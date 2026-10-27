@@ -1,0 +1,317 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tickee vé</title>
+<style>
+/* key-success-ticket.html — Thành công + Vé của tôi (Minh, UJ-1)
+   Governing spine sections:
+   DESIGN.md › Components › ticket-card (Mã QR vé) incl. bảng so sánh payment-qr-card vs ticket-card · stage-block · payment-qr-card · recipient-trust-block · event-card · status-badge · button-secondary / button-primary-on-light
+   DESIGN.md › Colors (QR module #000 / plate #FFF mọi chế độ; warning tone cho “BTC đang kiểm tra thanh toán”) · Elevation & Depth · Shapes
+   EXPERIENCE.md › Component Patterns rows: ticket-card, payment-qr-card, event-card, status-badge
+   EXPERIENCE.md › State Patterns › “QR thanh toán & sau thanh toán” (Thành công) · “Vé của tôi & Chi tiết Vé” (BTC đang kiểm tra thanh toán, Sau Sự kiện kết thúc)
+   EXPERIENCE.md › IA › Người mua (Vé của tôi: ba nhóm) · Key Flows › Flow 1 bước 8–9 · Accessibility Floor (Chuyển động, reduced motion) · Voice and Tone (Với Người mua)
+   .memlog.md: climax — QR tự chuyển “Thành công”, thẻ Vé trượt lên từ sân khấu tối + rung nhẹ; Cần xử lý → “BTC đang kiểm tra thanh toán” + liên hệ BTC */
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{font-family:"Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#E7E3E2;color:#1C1917;padding:32px 24px 80px;line-height:1.45}
+.page-h{max-width:1100px;margin:0 0 24px}
+.page-h h1{font-size:26px;font-weight:700;letter-spacing:-.02em}
+.page-h p{color:#4A4442;margin-top:6px;max-width:860px;line-height:1.55;font-size:14.5px}
+.page-h .gov{font:12px ui-monospace,Menlo,monospace;color:#4A4442;margin-top:8px}
+h2.sec-h{font-size:18px;font-weight:700;margin:36px 0 4px}
+p.sec-p{font-size:13.5px;color:#4A4442;max-width:860px;margin-bottom:12px}
+.phones{display:flex;gap:28px;flex-wrap:wrap;padding:4px 4px 16px;align-items:flex-start}
+figure{flex:0 0 auto}
+figcaption{font-size:12px;color:#4A4442;margin-bottom:8px;font-weight:600;max-width:390px;line-height:1.4}
+figcaption small{display:block;font-weight:400}
+.phone{width:375px;height:780px;border-radius:40px;overflow:hidden;position:relative;outline:8px solid #1c1c1f;margin:8px;box-shadow:0 20px 50px rgba(0,0,0,.18);font-size:15px}
+.scroll{height:calc(100% - 40px);overflow:hidden;position:relative}
+.sb{height:40px;display:flex;justify-content:space-between;align-items:center;padding:0 26px 0 32px;font-size:14px;font-weight:600}
+.sbr{display:flex;gap:3px;align-items:flex-end}.sbr i{width:3px;background:currentColor;border-radius:1px}.sbr i:nth-child(1){height:5px}.sbr i:nth-child(2){height:8px}.sbr i:nth-child(3){height:11px}.sbr b{width:22px;height:11px;border:1.5px solid currentColor;border-radius:3px;margin-left:5px}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+a{color:inherit}
+.ic{flex:0 0 auto;display:inline-block;vertical-align:middle}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;letter-spacing:.04em;font-weight:500}
+.num{font-variant-numeric:tabular-nums}
+.c{text-align:center}
+.asm{display:inline-block;font:600 10px/1.3 ui-monospace,Menlo,monospace;color:#7A3E00;background:#FFF4D6;border:1px dashed #B26A00;border-radius:4px;padding:1px 5px;margin:3px 0;letter-spacing:0;text-transform:none;vertical-align:middle;white-space:normal}
+
+/* ---- Tokens (DESIGN.md frontmatter colors) ---- */
+.light{--pg:#F7F3F2;--cd:#FFFFFF;--tx:#1C1917;--mu:#5C5552;--sunk:#F0EBEA;--line:#EFE8E7;--ring:#CF2147;--brt:#CF2147;
+ --sh:0 1px 2px rgba(60,20,30,.06),0 8px 24px rgba(60,20,30,.08);
+ --ok-t:#3F5F4F;--ok-s:#E8EFEA;--wa-t:#7A5320;--wa-s:#F5EDDC;--da-t:#8F3F3F;--da-s:#F5E6E4;--ne-t:#5C5552;--ne-s:#F0EBEA}
+.dark{--pg:#0B0809;--cd:#1C1416;--tx:#F5F2F2;--mu:#A8A29E;--sunk:#2A2023;--line:#2A2023;--ring:#FF4D6A;--brt:#FF4D6A;
+ --sh:0 0 0 1px #2A2023;
+ --ok-t:#A3C4B2;--ok-s:#1A2621;--wa-t:#E3C590;--wa-s:#2A2318;--da-t:#E0A3A0;--da-s:#2E1B1B;--ne-t:#C9BDBF;--ne-s:#2A2023}
+.light,.dark{--br:#FF4D6A;--on:#1F0A10;--st:#1C1416;--stx:#FFF7F8;--smu:#C9BDBF;--sline:#2A2023;--bar:#141012;
+ --scan-ok:#4A6B5A;--scan-da:#8F3F3F;--scan-fg:#FFFFFF;background:var(--pg);color:var(--tx)}
+
+/* ---- Shared components ---- */
+.card{background:var(--cd);border-radius:18px;box-shadow:var(--sh);padding:14px}
+.stage{background:var(--st);color:var(--stx);border-radius:18px;padding:16px}
+.stage .mu{color:var(--smu)}
+.mu{color:var(--mu)}
+.meta{font-size:13px;line-height:1.45}
+.lbl{font-size:14px;font-weight:500}
+.ttl{font-size:17px;font-weight:700;line-height:1.3}
+.hl{font-size:24px;font-weight:700;line-height:1.2;letter-spacing:-.02em}
+.eyebrow{font-size:13px;font-weight:700;color:var(--br)}
+.badge{display:inline-flex;align-items:center;border-radius:999px;padding:2px 10px;font-size:14px;font-weight:500;line-height:1.4;white-space:nowrap}
+.b-ok{color:var(--ok-t);background:var(--ok-s)}.b-wa{color:var(--wa-t);background:var(--wa-s)}.b-da{color:var(--da-t);background:var(--da-s)}.b-ne{color:var(--ne-t);background:var(--ne-s)}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:50px;border-radius:12px;font-size:16px;font-weight:700;line-height:1}
+.btn-p{background:var(--br);color:var(--on)}
+.btn-pl{background:var(--st);color:var(--stx)}
+.btn-s{background:var(--cd);color:var(--tx);box-shadow:var(--sh)}
+.dark .btn-pl{background:var(--br);color:var(--on)}
+.wm{font-weight:700;font-size:19px;letter-spacing:-.03em;display:inline-flex;align-items:center;gap:4px}
+.wm i{width:8px;height:8px;border-radius:2px;background:var(--brt);transform:rotate(45deg)}
+.iconbtn{width:40px;height:40px;border-radius:12px;background:var(--cd);box-shadow:var(--sh);display:inline-flex;align-items:center;justify-content:center}
+
+/* ---- QR (CSS background, no per-module DOM). Module #000 on plate #FFF in every mode ---- */
+.qrplate{background:#FFFFFF;display:inline-block;padding:12px;border-radius:12px;line-height:0}
+.qr{position:relative;width:175px;height:175px;display:block;background-color:#fff;
+ background-image:linear-gradient(90deg,#fff 0 7px,transparent 7px 21px,#fff 21px 28px,transparent 28px),
+  linear-gradient(#fff 0 7px,transparent 7px 14px,#fff 14px 21px,transparent 21px),
+  linear-gradient(90deg,transparent 0 14px,#fff 14px 21px,transparent 21px),
+  repeating-conic-gradient(#000 0 25%,#fff 0 50%);
+ background-size:35px 35px,28px 49px,42px 63px,14px 14px;background-position:0 0,0 0,3px 0,0 0}
+.qr.v2{background-position:7px 14px,14px 0,10px 21px,7px 0}
+.qr.v3{background-position:14px 7px,0 21px,24px 7px,0 7px}
+.qr.big{width:203px;height:203px}
+.qr i{position:absolute;width:49px;height:49px;background:#fff;box-shadow:0 0 0 7px #fff}
+.qr i::before{content:"";position:absolute;inset:0;border:7px solid #000}
+.qr i::after{content:"";position:absolute;inset:14px;background:#000}
+.qr .f1{left:0;top:0}.qr .f2{right:0;top:0}.qr .f3{left:0;bottom:0}
+
+
+.pad{padding:0 16px 24px}
+.top{display:flex;justify-content:space-between;align-items:center;padding:6px 16px 12px}
+.top .ttl{font-size:17px}
+.won{padding:18px 16px 46px;text-align:center}
+.won .okc{width:48px;height:48px;border-radius:50%;background:var(--sline);color:var(--br);display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px}
+.won .hl{margin:2px 0 6px}
+.slide{position:relative;margin-top:-30px;z-index:1}
+.motion{position:absolute;right:-6px;top:-22px;z-index:2}
+/* ticket-card: light card, tear line + two semicircle notches (stub shape) */
+.tk{background:var(--cd);border-radius:18px;box-shadow:var(--sh);position:relative;margin-bottom:10px}
+.tk .info{padding:14px}
+.tk .info .ttl{margin-bottom:6px}
+.tk .kv{display:flex;justify-content:space-between;font-size:14px;padding:5px 0}
+.tk .kv span{color:var(--mu)}
+.tk .kv b{font-weight:600}
+.tk .tier{display:flex;gap:8px;align-items:center;margin-bottom:6px}
+.tk .tier b{font-size:17px}
+.tear{position:relative;height:0;border-top:2px dashed var(--line);margin:0 14px}
+.dark .tear{border-top-color:#3A2E31}
+.tear::before,.tear::after{content:"";position:absolute;top:-11px;width:20px;height:20px;border-radius:50%;background:var(--pg)}
+.tear::before{left:-25px}.tear::after{right:-25px}
+.tk .qa{padding:14px;text-align:center}
+.tk .qa .lbl{margin-bottom:10px}
+.tk.used .qrplate{opacity:.25}
+.share{margin-bottom:18px}
+.cut{position:absolute;left:0;right:0;bottom:0;height:40px;background:linear-gradient(transparent,var(--pg))}
+/* payment reference (from directions-2 D) */
+.stage.c{text-align:center;padding:18px 16px}
+.amt{font-size:34px;font-weight:700;letter-spacing:-.02em;margin:2px 0 8px}
+.timer{display:inline-flex;gap:6px;align-items:center;font-size:14px;font-weight:500;color:var(--br);border:1px solid rgba(255,77,106,.5);border-radius:999px;padding:5px 12px;font-variant-numeric:tabular-nums}
+.stage .qrplate{margin:14px 0 10px}
+.trh{display:flex;gap:12px;align-items:center;margin-bottom:8px}
+.shd{width:40px;height:40px;border-radius:12px;background:var(--st);color:var(--br);display:inline-flex;align-items:center;justify-content:center}
+.kv2{display:flex;justify-content:space-between;font-size:14px;padding:8px 0;border-top:1px solid var(--line)}.kv2 span{color:var(--mu)}
+/* Vé của tôi */
+.grp{font-size:17px;font-weight:700;margin:20px 0 10px}
+.grp:first-child{margin-top:4px}
+.ev{display:flex;gap:12px;align-items:center}
+.thumb{width:56px;height:56px;border-radius:12px;flex:0 0 auto;background:radial-gradient(circle at 75% 30%,rgba(255,77,106,.55),transparent 45%),#2A1D20}
+.thumb.t2{background:radial-gradient(circle at 30% 70%,rgba(255,77,106,.45),transparent 50%),#2A1D20}
+.thumb.t3{background:#2A2023}
+.ev .who{flex:1;min-width:0}
+.ev .ttl{font-size:15px;line-height:1.3}
+.ev .sub{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px}
+.ev .mu.ic{color:var(--mu)}
+.pend .ttl{margin:8px 0 2px;font-size:15px}
+.pend .line{border-top:1px solid var(--line);margin:12px 0 10px}
+.contact{display:flex;gap:10px;align-items:center;font-size:14px;padding:4px 0}
+.contact a{color:var(--brt);font-weight:600;text-decoration:none}
+.contact .ic{color:var(--mu)}
+.hist{padding:12px 14px}
+.hist + .hist{margin-top:10px}
+.stack > .card + .card{margin-top:10px}
+
+</style></head><body>
+<header class="page-h"><h1>Tickee — Thành công &amp; Vé của tôi (Minh)</h1><p>Mock key-screen cho Flow 1 bước 8–9. Điện thoại 375px. Nội dung: Giải Pickleball Mở rộng CLB Sóng Xanh 2026, Đơn TK8F3Q2A gồm 1 Đơn nam + 1 Đôi nam. QR là hình giả lập (nền CSS). Ô vàng nét đứt “[ASSUMPTION]” = chi tiết chưa có cơ sở trong spine/memlog.</p><p class="gov">Spine: DESIGN.md › ticket-card, payment-qr-card, stage-block, event-card, status-badge · EXPERIENCE.md › State Patterns (Thành công; Vé của tôi &amp; Chi tiết Vé), IA › Người mua, Flow 1, Accessibility Floor › Chuyển động</p></header>
+
+<h2 class="sec-h">1 · “Thành công” — trạng thái cuối sau khi QR thanh toán tự chuyển</h2>
+<p class="sec-p"><b>Chuyển động (không vẽ được trong mock tĩnh):</b> khi thanh toán được xác nhận, màn QR thanh toán tự chuyển sang đây — từng thẻ Vé trượt lên từ khối sân khấu tối và chồng lên mép dưới của nó, điện thoại rung nhẹ nếu thiết bị hỗ trợ. prefers-reduced-motion: hiện ngay, không trượt, không rung. Thông báo “Vé của bạn đã sẵn sàng!” cho trình đọc màn hình (polite). Đơn 2 Vé (1 Đơn nam + 1 Đôi nam) → 2 Mã QR vé khác nhau.</p>
+<div class="phones">
+<figure><figcaption>Thành công · Sáng · đầu màn<small>Vé 1/2 chồng lên mép stage (vị trí cuối của chuyển cảnh).</small></figcaption><div class="phone light "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><span class="wm">tickee<i></i></span><span style="max-width:230px;text-align:right"></span></div>
+<div class="pad">
+<div class="stage won" aria-live="polite">
+<span class="okc"><svg class="ic" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+<div class="mu meta">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div>
+<div class="hl">Vé của bạn đã sẵn sàng!</div>
+<div class="meta mu">Đã gửi Vé tới minh.nguyen@gmail.com</div>
+</div>
+<div class="slide"><div class="tk">
+<div class="info"><div class="ttl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div>
+<div class="tier"><b>Đơn nam</b><span class="mu num">· Vé 1/2</span></div>
+<div class="kv"><span>Người mua</span><b>Nguyễn Văn Minh</b></div>
+<div class="kv"><span>Thời gian</span><b>CN, 16/11/2026 · 07:00</b></div>
+<div class="kv"><span>Địa điểm</span><b>Sân Pickleball Thảo Điền</b></div></div>
+<div class="tear"></div>
+<div class="qa"><div class="lbl mu">Mã QR vé · đưa cho CTV ở cổng</div>
+<div class="qrplate"><div class="qr big v1" role="img" aria-label="Mã QR vé 1 trên 2, Đơn nam"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+</div></div>
+<button class="btn btn-s share"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg> Chia sẻ Vé</button></div>
+</div><div class="cut"></div></div></div></figure>
+<figure><figcaption>Thành công · Sáng · cuộn xuống<small>Vé 2/2 với Mã QR vé riêng; “Chia sẻ Vé” cho từng Vé.</small></figcaption><div class="phone light "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="pad" style="padding-top:8px">
+<div class="tk">
+<div class="info"><div class="ttl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div>
+<div class="tier"><b>Đôi nam</b><span class="mu num">· Vé 2/2</span></div>
+<div class="kv"><span>Người mua</span><b>Nguyễn Văn Minh</b></div>
+<div class="kv"><span>Thời gian</span><b>CN, 16/11/2026 · 07:00</b></div>
+<div class="kv"><span>Địa điểm</span><b>Sân Pickleball Thảo Điền</b></div></div>
+<div class="tear"></div>
+<div class="qa"><div class="lbl mu">Mã QR vé · đưa cho CTV ở cổng</div>
+<div class="qrplate"><div class="qr big v3" role="img" aria-label="Mã QR vé 2 trên 2, Đôi nam"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+</div></div>
+<button class="btn btn-s share"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg> Chia sẻ Vé</button>
+<button class="btn btn-pl">Xem Vé của tôi</button>
+
+</div></div></div></figure>
+<figure><figcaption>Thành công · Tối · đầu màn<small>QR vẫn module đen trên tấm trắng.</small></figcaption><div class="phone dark "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><span class="wm">tickee<i></i></span><span style="max-width:230px;text-align:right"></span></div>
+<div class="pad">
+<div class="stage won" aria-live="polite">
+<span class="okc"><svg class="ic" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+<div class="mu meta">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div>
+<div class="hl">Vé của bạn đã sẵn sàng!</div>
+<div class="meta mu">Đã gửi Vé tới minh.nguyen@gmail.com</div>
+</div>
+<div class="slide"><div class="tk">
+<div class="info"><div class="ttl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div>
+<div class="tier"><b>Đơn nam</b><span class="mu num">· Vé 1/2</span></div>
+<div class="kv"><span>Người mua</span><b>Nguyễn Văn Minh</b></div>
+<div class="kv"><span>Thời gian</span><b>CN, 16/11/2026 · 07:00</b></div>
+<div class="kv"><span>Địa điểm</span><b>Sân Pickleball Thảo Điền</b></div></div>
+<div class="tear"></div>
+<div class="qa"><div class="lbl mu">Mã QR vé · đưa cho CTV ở cổng</div>
+<div class="qrplate"><div class="qr big v1" role="img" aria-label="Mã QR vé 1 trên 2, Đơn nam"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+</div></div>
+<button class="btn btn-s share"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg> Chia sẻ Vé</button></div>
+</div><div class="cut"></div></div></div></figure>
+<figure><figcaption>Thành công · Tối · cuộn xuống</figcaption><div class="phone dark "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="pad" style="padding-top:8px">
+<div class="tk">
+<div class="info"><div class="ttl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div>
+<div class="tier"><b>Đôi nam</b><span class="mu num">· Vé 2/2</span></div>
+<div class="kv"><span>Người mua</span><b>Nguyễn Văn Minh</b></div>
+<div class="kv"><span>Thời gian</span><b>CN, 16/11/2026 · 07:00</b></div>
+<div class="kv"><span>Địa điểm</span><b>Sân Pickleball Thảo Điền</b></div></div>
+<div class="tear"></div>
+<div class="qa"><div class="lbl mu">Mã QR vé · đưa cho CTV ở cổng</div>
+<div class="qrplate"><div class="qr big v3" role="img" aria-label="Mã QR vé 2 trên 2, Đôi nam"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+</div></div>
+<button class="btn btn-s share"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg> Chia sẻ Vé</button>
+<button class="btn btn-pl">Xem Vé của tôi</button>
+
+</div></div></div></figure>
+</div>
+<h2 class="sec-h">2 · Phân biệt: QR thanh toán vs Mã QR vé</h2>
+<p class="sec-p">QR thanh toán nằm trong <b>stage tối</b>, kèm số tiền, đếm ngược, người nhận tiền. Mã QR vé nằm trong <b>thẻ sáng dáng cuống vé</b> (đường xé nét đứt + hai khuyết bán nguyệt), kèm tên Sự kiện, Hạng vé, “Vé 1/2”, tên Người mua, ngày-giờ (DESIGN.md › ticket-card).</p>
+<div class="phones">
+<figure><figcaption>Tham chiếu · QR thanh toán (Hướng D) · Sáng</figcaption><div class="phone light "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span style="width:40px"></span></div>
+<div class="pad">
+<div class="stage c">
+ <div class="meta mu">Quét bằng app ngân hàng để trả</div>
+ <div class="amt num">450.000đ</div>
+ <span class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Giữ chỗ còn 14:32</span><br>
+ <div class="qrplate "><div class="qr v1" role="img" aria-label="Mã QR thanh toán 450.000 đồng cho CLB Sóng Xanh"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+ <div class="meta mu">Mã Đơn <b class="mono" style="color:var(--stx)">TK8F3Q2A</b></div>
+</div>
+<div class="card" style="margin-top:12px">
+ <div class="trh"><span class="shd"><svg class="ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 4.5 5.6v6c0 4.6 3.1 8.2 7.5 9.6 4.4-1.4 7.5-5 7.5-9.6v-6z"/><path d="m8.6 12 2.4 2.4 4.6-4.8"/></svg></span><div><div class="meta mu">Tiền chuyển thẳng cho</div><div class="ttl">CLB Sóng Xanh</div></div></div>
+ <div class="kv2"><span>Chủ tài khoản</span><b>NGUYEN VAN TUAN</b></div>
+ <div class="kv2"><span>Ngân hàng</span><b>Vietcombank</b></div>
+</div>
+</div><div class="cut"></div></div></div></figure>
+<figure><figcaption>Mã QR vé · Sáng</figcaption><div class="phone light "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><span class="wm">tickee<i></i></span><span style="max-width:230px;text-align:right"></span></div>
+<div class="pad">
+<div class="stage won" aria-live="polite">
+<span class="okc"><svg class="ic" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+<div class="mu meta">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div>
+<div class="hl">Vé của bạn đã sẵn sàng!</div>
+<div class="meta mu">Đã gửi Vé tới minh.nguyen@gmail.com</div>
+</div>
+<div class="slide"><div class="tk">
+<div class="info"><div class="ttl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div>
+<div class="tier"><b>Đơn nam</b><span class="mu num">· Vé 1/2</span></div>
+<div class="kv"><span>Người mua</span><b>Nguyễn Văn Minh</b></div>
+<div class="kv"><span>Thời gian</span><b>CN, 16/11/2026 · 07:00</b></div>
+<div class="kv"><span>Địa điểm</span><b>Sân Pickleball Thảo Điền</b></div></div>
+<div class="tear"></div>
+<div class="qa"><div class="lbl mu">Mã QR vé · đưa cho CTV ở cổng</div>
+<div class="qrplate"><div class="qr big v1" role="img" aria-label="Mã QR vé 1 trên 2, Đơn nam"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+</div></div>
+<button class="btn btn-s share"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg> Chia sẻ Vé</button></div>
+</div><div class="cut"></div></div></div></figure>
+</div>
+<h2 class="sec-h">3 · Vé của tôi</h2>
+<p class="sec-p">Ba nhóm theo IA: Vé còn hiệu lực · Đơn đang chờ / “BTC đang kiểm tra thanh toán” · Lịch sử. Mọi loại Cần xử lý hiện cùng một trạng thái phía Người mua (không lộ tên loại), kèm liên hệ BTC. Lịch sử: tên, ngày, “Đã tham dự” / “Chưa check-in”. (Một thời điểm khác với phần 1 — dữ liệu mẫu riêng.)</p>
+<div class="phones">
+<figure><figcaption>Vé của tôi · Sáng</figcaption><div class="phone light "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Vé của tôi</span><span style="width:40px"></span></div>
+<div class="pad">
+<div class="grp">Vé còn hiệu lực</div>
+<div class="card ev"><span class="thumb"></span><div class="who"><div class="ttl">Đêm nhạc Acoustic — Phòng trà Mây</div><div class="meta mu">Thứ bảy, 22/11/2026 · 20:00</div><div class="sub"><span class="meta">Ghế thường · Vé 1/1</span><span class="badge b-ok">Hợp lệ</span></div></div><span class="mu"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></span></div>
+
+<div class="grp">Đơn đang chờ</div>
+<div class="card pend">
+<span class="badge b-wa">BTC đang kiểm tra thanh toán</span>
+<div class="ttl">Workshop Pha chế Cà phê Mộc</div>
+<div class="meta mu">Chủ nhật, 30/11/2026 · 09:00</div>
+<div class="meta mu" style="margin-top:4px">Mã Đơn <span class="mono" style="color:var(--tx)">TK7M2P9X</span> · 2 vé · <span class="num">400.000đ</span></div>
+<div class="line"></div>
+<div class="meta mu" style="margin-bottom:4px">Liên hệ BTC · Nhà Rang Mộc</div>
+<div class="contact"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/></svg><a href="#">0903 456 789</a></div>
+<div class="contact"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 6 8.5 7 8.5-7"/></svg><a href="#">hello@nharangmoc.vn</a></div>
+<span class="asm">[ASSUMPTION] kênh liên hệ BTC (SĐT + email) — PM chưa chốt BTC cung cấp kênh nào</span>
+</div>
+
+<div class="grp">Lịch sử</div>
+<div class="stack">
+<div class="card ev hist"><span class="thumb t3"></span><div class="who"><div class="ttl">Giải Pickleball Mùa hè CLB Sóng Xanh</div><div class="meta mu">Chủ nhật, 15/06/2026 · Đã tham dự</div></div></div>
+<div class="card ev hist"><span class="thumb t3"></span><div class="who"><div class="ttl">Workshop Làm nến thơm</div><div class="meta mu">Thứ bảy, 03/05/2026 · Chưa check-in</div></div></div>
+</div>
+</div><div class="cut"></div></div></div></figure>
+<figure><figcaption>Vé của tôi · Tối</figcaption><div class="phone dark "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Vé của tôi</span><span style="width:40px"></span></div>
+<div class="pad">
+<div class="grp">Vé còn hiệu lực</div>
+<div class="card ev"><span class="thumb"></span><div class="who"><div class="ttl">Đêm nhạc Acoustic — Phòng trà Mây</div><div class="meta mu">Thứ bảy, 22/11/2026 · 20:00</div><div class="sub"><span class="meta">Ghế thường · Vé 1/1</span><span class="badge b-ok">Hợp lệ</span></div></div><span class="mu"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></span></div>
+
+<div class="grp">Đơn đang chờ</div>
+<div class="card pend">
+<span class="badge b-wa">BTC đang kiểm tra thanh toán</span>
+<div class="ttl">Workshop Pha chế Cà phê Mộc</div>
+<div class="meta mu">Chủ nhật, 30/11/2026 · 09:00</div>
+<div class="meta mu" style="margin-top:4px">Mã Đơn <span class="mono" style="color:var(--tx)">TK7M2P9X</span> · 2 vé · <span class="num">400.000đ</span></div>
+<div class="line"></div>
+<div class="meta mu" style="margin-bottom:4px">Liên hệ BTC · Nhà Rang Mộc</div>
+<div class="contact"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/></svg><a href="#">0903 456 789</a></div>
+<div class="contact"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 6 8.5 7 8.5-7"/></svg><a href="#">hello@nharangmoc.vn</a></div>
+<span class="asm">[ASSUMPTION] kênh liên hệ BTC (SĐT + email) — PM chưa chốt BTC cung cấp kênh nào</span>
+</div>
+
+<div class="grp">Lịch sử</div>
+<div class="stack">
+<div class="card ev hist"><span class="thumb t3"></span><div class="who"><div class="ttl">Giải Pickleball Mùa hè CLB Sóng Xanh</div><div class="meta mu">Chủ nhật, 15/06/2026 · Đã tham dự</div></div></div>
+<div class="card ev hist"><span class="thumb t3"></span><div class="who"><div class="ttl">Workshop Làm nến thơm</div><div class="meta mu">Thứ bảy, 03/05/2026 · Chưa check-in</div></div></div>
+</div>
+</div><div class="cut"></div></div></div></figure>
+</div>
+
+</body></html>

@@ -1,0 +1,248 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tickee dashboard</title>
+<style>
+/* key-dashboard-event.html — Tổng quan Sự kiện (anh Tuấn, Owner, UJ-2)
+   Governing spine sections:
+   DESIGN.md › Brand & Style (Dashboard BTC: tiết chế — stage chỉ cho sidebar/header hoặc stat-card) · Layout & Spacing (sidebar 256px ≥ lg; bottom-tab-bar < md; bảng Đơn → thẻ ở < md)
+   DESIGN.md › Components › dashboard-sidebar · bottom-tab-bar · stat-card · status-badge (bảng tone Đơn / Sự kiện) · Elevation (không bóng phân cấp trong dashboard: bảng phẳng trên card)
+   EXPERIENCE.md › IA › BTC (dashboard) — cấp BTC: Sự kiện · Cần xử lý · Token · Thành viên · Tài khoản nhận tiền · Cài đặt; cấp Sự kiện tabs: Tổng quan · Đơn · Hạng vé · Form mua · Check-in · Cài đặt
+   EXPERIENCE.md › Component Patterns rows: dashboard-sidebar, bottom-tab-bar, stat-card, status-badge · State Patterns › Dashboard BTC (Token dưới ngưỡng)
+   EXPERIENCE.md › Voice and Tone (Với BTC) · Key Flows › Flow 2 bước 7–9
+   PRD FR-31 (doanh thu chỉ tính Đơn “Đã thanh toán”; Vé theo Hạng vé), FR-30 (check-in real-time), FR-21 (số mục Cần xử lý), FR-34 (Token)
+   .memlog.md: dashboard tiết chế; Cần xử lý ở sidebar có badge số; bottom tab bar Sự kiện/Cần xử lý/Quét vé/Thêm */
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{font-family:"Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#E7E3E2;color:#1C1917;padding:32px 24px 80px;line-height:1.45}
+.page-h{max-width:1100px;margin:0 0 24px}
+.page-h h1{font-size:26px;font-weight:700;letter-spacing:-.02em}
+.page-h p{color:#4A4442;margin-top:6px;max-width:860px;line-height:1.55;font-size:14.5px}
+.page-h .gov{font:12px ui-monospace,Menlo,monospace;color:#4A4442;margin-top:8px}
+h2.sec-h{font-size:18px;font-weight:700;margin:36px 0 4px}
+p.sec-p{font-size:13.5px;color:#4A4442;max-width:860px;margin-bottom:12px}
+.phones{display:flex;gap:28px;flex-wrap:wrap;padding:4px 4px 16px;align-items:flex-start}
+figure{flex:0 0 auto}
+figcaption{font-size:12px;color:#4A4442;margin-bottom:8px;font-weight:600;max-width:390px;line-height:1.4}
+figcaption small{display:block;font-weight:400}
+.phone{width:375px;height:780px;border-radius:40px;overflow:hidden;position:relative;outline:8px solid #1c1c1f;margin:8px;box-shadow:0 20px 50px rgba(0,0,0,.18);font-size:15px}
+.scroll{height:calc(100% - 40px);overflow:hidden;position:relative}
+.sb{height:40px;display:flex;justify-content:space-between;align-items:center;padding:0 26px 0 32px;font-size:14px;font-weight:600}
+.sbr{display:flex;gap:3px;align-items:flex-end}.sbr i{width:3px;background:currentColor;border-radius:1px}.sbr i:nth-child(1){height:5px}.sbr i:nth-child(2){height:8px}.sbr i:nth-child(3){height:11px}.sbr b{width:22px;height:11px;border:1.5px solid currentColor;border-radius:3px;margin-left:5px}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+a{color:inherit}
+.ic{flex:0 0 auto;display:inline-block;vertical-align:middle}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;letter-spacing:.04em;font-weight:500}
+.num{font-variant-numeric:tabular-nums}
+.c{text-align:center}
+.asm{display:inline-block;font:600 10px/1.3 ui-monospace,Menlo,monospace;color:#7A3E00;background:#FFF4D6;border:1px dashed #B26A00;border-radius:4px;padding:1px 5px;margin:3px 0;letter-spacing:0;text-transform:none;vertical-align:middle;white-space:normal}
+
+/* ---- Tokens (DESIGN.md frontmatter colors) ---- */
+.light{--pg:#F7F3F2;--cd:#FFFFFF;--tx:#1C1917;--mu:#5C5552;--sunk:#F0EBEA;--line:#EFE8E7;--ring:#CF2147;--brt:#CF2147;
+ --sh:0 1px 2px rgba(60,20,30,.06),0 8px 24px rgba(60,20,30,.08);
+ --ok-t:#3F5F4F;--ok-s:#E8EFEA;--wa-t:#7A5320;--wa-s:#F5EDDC;--da-t:#8F3F3F;--da-s:#F5E6E4;--ne-t:#5C5552;--ne-s:#F0EBEA}
+.dark{--pg:#0B0809;--cd:#1C1416;--tx:#F5F2F2;--mu:#A8A29E;--sunk:#2A2023;--line:#2A2023;--ring:#FF4D6A;--brt:#FF4D6A;
+ --sh:0 0 0 1px #2A2023;
+ --ok-t:#A3C4B2;--ok-s:#1A2621;--wa-t:#E3C590;--wa-s:#2A2318;--da-t:#E0A3A0;--da-s:#2E1B1B;--ne-t:#C9BDBF;--ne-s:#2A2023}
+.light,.dark{--br:#FF4D6A;--on:#1F0A10;--st:#1C1416;--stx:#FFF7F8;--smu:#C9BDBF;--sline:#2A2023;--bar:#141012;
+ --scan-ok:#4A6B5A;--scan-da:#8F3F3F;--scan-fg:#FFFFFF;background:var(--pg);color:var(--tx)}
+
+/* ---- Shared components ---- */
+.card{background:var(--cd);border-radius:18px;box-shadow:var(--sh);padding:14px}
+.stage{background:var(--st);color:var(--stx);border-radius:18px;padding:16px}
+.stage .mu{color:var(--smu)}
+.mu{color:var(--mu)}
+.meta{font-size:13px;line-height:1.45}
+.lbl{font-size:14px;font-weight:500}
+.ttl{font-size:17px;font-weight:700;line-height:1.3}
+.hl{font-size:24px;font-weight:700;line-height:1.2;letter-spacing:-.02em}
+.eyebrow{font-size:13px;font-weight:700;color:var(--br)}
+.badge{display:inline-flex;align-items:center;border-radius:999px;padding:2px 10px;font-size:14px;font-weight:500;line-height:1.4;white-space:nowrap}
+.b-ok{color:var(--ok-t);background:var(--ok-s)}.b-wa{color:var(--wa-t);background:var(--wa-s)}.b-da{color:var(--da-t);background:var(--da-s)}.b-ne{color:var(--ne-t);background:var(--ne-s)}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:50px;border-radius:12px;font-size:16px;font-weight:700;line-height:1}
+.btn-p{background:var(--br);color:var(--on)}
+.btn-pl{background:var(--st);color:var(--stx)}
+.btn-s{background:var(--cd);color:var(--tx);box-shadow:var(--sh)}
+.dark .btn-pl{background:var(--br);color:var(--on)}
+.wm{font-weight:700;font-size:19px;letter-spacing:-.03em;display:inline-flex;align-items:center;gap:4px}
+.wm i{width:8px;height:8px;border-radius:2px;background:var(--brt);transform:rotate(45deg)}
+.iconbtn{width:40px;height:40px;border-radius:12px;background:var(--cd);box-shadow:var(--sh);display:inline-flex;align-items:center;justify-content:center}
+
+/* ---- QR (CSS background, no per-module DOM). Module #000 on plate #FFF in every mode ---- */
+.qrplate{background:#FFFFFF;display:inline-block;padding:12px;border-radius:12px;line-height:0}
+.qr{position:relative;width:175px;height:175px;display:block;background-color:#fff;
+ background-image:linear-gradient(90deg,#fff 0 7px,transparent 7px 21px,#fff 21px 28px,transparent 28px),
+  linear-gradient(#fff 0 7px,transparent 7px 14px,#fff 14px 21px,transparent 21px),
+  linear-gradient(90deg,transparent 0 14px,#fff 14px 21px,transparent 21px),
+  repeating-conic-gradient(#000 0 25%,#fff 0 50%);
+ background-size:35px 35px,28px 49px,42px 63px,14px 14px;background-position:0 0,0 0,3px 0,0 0}
+.qr.v2{background-position:7px 14px,14px 0,10px 21px,7px 0}
+.qr.v3{background-position:14px 7px,0 21px,24px 7px,0 7px}
+.qr.big{width:203px;height:203px}
+.qr i{position:absolute;width:49px;height:49px;background:#fff;box-shadow:0 0 0 7px #fff}
+.qr i::before{content:"";position:absolute;inset:0;border:7px solid #000}
+.qr i::after{content:"";position:absolute;inset:14px;background:#000}
+.qr .f1{left:0;top:0}.qr .f2{right:0;top:0}.qr .f3{left:0;bottom:0}
+
+
+/* browser frame */
+.browser{width:1280px;border-radius:12px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.18);outline:1px solid rgba(0,0,0,.12);margin:8px 0 8px 8px;font-size:15px}
+.chrome{height:40px;background:#DCD7D6;display:flex;align-items:center;gap:14px;padding:0 14px}
+.browser.dark .chrome{background:#2B2527}
+.dots{display:flex;gap:7px}.dots i{width:12px;height:12px;border-radius:50%;background:#B9B2B0}
+.browser.dark .dots i{background:#4A4144}
+.url{flex:1;max-width:560px;height:26px;border-radius:7px;background:rgba(255,255,255,.65);font-size:12.5px;display:flex;align-items:center;padding:0 12px;color:#4A4442}
+.browser.dark .url{background:rgba(0,0,0,.35);color:#C9BDBF}
+.app{display:flex;min-height:900px}
+/* dashboard-sidebar */
+.side{width:256px;flex:0 0 256px;background:var(--st);color:var(--stx);padding:14px 12px;display:flex;flex-direction:column;gap:2px}
+.sw{display:flex;align-items:center;gap:10px;padding:8px;border-radius:12px;background:var(--sline);margin-bottom:14px}
+.av{width:34px;height:34px;border-radius:50%;background:var(--bar);color:var(--br);display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex:0 0 auto}
+.sw .n{flex:1;min-width:0}.sw .n b{display:block;font-size:14px}.sw .n span{font-size:12px;color:var(--smu)}
+.sw .ic{color:var(--smu)}
+.nav{display:flex;align-items:center;gap:10px;height:40px;padding:0 10px;border-radius:10px;color:var(--smu);font-size:14px;font-weight:500;position:relative}
+.nav .ic{color:var(--smu)}
+.nav.on{color:var(--stx);font-weight:600;background:var(--sline)}
+.nav.on::before{content:"";position:absolute;left:-12px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--br)}
+.nav.on .ic{color:var(--br)}
+.nav .cnt{margin-left:auto;background:var(--br);color:var(--on);font-size:12px;font-weight:700;border-radius:999px;min-width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px}
+/* main */
+.main{flex:1;padding:24px 32px 40px;min-width:0}
+.crumb{font-size:13px;color:var(--mu);display:flex;gap:6px;align-items:center}
+.ph{display:flex;align-items:center;gap:12px;margin:6px 0 4px}
+.tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin:18px 0 18px;font-size:14px;font-weight:500}
+.tabs span{padding:10px 0;color:var(--mu)}
+.tabs span.on{color:var(--tx);font-weight:600;box-shadow:inset 0 -2px 0 var(--tx)}
+.banner{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;background:var(--wa-s);color:var(--wa-t);font-size:14px;font-weight:500;margin-bottom:18px}
+.banner .act{margin-left:auto;font-weight:700;text-decoration:underline;text-underline-offset:3px;white-space:nowrap}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+.stat .lbl{color:var(--smu)}
+.stat .hl{margin:6px 0 4px;font-variant-numeric:tabular-nums}
+.prog{height:8px;border-radius:999px;background:var(--sline);overflow:hidden;margin:10px 0 6px}
+.prog i{display:block;height:100%;background:var(--br);border-radius:999px}
+.dark .stat{box-shadow:0 0 0 1px #2A2023}
+.na .hl{margin:6px 0 4px;color:var(--tx)}
+.na a{color:var(--brt);font-weight:600;font-size:14px;text-decoration:none}
+.blk{margin-top:16px;padding:0;overflow:hidden}
+.blk-h{display:flex;justify-content:space-between;align-items:center;padding:14px 16px 10px}
+.blk-h a{color:var(--brt);font-weight:600;font-size:14px;text-decoration:none}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-weight:500;color:var(--mu);font-size:13px;padding:8px 16px;border-bottom:1px solid var(--line)}
+td{padding:11px 16px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+td.r,th.r{text-align:right}
+.tiny{font-size:12.5px;color:var(--mu);display:block}
+.mbar{display:inline-block;width:120px;height:6px;border-radius:999px;background:var(--sunk);vertical-align:middle;margin-right:8px;overflow:hidden}
+.mbar i{display:block;height:100%;background:var(--tx)}
+.dark .mbar i{background:var(--br)}
+.foot{margin-top:10px}
+
+/* mobile */
+.mtop{padding:4px 16px 0}
+.mtop .ph{margin:2px 0 0}
+.mtop .ttl{font-size:17px}
+.mtabs{display:flex;gap:20px;overflow:hidden;border-bottom:1px solid var(--line);margin:10px -16px 0;padding:0 16px;font-size:14px;font-weight:500;white-space:nowrap}
+.mtabs span{padding:10px 0;color:var(--mu)}.mtabs span.on{color:var(--tx);font-weight:600;box-shadow:inset 0 -2px 0 var(--tx)}
+.mbody{padding:14px 16px 100px}
+.mbody .banner{margin-bottom:12px;font-size:13.5px}
+.mbody .stat{margin-bottom:10px}
+.mrow2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.mrow2 .stat{margin:0;padding:14px}
+.mrow2 .hl{font-size:22px}
+.olist .ord{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:12px 14px;border-top:1px solid var(--line)}
+.olist .ord:first-of-type{border-top:0}
+.ord b{font-weight:600}
+.tline{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-top:1px solid var(--line);font-size:14px}
+.tline:first-of-type{border-top:0}
+/* bottom-tab-bar */
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:84px;padding-bottom:20px;background:var(--bar);display:grid;grid-template-columns:repeat(4,1fr);z-index:3}
+.tb{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--smu);font-size:13px;position:relative}
+.tb.on{color:var(--br)}
+.tb.on::before{content:"";position:absolute;top:0;left:22%;right:22%;height:2px;background:var(--br);border-radius:0 0 2px 2px}
+.tb .cnt{position:absolute;top:7px;left:calc(50% + 6px);background:var(--br);color:var(--on);font-size:11px;font-weight:700;border-radius:999px;min-width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
+
+</style></head><body>
+<header class="page-h"><h1>Tickee — Tổng quan Sự kiện (anh Tuấn, Owner)</h1><p>Mock key-screen cho Flow 2 bước 7–9, ngày thi đấu. Dữ liệu mẫu: 3 Hạng vé, 66/72 Vé đã bán, doanh thu 12.900.000đ (chỉ Đơn Đã thanh toán), 41/66 đã check-in, 2 mục Cần xử lý, Token dưới ngưỡng. Ô vàng nét đứt “[ASSUMPTION]” = chi tiết chưa có cơ sở trong spine/memlog.</p><p class="gov">Spine: DESIGN.md › Brand &amp; Style (tiết chế), Layout, dashboard-sidebar, bottom-tab-bar, stat-card, status-badge · EXPERIENCE.md › IA › BTC, Component Patterns, State Patterns › Dashboard BTC (Token), Voice › Với BTC, Flow 2 · PRD FR-21, FR-30, FR-31, FR-34</p></header>
+
+<h2 class="sec-h">1 · Desktop ≥ lg (khung 1280px) · Sáng</h2>
+<p class="sec-p">Tiết chế: nền page/card theo hệ thống; khối stage tối chỉ ở sidebar và 2 stat-card (Doanh thu, Check-in). Bảng phẳng trên card, không stage trong bảng. Tab đang chọn gạch chân màu chữ (không coral trên nền sáng). Sidebar: BTC switcher → Sự kiện · Cần xử lý (badge 2) · Token · Thành viên · Tài khoản nhận tiền · Cài đặt (Owner thấy đủ; Admin bị ẩn mục Owner-only). Token dưới ngưỡng → banner warning + “mua thêm Token” (Owner).</p>
+<div class="browser light"><div class="chrome"><span class="dots"><i></i><i></i><i></i></span><span class="url">tickee · /su-kien/giai-pickleball-mo-rong-2026/tong-quan</span></div>
+<div class="app"><aside class="side"><div class="sw" aria-label="Đổi BTC"><span class="av">SX</span><div class="n"><b>CLB Sóng Xanh</b><span>Owner</span></div><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 9 4-4 4 4M8 15l4 4 4-4"/></svg></div><div class="nav on"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>Sự kiện</div><div class="nav"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 13.5 6 5h12l2.5 8.5V19a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/><path d="M3.5 13.5H9l1 2h4l1-2h5.5"/></svg>Cần xử lý<span class=cnt>2</span></div><div class="nav"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="7" rx="7" ry="3"/><path d="M5 7v5c0 1.7 3.1 3 7 3s7-1.3 7-3V7M5 12v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/></svg>Token</div><div class="nav"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.8a3.3 3.3 0 0 1 0 6.4M18 14.8c1.9.7 3.1 2.4 3.5 5.2"/></svg>Thành viên</div><div class="nav"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5 12 4l9 5.5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20.5h18"/></svg>Tài khoản nhận tiền</div><div class="nav"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></svg>Cài đặt</div></aside>
+<main class="main">
+<div class="crumb">Sự kiện <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg> <span>Giải Pickleball Mở rộng CLB Sóng Xanh 2026</span></div>
+<div class="ph"><span class="hl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</span><span class="badge b-ok">Đang mở bán</span></div>
+<div class="meta mu">Chủ nhật, 16/11/2026 · 07:00 – 17:00 · Sân Pickleball Thảo Điền</div>
+<nav class="tabs"><span class="on">Tổng quan</span><span>Đơn</span><span>Hạng vé</span><span>Form mua</span><span>Check-in</span><span>Cài đặt</span></nav>
+<div class="banner" role="status"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5M12 17.3v.2"/></svg> Token khả dụng dưới ngưỡng cảnh báo. <span class="act">mua thêm Token</span></div>
+<div class="grid3">
+<div class="stage stat"><div class="lbl">Doanh thu</div><div class="hl">12.900.000đ</div><div class="meta" style="color:var(--smu)">Chỉ tính Đơn Đã thanh toán · 48 Đơn</div></div>
+<div class="stage stat"><div class="lbl">Check-in</div><div class="hl">41<span style="color:var(--smu);font-weight:500">/66</span></div><div class="prog" role="progressbar" aria-valuenow="41" aria-valuemax="66"><i style="width:62%"></i></div><div class="meta" style="color:var(--smu)">Cập nhật liên tục</div></div>
+<div class="card na"><div class="lbl mu">Cần xử lý</div><div class="hl">2 mục Cần xử lý</div><a href="#">Mở tab Đơn, lọc Cần xử lý</a></div>
+</div>
+<section class="card blk"><div class="blk-h"><span class="ttl">Vé theo Hạng vé</span><span class="meta mu num">66/72 Vé đã bán</span></div>
+<table><thead><tr><th>Hạng vé</th><th>Giá</th><th>Đã bán</th><th>Còn</th><th class="r">Doanh thu</th></tr></thead><tbody><tr><td><b>Đơn nam</b></td><td class="num">150.000đ</td><td><span class="mbar"><i style="width:94%"></i></span><span class="num">30/32</span></td><td class="num">2</td><td class="r num">4.500.000đ</td></tr><tr><td><b>Đôi nam</b></td><td class="num">300.000đ</td><td><span class="mbar"><i style="width:83%"></i></span><span class="num">20/24</span></td><td class="num">4</td><td class="r num">6.000.000đ</td></tr><tr><td><b>Đơn nữ</b></td><td class="num">150.000đ</td><td><span class="mbar"><i style="width:100%"></i></span><span class="num">16/16</span></td><td class="num">0 · Hết vé</td><td class="r num">2.400.000đ</td></tr></tbody></table></section>
+<section class="card blk"><div class="blk-h"><span class="ttl">Đơn gần đây</span><a href="#">Xem tất cả Đơn</a></div>
+<table><thead><tr><th>Mã Đơn</th><th>Người mua</th><th>Vé</th><th class="r">Số tiền</th><th>Trạng thái</th><th>Thời gian</th></tr></thead><tbody><tr><td class="mono">TK8F3Q2A</td><td>Nguyễn Văn Minh</td><td class="num">2 Vé</td><td class="r num">450.000đ</td><td><span class="badge b-ok">Đã thanh toán</span></td><td class="num mu">08:12</td></tr><tr><td class="mono">TK5R8W1C</td><td>Phạm Thu Hà</td><td class="num">2 Vé</td><td class="r num">300.000đ</td><td><span class="badge b-da">Cần xử lý</span><span class=tiny>Lệch số tiền · nhận 250.000đ / Đơn 300.000đ</span></td><td class="num mu">07:58</td></tr><tr><td class="mono">TK3J6N4D</td><td>Lê Hoàng Nam</td><td class="num">1 Vé</td><td class="r num">150.000đ</td><td><span class="badge b-wa">Chờ thanh toán</span></td><td class="num mu">07:55</td></tr><tr><td class="mono">TK9B2X7E</td><td>Trần Quốc Bảo</td><td class="num">1 Vé</td><td class="r num">300.000đ</td><td><span class="badge b-ok">Đã thanh toán</span></td><td class="num mu">07:31</td></tr><tr><td class="mono">TK1Q4Z8H</td><td>Võ Minh Thư</td><td class="num">1 Vé</td><td class="r num">150.000đ</td><td><span class="badge b-ne">Hết hạn</span></td><td class="num mu">15/11 · 22:10</td></tr></tbody></table></section>
+
+</main></div></div>
+<h2 class="sec-h">2 · Desktop · Tối</h2>
+<div class="browser dark"><div class="chrome"><span class="dots"><i></i><i></i><i></i></span><span class="url">tickee · /su-kien/giai-pickleball-mo-rong-2026/tong-quan</span></div>
+<div class="app"><aside class="side"><div class="sw" aria-label="Đổi BTC"><span class="av">SX</span><div class="n"><b>CLB Sóng Xanh</b><span>Owner</span></div><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 9 4-4 4 4M8 15l4 4 4-4"/></svg></div><div class="nav on"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>Sự kiện</div><div class="nav"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 13.5 6 5h12l2.5 8.5V19a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/><path d="M3.5 13.5H9l1 2h4l1-2h5.5"/></svg>Cần xử lý<span class=cnt>2</span></div><div class="nav"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="7" rx="7" ry="3"/><path d="M5 7v5c0 1.7 3.1 3 7 3s7-1.3 7-3V7M5 12v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/></svg>Token</div><div class="nav"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.8a3.3 3.3 0 0 1 0 6.4M18 14.8c1.9.7 3.1 2.4 3.5 5.2"/></svg>Thành viên</div><div class="nav"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5 12 4l9 5.5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20.5h18"/></svg>Tài khoản nhận tiền</div><div class="nav"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></svg>Cài đặt</div></aside>
+<main class="main">
+<div class="crumb">Sự kiện <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg> <span>Giải Pickleball Mở rộng CLB Sóng Xanh 2026</span></div>
+<div class="ph"><span class="hl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</span><span class="badge b-ok">Đang mở bán</span></div>
+<div class="meta mu">Chủ nhật, 16/11/2026 · 07:00 – 17:00 · Sân Pickleball Thảo Điền</div>
+<nav class="tabs"><span class="on">Tổng quan</span><span>Đơn</span><span>Hạng vé</span><span>Form mua</span><span>Check-in</span><span>Cài đặt</span></nav>
+<div class="banner" role="status"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5M12 17.3v.2"/></svg> Token khả dụng dưới ngưỡng cảnh báo. <span class="act">mua thêm Token</span></div>
+<div class="grid3">
+<div class="stage stat"><div class="lbl">Doanh thu</div><div class="hl">12.900.000đ</div><div class="meta" style="color:var(--smu)">Chỉ tính Đơn Đã thanh toán · 48 Đơn</div></div>
+<div class="stage stat"><div class="lbl">Check-in</div><div class="hl">41<span style="color:var(--smu);font-weight:500">/66</span></div><div class="prog" role="progressbar" aria-valuenow="41" aria-valuemax="66"><i style="width:62%"></i></div><div class="meta" style="color:var(--smu)">Cập nhật liên tục</div></div>
+<div class="card na"><div class="lbl mu">Cần xử lý</div><div class="hl">2 mục Cần xử lý</div><a href="#">Mở tab Đơn, lọc Cần xử lý</a></div>
+</div>
+<section class="card blk"><div class="blk-h"><span class="ttl">Vé theo Hạng vé</span><span class="meta mu num">66/72 Vé đã bán</span></div>
+<table><thead><tr><th>Hạng vé</th><th>Giá</th><th>Đã bán</th><th>Còn</th><th class="r">Doanh thu</th></tr></thead><tbody><tr><td><b>Đơn nam</b></td><td class="num">150.000đ</td><td><span class="mbar"><i style="width:94%"></i></span><span class="num">30/32</span></td><td class="num">2</td><td class="r num">4.500.000đ</td></tr><tr><td><b>Đôi nam</b></td><td class="num">300.000đ</td><td><span class="mbar"><i style="width:83%"></i></span><span class="num">20/24</span></td><td class="num">4</td><td class="r num">6.000.000đ</td></tr><tr><td><b>Đơn nữ</b></td><td class="num">150.000đ</td><td><span class="mbar"><i style="width:100%"></i></span><span class="num">16/16</span></td><td class="num">0 · Hết vé</td><td class="r num">2.400.000đ</td></tr></tbody></table></section>
+<section class="card blk"><div class="blk-h"><span class="ttl">Đơn gần đây</span><a href="#">Xem tất cả Đơn</a></div>
+<table><thead><tr><th>Mã Đơn</th><th>Người mua</th><th>Vé</th><th class="r">Số tiền</th><th>Trạng thái</th><th>Thời gian</th></tr></thead><tbody><tr><td class="mono">TK8F3Q2A</td><td>Nguyễn Văn Minh</td><td class="num">2 Vé</td><td class="r num">450.000đ</td><td><span class="badge b-ok">Đã thanh toán</span></td><td class="num mu">08:12</td></tr><tr><td class="mono">TK5R8W1C</td><td>Phạm Thu Hà</td><td class="num">2 Vé</td><td class="r num">300.000đ</td><td><span class="badge b-da">Cần xử lý</span><span class=tiny>Lệch số tiền · nhận 250.000đ / Đơn 300.000đ</span></td><td class="num mu">07:58</td></tr><tr><td class="mono">TK3J6N4D</td><td>Lê Hoàng Nam</td><td class="num">1 Vé</td><td class="r num">150.000đ</td><td><span class="badge b-wa">Chờ thanh toán</span></td><td class="num mu">07:55</td></tr><tr><td class="mono">TK9B2X7E</td><td>Trần Quốc Bảo</td><td class="num">1 Vé</td><td class="r num">300.000đ</td><td><span class="badge b-ok">Đã thanh toán</span></td><td class="num mu">07:31</td></tr><tr><td class="mono">TK1Q4Z8H</td><td>Võ Minh Thư</td><td class="num">1 Vé</td><td class="r num">150.000đ</td><td><span class="badge b-ne">Hết hạn</span></td><td class="num mu">15/11 · 22:10</td></tr></tbody></table></section>
+
+</main></div></div>
+<h2 class="sec-h">3 · Điện thoại &lt; md (375px)</h2>
+<p class="sec-p">Sidebar thay bằng bottom-tab-bar nền bar: Sự kiện · Cần xử lý (badge) · Quét vé · Thêm. “Thêm” mở Sheet chứa Token, Thành viên, Tài khoản nhận tiền, Cài đặt, BTC switcher. Bảng Đơn thành danh sách thẻ. Số check-in và doanh thu tự cập nhật, không reload.</p>
+<div class="phones">
+<figure><figcaption>Tổng quan · điện thoại · Sáng</figcaption><div class="phone light "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="mtop"><div class="meta mu">CLB Sóng Xanh</div>
+<div class="ph"><span class="ttl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</span></div>
+<div style="margin-top:6px"><span class="badge b-ok">Đang mở bán</span></div>
+<nav class="mtabs"><span class="on">Tổng quan</span><span>Đơn</span><span>Hạng vé</span><span>Form mua</span><span>Check-in</span><span>Cài đặt</span></nav></div>
+<div class="mbody">
+<div class="banner"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5M12 17.3v.2"/></svg><span>Token khả dụng dưới ngưỡng cảnh báo. <b style="text-decoration:underline">mua thêm Token</b></span></div>
+<div class="mrow2"><div class="stage stat"><div class="lbl">Doanh thu</div><div class="hl">12.900.000đ</div><div class="meta" style="color:var(--smu)">Chỉ tính Đơn Đã thanh toán · 48 Đơn</div></div><div class="stage stat"><div class="lbl">Check-in</div><div class="hl">41<span style="color:var(--smu);font-weight:500">/66</span></div><div class="prog" role="progressbar" aria-valuenow="41" aria-valuemax="66"><i style="width:62%"></i></div><div class="meta" style="color:var(--smu)">Cập nhật liên tục</div></div></div>
+<div class="card na" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center"><div><div class="lbl mu">Cần xử lý</div><div class="ttl">2 mục Cần xử lý</div></div><span class="mu"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></span></div>
+<div class="card blk" style="margin-top:0"><div class="blk-h"><span class="ttl">Vé theo Hạng vé</span><span class="meta mu num">66/72</span></div><div class="tline"><span><b>Đơn nam</b> <span class="mu meta">· 150.000đ</span></span><span class="num">30/32</span></div><div class="tline"><span><b>Đôi nam</b> <span class="mu meta">· 300.000đ</span></span><span class="num">20/24</span></div><div class="tline"><span><b>Đơn nữ</b> <span class="mu meta">· 150.000đ</span></span><span class="num">16/16 · <span class=mu>Hết vé</span></span></div></div>
+<div class="card blk olist"><div class="blk-h"><span class="ttl">Đơn gần đây</span></div><div class="ord"><div><b>Nguyễn Văn Minh</b><span class="tiny"><span class="mono">TK8F3Q2A</span> · 2 Vé · 08:12</span></div><div style="text-align:right"><div class="num" style="font-weight:600">450.000đ</div><span class="badge b-ok" style="margin-top:4px">Đã thanh toán</span></div></div><div class="ord"><div><b>Phạm Thu Hà</b><span class="tiny"><span class="mono">TK5R8W1C</span> · 2 Vé · 07:58</span><span class=tiny>Lệch số tiền · nhận 250.000đ / Đơn 300.000đ</span></div><div style="text-align:right"><div class="num" style="font-weight:600">300.000đ</div><span class="badge b-da" style="margin-top:4px">Cần xử lý</span></div></div><div class="ord"><div><b>Lê Hoàng Nam</b><span class="tiny"><span class="mono">TK3J6N4D</span> · 1 Vé · 07:55</span></div><div style="text-align:right"><div class="num" style="font-weight:600">150.000đ</div><span class="badge b-wa" style="margin-top:4px">Chờ thanh toán</span></div></div><div class="ord"><div><b>Trần Quốc Bảo</b><span class="tiny"><span class="mono">TK9B2X7E</span> · 1 Vé · 07:31</span></div><div style="text-align:right"><div class="num" style="font-weight:600">300.000đ</div><span class="badge b-ok" style="margin-top:4px">Đã thanh toán</span></div></div></div>
+</div>
+<nav class="tabbar">
+<div class="tb on"><svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>Sự kiện</div>
+<div class="tb"><svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 13.5 6 5h12l2.5 8.5V19a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/><path d="M3.5 13.5H9l1 2h4l1-2h5.5"/></svg><span class="cnt">2</span>Cần xử lý</div>
+<div class="tb"><svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>Quét vé</div>
+<div class="tb"><svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5.5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18.5" cy="12" r="1.3"/></svg>Thêm</div>
+</nav></div></div></figure>
+<figure><figcaption>Tổng quan · điện thoại · Tối</figcaption><div class="phone dark "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="mtop"><div class="meta mu">CLB Sóng Xanh</div>
+<div class="ph"><span class="ttl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</span></div>
+<div style="margin-top:6px"><span class="badge b-ok">Đang mở bán</span></div>
+<nav class="mtabs"><span class="on">Tổng quan</span><span>Đơn</span><span>Hạng vé</span><span>Form mua</span><span>Check-in</span><span>Cài đặt</span></nav></div>
+<div class="mbody">
+<div class="banner"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5M12 17.3v.2"/></svg><span>Token khả dụng dưới ngưỡng cảnh báo. <b style="text-decoration:underline">mua thêm Token</b></span></div>
+<div class="mrow2"><div class="stage stat"><div class="lbl">Doanh thu</div><div class="hl">12.900.000đ</div><div class="meta" style="color:var(--smu)">Chỉ tính Đơn Đã thanh toán · 48 Đơn</div></div><div class="stage stat"><div class="lbl">Check-in</div><div class="hl">41<span style="color:var(--smu);font-weight:500">/66</span></div><div class="prog" role="progressbar" aria-valuenow="41" aria-valuemax="66"><i style="width:62%"></i></div><div class="meta" style="color:var(--smu)">Cập nhật liên tục</div></div></div>
+<div class="card na" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center"><div><div class="lbl mu">Cần xử lý</div><div class="ttl">2 mục Cần xử lý</div></div><span class="mu"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></span></div>
+<div class="card blk" style="margin-top:0"><div class="blk-h"><span class="ttl">Vé theo Hạng vé</span><span class="meta mu num">66/72</span></div><div class="tline"><span><b>Đơn nam</b> <span class="mu meta">· 150.000đ</span></span><span class="num">30/32</span></div><div class="tline"><span><b>Đôi nam</b> <span class="mu meta">· 300.000đ</span></span><span class="num">20/24</span></div><div class="tline"><span><b>Đơn nữ</b> <span class="mu meta">· 150.000đ</span></span><span class="num">16/16 · <span class=mu>Hết vé</span></span></div></div>
+<div class="card blk olist"><div class="blk-h"><span class="ttl">Đơn gần đây</span></div><div class="ord"><div><b>Nguyễn Văn Minh</b><span class="tiny"><span class="mono">TK8F3Q2A</span> · 2 Vé · 08:12</span></div><div style="text-align:right"><div class="num" style="font-weight:600">450.000đ</div><span class="badge b-ok" style="margin-top:4px">Đã thanh toán</span></div></div><div class="ord"><div><b>Phạm Thu Hà</b><span class="tiny"><span class="mono">TK5R8W1C</span> · 2 Vé · 07:58</span><span class=tiny>Lệch số tiền · nhận 250.000đ / Đơn 300.000đ</span></div><div style="text-align:right"><div class="num" style="font-weight:600">300.000đ</div><span class="badge b-da" style="margin-top:4px">Cần xử lý</span></div></div><div class="ord"><div><b>Lê Hoàng Nam</b><span class="tiny"><span class="mono">TK3J6N4D</span> · 1 Vé · 07:55</span></div><div style="text-align:right"><div class="num" style="font-weight:600">150.000đ</div><span class="badge b-wa" style="margin-top:4px">Chờ thanh toán</span></div></div><div class="ord"><div><b>Trần Quốc Bảo</b><span class="tiny"><span class="mono">TK9B2X7E</span> · 1 Vé · 07:31</span></div><div style="text-align:right"><div class="num" style="font-weight:600">300.000đ</div><span class="badge b-ok" style="margin-top:4px">Đã thanh toán</span></div></div></div>
+</div>
+<nav class="tabbar">
+<div class="tb on"><svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>Sự kiện</div>
+<div class="tb"><svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 13.5 6 5h12l2.5 8.5V19a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/><path d="M3.5 13.5H9l1 2h4l1-2h5.5"/></svg><span class="cnt">2</span>Cần xử lý</div>
+<div class="tb"><svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>Quét vé</div>
+<div class="tb"><svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5.5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18.5" cy="12" r="1.3"/></svg>Thêm</div>
+</nav></div></div></figure>
+</div>
+
+</body></html>

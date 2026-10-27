@@ -1,0 +1,230 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tickee check-in</title>
+<style>
+/* key-checkin.html — Màn quét CTV (Lan, UJ-3)
+   Governing spine sections:
+   DESIGN.md › Colors (scan-success #4A6B5A, scan-danger #8F3F3F, scan-foreground #FFF; warning-subtle/text) · Typography (scan-result 32/700, scan-detail 20/500, input 16)
+   DESIGN.md › Components › scan-result-overlay · "Màn quét: scanner-viewport, offline-banner, manual-lookup" · status-badge · button-secondary / button-primary-on-light / button-primary
+   EXPERIENCE.md › Component Patterns rows: scanner-viewport, scan-result-overlay, offline-banner, manual-lookup
+   EXPERIENCE.md › State Patterns › CTV / Màn quét (Đang quét, Xanh, Đỏ đã check-in, Đỏ Vé không hợp lệ, Mất mạng, Tra tay)
+   EXPERIENCE.md › Check-in tại cổng · Key Flows › Flow 3 (bước 4–7) · Voice and Tone (Với CTV) · Accessibility Floor (không chỉ dựa vào màu)
+   .memlog.md: kết quả phủ toàn màn hình; xanh tự quay về ~1.5s, đỏ chạm để đóng; tra tay theo tên + số cuối SĐT; banner mất mạng; màn quét theo hệ thống */
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{font-family:"Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#E7E3E2;color:#1C1917;padding:32px 24px 80px;line-height:1.45}
+.page-h{max-width:1100px;margin:0 0 24px}
+.page-h h1{font-size:26px;font-weight:700;letter-spacing:-.02em}
+.page-h p{color:#4A4442;margin-top:6px;max-width:860px;line-height:1.55;font-size:14.5px}
+.page-h .gov{font:12px ui-monospace,Menlo,monospace;color:#4A4442;margin-top:8px}
+h2.sec-h{font-size:18px;font-weight:700;margin:36px 0 4px}
+p.sec-p{font-size:13.5px;color:#4A4442;max-width:860px;margin-bottom:12px}
+.phones{display:flex;gap:28px;flex-wrap:wrap;padding:4px 4px 16px;align-items:flex-start}
+figure{flex:0 0 auto}
+figcaption{font-size:12px;color:#4A4442;margin-bottom:8px;font-weight:600;max-width:390px;line-height:1.4}
+figcaption small{display:block;font-weight:400}
+.phone{width:375px;height:780px;border-radius:40px;overflow:hidden;position:relative;outline:8px solid #1c1c1f;margin:8px;box-shadow:0 20px 50px rgba(0,0,0,.18);font-size:15px}
+.scroll{height:calc(100% - 40px);overflow:hidden;position:relative}
+.sb{height:40px;display:flex;justify-content:space-between;align-items:center;padding:0 26px 0 32px;font-size:14px;font-weight:600}
+.sbr{display:flex;gap:3px;align-items:flex-end}.sbr i{width:3px;background:currentColor;border-radius:1px}.sbr i:nth-child(1){height:5px}.sbr i:nth-child(2){height:8px}.sbr i:nth-child(3){height:11px}.sbr b{width:22px;height:11px;border:1.5px solid currentColor;border-radius:3px;margin-left:5px}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+a{color:inherit}
+.ic{flex:0 0 auto;display:inline-block;vertical-align:middle}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;letter-spacing:.04em;font-weight:500}
+.num{font-variant-numeric:tabular-nums}
+.c{text-align:center}
+.asm{display:inline-block;font:600 10px/1.3 ui-monospace,Menlo,monospace;color:#7A3E00;background:#FFF4D6;border:1px dashed #B26A00;border-radius:4px;padding:1px 5px;margin:3px 0;letter-spacing:0;text-transform:none;vertical-align:middle;white-space:normal}
+
+/* ---- Tokens (DESIGN.md frontmatter colors) ---- */
+.light{--pg:#F7F3F2;--cd:#FFFFFF;--tx:#1C1917;--mu:#5C5552;--sunk:#F0EBEA;--line:#EFE8E7;--ring:#CF2147;--brt:#CF2147;
+ --sh:0 1px 2px rgba(60,20,30,.06),0 8px 24px rgba(60,20,30,.08);
+ --ok-t:#3F5F4F;--ok-s:#E8EFEA;--wa-t:#7A5320;--wa-s:#F5EDDC;--da-t:#8F3F3F;--da-s:#F5E6E4;--ne-t:#5C5552;--ne-s:#F0EBEA}
+.dark{--pg:#0B0809;--cd:#1C1416;--tx:#F5F2F2;--mu:#A8A29E;--sunk:#2A2023;--line:#2A2023;--ring:#FF4D6A;--brt:#FF4D6A;
+ --sh:0 0 0 1px #2A2023;
+ --ok-t:#A3C4B2;--ok-s:#1A2621;--wa-t:#E3C590;--wa-s:#2A2318;--da-t:#E0A3A0;--da-s:#2E1B1B;--ne-t:#C9BDBF;--ne-s:#2A2023}
+.light,.dark{--br:#FF4D6A;--on:#1F0A10;--st:#1C1416;--stx:#FFF7F8;--smu:#C9BDBF;--sline:#2A2023;--bar:#141012;
+ --scan-ok:#4A6B5A;--scan-da:#8F3F3F;--scan-fg:#FFFFFF;background:var(--pg);color:var(--tx)}
+
+/* ---- Shared components ---- */
+.card{background:var(--cd);border-radius:18px;box-shadow:var(--sh);padding:14px}
+.stage{background:var(--st);color:var(--stx);border-radius:18px;padding:16px}
+.stage .mu{color:var(--smu)}
+.mu{color:var(--mu)}
+.meta{font-size:13px;line-height:1.45}
+.lbl{font-size:14px;font-weight:500}
+.ttl{font-size:17px;font-weight:700;line-height:1.3}
+.hl{font-size:24px;font-weight:700;line-height:1.2;letter-spacing:-.02em}
+.eyebrow{font-size:13px;font-weight:700;color:var(--br)}
+.badge{display:inline-flex;align-items:center;border-radius:999px;padding:2px 10px;font-size:14px;font-weight:500;line-height:1.4;white-space:nowrap}
+.b-ok{color:var(--ok-t);background:var(--ok-s)}.b-wa{color:var(--wa-t);background:var(--wa-s)}.b-da{color:var(--da-t);background:var(--da-s)}.b-ne{color:var(--ne-t);background:var(--ne-s)}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:50px;border-radius:12px;font-size:16px;font-weight:700;line-height:1}
+.btn-p{background:var(--br);color:var(--on)}
+.btn-pl{background:var(--st);color:var(--stx)}
+.btn-s{background:var(--cd);color:var(--tx);box-shadow:var(--sh)}
+.dark .btn-pl{background:var(--br);color:var(--on)}
+.wm{font-weight:700;font-size:19px;letter-spacing:-.03em;display:inline-flex;align-items:center;gap:4px}
+.wm i{width:8px;height:8px;border-radius:2px;background:var(--brt);transform:rotate(45deg)}
+.iconbtn{width:40px;height:40px;border-radius:12px;background:var(--cd);box-shadow:var(--sh);display:inline-flex;align-items:center;justify-content:center}
+
+/* ---- QR (CSS background, no per-module DOM). Module #000 on plate #FFF in every mode ---- */
+.qrplate{background:#FFFFFF;display:inline-block;padding:12px;border-radius:12px;line-height:0}
+.qr{position:relative;width:175px;height:175px;display:block;background-color:#fff;
+ background-image:linear-gradient(90deg,#fff 0 7px,transparent 7px 21px,#fff 21px 28px,transparent 28px),
+  linear-gradient(#fff 0 7px,transparent 7px 14px,#fff 14px 21px,transparent 21px),
+  linear-gradient(90deg,transparent 0 14px,#fff 14px 21px,transparent 21px),
+  repeating-conic-gradient(#000 0 25%,#fff 0 50%);
+ background-size:35px 35px,28px 49px,42px 63px,14px 14px;background-position:0 0,0 0,3px 0,0 0}
+.qr.v2{background-position:7px 14px,14px 0,10px 21px,7px 0}
+.qr.v3{background-position:14px 7px,0 21px,24px 7px,0 7px}
+.qr.big{width:203px;height:203px}
+.qr i{position:absolute;width:49px;height:49px;background:#fff;box-shadow:0 0 0 7px #fff}
+.qr i::before{content:"";position:absolute;inset:0;border:7px solid #000}
+.qr i::after{content:"";position:absolute;inset:14px;background:#000}
+.qr .f1{left:0;top:0}.qr .f2{right:0;top:0}.qr .f3{left:0;bottom:0}
+
+
+.swatches{display:flex;gap:14px;flex-wrap:wrap;margin:14px 0 4px}
+.sw{display:flex;gap:10px;align-items:center;background:#fff;border-radius:12px;padding:8px 14px 8px 8px;font-size:13px}
+.sw i{width:56px;height:40px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-style:normal;font-weight:700}
+.sw b{display:block;font-family:ui-monospace,Menlo,monospace}
+
+/* scanner at rest */
+.scn{display:flex;flex-direction:column;height:100%}
+.scn-top{padding:6px 16px 12px;display:flex;justify-content:space-between;align-items:flex-end;gap:10px}
+.scn-top .lbl{max-width:220px}
+.count{text-align:right}
+.count b{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;display:block;line-height:1.1}
+.cam{flex:1;position:relative;margin:0 16px;border-radius:18px;overflow:hidden;
+ background:radial-gradient(ellipse at 30% 70%,rgba(160,150,140,.35),transparent 55%),radial-gradient(ellipse at 75% 25%,rgba(120,130,140,.35),transparent 50%),linear-gradient(160deg,#3a3633,#1f1d1c)}
+.vf{position:absolute;left:50%;top:46%;width:220px;height:220px;transform:translate(-50%,-50%);border:3px solid #fff;border-radius:18px;box-shadow:0 0 0 999px rgba(0,0,0,.28)}
+.held{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%) rotate(-4deg) scale(.62);opacity:.85}
+.thumb{padding:14px 16px 26px}
+.paused .vf,.paused .held{opacity:.5}
+.paused .cam{filter:grayscale(.6) brightness(.8)}
+.pausedtag{position:absolute;left:0;right:0;bottom:16px;text-align:center;color:#fff;font-size:13px}
+.offline{display:flex;gap:10px;align-items:center;margin:0 16px 10px;padding:12px 14px;border-radius:12px;background:var(--wa-s);color:var(--wa-t);font-weight:700;font-size:15px}
+
+/* full-screen result overlay */
+.ov{position:absolute;inset:0;color:var(--scan-fg);display:flex;flex-direction:column;z-index:5}
+.ov.ok{background:var(--scan-ok)}.ov.da{background:var(--scan-da)}
+.ov .mid{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 28px;gap:14px}
+.ov .res{font-size:32px;font-weight:700;line-height:1.15}
+.ov .det{font-size:20px;font-weight:500;line-height:1.35}
+.ov .det .num{font-weight:700}
+.ov .tap{margin:0 16px 30px;height:56px;border-radius:12px;border:2px solid #fff;color:#fff;font-weight:700;font-size:17px;display:flex;align-items:center;justify-content:center}
+.ov .asm{margin-top:4px}
+
+/* manual lookup sheet */
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.45);z-index:3}
+.sheet{position:absolute;left:0;right:0;bottom:0;top:86px;z-index:4;background:var(--pg);border-radius:20px 20px 0 0;padding:8px 16px 0}
+.dark .sheet{box-shadow:0 0 0 1px #2A2023}
+.grab{width:40px;height:5px;border-radius:3px;background:var(--line);margin:0 auto 10px}
+.dark .grab{background:#3A2E31}
+.sh-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.field label{display:block;font-size:14px;font-weight:500;margin-bottom:6px}
+.inp{display:flex;align-items:center;gap:8px;height:50px;border-radius:12px;background:var(--cd);padding:0 14px;font-size:16px;box-shadow:0 0 0 2px var(--ring)}
+.inp .mu{display:inline-flex}
+.caret{display:inline-block;width:1.5px;height:20px;background:var(--tx);margin-left:1px;vertical-align:middle}
+.rescount{margin:14px 2px 8px}
+.row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.row .who{flex:1;min-width:0}
+.row .ttl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .sub{display:flex;gap:8px;align-items:center;margin-top:4px;flex-wrap:wrap}
+.row .ci{width:auto;padding:0 16px;height:44px;font-size:15px;flex:0 0 auto}
+mark{background:none;color:inherit;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
+.empty{padding:18px 4px;text-align:center}
+
+</style></head><body>
+<header class="page-h"><h1>Tickee — Màn quét của Lan (CTV)</h1><p>Mock key-screen cho Flow 3. Mỗi điện thoại 375px. Màu quét (scan-success, scan-danger) render đúng token DESIGN.md để duyệt. Nội dung: Giải Pickleball Mở rộng CLB Sóng Xanh 2026. QR là hình giả lập. Ô vàng nét đứt “[ASSUMPTION]” = chi tiết chưa có cơ sở trong spine/memlog.</p><p class="gov">Spine: DESIGN.md › Colors, Typography, scan-result-overlay, Màn quét · EXPERIENCE.md › Component Patterns (scanner-viewport, scan-result-overlay, offline-banner, manual-lookup), State Patterns › CTV / Màn quét, Check-in tại cổng, Flow 3</p></header>
+
+<h2 class="sec-h">1 · Màu kết quả quét — đề xuất chờ duyệt</h2>
+<p class="sec-p">Hai màu phủ toàn màn hình, giống hệt nhau ở light và dark (DESIGN.md › Colors). Đỏ quét (#8F3F3F) khác coral thương hiệu về sắc độ; mỗi kết quả còn có icon khác hình (tích tròn / X bát giác), chữ lớn và âm thanh khi đỏ.</p>
+<div class="swatches">
+<div class="sw"><i style="background:#4A6B5A">Aa</i><div><b>scan-success #4A6B5A</b>chữ trắng 5.93:1 · khối trên page 6.01:1</div></div>
+<div class="sw"><i style="background:#8F3F3F">Aa</i><div><b>scan-danger #8F3F3F</b>chữ trắng 7.12:1 · khối trên page 6.28:1</div></div>
+<div class="sw"><i style="background:#FF4D6A;color:#1F0A10">Aa</i><div><b>brand #FF4D6A (so sánh)</b>không dùng cho kết quả quét</div></div>
+</div>
+<div class="phones">
+<figure><figcaption>Xanh · “Thành công”<small>Tự đóng sau ~1.5s, quay về quét. Không chạm. aria-live assertive.</small></figcaption><div class="phone light "><div class="ov ok" role="alert" aria-live="assertive" aria-label="Thành công. Minh, vé 2 trên 2, Đôi nam."><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="mid"><svg width="96" height="96" viewBox="0 0 96 96" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="48" cy="48" r="42"/><path d="m28 49 13 13 27-28"/></svg><div class="res">Thành công</div><div class="det">Minh · <span class="num">Vé 2/2</span> · Đôi nam</div></div></div></div></figure>
+<figure><figcaption>Đỏ · “Đã check-in”<small>Giờ + người quét lần trước; có âm thanh; chạm bất kỳ đâu để đóng.</small></figcaption><div class="phone light "><div class="ov da" role="alert" aria-live="assertive" aria-label="Dừng lại. Vé đã check-in lúc 7 giờ 42."><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="mid"><svg width="96" height="96" viewBox="0 0 96 96" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M31 6h34l25 25v34L65 90H31L6 65V31z"/><path d="m33 33 30 30M63 33 33 63"/></svg><div class="res">Đã check-in</div><div class="det">lúc <span class="num">07:42</span> · bởi Hùng</div></div><button class="tap">Chạm để quét tiếp</button></div></div></figure>
+<figure><figcaption>Đỏ · “Vé không hợp lệ”<small>Sai chữ ký / Vé đã hủy / Vé Sự kiện khác; có âm thanh; chạm để đóng.</small></figcaption><div class="phone light "><div class="ov da" role="alert" aria-live="assertive" aria-label="Dừng lại. Vé không hợp lệ."><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="mid"><svg width="96" height="96" viewBox="0 0 96 96" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M31 6h34l25 25v34L65 90H31L6 65V31z"/><path d="m33 33 30 30M63 33 33 63"/></svg><div class="res">Vé không hợp lệ</div><div class="det">Vé của Sự kiện khác</div><span class="asm">[ASSUMPTION] dòng lý do dưới tiêu đề — PRD chỉ yêu cầu “vé không hợp lệ”</span></div><button class="tap">Chạm để quét tiếp</button></div></div></figure>
+</div>
+<h2 class="sec-h">2 · Màn quét lúc chờ</h2>
+<p class="sec-p">Theo cài đặt hệ thống (không ép tối). Đỉnh: tên Sự kiện + số đã check-in (cập nhật liên tục). Đáy, vùng ngón cái: “Tra tay”.</p>
+<div class="phones">
+<figure><figcaption>Đang quét · Sáng</figcaption><div class="phone light "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll"><div class="scn">
+
+<div class="scn-top"><div class="lbl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div><div class="count"><span class="meta mu">Đã check-in</span><b>128/160</b></div></div>
+<div class="cam" aria-label="Khung camera"><div class="held"><div class="qrplate "><div class="qr v2" role="img" aria-label="Mã QR vé trong khung ngắm"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div></div><div class="vf"></div></div>
+<div class="thumb"><button class="btn btn-s"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg> Tra tay</button></div>
+</div></div></div></figure>
+<figure><figcaption>Đang quét · Tối</figcaption><div class="phone dark "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll"><div class="scn">
+
+<div class="scn-top"><div class="lbl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div><div class="count"><span class="meta mu">Đã check-in</span><b>128/160</b></div></div>
+<div class="cam" aria-label="Khung camera"><div class="held"><div class="qrplate "><div class="qr v2" role="img" aria-label="Mã QR vé trong khung ngắm"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div></div><div class="vf"></div></div>
+<div class="thumb"><button class="btn btn-s"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg> Tra tay</button></div>
+</div></div></div></figure>
+</div>
+<h2 class="sec-h">3 · Mất kết nối</h2>
+<p class="sec-p">Banner cố định trên cùng, không đóng tay được; camera tạm dừng (khung ngắm mờ 50%) để Lan không tưởng đã quét được; tự ẩn khi có mạng. Không có check-in offline.</p>
+<div class="phones">
+<figure><figcaption>Mất kết nối · Sáng</figcaption><div class="phone light "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll"><div class="scn paused">
+<div class="offline" role="status"><svg class="ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M8.5 16.4a5 5 0 0 1 7 0M5 12.9a10 10 0 0 1 4.2-2.4M19 12.9a10 10 0 0 0-2.7-1.9M2 9.3a15 15 0 0 1 4.3-2.7M22 9.3A15 15 0 0 0 11 5"/><circle cx="12" cy="19.5" r=".6"/></svg> Mất kết nối — chưa quét được</div>
+<div class="scn-top"><div class="lbl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div><div class="count"><span class="meta mu">Đã check-in</span><b>128/160</b></div></div>
+<div class="cam" aria-label="Khung camera"><div class="vf"></div><div class="pausedtag">Camera tạm dừng · tự thử lại<br><span class="asm">[ASSUMPTION] chữ trong khung camera khi tạm dừng</span></div></div>
+<div class="thumb"><button class="btn btn-s"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg> Tra tay</button><span class="asm">[ASSUMPTION] Tra tay vẫn hiện khi mất mạng — spine chưa nói nút này làm gì lúc offline</span></div>
+</div></div></div></figure>
+<figure><figcaption>Mất kết nối · Tối</figcaption><div class="phone dark "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll"><div class="scn paused">
+<div class="offline" role="status"><svg class="ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M8.5 16.4a5 5 0 0 1 7 0M5 12.9a10 10 0 0 1 4.2-2.4M19 12.9a10 10 0 0 0-2.7-1.9M2 9.3a15 15 0 0 1 4.3-2.7M22 9.3A15 15 0 0 0 11 5"/><circle cx="12" cy="19.5" r=".6"/></svg> Mất kết nối — chưa quét được</div>
+<div class="scn-top"><div class="lbl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div><div class="count"><span class="meta mu">Đã check-in</span><b>128/160</b></div></div>
+<div class="cam" aria-label="Khung camera"><div class="vf"></div><div class="pausedtag">Camera tạm dừng · tự thử lại<br><span class="asm">[ASSUMPTION] chữ trong khung camera khi tạm dừng</span></div></div>
+<div class="thumb"><button class="btn btn-s"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg> Tra tay</button><span class="asm">[ASSUMPTION] Tra tay vẫn hiện khi mất mạng — spine chưa nói nút này làm gì lúc offline</span></div>
+</div></div></div></figure>
+</div>
+<h2 class="sec-h">4 · Tra tay</h2>
+<p class="sec-p">Sheet từ dưới lên, ô tìm tự focus, kết quả hiện khi gõ (theo tên hoặc vài số cuối SĐT — đang chờ PM xác nhận, xem EXPERIENCE Open Question #4). Mỗi hàng chỉ có tên, Hạng vé, trạng thái check-in — không bao giờ có Mã QR vé, không hiện SĐT.</p>
+<div class="phones">
+<figure><figcaption>Tra tay theo tên · Sáng<small>Gõ “Minh”. Nút Check-in: button-primary-on-light.</small></figcaption><div class="phone light "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll"><div class="scn">
+
+<div class="scn-top"><div class="lbl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div><div class="count"><span class="meta mu">Đã check-in</span><b>128/160</b></div></div>
+<div class="cam" aria-label="Khung camera"><div class="held"><div class="qrplate "><div class="qr v2" role="img" aria-label="Mã QR vé trong khung ngắm"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div></div><div class="vf"></div></div>
+<div class="thumb"><button class="btn btn-s"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg> Tra tay</button></div>
+</div></div><div class="scrim"></div>
+<div class="sheet" role="dialog" aria-label="Tra tay"><div class="grab"></div>
+<div class="sh-h"><span class="ttl">Tra tay</span><button class="iconbtn" aria-label="Đóng"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+<div class="field"><label for="q">Tên Người mua hoặc số cuối SĐT</label>
+<div class="inp"><span class="mu"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg></span><span>Minh<span class="caret"></span></span></div>
+<span class="asm">[ASSUMPTION] nhãn ô tìm</span></div>
+<div class="rescount meta mu">4 Vé khớp</div>
+<div class="card row"><div class="who"><div class="ttl">Nguyễn Văn <mark>Minh</mark></div><div class="sub"><span class="meta mu">Đôi nam · Vé 2/2</span><span class="badge b-ok">Hợp lệ</span></div></div><button class="btn btn-pl ci">Check-in</button></div><div class="card row"><div class="who"><div class="ttl">Nguyễn Văn <mark>Minh</mark></div><div class="sub"><span class="meta mu">Đơn nam · Vé 1/2</span><span class="badge b-ne">Đã check-in</span></div></div></div><div class="card row"><div class="who"><div class="ttl">Trần <mark>Minh</mark> Anh</div><div class="sub"><span class="meta mu">Đơn nữ · Vé 1/1</span><span class="badge b-ok">Hợp lệ</span></div></div><button class="btn btn-pl ci">Check-in</button></div><div class="card row"><div class="who"><div class="ttl">Lê Quang <mark>Minh</mark></div><div class="sub"><span class="meta mu">Đơn nam · Vé 1/1</span><span class="badge b-ok">Hợp lệ</span></div></div><button class="btn btn-pl ci">Check-in</button></div>
+<span class="asm">[ASSUMPTION] hàng “Đã check-in” không có nút Check-in (spine: mỗi hàng có nút)</span>
+</div></div></figure>
+<figure><figcaption>Tra tay theo số cuối SĐT · Tối<small>Gõ “347”. Nút Check-in: button-primary (coral, chữ mực).</small></figcaption><div class="phone dark "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll"><div class="scn">
+
+<div class="scn-top"><div class="lbl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div><div class="count"><span class="meta mu">Đã check-in</span><b>128/160</b></div></div>
+<div class="cam" aria-label="Khung camera"><div class="held"><div class="qrplate "><div class="qr v2" role="img" aria-label="Mã QR vé trong khung ngắm"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div></div><div class="vf"></div></div>
+<div class="thumb"><button class="btn btn-s"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg> Tra tay</button></div>
+</div></div><div class="scrim"></div>
+<div class="sheet" role="dialog" aria-label="Tra tay"><div class="grab"></div>
+<div class="sh-h"><span class="ttl">Tra tay</span><button class="iconbtn" aria-label="Đóng"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+<div class="field"><label for="q">Tên Người mua hoặc số cuối SĐT</label>
+<div class="inp"><span class="mu"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg></span><span>347<span class="caret"></span></span></div>
+<span class="asm">[ASSUMPTION] nhãn ô tìm</span></div>
+<div class="rescount meta mu">2 Vé khớp</div>
+<div class="card row"><div class="who"><div class="ttl">Nguyễn Văn Minh</div><div class="sub"><span class="meta mu">Đôi nam · Vé 2/2</span><span class="badge b-ok">Hợp lệ</span></div></div><button class="btn btn-pl ci">Check-in</button></div><div class="card row"><div class="who"><div class="ttl">Nguyễn Văn Minh</div><div class="sub"><span class="meta mu">Đơn nam · Vé 1/2</span><span class="badge b-ne">Đã check-in</span></div></div></div>
+
+</div></div></figure>
+<figure><figcaption>Tra tay · không có kết quả · Sáng</figcaption><div class="phone light "><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll"><div class="scn">
+
+<div class="scn-top"><div class="lbl">Giải Pickleball Mở rộng CLB Sóng Xanh 2026</div><div class="count"><span class="meta mu">Đã check-in</span><b>128/160</b></div></div>
+<div class="cam" aria-label="Khung camera"><div class="held"><div class="qrplate "><div class="qr v2" role="img" aria-label="Mã QR vé trong khung ngắm"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div></div><div class="vf"></div></div>
+<div class="thumb"><button class="btn btn-s"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg> Tra tay</button></div>
+</div></div><div class="scrim"></div>
+<div class="sheet"><div class="grab"></div>
+<div class="sh-h"><span class="ttl">Tra tay</span><button class="iconbtn" aria-label="Đóng"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+<div class="field"><label>Tên Người mua hoặc số cuối SĐT</label>
+<div class="inp"><span class="mu"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg></span><span>9021<span class="caret"></span></span></div></div>
+<div class="empty"><div class="ttl">Không tìm thấy Vé khớp.</div></div></div></div></figure>
+</div>
+
+</body></html>
