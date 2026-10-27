@@ -1,0 +1,713 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tickee · Hướng thiết kế 2</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#ECECEE;color:#18181B;padding:32px 16px 80px}
+.page-h{max-width:1200px;margin:0 auto 24px}
+.page-h h1{font-size:28px;font-weight:700}
+.page-h p{color:#52525B;margin-top:6px;max-width:760px;line-height:1.5}
+section.dir{margin:0 auto 56px;max-width:2600px}
+.dh{max-width:900px;margin:0 0 18px}
+.dh .n{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#52525B}
+.dh .dname{font-weight:700;font-size:24px;margin:4px 0 6px}
+.dh p{line-height:1.55;color:#3F3F46}
+.dh .reg{margin-top:8px;font-size:14px}
+.dh .sw{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.dh .sw span{font:12px ui-monospace,Menlo,monospace;padding:4px 8px 4px 4px;border-radius:6px;background:#fff;border:1px solid #D4D4D8;display:inline-flex;align-items:center;gap:6px}
+.dh .sw span i{width:16px;height:16px;border-radius:4px;display:inline-block;border:1px solid rgba(0,0,0,.15)}
+.phones{display:flex;gap:28px;overflow-x:auto;padding:4px 4px 16px}
+figure{flex:0 0 auto}
+figcaption{font-size:12px;color:#52525B;margin-bottom:8px;font-weight:600;letter-spacing:.02em}
+.phone{width:375px;height:780px;border-radius:40px;overflow:hidden;position:relative;outline:8px solid #1c1c1f;margin:8px;box-shadow:0 20px 50px rgba(0,0,0,.18)}
+.phone .scroll{height:calc(100% - 40px);overflow-y:auto;position:relative}
+.sb{height:40px;display:flex;justify-content:space-between;align-items:center;padding:0 26px 0 32px;font-size:14px;font-weight:600}
+.sbr{display:flex;gap:3px;align-items:flex-end}.sbr i{width:3px;background:currentColor;border-radius:1px}.sbr i:nth-child(1){height:5px}.sbr i:nth-child(2){height:8px}.sbr i:nth-child(3){height:11px}.sbr b{width:22px;height:11px;border:1.5px solid currentColor;border-radius:3px;margin-left:5px}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+a{color:inherit}
+.ic{flex:0 0 auto;display:inline-block;vertical-align:middle}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.c{text-align:center}
+.qrplate{background:#fff;display:inline-block;padding:12px}
+.qr{display:grid;grid-template-columns:repeat(25,7px);grid-template-rows:repeat(25,7px)}
+.qr i{display:block}.qr i.k{background:#000}
+.step{display:inline-flex;align-items:center}
+.step span{min-width:28px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600}
+.step button{display:inline-flex;align-items:center;justify-content:center}
+.step.dis{opacity:.45}
+.cta,.sec{display:flex;align-items:center;justify-content:center;gap:8px;width:100%}
+.waiting,.reassure{display:flex;gap:8px;align-items:flex-start;text-align:left;font-size:14px;line-height:1.45}
+.waiting .dot{width:8px;height:8px;border-radius:50%;background:currentColor;margin-top:6px;flex:0 0 auto;opacity:.6}
+
+
+.qr{position:relative;width:175px;height:175px;display:block;
+ background:
+  linear-gradient(90deg,#fff 0 7px,transparent 7px 21px,#fff 21px 28px,transparent 28px) 0 0/35px 35px,
+  linear-gradient(#fff 0 7px,transparent 7px 14px,#fff 14px 21px,transparent 21px) 0 0/28px 49px,
+  linear-gradient(90deg,transparent 0 14px,#fff 14px 21px,transparent 21px) 3px 0/42px 63px,
+  repeating-conic-gradient(#000 0 25%,#fff 0 50%) 0 0/14px 14px}
+.qr i{position:absolute;width:49px;height:49px;background:#fff;box-shadow:0 0 0 7px #fff}
+.qr i::before{content:"";position:absolute;inset:0;border:7px solid #000}
+.qr i::after{content:"";position:absolute;inset:14px;background:#000}
+.qr .f1{left:0;top:0}.qr .f2{right:0;top:0}.qr .f3{left:0;bottom:0}
+
+
+.dh .a11y{margin-top:6px;font-size:14px;background:#fff;border:1px solid #D4D4D8;border-radius:8px;padding:8px 10px;color:#27272A}
+.page-h .brand{display:inline-flex;gap:8px;align-items:center;font:13px ui-monospace,Menlo,monospace;background:#fff;border:1px solid #D4D4D8;border-radius:8px;padding:4px 10px 4px 4px;margin-top:10px}
+.page-h .brand i{width:20px;height:20px;border-radius:5px;background:#FF4D6A}
+@media (prefers-color-scheme: dark){
+ body{background:#111113;color:#F4F4F5}
+ .page-h p,.dh p,.dh .n,figcaption{color:#A1A1AA}
+ .dh .a11y,.dh .sw span,.page-h .brand{background:#1C1C1F;border-color:#3F3F46;color:#E4E4E7}
+ .phone{outline-color:#3F3F46}
+}
+
+
+/* A · TỜ GIẤY + CORAL (round-1 Hướng 1 + brand) — monochrome hairline UI; #ff4d6a only as the one CTA fill
+   CONTRAST: CTA = #FF4D6A fill + ink #1F0A10 text = 5.88:1 (AA normal). White on #FF4D6A (3.22) never used.
+   Brand-as-text (low stock, links) uses coral-700 #D6264A: 4.96:1 on #FFFFFF, 4.75:1 on #FAFAFA.
+   DARK: same CTA (ink on coral 5.88:1); brand text uses #FF4D6A itself = 6.18:1 on #09090B, 5.50:1 on #18181B.
+   Non-text: #FF4D6A focus/border = 3.22:1 on white (>=3:1, SC 1.4.11).
+   LIGHT bg #FFFFFF · surface #FAFAFA · border #E4E4E7 · text #18181B · muted #52525B (7.7:1)
+   DARK  bg #09090B · surface #18181B · border #27272A · text #FAFAFA · muted #A1A1AA (7.9:1)
+   Font: system-ui, -apple-system, "Segoe UI", Roboto · 400/600 · H1 24/600 · radius 8px · 1px borders, no shadows */
+.a .phone{--bg:#FFFFFF;--sf:#FAFAFA;--bd:#E4E4E7;--tx:#18181B;--mu:#52525B;--br:#FF4D6A;--brt:#D6264A;--on:#1F0A10;--cov1:#FFE4E9;--cov2:#F4F4F5;--line:#FFFFFF}
+.a .phone.dark{--bg:#09090B;--sf:#18181B;--bd:#27272A;--tx:#FAFAFA;--mu:#A1A1AA;--br:#FF4D6A;--brt:#FF4D6A;--on:#1F0A10;--cov1:#2A1419;--cov2:#18181B;--line:#3F3F46}
+.a .phone{background:var(--bg);color:var(--tx);font-size:15px}
+.a .top{display:flex;justify-content:space-between;align-items:center;padding:6px 16px 10px}
+.a .wm{font-weight:600;letter-spacing:-.02em;font-size:18px}
+.a .ttl{font-weight:600}
+.a .iconbtn{width:36px;height:36px;border:1px solid var(--bd);border-radius:8px;display:inline-flex;align-items:center;justify-content:center}
+.a .cover{margin:0 16px;height:168px;border-radius:8px;border:1px solid var(--bd);background:linear-gradient(135deg,var(--cov1),var(--cov2));position:relative;overflow:hidden}
+.a .court{position:absolute;inset:24px 40px;border:2px solid var(--line)}
+.a .court::before{content:"";position:absolute;left:50%;top:0;bottom:0;border-left:2px solid var(--line)}
+.a .court::after{content:"";position:absolute;left:0;right:0;top:50%;border-top:2px dashed var(--line)}
+.a .pad{padding:16px 16px 24px}
+.a .eyebrow{font-size:13px;color:var(--mu)}
+.a h1{font-size:24px;line-height:1.25;font-weight:600;letter-spacing:-.015em;margin:4px 0 16px}
+.a .row{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+.a .ib{width:40px;height:40px;border:1px solid var(--bd);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:var(--mu)}
+.a .r1{font-weight:600}.a .r2{color:var(--mu);font-size:13px}
+.a h2{font-size:15px;font-weight:600;margin:24px 0 8px}
+.a .tiers{border:1px solid var(--bd);border-radius:8px}
+.a .tier{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 12px}
+.a .tier+.tier{border-top:1px solid var(--bd)}
+.a .tn{font-weight:600}.a .td{font-size:13px;color:var(--mu);margin:2px 0 6px}
+.a .tp{font-size:14px}.a .tp b{font-weight:600}
+.a .av{color:var(--mu)}.a .av.low{color:var(--brt);font-weight:600}
+.a .av.out{font-size:12px;border:1px solid var(--bd);border-radius:999px;padding:1px 8px}
+.a .isout .tn,.a .isout .tp b{color:var(--mu)}.a .isout .tp b{text-decoration:line-through}
+.a .step{border:1px solid var(--bd);border-radius:8px}
+.a .step button{width:36px;height:36px}
+.a .note{font-size:13px;color:var(--mu);margin-top:10px}.a .note a,.a .lnk{color:var(--brt);font-weight:600;text-underline-offset:3px}
+.a .body{color:var(--mu);line-height:1.55}
+.a .bar{position:sticky;bottom:0;display:flex;justify-content:space-between;align-items:center;gap:16px;padding:12px 16px 20px;background:var(--bg);border-top:1px solid var(--bd)}
+.a .tot{font-weight:600;font-size:18px}
+.a .cta{background:var(--br);color:var(--on);height:48px;border-radius:8px;font-weight:600;font-size:15px}
+.a .bar .cta{width:150px}
+.a .sec{height:48px;border-radius:8px;border:1px solid var(--bd);font-weight:600;margin-top:8px}
+.a .timer{font-size:13px;font-weight:600;border:1px solid var(--bd);border-radius:999px;padding:4px 10px;display:inline-flex;gap:4px;align-items:center;font-variant-numeric:tabular-nums}
+.a .amt{font-size:32px;font-weight:600;letter-spacing:-.02em;margin:2px 0}
+.a .qrplate{border-radius:8px;border:1px solid var(--bd);margin:14px 0 12px}
+.a .trust{text-align:left;border:1px solid var(--bd);border-radius:8px;padding:12px;margin:12px 0}
+.a .trh{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+.a .kv{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-top:1px solid var(--bd)}.a .kv span{color:var(--mu)}
+.a .trust p{margin-top:6px}
+.a .waiting{color:var(--mu);font-size:13px}.a .waiting .dot{background:var(--br);opacity:1}
+.a .reassure{border:1px solid var(--bd);border-left:3px solid var(--br);border-radius:8px;padding:10px 12px;font-weight:600}
+.a .lnk{display:inline-block;margin-top:14px;font-size:14px}
+
+
+/* B · SÂN NHÀ + CORAL (round-1 Hướng 2 + brand) — soft, rounded, filled; brand also tints surfaces
+   CONTRAST: CTA = #FF4D6A fill + WHITE text only at 19px/700 (WCAG "large" >=14pt bold) = 3.22:1 >= 3:1. No coral-filled control has text <19px bold.
+   Tinted surface coral-50 #FFE8EC carries coral-800 text #B3123A = 5.88:1; ink #1C1917 on it 14.99:1.
+   Stepper "+" = white icon on #FF4D6A (non-text, 3.22:1 >= 3:1).
+   DARK: tint #3A1820 with text #FFD6DD = 11.95:1; #FF4D6A as text on bg #120D0E = 5.99:1, on surface #1F1719 = 5.46:1; CTA stays coral + white 19px bold.
+   LIGHT bg #FFFFFF · surface #F6F3F3 · text #1C1917 · muted #57534E (6.91:1 on surface)
+   DARK  bg #120D0E · surface #1F1719 · text #F5F5F4 · muted #A8A29E (6.97:1 on surface)
+   Font: system-ui · 500/600/700 · H1 22/700 · radius cards 20px, inner 14px, pill buttons · no borders, no shadows */
+.b .phone{--bg:#FFFFFF;--sf:#F6F3F3;--tx:#1C1917;--mu:#57534E;--ac:#FF4D6A;--on:#FFFFFF;--as:#FFE8EC;--at:#B3123A;--cv1:#FFD3DB;--cv2:#FF9DAE}
+.b .phone.dark{--bg:#120D0E;--sf:#1F1719;--tx:#F5F5F4;--mu:#A8A29E;--ac:#FF4D6A;--on:#FFFFFF;--as:#3A1820;--at:#FFD6DD;--cv1:#3A1820;--cv2:#24131A}
+.b .phone{background:var(--bg);color:var(--tx);font-size:15px}
+.b .top{display:flex;justify-content:space-between;align-items:center;padding:6px 16px 8px}
+.b .wm{font-weight:700;font-size:19px;letter-spacing:-.02em}
+.b .wm::after{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ac);margin-left:2px}
+.b .ttl{font-weight:600}
+.b .iconbtn{width:40px;height:40px;border-radius:999px;background:var(--sf);display:inline-flex;align-items:center;justify-content:center}
+.b .pad{padding:4px 16px 28px}
+.b .cover{height:200px;border-radius:20px;background:linear-gradient(160deg,var(--cv1),var(--cv2));position:relative;overflow:hidden}
+.b .ball{position:absolute;width:86px;height:86px;border-radius:50%;right:34px;top:30px;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.85),rgba(255,255,255,.3))}
+.b .ball.b2{width:34px;height:34px;right:140px;top:110px;opacity:.7}
+.b .net{position:absolute;left:0;right:0;bottom:46px;height:2px;background:rgba(255,255,255,.6)}
+.b h1{font-size:22px;line-height:1.3;font-weight:700;margin:16px 0 10px;letter-spacing:-.01em}
+.b .host{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--mu)}.b .host b{color:var(--tx);font-weight:600}
+.b .avatar{width:28px;height:28px;border-radius:50%;background:var(--as);color:var(--at);font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.b .avatar.lg{width:48px;height:48px;font-size:16px;background:var(--bg)}
+.b .chips{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 16px}
+.b .chip{background:var(--sf);border-radius:999px;padding:8px 12px;font-size:13px;font-weight:500;display:inline-flex;gap:6px;align-items:center}
+.b .card{background:var(--sf);border-radius:20px;padding:16px}
+.b .ch{font-weight:700;font-size:16px;margin-bottom:8px}
+.b .tier{background:var(--bg);border-radius:14px;padding:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
+.b .tn{font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.b .td{font-size:12.5px;color:var(--mu);margin:3px 0}
+.b .tp{font-weight:700}
+.b .av{font-size:12px;font-weight:600;background:var(--sf);color:var(--mu);padding:2px 8px;border-radius:999px}
+.b .av.low{background:var(--as);color:var(--at)}
+.b .av.out{background:var(--sf);color:var(--mu)}
+.b .isout .tn,.b .isout .tp{color:var(--mu)}
+.b .step{background:var(--sf);border-radius:999px;padding:3px}
+.b .step button{width:34px;height:34px;border-radius:50%;background:var(--bg)}
+.b .step:not(.dis) button:last-child{background:var(--ac);color:#FFFFFF}
+.b .sum{display:flex;justify-content:space-between;padding:8px 4px 12px}.b .sum span{color:var(--mu)}
+.b .cta{height:56px;border-radius:999px;background:var(--ac);color:var(--on);font-weight:700;font-size:19px}
+.b .sec{height:52px;border-radius:999px;background:var(--sf);font-weight:600;margin-top:8px}
+.b .note{font-size:13px;color:var(--mu);margin-top:12px}.b .note.c{text-align:center}.b .note a{color:var(--tx);font-weight:600}
+.b h2{font-size:16px;font-weight:700;margin:22px 0 6px}
+.b .body{color:var(--mu);line-height:1.5}.b .body b{color:var(--tx)}
+.b .trust{display:flex;gap:12px;align-items:center;background:var(--as);border-radius:20px;padding:14px;margin:4px 0 12px}
+.b .trust .r2{font-size:13px;color:var(--at);font-weight:600}
+.b .big{font-size:20px;font-weight:700}
+.b .timer{display:inline-flex;gap:6px;align-items:center;font-size:13px;background:var(--bg);border-radius:999px;padding:6px 12px;font-variant-numeric:tabular-nums}
+.b .qrplate{border-radius:18px;margin:14px 0 10px;padding:14px}
+.b .amt{font-size:30px;font-weight:700;letter-spacing:-.02em}
+.b .recv{font-size:14px;font-weight:600;display:inline-flex;gap:6px;align-items:center;margin-top:4px}
+.b .code{font-size:13px;color:var(--mu);margin-top:8px;display:flex;justify-content:center;align-items:center;gap:6px}.b .code b{color:var(--tx)}
+.b .mini{width:28px;height:28px;border-radius:50%;background:var(--bg);display:inline-flex;align-items:center;justify-content:center}
+.b .waiting{color:var(--mu);margin:14px 4px;font-size:13px}.b .waiting .dot{background:var(--ac);opacity:1}
+.b .reassure{background:var(--as);color:var(--tx);border-radius:16px;padding:12px 14px;margin:12px 0;font-weight:600}
+.b .reassure .ic{color:var(--at)}
+
+
+/* C · BIỂN HIỆU (fresh) — one bold brand block at the top of each screen, everything below is plain white "sheet"; CTA is ink, not coral
+   CONTRAST: text on the #FF4D6A block is ink #1A0A0F = 5.96:1 (AA normal, all sizes). No white text on coral anywhere.
+   Brand appears nowhere else as text in light mode (no coral-700 needed). CTA ink #18181B / #FFFFFF = 17.7:1.
+   DARK: block becomes wine #3A1820 with text #FFD6DD = 11.95:1 (a full-bright coral slab glares at night); coral moves to the CTA: #FF4D6A + ink #1A0A0F = 5.96:1; coral eyebrow on #3A1820 = 4.90:1.
+   LIGHT sheet #FFFFFF · border #E7E5E4 · text #1C1917 · muted #57534E (7.63:1)
+   DARK  sheet #0E0B0C · border #2A2224 · text #F5F5F4 · muted #A8A29E (7.77:1)
+   Font: system-ui · 500/800 · H1 28/800 tight on the block · radius: sheet top 24px, controls 12px · 1px borders, no shadows */
+.cc .phone{--blk:#FF4D6A;--btx:#1A0A0F;--bmu:#1A0A0F;--bg:#FFFFFF;--bd:#E7E5E4;--tx:#1C1917;--mu:#57534E;--pr:#18181B;--on:#FFFFFF;--chip:rgba(26,10,15,.10)}
+.cc .phone.dark{--blk:#3A1820;--btx:#FFD6DD;--bmu:#FF4D6A;--bg:#0E0B0C;--bd:#2A2224;--tx:#F5F5F4;--mu:#A8A29E;--pr:#FF4D6A;--on:#1A0A0F;--chip:rgba(255,214,221,.10)}
+.cc .phone{background:var(--bg);color:var(--tx);font-size:15px}
+.cc .phone .sb{background:var(--blk);color:var(--btx)}
+.cc .blk{background:var(--blk);color:var(--btx);padding:4px 16px 40px}
+.cc .top{display:flex;justify-content:space-between;align-items:center;padding:2px 0 18px}
+.cc .wm{font-weight:800;font-size:20px;letter-spacing:-.04em}
+.cc .ttl{font-weight:800}
+.cc .iconbtn{width:38px;height:38px;border-radius:12px;background:var(--chip);display:inline-flex;align-items:center;justify-content:center}
+.cc .eyebrow{font-size:13px;font-weight:700;color:var(--bmu);letter-spacing:.02em}
+.cc h1{font-size:28px;line-height:1.12;font-weight:800;letter-spacing:-.03em;margin:6px 0 14px}
+.cc .bl{display:flex;gap:6px;align-items:center;font-size:14px;font-weight:500;margin-top:6px}
+.cc .sheet{background:var(--bg);border-radius:24px 24px 0 0;margin-top:-24px;position:relative;padding:20px 16px 24px}
+.cc .host{display:flex;gap:10px;align-items:center;padding-bottom:16px;border-bottom:1px solid var(--bd)}
+.cc .avatar{width:40px;height:40px;border-radius:12px;border:1px solid var(--bd);display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
+.cc .r1{font-weight:700}.cc .r2{color:var(--mu);font-size:13px}
+.cc h2{font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin:20px 0 8px}
+.cc .tier{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px;border:1px solid var(--bd);border-radius:12px;margin-bottom:8px}
+.cc .tn{font-weight:700}.cc .td{font-size:13px;color:var(--mu);margin:2px 0 6px}
+.cc .tp{font-size:14px;display:flex;gap:8px;align-items:center}.cc .tp b{font-weight:800}
+.cc .av{font-size:12px;font-weight:600;color:var(--mu)}
+.cc .av.low{color:var(--tx);border:1.5px solid var(--tx);border-radius:999px;padding:0 7px}
+.cc .av.out{border:1px solid var(--bd);border-radius:999px;padding:0 7px}
+.cc .isout .tn,.cc .isout .tp b{color:var(--mu)}.cc .isout .tp b{text-decoration:line-through}
+.cc .step{border:1px solid var(--bd);border-radius:12px}
+.cc .step button{width:36px;height:36px}
+.cc .note{font-size:13px;color:var(--mu);margin-top:8px}.cc .note a,.cc .lnk{color:var(--tx);font-weight:700;text-underline-offset:3px}
+.cc .body{color:var(--mu);line-height:1.55}
+.cc .bar{position:sticky;bottom:0;display:flex;justify-content:space-between;align-items:center;gap:16px;padding:12px 16px 20px;background:var(--bg);border-top:1px solid var(--bd)}
+.cc .tot{font-weight:800;font-size:19px}
+.cc .cta{background:var(--pr);color:var(--on);height:50px;border-radius:12px;font-weight:700;font-size:15px;margin-top:4px}
+.cc .bar .cta{width:150px;margin:0}
+.cc .sec{height:50px;border-radius:12px;border:1px solid var(--bd);font-weight:700;margin-top:8px}
+.cc .timer{font-size:13px;font-weight:700;background:var(--chip);border-radius:999px;padding:5px 10px;display:inline-flex;gap:4px;align-items:center;font-variant-numeric:tabular-nums}
+.cc .big{font-size:26px;font-weight:800;letter-spacing:-.03em;margin:2px 0 10px}
+.cc .amtrow{display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--chip);padding-top:10px}
+.cc .amtrow .bl{margin:0}
+.cc .amt{font-size:30px;font-weight:800;letter-spacing:-.02em}
+.cc .qrplate{border-radius:12px;border:1px solid var(--bd);margin:0 0 12px}
+.cc .kvs{text-align:left}
+.cc .kv{display:flex;justify-content:space-between;font-size:14px;padding:8px 0;border-bottom:1px solid var(--bd)}.cc .kv span{color:var(--mu)}
+.cc .lft{text-align:left;margin:8px 0 12px}
+.cc .waiting{color:var(--mu);font-size:13px;margin-bottom:12px}
+.cc .reassure{border:1.5px solid var(--tx);border-radius:12px;padding:10px 12px;font-weight:700;margin-bottom:12px}
+.cc .lnk{display:inline-block;margin-top:14px;font-size:14px}
+
+
+/* D · RẠP TỐI (fresh, dark-leaning) — even in light mode the hero "stage" card and the bottom bar are near-black; coral lives only on dark ground
+   CONTRAST: #FF4D6A is only ever placed on dark: on stage #1C1416 = 5.62:1, on bar #141012 = 5.86:1 (AA normal text OK).
+   CTA = #FF4D6A fill + ink #1F0A10 text = 5.88:1. On light cards brand-as-text uses coral-700 #D6264A = 4.96:1 on #FFFFFF.
+   Stage text #FFF7F8 on #1C1416 = 17.15:1; stage muted #C9BDBF = 9.9:1.
+   DARK: page #0B0809, cards #1C1416, coral text 5.62:1, muted #A8A29E on #1C1416 = 7.17:1.
+   LIGHT page #F7F3F2 · card #FFFFFF (shadow 0 1px 2px + 0 8px 24px warm) · text #1C1917 · muted #5C5552 (6.63:1 on page, 7.30:1 on card)
+   Font: system-ui · 500/700 · H1 24/700 on stage · radius 18px cards, 12px controls · elevation by shadow, no borders on light cards */
+.dd .phone{--pg:#F7F3F2;--cd:#FFFFFF;--tx:#1C1917;--mu:#5C5552;--st:#1C1416;--stx:#FFF7F8;--smu:#C9BDBF;--br:#FF4D6A;--brt:#D6264A;--on:#1F0A10;--bar:#141012;--sh:0 1px 2px rgba(60,20,30,.06),0 8px 24px rgba(60,20,30,.08);--line:#EFE8E7}
+.dd .phone.dark{--pg:#0B0809;--cd:#1C1416;--tx:#F5F2F2;--mu:#A8A29E;--st:#1C1416;--stx:#FFF7F8;--smu:#C9BDBF;--br:#FF4D6A;--brt:#FF4D6A;--on:#1F0A10;--bar:#141012;--sh:0 0 0 1px #2A2023;--line:#2A2023}
+.dd .phone{background:var(--pg);color:var(--tx);font-size:15px}
+.dd .top{display:flex;justify-content:space-between;align-items:center;padding:6px 0 12px}
+.dd .top.px{padding:6px 16px 4px}
+.dd .wm{font-weight:700;font-size:19px;letter-spacing:-.03em;display:inline-flex;align-items:center;gap:4px}
+.dd .wm i{width:8px;height:8px;border-radius:2px;background:var(--br);transform:rotate(45deg)}
+.dd .ttl{font-weight:700}
+.dd .iconbtn{width:40px;height:40px;border-radius:12px;background:var(--cd);box-shadow:var(--sh);display:inline-flex;align-items:center;justify-content:center}
+.dd .pad{padding:0 16px 24px}
+.dd .stage{background:var(--st);color:var(--stx);border-radius:18px;padding:16px;position:relative;overflow:hidden}
+.dd .art{height:120px;border-radius:12px;margin-bottom:14px;background:radial-gradient(circle at 78% 30%,rgba(255,77,106,.55),transparent 42%),radial-gradient(circle at 20% 90%,rgba(255,77,106,.18),transparent 50%),#2A1D20}
+.dd .eyebrow{font-size:13px;font-weight:700;color:var(--br)}
+.dd h1{font-size:24px;line-height:1.2;font-weight:700;letter-spacing:-.02em;margin:4px 0 14px}
+.dd .row{display:flex;gap:10px;align-items:flex-start;margin-top:10px}.dd .row .ic{margin-top:2px;color:var(--br)}
+.dd .stage .r2{color:var(--smu)}
+.dd .r1{font-weight:600}.dd .r2{color:var(--mu);font-size:13px}
+.dd .card{background:var(--cd);border-radius:18px;box-shadow:var(--sh);padding:14px}
+.dd .host{display:flex;gap:10px;align-items:center;margin-top:12px}
+.dd .avatar{width:40px;height:40px;border-radius:50%;background:var(--st);color:var(--br);display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
+.dd h2{font-size:17px;font-weight:700;margin:22px 0 10px}
+.dd .tier{background:var(--cd);border-radius:18px;box-shadow:var(--sh);padding:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
+.dd .tn{font-weight:700}.dd .td{font-size:13px;color:var(--mu);margin:2px 0 6px}
+.dd .tp{font-size:14px;font-weight:600}
+.dd .av{color:var(--mu);font-weight:500}.dd .av.low{color:var(--brt);font-weight:700}.dd .av.out{color:var(--mu)}
+.dd .isout{box-shadow:none;background:transparent;border:1px dashed var(--line)}
+.dd .isout .tn,.dd .isout .tp{color:var(--mu)}
+.dd .step{background:var(--pg);border-radius:12px;padding:3px}
+.dd .step button{width:34px;height:34px;border-radius:10px}
+.dd .step:not(.dis) button:last-child{background:var(--st);color:var(--br)}
+.dd .note{font-size:13px;color:var(--mu);margin-top:10px}.dd .note.c{text-align:center}.dd .note a{color:var(--brt);font-weight:600}
+.dd .bar{position:sticky;bottom:0;margin:0 10px 10px;border-radius:20px;display:flex;justify-content:space-between;align-items:center;gap:14px;padding:10px 10px 10px 18px;background:var(--bar);color:var(--stx)}
+.dd .bar .r2{color:var(--smu)}
+.dd .tot{font-weight:700;font-size:19px}
+.dd .cta{background:var(--br);color:var(--on);height:50px;border-radius:14px;font-weight:700;font-size:16px;margin-top:14px}
+.dd .bar .cta{width:140px;margin:0}
+.dd .sec{height:50px;border-radius:14px;background:var(--cd);box-shadow:var(--sh);font-weight:600;margin-top:10px}
+.dd .stage.c{padding:18px 16px}
+.dd .amt{font-size:34px;font-weight:700;letter-spacing:-.02em;margin:2px 0 8px}
+.dd .timer{display:inline-flex;gap:6px;align-items:center;font-size:13px;font-weight:600;color:var(--br);border:1px solid rgba(255,77,106,.5);border-radius:999px;padding:5px 12px;font-variant-numeric:tabular-nums}
+.dd .qrplate{border-radius:14px;margin:14px 0 10px}
+.dd .stage .mono{color:var(--stx)}
+.dd .trust{margin-top:12px}
+.dd .trh{display:flex;gap:12px;align-items:center;margin-bottom:8px}
+.dd .sh{width:40px;height:40px;border-radius:12px;background:var(--st);color:var(--br);display:inline-flex;align-items:center;justify-content:center}
+.dd .big{font-size:18px}
+.dd .kv{display:flex;justify-content:space-between;font-size:14px;padding:8px 0;border-top:1px solid var(--line)}.dd .kv span{color:var(--mu)}
+.dd .waiting{color:var(--mu);margin:14px 4px 0;font-size:13.5px}.dd .waiting .dot{background:var(--br);opacity:1}
+.dd .reassure{background:var(--st);color:var(--stx);border-radius:16px;padding:14px;margin:14px 0 0;font-weight:600}
+.dd .reassure .ic{color:var(--br)}
+
+</style></head><body>
+<header class="page-h"><h1>tickee — 4 hướng thiết kế với màu thương hiệu #ff4d6a (vòng 2)</h1>
+<p>Cùng nội dung như vòng 1 (Giải Pickleball CLB Sóng Xanh, 2 × Đơn nam = 300.000đ). Mỗi hướng: trang Sự kiện, màn QR thanh toán, trạng thái trấn an — sáng và tối cạnh nhau. Các hướng khác nhau ở lượng diện tích coral chiếm: A chỉ ở nút · B nhuộm bề mặt nhạt · C một khối lớn đầu trang · D chỉ trên nền tối. #ff4d6a trên nền trắng chỉ đạt 3.22:1, nên mỗi hướng ghi rõ cách xử lý tương phản. QR là hình giả lập.</p>
+<span class="brand"><i></i>#FF4D6A · 3.22:1 trên #FFF · 5.5–6.2:1 trên nền gần đen</span></header>
+<section class="dir a"><div class="dh"><div class="n">Hướng A · biến thể của "Tờ giấy" (vòng 1, Hướng 1) + #ff4d6a</div><div class="dname">Tờ giấy + coral — đơn sắc, coral chỉ ở nút chính</div><p>Giữ nguyên bộ khung trung tính, viền mảnh 1px của Tờ giấy; #ff4d6a xuất hiện ở đúng một chỗ mỗi màn hình — nút hành động chính — cộng vài điểm nhấn nhỏ (còn ít vé, link chính sách, chấm "đang chờ"). Thương hiệu được nhận ra qua nút, còn trang vẫn yên tĩnh như tờ giấy.</p><p class="reg"><b>Cảm xúc:</b> Điềm tĩnh, gọn, đáng tin — có thêm chút ấm áp ở đúng nơi cần bấm.</p><p class="a11y"><b>Tương phản (WCAG 2.2 AA):</b> Nút coral dùng chữ mực #1F0A10 (5.88:1); chữ thương hiệu trên nền sáng dùng coral-700 #D6264A (4.96:1); tối: #ff4d6a làm chữ trên #09090B = 6.18:1.</p><div class="sw"><span><i style="background:#FF4D6A"></i>#FF4D6A brand / CTA fill</span><span><i style="background:#1F0A10"></i>#1F0A10 text on CTA</span><span><i style="background:#D6264A"></i>#D6264A coral-700 text</span><span><i style="background:#18181B"></i>#18181B text</span><span><i style="background:#E4E4E7"></i>#E4E4E7 border</span><span><i style="background:#09090B"></i>#09090B dark bg</span></div></div><div class="phones"><figure><figcaption>Sự kiện · Sáng</figcaption><div class="phone light"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><span class="wm">tickee</span><button class="iconbtn" aria-label="Chia sẻ"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg></button></div>
+<div class="cover"><div class="court"></div></div>
+<div class="pad">
+<div class="eyebrow">Thể thao · Pickleball</div>
+<h1>Giải Pickleball Mở rộng CLB Sóng Xanh 2026</h1>
+<div class="row"><span class="ib"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg></span><div><div class="r1">Chủ nhật, 16/11/2026</div><div class="r2">07:00 – 17:00</div></div></div>
+<div class="row"><span class="ib"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg></span><div><div class="r1">Sân Pickleball Thảo Điền</div><div class="r2">12 Nguyễn Văn Hưởng, TP. Thủ Đức</div></div></div>
+<div class="row"><span class="ib"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.8a3.3 3.3 0 0 1 0 6.4M18 14.8c1.9.7 3.1 2.4 3.5 5.2"/></svg></span><div><div class="r2">Ban tổ chức</div><div class="r1">CLB Sóng Xanh</div></div></div>
+<h2>Hạng vé</h2>
+<div class="tiers"><div class="tier"><div class="tl"><div class="tn">Đơn nam</div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp"><b>150.000đ</b> · <span class="av">Còn 12 vé</span></div></div><div class="step"><button aria-label="Bớt 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>2</span><button aria-label="Thêm 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier"><div class="tl"><div class="tn">Đôi nam nữ</div><div class="td">Đăng ký cho 1 cặp · 2 áo giải</div><div class="tp"><b>300.000đ</b> · <span class="av low">Còn 3 vé</span></div></div><div class="step"><button aria-label="Bớt 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button aria-label="Thêm 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier isout"><div class="tl"><div class="tn">Đơn nữ</div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp"><b>150.000đ</b> · <span class="av out">Hết vé</span></div></div><div class="step dis" aria-disabled="true"><button disabled aria-label="Bớt"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button disabled aria-label="Thêm"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div></div>
+<p class="note">Tối đa 4 vé mỗi Đơn · <a href="#">Chính sách hoàn vé</a></p>
+<h2>Về sự kiện</h2><p class="body">Giải giao lưu mở rộng cho mọi trình độ, chia bảng theo DUPR. Có trọng tài, nước uống và ảnh lưu niệm cho tất cả VĐV.</p>
+</div>
+<div class="bar"><div><div class="r2">2 vé · Đơn nam</div><div class="tot">300.000đ</div></div><button class="cta">Mua</button></div>
+</div></div></figure><figure><figcaption>Sự kiện · Tối</figcaption><div class="phone dark"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><span class="wm">tickee</span><button class="iconbtn" aria-label="Chia sẻ"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg></button></div>
+<div class="cover"><div class="court"></div></div>
+<div class="pad">
+<div class="eyebrow">Thể thao · Pickleball</div>
+<h1>Giải Pickleball Mở rộng CLB Sóng Xanh 2026</h1>
+<div class="row"><span class="ib"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg></span><div><div class="r1">Chủ nhật, 16/11/2026</div><div class="r2">07:00 – 17:00</div></div></div>
+<div class="row"><span class="ib"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg></span><div><div class="r1">Sân Pickleball Thảo Điền</div><div class="r2">12 Nguyễn Văn Hưởng, TP. Thủ Đức</div></div></div>
+<div class="row"><span class="ib"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.8a3.3 3.3 0 0 1 0 6.4M18 14.8c1.9.7 3.1 2.4 3.5 5.2"/></svg></span><div><div class="r2">Ban tổ chức</div><div class="r1">CLB Sóng Xanh</div></div></div>
+<h2>Hạng vé</h2>
+<div class="tiers"><div class="tier"><div class="tl"><div class="tn">Đơn nam</div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp"><b>150.000đ</b> · <span class="av">Còn 12 vé</span></div></div><div class="step"><button aria-label="Bớt 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>2</span><button aria-label="Thêm 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier"><div class="tl"><div class="tn">Đôi nam nữ</div><div class="td">Đăng ký cho 1 cặp · 2 áo giải</div><div class="tp"><b>300.000đ</b> · <span class="av low">Còn 3 vé</span></div></div><div class="step"><button aria-label="Bớt 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button aria-label="Thêm 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier isout"><div class="tl"><div class="tn">Đơn nữ</div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp"><b>150.000đ</b> · <span class="av out">Hết vé</span></div></div><div class="step dis" aria-disabled="true"><button disabled aria-label="Bớt"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button disabled aria-label="Thêm"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div></div>
+<p class="note">Tối đa 4 vé mỗi Đơn · <a href="#">Chính sách hoàn vé</a></p>
+<h2>Về sự kiện</h2><p class="body">Giải giao lưu mở rộng cho mọi trình độ, chia bảng theo DUPR. Có trọng tài, nước uống và ảnh lưu niệm cho tất cả VĐV.</p>
+</div>
+<div class="bar"><div><div class="r2">2 vé · Đơn nam</div><div class="tot">300.000đ</div></div><button class="cta">Mua</button></div>
+</div></div></figure><figure><figcaption>QR thanh toán · Sáng</figcaption><div class="phone light"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> 14:32</span></div>
+<div class="pad c">
+<div class="r2">Quét bằng app ngân hàng để trả</div>
+<div class="amt">300.000đ</div>
+<div class="r2">2 × Đơn nam · Giải Pickleball Mở rộng</div>
+<div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+<div class="waiting" role="status"><span class="dot"></span>Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền.</div>
+<div class="trust">
+ <div class="trh"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 4.5 5.6v6c0 4.6 3.1 8.2 7.5 9.6 4.4-1.4 7.5-5 7.5-9.6v-6z"/><path d="m8.6 12 2.4 2.4 4.6-4.8"/></svg><b>Tiền chuyển thẳng cho CLB Sóng Xanh</b></div>
+ <div class="kv"><span>Người nhận</span><b>NGUYEN VAN TUAN · Vietcombank</b></div>
+ <div class="kv"><span>Mã Đơn</span><b class="mono">TK8F3Q2A</b></div>
+ <p class="r2">App ngân hàng sẽ hiện đúng tên người nhận này. Tickee không giữ tiền của bạn.</p>
+</div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<a class="lnk" href="#">Chính sách hoàn vé</a>
+</div></div></div></figure><figure><figcaption>QR thanh toán · Tối</figcaption><div class="phone dark"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> 14:32</span></div>
+<div class="pad c">
+<div class="r2">Quét bằng app ngân hàng để trả</div>
+<div class="amt">300.000đ</div>
+<div class="r2">2 × Đơn nam · Giải Pickleball Mở rộng</div>
+<div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+<div class="waiting" role="status"><span class="dot"></span>Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền.</div>
+<div class="trust">
+ <div class="trh"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 4.5 5.6v6c0 4.6 3.1 8.2 7.5 9.6 4.4-1.4 7.5-5 7.5-9.6v-6z"/><path d="m8.6 12 2.4 2.4 4.6-4.8"/></svg><b>Tiền chuyển thẳng cho CLB Sóng Xanh</b></div>
+ <div class="kv"><span>Người nhận</span><b>NGUYEN VAN TUAN · Vietcombank</b></div>
+ <div class="kv"><span>Mã Đơn</span><b class="mono">TK8F3Q2A</b></div>
+ <p class="r2">App ngân hàng sẽ hiện đúng tên người nhận này. Tickee không giữ tiền của bạn.</p>
+</div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<a class="lnk" href="#">Chính sách hoàn vé</a>
+</div></div></div></figure><figure><figcaption>QR · trạng thái trấn an · Sáng</figcaption><div class="phone light"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> 09:47</span></div>
+<div class="pad c">
+<div class="r2">Quét bằng app ngân hàng để trả</div>
+<div class="amt">300.000đ</div>
+<div class="r2">2 × Đơn nam · Giải Pickleball Mở rộng</div>
+<div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+<div class="reassure" role="status"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.2"/></svg><span>Nếu bạn đã chuyển, vé sẽ về trong vài phút — đừng chuyển lại.</span></div>
+<div class="trust">
+ <div class="trh"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 4.5 5.6v6c0 4.6 3.1 8.2 7.5 9.6 4.4-1.4 7.5-5 7.5-9.6v-6z"/><path d="m8.6 12 2.4 2.4 4.6-4.8"/></svg><b>Tiền chuyển thẳng cho CLB Sóng Xanh</b></div>
+ <div class="kv"><span>Người nhận</span><b>NGUYEN VAN TUAN · Vietcombank</b></div>
+ <div class="kv"><span>Mã Đơn</span><b class="mono">TK8F3Q2A</b></div>
+ <p class="r2">App ngân hàng sẽ hiện đúng tên người nhận này. Tickee không giữ tiền của bạn.</p>
+</div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<a class="lnk" href="#">Chính sách hoàn vé</a>
+</div></div></div></figure><figure><figcaption>QR · trạng thái trấn an · Tối</figcaption><div class="phone dark"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> 09:47</span></div>
+<div class="pad c">
+<div class="r2">Quét bằng app ngân hàng để trả</div>
+<div class="amt">300.000đ</div>
+<div class="r2">2 × Đơn nam · Giải Pickleball Mở rộng</div>
+<div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+<div class="reassure" role="status"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.2"/></svg><span>Nếu bạn đã chuyển, vé sẽ về trong vài phút — đừng chuyển lại.</span></div>
+<div class="trust">
+ <div class="trh"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 4.5 5.6v6c0 4.6 3.1 8.2 7.5 9.6 4.4-1.4 7.5-5 7.5-9.6v-6z"/><path d="m8.6 12 2.4 2.4 4.6-4.8"/></svg><b>Tiền chuyển thẳng cho CLB Sóng Xanh</b></div>
+ <div class="kv"><span>Người nhận</span><b>NGUYEN VAN TUAN · Vietcombank</b></div>
+ <div class="kv"><span>Mã Đơn</span><b class="mono">TK8F3Q2A</b></div>
+ <p class="r2">App ngân hàng sẽ hiện đúng tên người nhận này. Tickee không giữ tiền của bạn.</p>
+</div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<a class="lnk" href="#">Chính sách hoàn vé</a>
+</div></div></div></figure></div></section><section class="dir b"><div class="dh"><div class="n">Hướng B · biến thể của "Sân nhà" (vòng 1, Hướng 2) + #ff4d6a</div><div class="dname">Sân nhà + coral — mềm, bo tròn, bề mặt nhuộm hồng nhạt</div><p>Bo tròn lớn, nút pill, không viền như Sân nhà; màu thương hiệu lan sang một tông nhuộm rất nhạt (#FFE8EC) cho khối người nhận, nhãn "còn ít vé" và ô trấn an — nên cảm giác hồng ấm nhưng không chói. Nút chính là coral đặc với chữ trắng cỡ lớn, đậm.</p><p class="reg"><b>Cảm xúc:</b> Thân thiện, trẻ trung, ấm — như CLB rủ nhau đi chơi.</p><p class="a11y"><b>Tương phản (WCAG 2.2 AA):</b> Chữ trắng trên coral chỉ dùng cỡ 19px/700 ("chữ lớn", 3.22:1 ≥ 3:1); trên nền nhuộm #FFE8EC chữ #B3123A = 5.88:1; tối: nền nhuộm #3A1820 + chữ #FFD6DD = 11.95:1.</p><div class="sw"><span><i style="background:#FF4D6A"></i>#FF4D6A brand / CTA fill</span><span><i style="background:#FFFFFF"></i>#FFFFFF CTA text 19px bold</span><span><i style="background:#FFE8EC"></i>#FFE8EC coral-50 tint</span><span><i style="background:#B3123A"></i>#B3123A coral-800 on tint</span><span><i style="background:#3A1820"></i>#3A1820 dark tint</span><span><i style="background:#120D0E"></i>#120D0E dark bg</span></div></div><div class="phones"><figure><figcaption>Sự kiện · Sáng</figcaption><div class="phone light"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><span class="wm">tickee</span><button class="iconbtn" aria-label="Chia sẻ"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg></button></div>
+<div class="pad">
+<div class="cover"><div class="ball"></div><div class="ball b2"></div><div class="net"></div></div>
+<h1>Giải Pickleball Mở rộng CLB Sóng Xanh 2026</h1>
+<div class="host"><span class="avatar">SX</span><span>Tổ chức bởi <b>CLB Sóng Xanh</b></span></div>
+<div class="chips"><span class="chip"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg> CN, 16/11 · 07:00</span><span class="chip"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg> Thảo Điền, TP. Thủ Đức</span></div>
+<div class="card">
+<div class="ch">Chọn vé</div>
+<div class="tier"><div class="tl"><div class="tn">Đơn nam <span class="av">Còn 12 vé</span></div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp">150.000đ</div></div><div class="step"><button aria-label="Bớt 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>2</span><button aria-label="Thêm 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier"><div class="tl"><div class="tn">Đôi nam nữ <span class="av low">Còn 3 vé</span></div><div class="td">Đăng ký cho 1 cặp · 2 áo giải</div><div class="tp">300.000đ</div></div><div class="step"><button aria-label="Bớt 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button aria-label="Thêm 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier isout"><div class="tl"><div class="tn">Đơn nữ <span class="av out">Hết vé</span></div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp">150.000đ</div></div><div class="step dis" aria-disabled="true"><button disabled aria-label="Bớt"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button disabled aria-label="Thêm"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div>
+<div class="sum"><span>2 vé</span><b>300.000đ</b></div>
+<button class="cta">Mua</button>
+<p class="note">Tối đa 4 vé mỗi Đơn · <a href="#">Chính sách hoàn vé</a></p>
+</div>
+<h2>Địa điểm</h2><p class="body"><b>Sân Pickleball Thảo Điền</b><br>12 Nguyễn Văn Hưởng, TP. Thủ Đức</p>
+</div></div></div></figure><figure><figcaption>Sự kiện · Tối</figcaption><div class="phone dark"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><span class="wm">tickee</span><button class="iconbtn" aria-label="Chia sẻ"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg></button></div>
+<div class="pad">
+<div class="cover"><div class="ball"></div><div class="ball b2"></div><div class="net"></div></div>
+<h1>Giải Pickleball Mở rộng CLB Sóng Xanh 2026</h1>
+<div class="host"><span class="avatar">SX</span><span>Tổ chức bởi <b>CLB Sóng Xanh</b></span></div>
+<div class="chips"><span class="chip"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg> CN, 16/11 · 07:00</span><span class="chip"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg> Thảo Điền, TP. Thủ Đức</span></div>
+<div class="card">
+<div class="ch">Chọn vé</div>
+<div class="tier"><div class="tl"><div class="tn">Đơn nam <span class="av">Còn 12 vé</span></div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp">150.000đ</div></div><div class="step"><button aria-label="Bớt 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>2</span><button aria-label="Thêm 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier"><div class="tl"><div class="tn">Đôi nam nữ <span class="av low">Còn 3 vé</span></div><div class="td">Đăng ký cho 1 cặp · 2 áo giải</div><div class="tp">300.000đ</div></div><div class="step"><button aria-label="Bớt 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button aria-label="Thêm 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier isout"><div class="tl"><div class="tn">Đơn nữ <span class="av out">Hết vé</span></div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp">150.000đ</div></div><div class="step dis" aria-disabled="true"><button disabled aria-label="Bớt"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button disabled aria-label="Thêm"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div>
+<div class="sum"><span>2 vé</span><b>300.000đ</b></div>
+<button class="cta">Mua</button>
+<p class="note">Tối đa 4 vé mỗi Đơn · <a href="#">Chính sách hoàn vé</a></p>
+</div>
+<h2>Địa điểm</h2><p class="body"><b>Sân Pickleball Thảo Điền</b><br>12 Nguyễn Văn Hưởng, TP. Thủ Đức</p>
+</div></div></div></figure><figure><figcaption>QR thanh toán · Sáng</figcaption><div class="phone light"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span></span></div>
+<div class="pad">
+<div class="trust">
+ <div class="avatar lg">SX</div>
+ <div><div class="r2">Tiền chuyển thẳng cho</div><div class="big">CLB Sóng Xanh</div></div>
+</div>
+<div class="card c">
+ <div class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Giữ chỗ còn <b>14:32</b></div>
+ <div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+ <div class="amt">300.000đ</div>
+ <div class="recv"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5 12 4l9 5.5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20.5h18"/></svg> NGUYEN VAN TUAN · Vietcombank</div>
+ <div class="code">Mã Đơn <b class="mono">TK8F3Q2A</b> <button class="mini" aria-label="Sao chép mã Đơn"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h3.5"/></svg></button></div>
+</div>
+<div class="waiting" role="status"><span class="dot"></span>Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền.</div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<p class="note c">Tickee không giữ tiền của bạn · <a href="#">Chính sách hoàn vé</a></p>
+</div></div></div></figure><figure><figcaption>QR thanh toán · Tối</figcaption><div class="phone dark"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span></span></div>
+<div class="pad">
+<div class="trust">
+ <div class="avatar lg">SX</div>
+ <div><div class="r2">Tiền chuyển thẳng cho</div><div class="big">CLB Sóng Xanh</div></div>
+</div>
+<div class="card c">
+ <div class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Giữ chỗ còn <b>14:32</b></div>
+ <div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+ <div class="amt">300.000đ</div>
+ <div class="recv"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5 12 4l9 5.5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20.5h18"/></svg> NGUYEN VAN TUAN · Vietcombank</div>
+ <div class="code">Mã Đơn <b class="mono">TK8F3Q2A</b> <button class="mini" aria-label="Sao chép mã Đơn"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h3.5"/></svg></button></div>
+</div>
+<div class="waiting" role="status"><span class="dot"></span>Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền.</div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<p class="note c">Tickee không giữ tiền của bạn · <a href="#">Chính sách hoàn vé</a></p>
+</div></div></div></figure><figure><figcaption>QR · trạng thái trấn an · Sáng</figcaption><div class="phone light"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span></span></div>
+<div class="pad">
+<div class="trust">
+ <div class="avatar lg">SX</div>
+ <div><div class="r2">Tiền chuyển thẳng cho</div><div class="big">CLB Sóng Xanh</div></div>
+</div>
+<div class="card c">
+ <div class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Giữ chỗ còn <b>09:47</b></div>
+ <div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+ <div class="amt">300.000đ</div>
+ <div class="recv"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5 12 4l9 5.5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20.5h18"/></svg> NGUYEN VAN TUAN · Vietcombank</div>
+ <div class="code">Mã Đơn <b class="mono">TK8F3Q2A</b> <button class="mini" aria-label="Sao chép mã Đơn"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h3.5"/></svg></button></div>
+</div>
+<div class="reassure" role="status"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.2"/></svg><span>Nếu bạn đã chuyển, vé sẽ về trong vài phút — đừng chuyển lại.</span></div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<p class="note c">Tickee không giữ tiền của bạn · <a href="#">Chính sách hoàn vé</a></p>
+</div></div></div></figure><figure><figcaption>QR · trạng thái trấn an · Tối</figcaption><div class="phone dark"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span></span></div>
+<div class="pad">
+<div class="trust">
+ <div class="avatar lg">SX</div>
+ <div><div class="r2">Tiền chuyển thẳng cho</div><div class="big">CLB Sóng Xanh</div></div>
+</div>
+<div class="card c">
+ <div class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Giữ chỗ còn <b>09:47</b></div>
+ <div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+ <div class="amt">300.000đ</div>
+ <div class="recv"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5 12 4l9 5.5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20.5h18"/></svg> NGUYEN VAN TUAN · Vietcombank</div>
+ <div class="code">Mã Đơn <b class="mono">TK8F3Q2A</b> <button class="mini" aria-label="Sao chép mã Đơn"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h3.5"/></svg></button></div>
+</div>
+<div class="reassure" role="status"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.2"/></svg><span>Nếu bạn đã chuyển, vé sẽ về trong vài phút — đừng chuyển lại.</span></div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<p class="note c">Tickee không giữ tiền của bạn · <a href="#">Chính sách hoàn vé</a></p>
+</div></div></div></figure></div></section><section class="dir cc"><div class="dh"><div class="n">Hướng C · mới</div><div class="dname">Biển hiệu — một khối coral lớn ở đầu, phần dưới là tờ trắng</div><p>Thương hiệu được nói một lần, thật rõ: khối coral đầu trang chứa tên Sự kiện (trang Sự kiện) hoặc tên người nhận và số tiền (màn QR) — chính thông tin quan trọng nhất. Phía dưới là "tờ" trắng bo góc trên đè lên khối màu, viền mảnh, chữ đậm 800, nút chính màu mực. Coral chiếm nhiều diện tích nhất nhưng chỉ ở một vùng nên vẫn gọn.</p><p class="reg"><b>Cảm xúc:</b> Tự tin, trẻ, có cá tính poster — nhưng phần thao tác vẫn sạch và bình tĩnh.</p><p class="a11y"><b>Tương phản (WCAG 2.2 AA):</b> Chữ trên khối coral là mực #1A0A0F (5.96:1), không có chữ trắng trên coral; tối: khối đổi sang #3A1820 + chữ #FFD6DD (11.95:1), coral chuyển xuống nút chính (chữ mực 5.96:1).</p><div class="sw"><span><i style="background:#FF4D6A"></i>#FF4D6A brand block</span><span><i style="background:#1A0A0F"></i>#1A0A0F ink on block</span><span><i style="background:#18181B"></i>#18181B CTA (light)</span><span><i style="background:#E7E5E4"></i>#E7E5E4 border</span><span><i style="background:#3A1820"></i>#3A1820 dark block</span><span><i style="background:#FFD6DD"></i>#FFD6DD dark block text</span></div></div><div class="phones"><figure><figcaption>Sự kiện · Sáng</figcaption><div class="phone light"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="blk">
+<div class="top"><span class="wm">tickee</span><button class="iconbtn" aria-label="Chia sẻ"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg></button></div>
+<div class="eyebrow">Thể thao · Pickleball</div>
+<h1>Giải Pickleball Mở rộng CLB Sóng Xanh 2026</h1>
+<div class="bl"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg> CN, 16/11 · 07:00 – 17:00</div>
+<div class="bl"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg> Sân Pickleball Thảo Điền, TP. Thủ Đức</div>
+</div>
+<div class="sheet">
+<div class="host"><span class="avatar">SX</span><div><div class="r2">Ban tổ chức</div><div class="r1">CLB Sóng Xanh</div></div></div>
+<h2>Hạng vé</h2>
+<div class="tiers"><div class="tier"><div class="tl"><div class="tn">Đơn nam</div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp"><b>150.000đ</b> <span class="av">Còn 12 vé</span></div></div><div class="step"><button aria-label="Bớt 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>2</span><button aria-label="Thêm 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier"><div class="tl"><div class="tn">Đôi nam nữ</div><div class="td">Đăng ký cho 1 cặp · 2 áo giải</div><div class="tp"><b>300.000đ</b> <span class="av low">Còn 3 vé</span></div></div><div class="step"><button aria-label="Bớt 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button aria-label="Thêm 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier isout"><div class="tl"><div class="tn">Đơn nữ</div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp"><b>150.000đ</b> <span class="av out">Hết vé</span></div></div><div class="step dis" aria-disabled="true"><button disabled aria-label="Bớt"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button disabled aria-label="Thêm"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div></div>
+<p class="note">Tối đa 4 vé mỗi Đơn · <a href="#">Chính sách hoàn vé</a></p>
+<h2>Về sự kiện</h2><p class="body">Giải giao lưu mở rộng cho mọi trình độ, chia bảng theo DUPR. Có trọng tài, nước uống và ảnh lưu niệm cho tất cả VĐV.</p>
+</div>
+<div class="bar"><div><div class="r2">2 vé · Đơn nam</div><div class="tot">300.000đ</div></div><button class="cta">Mua</button></div>
+</div></div></figure><figure><figcaption>Sự kiện · Tối</figcaption><div class="phone dark"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="blk">
+<div class="top"><span class="wm">tickee</span><button class="iconbtn" aria-label="Chia sẻ"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg></button></div>
+<div class="eyebrow">Thể thao · Pickleball</div>
+<h1>Giải Pickleball Mở rộng CLB Sóng Xanh 2026</h1>
+<div class="bl"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg> CN, 16/11 · 07:00 – 17:00</div>
+<div class="bl"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg> Sân Pickleball Thảo Điền, TP. Thủ Đức</div>
+</div>
+<div class="sheet">
+<div class="host"><span class="avatar">SX</span><div><div class="r2">Ban tổ chức</div><div class="r1">CLB Sóng Xanh</div></div></div>
+<h2>Hạng vé</h2>
+<div class="tiers"><div class="tier"><div class="tl"><div class="tn">Đơn nam</div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp"><b>150.000đ</b> <span class="av">Còn 12 vé</span></div></div><div class="step"><button aria-label="Bớt 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>2</span><button aria-label="Thêm 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier"><div class="tl"><div class="tn">Đôi nam nữ</div><div class="td">Đăng ký cho 1 cặp · 2 áo giải</div><div class="tp"><b>300.000đ</b> <span class="av low">Còn 3 vé</span></div></div><div class="step"><button aria-label="Bớt 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button aria-label="Thêm 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier isout"><div class="tl"><div class="tn">Đơn nữ</div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp"><b>150.000đ</b> <span class="av out">Hết vé</span></div></div><div class="step dis" aria-disabled="true"><button disabled aria-label="Bớt"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button disabled aria-label="Thêm"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div></div>
+<p class="note">Tối đa 4 vé mỗi Đơn · <a href="#">Chính sách hoàn vé</a></p>
+<h2>Về sự kiện</h2><p class="body">Giải giao lưu mở rộng cho mọi trình độ, chia bảng theo DUPR. Có trọng tài, nước uống và ảnh lưu niệm cho tất cả VĐV.</p>
+</div>
+<div class="bar"><div><div class="r2">2 vé · Đơn nam</div><div class="tot">300.000đ</div></div><button class="cta">Mua</button></div>
+</div></div></figure><figure><figcaption>QR thanh toán · Sáng</figcaption><div class="phone light"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="blk">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> 14:32</span></div>
+<div class="eyebrow">Tiền chuyển thẳng cho</div>
+<div class="big">CLB Sóng Xanh</div>
+<div class="amtrow"><span class="amt">300.000đ</span><span class="bl">2 × Đơn nam</span></div>
+</div>
+<div class="sheet c">
+<div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+<div class="kvs">
+ <div class="kv"><span>Chủ tài khoản</span><b>NGUYEN VAN TUAN</b></div>
+ <div class="kv"><span>Ngân hàng</span><b>Vietcombank</b></div>
+ <div class="kv"><span>Mã Đơn</span><b class="mono">TK8F3Q2A</b></div>
+</div>
+<p class="r2 lft">App ngân hàng sẽ hiện đúng tên người nhận này. Tickee không giữ tiền của bạn.</p>
+<div class="waiting" role="status"><span class="dot"></span>Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền.</div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<a class="lnk" href="#">Chính sách hoàn vé</a>
+</div></div></div></figure><figure><figcaption>QR thanh toán · Tối</figcaption><div class="phone dark"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="blk">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> 14:32</span></div>
+<div class="eyebrow">Tiền chuyển thẳng cho</div>
+<div class="big">CLB Sóng Xanh</div>
+<div class="amtrow"><span class="amt">300.000đ</span><span class="bl">2 × Đơn nam</span></div>
+</div>
+<div class="sheet c">
+<div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+<div class="kvs">
+ <div class="kv"><span>Chủ tài khoản</span><b>NGUYEN VAN TUAN</b></div>
+ <div class="kv"><span>Ngân hàng</span><b>Vietcombank</b></div>
+ <div class="kv"><span>Mã Đơn</span><b class="mono">TK8F3Q2A</b></div>
+</div>
+<p class="r2 lft">App ngân hàng sẽ hiện đúng tên người nhận này. Tickee không giữ tiền của bạn.</p>
+<div class="waiting" role="status"><span class="dot"></span>Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền.</div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<a class="lnk" href="#">Chính sách hoàn vé</a>
+</div></div></div></figure><figure><figcaption>QR · trạng thái trấn an · Sáng</figcaption><div class="phone light"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="blk">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> 09:47</span></div>
+<div class="eyebrow">Tiền chuyển thẳng cho</div>
+<div class="big">CLB Sóng Xanh</div>
+<div class="amtrow"><span class="amt">300.000đ</span><span class="bl">2 × Đơn nam</span></div>
+</div>
+<div class="sheet c">
+<div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+<div class="kvs">
+ <div class="kv"><span>Chủ tài khoản</span><b>NGUYEN VAN TUAN</b></div>
+ <div class="kv"><span>Ngân hàng</span><b>Vietcombank</b></div>
+ <div class="kv"><span>Mã Đơn</span><b class="mono">TK8F3Q2A</b></div>
+</div>
+<p class="r2 lft">App ngân hàng sẽ hiện đúng tên người nhận này. Tickee không giữ tiền của bạn.</p>
+<div class="reassure" role="status"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.2"/></svg><span>Nếu bạn đã chuyển, vé sẽ về trong vài phút — đừng chuyển lại.</span></div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<a class="lnk" href="#">Chính sách hoàn vé</a>
+</div></div></div></figure><figure><figcaption>QR · trạng thái trấn an · Tối</figcaption><div class="phone dark"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="blk">
+<div class="top"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> 09:47</span></div>
+<div class="eyebrow">Tiền chuyển thẳng cho</div>
+<div class="big">CLB Sóng Xanh</div>
+<div class="amtrow"><span class="amt">300.000đ</span><span class="bl">2 × Đơn nam</span></div>
+</div>
+<div class="sheet c">
+<div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+<div class="kvs">
+ <div class="kv"><span>Chủ tài khoản</span><b>NGUYEN VAN TUAN</b></div>
+ <div class="kv"><span>Ngân hàng</span><b>Vietcombank</b></div>
+ <div class="kv"><span>Mã Đơn</span><b class="mono">TK8F3Q2A</b></div>
+</div>
+<p class="r2 lft">App ngân hàng sẽ hiện đúng tên người nhận này. Tickee không giữ tiền của bạn.</p>
+<div class="reassure" role="status"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.2"/></svg><span>Nếu bạn đã chuyển, vé sẽ về trong vài phút — đừng chuyển lại.</span></div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<a class="lnk" href="#">Chính sách hoàn vé</a>
+</div></div></div></figure></div></section><section class="dir dd"><div class="dh"><div class="n">Hướng D · mới</div><div class="dname">Rạp tối — nghiêng về tối, coral chỉ sống trên nền đen</div><p>Ngay cả ở chế độ sáng, "sân khấu" đầu trang (thông tin Sự kiện, mã QR) và thanh mua vé là khối gần đen — như đèn rạp tắt trước giờ diễn; nền trang ấm, thẻ trắng nổi bằng bóng mềm. #ff4d6a chỉ đặt trên nền tối nên luôn đọc được và trông như ánh đèn sân khấu, không như mảng sơn.</p><p class="reg"><b>Cảm xúc:</b> Hồi hộp nhẹ, "tối nay đi chơi", hiện đại — hợp concert, livehouse, sự kiện buổi tối.</p><p class="a11y"><b>Tương phản (WCAG 2.2 AA):</b> #ff4d6a chỉ dùng trên nền tối: trên #1C1416 = 5.62:1, trên #141012 = 5.86:1; nút coral chữ mực #1F0A10 (5.88:1); trên thẻ trắng dùng coral-700 #D6264A (4.96:1).</p><div class="sw"><span><i style="background:#FF4D6A"></i>#FF4D6A brand on dark</span><span><i style="background:#1C1416"></i>#1C1416 stage</span><span><i style="background:#1F0A10"></i>#1F0A10 text on CTA</span><span><i style="background:#D6264A"></i>#D6264A coral-700 on light</span><span><i style="background:#F7F3F2"></i>#F7F3F2 light page</span><span><i style="background:#0B0809"></i>#0B0809 dark page</span></div></div><div class="phones"><figure><figcaption>Sự kiện · Sáng</figcaption><div class="phone light"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="pad">
+<div class="top"><span class="wm">tickee<i></i></span><button class="iconbtn" aria-label="Chia sẻ"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg></button></div>
+<div class="stage">
+ <div class="art"></div>
+ <div class="eyebrow">Thể thao · Pickleball</div>
+ <h1>Giải Pickleball Mở rộng CLB Sóng Xanh 2026</h1>
+ <div class="row"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg><div><div class="r1">Chủ nhật, 16/11/2026</div><div class="r2">07:00 – 17:00</div></div></div>
+ <div class="row"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg><div><div class="r1">Sân Pickleball Thảo Điền</div><div class="r2">12 Nguyễn Văn Hưởng, TP. Thủ Đức</div></div></div>
+</div>
+<div class="card host"><span class="avatar">SX</span><div><div class="r2">Ban tổ chức</div><div class="r1">CLB Sóng Xanh</div></div></div>
+<h2>Chọn vé</h2>
+<div class="tier"><div class="tl"><div class="tn">Đơn nam</div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp">150.000đ · <span class="av">Còn 12 vé</span></div></div><div class="step"><button aria-label="Bớt 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>2</span><button aria-label="Thêm 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier"><div class="tl"><div class="tn">Đôi nam nữ</div><div class="td">Đăng ký cho 1 cặp · 2 áo giải</div><div class="tp">300.000đ · <span class="av low">Còn 3 vé</span></div></div><div class="step"><button aria-label="Bớt 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button aria-label="Thêm 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier isout"><div class="tl"><div class="tn">Đơn nữ</div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp">150.000đ · <span class="av out">Hết vé</span></div></div><div class="step dis" aria-disabled="true"><button disabled aria-label="Bớt"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button disabled aria-label="Thêm"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div>
+<p class="note">Tối đa 4 vé mỗi Đơn · <a href="#">Chính sách hoàn vé</a></p>
+</div>
+<div class="bar"><div><div class="r2">Tổng · 2 vé</div><div class="tot">300.000đ</div></div><button class="cta">Mua</button></div>
+</div></div></figure><figure><figcaption>Sự kiện · Tối</figcaption><div class="phone dark"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="pad">
+<div class="top"><span class="wm">tickee<i></i></span><button class="iconbtn" aria-label="Chia sẻ"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg></button></div>
+<div class="stage">
+ <div class="art"></div>
+ <div class="eyebrow">Thể thao · Pickleball</div>
+ <h1>Giải Pickleball Mở rộng CLB Sóng Xanh 2026</h1>
+ <div class="row"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg><div><div class="r1">Chủ nhật, 16/11/2026</div><div class="r2">07:00 – 17:00</div></div></div>
+ <div class="row"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg><div><div class="r1">Sân Pickleball Thảo Điền</div><div class="r2">12 Nguyễn Văn Hưởng, TP. Thủ Đức</div></div></div>
+</div>
+<div class="card host"><span class="avatar">SX</span><div><div class="r2">Ban tổ chức</div><div class="r1">CLB Sóng Xanh</div></div></div>
+<h2>Chọn vé</h2>
+<div class="tier"><div class="tl"><div class="tn">Đơn nam</div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp">150.000đ · <span class="av">Còn 12 vé</span></div></div><div class="step"><button aria-label="Bớt 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>2</span><button aria-label="Thêm 1 vé Đơn nam"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier"><div class="tl"><div class="tn">Đôi nam nữ</div><div class="td">Đăng ký cho 1 cặp · 2 áo giải</div><div class="tp">300.000đ · <span class="av low">Còn 3 vé</span></div></div><div class="step"><button aria-label="Bớt 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button aria-label="Thêm 1 vé Đôi nam nữ"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div><div class="tier isout"><div class="tl"><div class="tn">Đơn nữ</div><div class="td">Thi đấu nội dung đơn · Áo giải + nước uống</div><div class="tp">150.000đ · <span class="av out">Hết vé</span></div></div><div class="step dis" aria-disabled="true"><button disabled aria-label="Bớt"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12"/></svg></button><span>0</span><button disabled aria-label="Thêm"><svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button></div></div>
+<p class="note">Tối đa 4 vé mỗi Đơn · <a href="#">Chính sách hoàn vé</a></p>
+</div>
+<div class="bar"><div><div class="r2">Tổng · 2 vé</div><div class="tot">300.000đ</div></div><button class="cta">Mua</button></div>
+</div></div></figure><figure><figcaption>QR thanh toán · Sáng</figcaption><div class="phone light"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top px"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span></span></div>
+<div class="pad">
+<div class="stage c">
+ <div class="r2">Quét bằng app ngân hàng để trả</div>
+ <div class="amt">300.000đ</div>
+ <span class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Giữ chỗ còn 14:32</span>
+ <div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+ <div class="r2">Mã Đơn <b class="mono">TK8F3Q2A</b></div>
+</div>
+<div class="card trust">
+ <div class="trh"><span class="sh"><svg class="ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 4.5 5.6v6c0 4.6 3.1 8.2 7.5 9.6 4.4-1.4 7.5-5 7.5-9.6v-6z"/><path d="m8.6 12 2.4 2.4 4.6-4.8"/></svg></span><div><div class="r2">Tiền chuyển thẳng cho</div><div class="r1 big">CLB Sóng Xanh</div></div></div>
+ <div class="kv"><span>Chủ tài khoản</span><b>NGUYEN VAN TUAN</b></div>
+ <div class="kv"><span>Ngân hàng</span><b>Vietcombank</b></div>
+</div>
+<div class="waiting" role="status"><span class="dot"></span>Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền.</div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<p class="note c">Tickee không giữ tiền của bạn · <a href="#">Chính sách hoàn vé</a></p>
+</div></div></div></figure><figure><figcaption>QR thanh toán · Tối</figcaption><div class="phone dark"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top px"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span></span></div>
+<div class="pad">
+<div class="stage c">
+ <div class="r2">Quét bằng app ngân hàng để trả</div>
+ <div class="amt">300.000đ</div>
+ <span class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Giữ chỗ còn 14:32</span>
+ <div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+ <div class="r2">Mã Đơn <b class="mono">TK8F3Q2A</b></div>
+</div>
+<div class="card trust">
+ <div class="trh"><span class="sh"><svg class="ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 4.5 5.6v6c0 4.6 3.1 8.2 7.5 9.6 4.4-1.4 7.5-5 7.5-9.6v-6z"/><path d="m8.6 12 2.4 2.4 4.6-4.8"/></svg></span><div><div class="r2">Tiền chuyển thẳng cho</div><div class="r1 big">CLB Sóng Xanh</div></div></div>
+ <div class="kv"><span>Chủ tài khoản</span><b>NGUYEN VAN TUAN</b></div>
+ <div class="kv"><span>Ngân hàng</span><b>Vietcombank</b></div>
+</div>
+<div class="waiting" role="status"><span class="dot"></span>Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền.</div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<p class="note c">Tickee không giữ tiền của bạn · <a href="#">Chính sách hoàn vé</a></p>
+</div></div></div></figure><figure><figcaption>QR · trạng thái trấn an · Sáng</figcaption><div class="phone light"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top px"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span></span></div>
+<div class="pad">
+<div class="stage c">
+ <div class="r2">Quét bằng app ngân hàng để trả</div>
+ <div class="amt">300.000đ</div>
+ <span class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Giữ chỗ còn 09:47</span>
+ <div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+ <div class="r2">Mã Đơn <b class="mono">TK8F3Q2A</b></div>
+</div>
+<div class="card trust">
+ <div class="trh"><span class="sh"><svg class="ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 4.5 5.6v6c0 4.6 3.1 8.2 7.5 9.6 4.4-1.4 7.5-5 7.5-9.6v-6z"/><path d="m8.6 12 2.4 2.4 4.6-4.8"/></svg></span><div><div class="r2">Tiền chuyển thẳng cho</div><div class="r1 big">CLB Sóng Xanh</div></div></div>
+ <div class="kv"><span>Chủ tài khoản</span><b>NGUYEN VAN TUAN</b></div>
+ <div class="kv"><span>Ngân hàng</span><b>Vietcombank</b></div>
+</div>
+<div class="reassure" role="status"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.2"/></svg><span>Nếu bạn đã chuyển, vé sẽ về trong vài phút — đừng chuyển lại.</span></div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<p class="note c">Tickee không giữ tiền của bạn · <a href="#">Chính sách hoàn vé</a></p>
+</div></div></div></figure><figure><figcaption>QR · trạng thái trấn an · Tối</figcaption><div class="phone dark"><div class="sb"><span>9:41</span><span class="sbr"><i></i><i></i><i></i><b></b></span></div><div class="scroll">
+<div class="top px"><button class="iconbtn" aria-label="Quay lại"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><span class="ttl">Thanh toán</span><span></span></div>
+<div class="pad">
+<div class="stage c">
+ <div class="r2">Quét bằng app ngân hàng để trả</div>
+ <div class="amt">300.000đ</div>
+ <span class="timer"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Giữ chỗ còn 09:47</span>
+ <div class="qrplate"><div class="qr" role="img" aria-label="Mã VietQR thanh toán 300.000đ"><i class="f1"></i><i class="f2"></i><i class="f3"></i></div></div>
+ <div class="r2">Mã Đơn <b class="mono">TK8F3Q2A</b></div>
+</div>
+<div class="card trust">
+ <div class="trh"><span class="sh"><svg class="ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 4.5 5.6v6c0 4.6 3.1 8.2 7.5 9.6 4.4-1.4 7.5-5 7.5-9.6v-6z"/><path d="m8.6 12 2.4 2.4 4.6-4.8"/></svg></span><div><div class="r2">Tiền chuyển thẳng cho</div><div class="r1 big">CLB Sóng Xanh</div></div></div>
+ <div class="kv"><span>Chủ tài khoản</span><b>NGUYEN VAN TUAN</b></div>
+ <div class="kv"><span>Ngân hàng</span><b>Vietcombank</b></div>
+</div>
+<div class="reassure" role="status"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.2"/></svg><span>Nếu bạn đã chuyển, vé sẽ về trong vài phút — đừng chuyển lại.</span></div>
+<button class="cta"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg> Mở app ngân hàng</button>
+<button class="sec"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 19.5h16"/></svg> Tải ảnh QR</button>
+<p class="note c">Tickee không giữ tiền của bạn · <a href="#">Chính sách hoàn vé</a></p>
+</div></div></div></figure></div></section>
+</body></html>
