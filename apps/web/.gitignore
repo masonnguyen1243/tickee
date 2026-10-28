@@ -1,0 +1,3 @@
+# Sinh bởi next typegen / next build
+next-env.d.ts
+*.tsbuildinfo
