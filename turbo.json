@@ -8,8 +8,11 @@
     "typecheck": {
       "dependsOn": ["^build"]
     },
+    "@tickee/web#typecheck": {
+      "dependsOn": ["^build", "build"]
+    },
     "lint:deps": {
-      "inputs": ["src/**", "module-graph.cjs", ".dependency-cruiser.cjs", "tsconfig*.json"]
+      "inputs": ["src/**", "app/**", "components/**", "lib/**", "module-graph.cjs", ".dependency-cruiser.cjs", "tsconfig*.json"]
     },
     "test": {
       "dependsOn": ["^build", "build"],

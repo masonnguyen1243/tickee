@@ -1,0 +1,277 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/*
+ * Hệ thống giao diện "Rạp tối" — giá trị lấy đúng DESIGN.md (frontmatter, § Colors, § Elevation & Depth).
+ * Light/dark CHỈ theo `prefers-color-scheme` (biến thể `dark:` mặc định của Tailwind 4); không công tắc theme.
+ * Coral `--primary` chỉ đặt trên nền tối (stage, bar, dark mode); chữ thương hiệu trên nền sáng dùng `--brand-text`.
+ */
+
+:root {
+  --radius: 12px;
+
+  /* shadcn — light */
+  --background: #F7F3F2;
+  --foreground: #1C1917;
+  --card: #FFFFFF;
+  --card-foreground: #1C1917;
+  --popover: #FFFFFF;
+  --popover-foreground: #1C1917;
+  --primary: #FF4D6A;
+  --primary-foreground: #1F0A10;
+  --secondary: #F0EBEA;
+  --secondary-foreground: #1C1917;
+  --muted: #F0EBEA;
+  --muted-foreground: #5C5552;
+  --accent: #F0EBEA;
+  --accent-foreground: #1C1917;
+  --destructive: #B42318;
+  --destructive-foreground: #FFFFFF;
+  --border: #EFE8E7;
+  --input: #EFE8E7;
+  --ring: #CF2147;
+
+  /* Tickee — sân khấu (giống nhau hai chế độ) */
+  --stage: #1C1416;
+  --stage-foreground: #FFF7F8;
+  --stage-muted: #C9BDBF;
+  --stage-line: #2A2023;
+  --bar: #141012;
+  --stage-fallback: #2A1D20;
+  --brand-border: #FF4D6A80;
+
+  /* Tickee — chữ thương hiệu */
+  --brand-text: #CF2147;
+
+  /* Tickee — trạng thái */
+  --success-text: #3F5F4F;
+  --success-subtle: #E8EFEA;
+  --warning-text: #7A5320;
+  --warning-subtle: #F5EDDC;
+  --danger-text: #8F3F3F;
+  --danger-subtle: #F5E6E4;
+  --neutral-text: #5C5552;
+  --neutral-subtle: #F0EBEA;
+
+  /* Tickee — kết quả quét, QR (giống nhau hai chế độ) */
+  --scan-success: #4A6B5A;
+  --scan-danger: #8F3F3F;
+  --scan-foreground: #FFFFFF;
+  --qr-module: #000000;
+  --qr-plate: #FFFFFF;
+
+  /* button-primary-on-light: nền stage ở light, thành button-primary ở dark */
+  --btn-on-light-bg: var(--stage);
+  --btn-on-light-fg: var(--stage-foreground);
+
+  /* Elevation: bóng mềm ấm, không viền (light) */
+  --elevation-card: 0 1px 2px rgba(60, 20, 30, 0.06), 0 8px 24px rgba(60, 20, 30, 0.08);
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0B0809;
+    --foreground: #F5F2F2;
+    --card: #1C1416;
+    --card-foreground: #F5F2F2;
+    --popover: #1C1416;
+    --popover-foreground: #F5F2F2;
+    --secondary: #2A2023;
+    --secondary-foreground: #F5F2F2;
+    --muted: #2A2023;
+    --muted-foreground: #A8A29E;
+    --accent: #2A2023;
+    --accent-foreground: #F5F2F2;
+    --border: #2A2023;
+    --input: #2A2023;
+    --ring: #FF4D6A;
+
+    --brand-text: #FF4D6A;
+
+    --success-text: #A3C4B2;
+    --success-subtle: #1A2621;
+    --warning-text: #E3C590;
+    --warning-subtle: #2A2318;
+    --danger-text: #E0A3A0;
+    --danger-subtle: #2E1B1B;
+    --neutral-text: #C9BDBF;
+    --neutral-subtle: #2A2023;
+
+    --btn-on-light-bg: var(--primary);
+    --btn-on-light-fg: var(--primary-foreground);
+
+    /* Dark: bỏ bóng, thay bằng vòng 1px stage-line */
+    --elevation-card: 0 0 0 1px var(--stage-line);
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-stage: var(--stage);
+  --color-stage-foreground: var(--stage-foreground);
+  --color-stage-muted: var(--stage-muted);
+  --color-stage-line: var(--stage-line);
+  --color-stage-fallback: var(--stage-fallback);
+  --color-bar: var(--bar);
+  --color-brand-border: var(--brand-border);
+  --color-brand-text: var(--brand-text);
+  --color-success-text: var(--success-text);
+  --color-success-subtle: var(--success-subtle);
+  --color-warning-text: var(--warning-text);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-danger-text: var(--danger-text);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-neutral-text: var(--neutral-text);
+  --color-neutral-subtle: var(--neutral-subtle);
+  --color-scan-success: var(--scan-success);
+  --color-scan-danger: var(--scan-danger);
+  --color-scan-foreground: var(--scan-foreground);
+  --color-qr-module: var(--qr-module);
+  --color-qr-plate: var(--qr-plate);
+  --color-btn-on-light: var(--btn-on-light-bg);
+  --color-btn-on-light-foreground: var(--btn-on-light-fg);
+
+  --shadow-card: var(--elevation-card);
+}
+
+@theme {
+  /* `--font-sans` do next/font (Be Vietnam Pro) đặt trên <html>; giá trị dưới chỉ là fallback. */
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Typography — DESIGN.md frontmatter `typography` */
+  --text-display: 40px;
+  --text-display--line-height: 1.1;
+  --text-display--letter-spacing: -0.02em;
+  --text-display--font-weight: 700;
+  --text-headline: 24px;
+  --text-headline--line-height: 1.2;
+  --text-headline--letter-spacing: -0.02em;
+  --text-headline--font-weight: 700;
+  --text-title: 17px;
+  --text-title--line-height: 1.3;
+  --text-title--font-weight: 700;
+  --text-body: 15px;
+  --text-body--line-height: 1.5;
+  --text-body--font-weight: 400;
+  --text-input: 16px;
+  --text-input--line-height: 1.4;
+  --text-input--font-weight: 400;
+  --text-label: 14px;
+  --text-label--line-height: 1.4;
+  --text-label--font-weight: 500;
+  --text-meta: 13px;
+  --text-meta--line-height: 1.45;
+  --text-meta--font-weight: 400;
+  --text-eyebrow: 13px;
+  --text-eyebrow--line-height: 1.3;
+  --text-eyebrow--font-weight: 700;
+  --text-button: 16px;
+  --text-button--line-height: 1;
+  --text-button--font-weight: 700;
+  --text-amount: 34px;
+  --text-amount--line-height: 1.1;
+  --text-amount--letter-spacing: -0.02em;
+  --text-amount--font-weight: 700;
+  --text-total: 19px;
+  --text-total--line-height: 1.2;
+  --text-total--font-weight: 700;
+  --text-scan-result: 32px;
+  --text-scan-result--line-height: 1.15;
+  --text-scan-result--font-weight: 700;
+  --text-scan-detail: 20px;
+  --text-scan-detail--line-height: 1.35;
+  --text-scan-detail--font-weight: 500;
+  /* code: dùng kèm `font-mono tabular-nums` */
+  --text-code: 15px;
+  --text-code--font-weight: 500;
+  --text-code--letter-spacing: 0.04em;
+
+  /* Rounded — DESIGN.md frontmatter `rounded` */
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 20px;
+
+  /* Spacing có tên — thang 4px của Tailwind giữ nguyên */
+  --spacing-gutter-mobile: 16px;
+  --spacing-card-padding: 14px;
+  --spacing-stack: 10px;
+  --spacing-section: 24px;
+  --spacing-control-height: 50px;
+  --spacing-stepper-button: 34px;
+  --spacing-tab-bar-height: 64px;
+  --spacing-sidebar-width: 256px;
+  --spacing-content-max-buyer: 480px;
+  --spacing-icon-button: 40px;
+  --spacing-qr-plate-padding: 12px;
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    -webkit-font-smoothing: antialiased;
+    overflow-wrap: break-word;
+  }
+
+  /* WCAG 2.2 AA: focus ring 2px `--ring`, offset 2px, chỉ khi focus bằng bàn phím. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* Ô nhập 16px để Safari iOS không tự zoom. */
+  input,
+  select,
+  textarea {
+    font-size: var(--text-input);
+    line-height: var(--text-input--line-height);
+  }
+}
+
+/* Tôn trọng prefers-reduced-motion: tắt animation và transition. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
