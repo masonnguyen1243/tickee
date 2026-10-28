@@ -15,7 +15,7 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     services:
       postgres:
@@ -69,6 +69,19 @@ jobs:
         env:
           DATABASE_URL: postgresql://tickee_app:tickee_app@localhost:5432/tickee_test
           MIGRATION_DATABASE_URL: postgresql://tickee_migrator:tickee_migrator@localhost:5432/tickee_test
+
+      - name: Cài trình duyệt Playwright (Chromium, WebKit)
+        run: pnpm --filter @tickee/web exec playwright install --with-deps chromium webkit
+
+      - name: Playwright (ios-webkit, android-chromium)
+        run: pnpm --filter @tickee/web test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-test-results
+          path: apps/web/test-results/
+          retention-days: 7
 
       - name: Build image api
         run: docker build -f apps/api/Dockerfile -t tickee-api:${{ github.sha }} .
