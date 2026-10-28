@@ -1,0 +1,132 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 10-28-2026 14:52
+last_updated: 10-28-2026 14:52
+project: tickee
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+development_status:
+  epic-1: backlog
+  1-1-dựng-monorepo-theo-structural-seed: backlog
+  1-2-hệ-thống-giao-diện-rạp-tối-và-khung-web: backlog
+  1-3-đăng-nhập-bằng-otp-qua-email: backlog
+  1-4-đăng-nhập-bằng-google: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-tạo-btc-và-khung-dashboard: backlog
+  2-2-totp-cho-owner: backlog
+  2-3-landing-btc: backlog
+  2-4-mời-và-xóa-admin: backlog
+  2-5-quản-trị-tingee-duyệt-btc-vào-closed-beta: backlog
+  2-6-liên-kết-tài-khoản-nhận-tiền: backlog
+  2-7-tạo-sự-kiện-nháp: backlog
+  2-8-hạng-vé-và-tồn-kho: backlog
+  2-9-cấu-hình-form-mua-vé: backlog
+  2-10-điều-kiện-mở-bán-và-mở-bán-sự-kiện: backlog
+  2-11-trang-sự-kiện-công-khai: backlog
+  2-12-sửa-ẩn-và-kết-thúc-sớm-sự-kiện: backlog
+  2-13-đổi-tài-khoản-nhận-tiền: backlog
+  2-14-chuyển-quyền-owner: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-chọn-vé-và-đăng-nhập-khi-bấm-mua: backlog
+  3-2-checkout-và-giữ-chỗ-không-bao-giờ-bán-quá-số-suất: backlog
+  3-3-đăng-ký-sự-kiện-miễn-phí-và-nhận-vé-ngay: backlog
+  3-4-tạo-link-thanh-toán-gateway-và-màn-thanh-toán: backlog
+  3-5-nhận-ipn-và-phát-vé-đúng-một-lần: backlog
+  3-6-ipn-cho-các-trường-hợp-biên: backlog
+  3-7-trang-đơn-tự-chuyển-thành-công-theo-thời-gian-thực: backlog
+  3-8-email-vé-và-link-chia-sẻ-vé: backlog
+  3-9-vé-của-tôi-và-chi-tiết-vé: backlog
+  3-10-báo-người-mua-khi-sự-kiện-đổi-giờ-hoặc-địa-điểm: backlog
+  3-11-tổng-quan-sự-kiện-thấy-đơn-đầu-tiên-ngay-lập-tức: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-đối-soát-bù-khi-ipn-trễ-hoặc-mất: backlog
+  4-2-tự-tạm-ngừng-bán-và-tự-mở-lại-khi-dịch-vụ-thanh-toán-của-btc: backlog
+  4-3-hàng-cần-xử-lý-của-btc: backlog
+  4-4-duyệt-tay-từ-chối-và-đánh-dấu-đã-hoàn-tay: backlog
+  4-5-token-và-cảnh-báo-token: backlog
+  4-6-giám-sát-và-lưới-an-toàn-vận-hành: backlog
+  4-7-môi-trường-staging-production-deploy-và-diễn-tập-khôi-phục: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-link-mời-ctv-và-tab-check-in: backlog
+  5-2-ctv-nhận-lời-mời: backlog
+  5-3-quét-mã-qr-vé-xanh-đỏ: backlog
+  5-4-quét-song-song-và-mất-mạng: backlog
+  5-5-tra-tay-và-check-in-tay: backlog
+  5-6-thu-hồi-khôi-phục-ctv-và-hết-quyền: backlog
+  5-7-theo-dõi-check-in-realtime: backlog
+  5-8-kiểm-thử-tải-nfr-3-trên-staging: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-tab-đơn-đầy-đủ: backlog
+  6-2-số-liệu-vé-theo-hạng-vé-trên-tổng-quan: backlog
+  6-3-xuất-csv-danh-sách-đơn: backlog
+  6-4-kết-nối-google-sheets: backlog
+  6-5-đồng-bộ-đơn-và-check-in-lên-sheet-trong-1-phút: backlog
+  6-6-mất-quyền-google-sheets-và-kết-nối-lại: backlog
+  epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-hủy-sự-kiện: backlog
+  7-2-danh-sách-hoàn-tiền-và-đánh-dấu-đã-hoàn-tay: backlog
+  7-3-người-mua-báo-cáo-sự-kiện: backlog
+  7-4-quản-trị-tingee-xem-báo-cáo-và-khóa-mở-khóa: backlog
+  7-5-vô-hiệu-vé-đã-phát: backlog
+  7-6-xóa-tài-khoản-tickee-hoặc-rút-đồng-ý: backlog
+  epic-7-retrospective: optional
+
+  epic-8: backlog
+  8-1-social-ticket-card-để-đăng-story: backlog
+  8-2-dòng-giới-thiệu-tickee: backlog
+  epic-8-retrospective: optional
+
+action_items:
+  - epic: 4
+    action: "Chốt với Tingee: API tra trạng thái theo orderId (Story 4.1) và API Token (Story 4.5); nếu chưa có thì ghi phương án dự phòng vào story trước khi bắt đầu E4"
+    owner: "Mason"
+    status: open
+  - epic: 4
+    action: "Chốt nhà cung cấp hạ tầng/email/giám sát theo pháp chế NĐ 53/2022 trước Story 4.7 và Closed Beta"
+    owner: "Mason"
+    status: open
+  - epic: 3
+    action: "Quyết định có thêm qr_version vào phần ký của AD-16 hay không trước khi làm Story 3.8"
+    owner: "Mason"
+    status: open
