@@ -289,7 +289,16 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 | FR-37 | E2 | Duyệt Closed Beta (thu hồi → Tạm ngừng bán ở E4) |
 | FR-38 | E7 | Xóa tài khoản, rút đồng ý |
 
-Phủ 37/38 FR (FR-6 ngoài phạm vi MVP). Phụ thuộc: E1 → E2 → E3 → E4; E5–E8 chỉ dựa trên E1–E3 và độc lập với nhau. Phase 1 = E1–E4; Phase 2 = E5–E8.
+Phủ 37/38 FR (FR-6 ngoài phạm vi MVP).
+
+**Phụ thuộc giữa các epic:**
+- E1 → E2 → E3 → E4 (tuần tự).
+- E5 chỉ dựa trên E1–E3.
+- E6 dựa trên E3 và E4: Story 6.5 đồng bộ cả Đơn do `markPaid` của E4 phát (Đối soát bù, duyệt tay) và trạng thái Cần xử lý.
+- E7 dựa trên E4 và E6: Story 7.1 dựa vào Đối soát bù (4.1); Story 7.2 dùng thao tác "Đã hoàn tay" (4.4) và chuẩn CSV (6.3); Story 7.4 dùng `notices` và banner của E4.
+- E8 chỉ dựa trên E3.
+
+Phase 1 = E1–E4; Phase 2 = E5–E8. E7 thuộc Phase 2 về thứ tự làm, nhưng là điều kiện bắt buộc trước khi mở Closed Beta.
 
 ## Epic List
 
@@ -299,7 +308,7 @@ Người dùng đăng ký/đăng nhập bằng Google hoặc OTP email và đồ
 **UX-DR chính:** UX-DR1–9, UX-DR14, UX-DR43, UX-DR45–46
 
 ### Epic 2: BTC thiết lập và mở bán Sự kiện
-Owner tạo BTC, bật TOTP, mời Admin, liên kết tài khoản nhận tiền, được Quản trị Tingee duyệt Closed Beta. Sau đó tạo Sự kiện, Hạng vé, form mua, mở bán và chia sẻ link có OG preview.
+Owner tạo BTC, bật TOTP (kèm mã khôi phục), mời Admin, liên kết và đổi tài khoản nhận tiền, chuyển quyền Owner, được Quản trị Tingee duyệt Closed Beta. Sau đó tạo Sự kiện, Hạng vé, form mua, mở bán và chia sẻ link có OG preview.
 **FRs covered:** FR-2, FR-4, FR-5, FR-7, FR-8, FR-9, FR-10, FR-37
 **UX-DR chính:** UX-DR10–13, UX-DR34, UX-DR36, UX-DR40–42, UX-DR44 (phần duyệt Closed Beta)
 
@@ -423,8 +432,10 @@ So that tôi vào được Tickee mà không cần nhớ mật khẩu.
 
 **Given** màn đăng nhập
 **When** tôi nhập email và bấm gửi mã
-**Then** hệ thống tạo tài khoản nếu email chưa tồn tại (Better Auth `emailOTP`, gắn vào NestJS qua `@thallesp/nestjs-better-auth`), gửi mã 6 số qua `EmailTransport` (Mailpit ở local), và màn hiện "Mã đã gửi tới {email}" kèm đếm ngược gửi lại (FR-1, UX-DR14)
-**And** OTP lưu dạng hash, hiệu lực 5 phút, dùng một lần
+**Then** hệ thống gửi mã 6 số qua `EmailTransport` (Mailpit ở local) bằng Better Auth `emailOTP` (gắn vào NestJS qua `@thallesp/nestjs-better-auth`), và màn hiện "Mã đã gửi tới {email}" kèm đếm ngược gửi lại (FR-1, UX-DR14)
+**And** bản ghi user chỉ được tạo khi OTP được xác minh đúng lần đầu, không tạo lúc gửi mã
+**And** OTP lưu dạng hash, hiệu lực 5 phút, dùng một lần; gửi mã mới làm mã cũ hết hiệu lực
+**And** giới hạn gửi mã: 1 lần mỗi 60 giây và tối đa 5 mã mỗi giờ cho mỗi email, kèm giới hạn theo IP, đếm trong Postgres; vượt giới hạn hiện "Bạn đã yêu cầu quá nhiều mã. Thử lại sau {n} phút." (NFR-6)
 
 **Given** ô `otp-input` 6 ô
 **When** tôi dán cả mã vào ô đầu hoặc trình duyệt tự điền (`autocomplete="one-time-code"`)
@@ -438,6 +449,7 @@ So that tôi vào được Tickee mà không cần nhớ mật khẩu.
 **Given** lần đầu đăng nhập của một email mới
 **When** OTP đúng
 **Then** tôi phải đồng ý điều khoản xử lý dữ liệu cá nhân theo NĐ 13/2023 trước khi tài khoản được dùng, và thời điểm đồng ý được lưu (FR-3, NFR-8)
+**And** chưa đồng ý thì mọi API ngoài màn đồng ý và đăng xuất trả `CONSENT_REQUIRED`; bấm "Không đồng ý" thì đăng xuất, quay về trang trước với thông báo "Bạn cần đồng ý để dùng Tickee."
 
 **Given** OTP đúng
 **When** đăng nhập thành công
@@ -469,6 +481,7 @@ So that tôi không phải chờ mã email.
 **When** đăng nhập bằng Google
 **Then** vẫn là cùng một Tài khoản Tickee, không tạo bản ghi user thứ hai (FR-1)
 **And** chiều ngược lại (đăng ký Google trước, sau đó dùng OTP) cũng ra cùng tài khoản
+**And** chỉ tự liên kết khi Google trả `email_verified = true`; email chưa xác minh thì từ chối đăng nhập Google với thông báo "Email Google chưa được xác minh. Hãy dùng mã qua email.", không tạo hay nối tài khoản
 
 **Given** tôi hủy giữa chừng trên màn Google
 **When** quay về Tickee
@@ -506,6 +519,7 @@ So that tôi bắt đầu chuẩn bị bán Vé cho CLB.
 **Then** `GET /v1/me/memberships` trả vai trò ở từng BTC; ≥ `lg` có `dashboard-sidebar` với BTC switcher ở đầu; < `md` có `bottom-tab-bar` (Sự kiện · Cần xử lý · Quét vé · Thêm); `md`–`lg` sidebar thu thành icon (UX-DR34)
 **And** đổi BTC trong switcher đưa về danh sách Sự kiện của BTC đó; mục chỉ dành cho Owner bị ẩn với Admin
 **And** danh sách Sự kiện trống hiện `empty-state` "Chưa có Sự kiện nào." + "Tạo Sự kiện"
+**And** cuối BTC switcher có mục "Tạo BTC mới", mở cùng màn tạo BTC; người đã thuộc BTC khác vẫn tạo được BTC mới và trở thành Owner của BTC đó (FR-2)
 
 ### Story 2.2: TOTP cho Owner
 
@@ -523,6 +537,23 @@ So that không ai chiếm được tài khoản nhận tiền của BTC chỉ b�
 **When** request với vai Owner mà session chưa có step-up hoặc step-up đã quá 12 giờ
 **Then** API trả `TOTP_REQUIRED`; web hiện màn step-up nhập mã TOTP; xác nhận đúng thì ghi `stepUpAt` vào session và thử lại thao tác dở (AD-26)
 **And** sai mã hiện lỗi tại ô, không mất thao tác đang làm
+**And** xác minh TOTP có giới hạn tốc độ: sai 5 lần liên tiếp thì khóa xác minh 15 phút theo user; ghi audit
+
+**Given** luật `TOTP_REQUIRED`
+**When** Owner chưa đăng ký hoặc chưa step-up gọi API
+**Then** các endpoint sau được miễn: đăng ký TOTP (enroll, verify enroll), step-up, dùng mã khôi phục, đăng xuất, `GET /v1/me/memberships`, `GET /v1/me`; danh sách miễn khai báo một chỗ trong `packages/contracts` và có test
+
+**Given** tôi vừa đăng ký TOTP thành công
+**When** màn xác nhận hiện
+**Then** hệ thống sinh 10 mã khôi phục dùng một lần (DB chỉ lưu hash), hiện một lần duy nhất kèm nút "Tải xuống" và "Sao chép", và yêu cầu tôi xác nhận "Tôi đã lưu mã khôi phục" trước khi tiếp tục
+
+**Given** tôi mất thiết bị TOTP
+**When** nhập một mã khôi phục ở màn step-up
+**Then** step-up thành công, mã đó hết hiệu lực, tôi được đưa tới màn đăng ký lại TOTP; audit ghi lại và email báo cho tôi
+
+**Given** tôi mất cả thiết bị TOTP lẫn mã khôi phục
+**When** liên hệ Tingee
+**Then** Quản trị Tingee (đã step-up) có thao tác "Đặt lại TOTP" cho một user ở `/admin`, bắt buộc ghi lý do; TOTP và mã khôi phục cũ bị xóa, mọi phiên của user bị hủy, user phải đăng ký lại ở lần đăng nhập kế tiếp; audit ghi lại và email báo cho user và các Owner/Admin của BTC liên quan
 
 **Given** tôi là Admin hoặc chỉ là Người mua
 **When** dùng Tickee
@@ -588,6 +619,11 @@ So that chỉ BTC được tin cậy mới bán được Vé có phí khi chưa 
 **When** truy cập `/v1/admin/*` hoặc `/admin` của web
 **Then** API chỉ nhận request từ dải IP cho phép (cấu hình trusted proxy để lấy đúng IP) và yêu cầu step-up TOTP cho mỗi session; mọi lần đọc dữ liệu qua `platformAdminScope` đều ghi audit (FR-4, AD-26)
 **And** tài khoản không có cờ nhận `FORBIDDEN_ROLE`
+
+**Given** cần cấp hoặc thu hồi quyền Quản trị Tingee
+**When** người vận hành chạy lệnh CLI `pnpm --filter api admin:grant <email>` hoặc `admin:revoke <email>` (chạy bằng role DB `migrate`, không có trên web)
+**Then** cờ `platform_admin` được bật/tắt cho đúng user theo email; audit ghi người chạy lệnh, thời điểm, user bị đổi; không có UI hay API nào tự cấp quyền này
+**And** dải IP cho phép đọc từ biến env `ADMIN_ALLOWED_CIDRS`, được kiểm bằng schema Zod khi khởi động; thiếu hoặc sai định dạng thì api không khởi động ở production
 
 **Given** BTC mới tạo
 **When** xem trạng thái
@@ -795,6 +831,61 @@ So that tôi kiểm soát được Sự kiện khi kế hoạch thay đổi.
 **Then** `ended_manually_at` và `effective_end_at` = thời điểm bấm; từ đó `sellability` trả "Đã kết thúc"; sửa giờ về sau không đổi `effective_end_at` (FR-7, AD-14)
 **And** "Đã kết thúc" không lưu thành `status` mà luôn tính từ `effective_end_at` tại thời điểm request (AD-27)
 
+### Story 2.13: Đổi tài khoản nhận tiền
+
+As a Owner,
+I want đổi sang tài khoản ngân hàng khác của CLB,
+So that tiền vé về đúng tài khoản khi CLB đổi ngân hàng mà không phải nhờ Tingee sửa tay.
+
+**Acceptance Criteria:**
+
+**Given** BTC đã liên kết tài khoản nhận tiền
+**When** Owner bấm "Đổi tài khoản nhận tiền"
+**Then** yêu cầu step-up TOTP mới (không dùng step-up cũ) rồi mới hiện form liên kết như Story 2.6; cùng quy tắc chặn VietinBank và lỗi tại chỗ (FR-5, AD-6, AD-26)
+
+**Given** liên kết tài khoản mới thành công
+**When** lưu
+**Then** Merchant con mới thành Merchant con hiện hành cho mọi Đơn tạo **sau** thời điểm đổi; Đơn đã có link giữ `orders.sub_merchant_id` cũ, nên IPN và Đối soát bù của các Đơn đó vẫn khớp Merchant con cũ (AD-7)
+**And** Merchant con cũ được lưu lại (không xóa) để tra cứu và để nhận diện BTC cho giao dịch `unmatched` về sau
+**And** audit ghi người đổi, thời điểm, 4 số cuối tài khoản cũ và mới; email cảnh báo gửi cho Owner và mọi Admin của BTC
+
+**Given** liên kết tài khoản mới thất bại
+**When** Tingee trả lỗi
+**Then** tài khoản cũ vẫn là tài khoản hiện hành, không gián đoạn bán Vé
+
+**Given** Merchant con cũ bị Tingee vô hiệu trong khi còn Đơn `pending` dùng nó
+**When** IPN hoặc Đối soát bù tới cho các Đơn đó
+**Then** xử lý như bình thường theo Story 3.5–3.6; nếu tra trạng thái trả `MERCHANT_SUSPENDED` thì Đơn đi theo luồng hết hạn và cảnh báo vận hành, không chặn BTC bán bằng tài khoản mới
+
+**Given** Admin
+**When** mở thao tác đổi tài khoản
+**Then** không thấy nút; API trả `FORBIDDEN_ROLE` (FR-4)
+
+### Story 2.14: Chuyển quyền Owner
+
+As a Owner,
+I want chuyển quyền Owner cho một Admin của BTC,
+So that BTC vẫn có người chịu trách nhiệm khi tôi rời CLB hoặc muốn xóa tài khoản.
+
+**Acceptance Criteria:**
+
+**Given** tôi là Owner, BTC có ít nhất một Admin
+**When** tôi chọn một Admin ở trang Thành viên và bấm "Chuyển quyền Owner"
+**Then** yêu cầu step-up TOTP mới; `Dialog` nêu hậu quả ("{tên} sẽ là Owner, quản lý tài khoản nhận tiền và Token. Bạn sẽ thành Admin.") và yêu cầu gõ tên BTC để xác nhận (FR-2, AD-26)
+
+**Given** đã xác nhận
+**When** gọi `flows.transferOwnership(orgId, toUserId)`
+**Then** trong một transaction: Owner cũ → `admin`, Admin được chọn → `owner`; unique index "mỗi BTC đúng một Owner" vẫn đúng sau commit (đổi thứ tự cập nhật hoặc dùng ràng buộc deferrable); audit ghi lại (FR-2, AD-26)
+**And** email báo cho cả hai người và mọi Admin còn lại
+
+**Given** người nhận chưa đăng ký TOTP
+**When** họ dùng vai Owner lần đầu
+**Then** gặp luồng bắt buộc đăng ký TOTP của Story 2.2
+
+**Given** BTC không có Admin nào
+**When** Owner mở thao tác
+**Then** thao tác bị tắt, kèm hướng dẫn "Mời một Admin trước rồi chuyển quyền." (Story 2.4)
+
 ## Epic 3: Người mua mua Vé và nhận Vé ngay
 
 Người mua chọn Vé, đăng nhập, điền form một lần, thanh toán qua Tingee Payment Gateway và tự thấy "Thành công" cùng từng Mã QR vé. Vé đến email, nằm trong "Vé của tôi" và chia sẻ được. Sự kiện miễn phí đi trọn luồng không thanh toán. IPN xử lý đủ mọi nhánh của AD-7, không để tiền về mà im lặng. Epic kết thúc bằng khung dashboard tối thiểu để BTC thấy Đơn đầu tiên realtime.
@@ -855,7 +946,16 @@ So that không ai lấy mất vé của tôi trong lúc tôi thanh toán.
 
 **Given** Đơn `pending` chưa có link thanh toán
 **When** quá `expires_at`
-**Then** job hoãn của `ordering` (`startAfter` = `expires_at`) chuyển Đơn → `expired` bằng compare-and-set và `held -= n` trong cùng transaction (AD-3, AD-4 (a))
+**Then** job hoãn của `ordering` (`startAfter` = `expires_at`) chuyển Đơn → `expired` bằng compare-and-set `WHERE status='pending' AND payment_link IS NULL AND expires_at < now()` và `held -= n` trong cùng transaction (AD-3, AD-4 (a))
+**And** Đơn đã được TX2 gắn link (và `expires_at` đã lùi theo hạn link) thì câu compare-and-set trả 0 dòng và job không làm gì
+
+**Given** tôi đã có một Đơn `pending` cho Sự kiện này
+**When** gửi Đơn mới (đổi số lượng hoặc bấm "Mua lại" trước khi Đơn cũ hết hạn)
+**Then** API trả `409 PENDING_ORDER_EXISTS` kèm mã Đơn đang có; web chuyển tới `/orders/:code` của Đơn đó với thông báo "Bạn đang có một Đơn chờ thanh toán cho Sự kiện này."
+
+**Given** payload gửi Đơn
+**When** server kiểm bằng schema Zod trong `packages/contracts`
+**Then** từ chối khi không có dòng nào, khi số lượng một dòng không phải số nguyên ≥ 1, hoặc khi tổng số Vé vượt giới hạn Vé/Đơn của Sự kiện; client sửa request cũng không vượt được
 
 **Given** test Vitest với Postgres thật trong CI
 **When** hai Người mua cùng gửi Đơn cho chỗ cuối cùng, và khi Đơn nhiều Hạng vé thiếu chỗ ở một hạng
@@ -890,6 +990,10 @@ So that tôi có vé vào cổng mà không cần thanh toán.
 **When** có người gửi Đơn tiếp
 **Then** báo "Hết vé" như Story 3.2
 
+**Given** Sự kiện miễn phí
+**When** một Người mua gửi thêm Đơn
+**Then** tổng số Vé của Người mua đó trên Sự kiện (cộng mọi Đơn `paid`) không vượt giới hạn Vé/Đơn của Sự kiện; vượt thì báo "Bạn đã nhận đủ số Vé tối đa cho Sự kiện này."; kiểm trong cùng transaction với bán có điều kiện
+
 ### Story 3.4: Tạo link thanh toán Gateway và màn thanh toán
 
 As a Người mua Sự kiện có phí,
@@ -902,6 +1006,7 @@ So that tôi yên tâm chuyển tiền.
 **When** server tạo link
 **Then** `tingee.createPaymentLink()` gọi `POST /v1/payment-gateway/create-link` ngoài transaction (timeout 5 giây) với `merchantId` = Merchant con của BTC, `orderId` = mã Đơn, `amount` = `orders.total_amount`, `expireInMinute` = 15, `returnUrl` = `/orders/:code`; adapter ký timestamp UNIX ms (FR-16, AD-5, AD-6, AD-9)
 **And** TX2 lưu link bằng `WHERE status='pending' AND payment_link IS NULL`, chụp `orders.sub_merchant_id`, đặt `expires_at` = hạn link do Tingee trả; checkout URL chỉ trả cho trình duyệt sau khi TX2 commit; p95 dưới 2 giây (NFR-1)
+**And** nếu TX2 cập nhật 0 dòng (job hết hạn 60 giây đã thắng) thì không trả checkout URL; API trả `ORDER_EXPIRED` và web hiện màn Hết hạn của Story 3.7; link Tingee đã tạo tự hết hạn sau 15 phút, tiền nếu vẫn về sẽ đi nhánh tiền về muộn của Story 3.6
 
 **Given** Tingee trả lỗi rõ ràng (không phải timeout)
 **When** màn thanh toán hiện
@@ -934,7 +1039,7 @@ So that tôi không phải gửi ảnh chụp chuyển khoản cho BTC.
 
 **Acceptance Criteria:**
 
-**Given** endpoint IPN công khai với guard người dùng
+**Given** endpoint IPN công khai, không qua guard đăng nhập người dùng
 **When** Tingee gửi IPN
 **Then** server đọc raw body, kiểm `x-signature` = `HMAC_SHA512(x-request-timestamp + ':' + rawBody, secret)` bằng `timingSafeEqual`; sai chữ ký hoặc timestamp lệch quá 10 phút thì từ chối và ghi lại (FR-19, NFR-6, AD-7)
 
@@ -945,7 +1050,7 @@ So that tôi không phải gửi ảnh chụp chuyển khoản cho BTC.
 
 **Given** IPN `success`, Đơn `pending`, `paidAmount` = `total_amount`
 **When** xử lý
-**Then** `markPaid(tx, orderId, 'ipn', paidAmount)` đọc Sự kiện `FOR SHARE`, compare-and-set `pending` → `paid`, `held -= n`, `sold += n`, ghi `paid_amount`, `paid_at` (giờ Tingee báo), phát N Vé như Story 3.3, enqueue email Vé, ghi audit và `checkout_funnel_events` `paid` — trọn gói hoặc không gì (FR-19, NFR-5, AD-1)
+**Then** (sau khi đi qua thứ tự kiểm của Story 3.6) `markPaid(tx, orderId, 'ipn', paidAmount)` đọc Sự kiện `FOR SHARE`, compare-and-set `pending` → `paid`, `held -= n`, `sold += n`, ghi `paid_amount`, `paid_at` (giờ Tingee báo), phát N Vé như Story 3.3, enqueue email Vé, ghi audit và `checkout_funnel_events` `paid` — trọn gói hoặc không gì (FR-19, NFR-5, AD-1)
 
 **Given** cùng IPN gửi lặp, hoặc hai IPN đến gần như đồng thời
 **When** xử lý
@@ -954,6 +1059,11 @@ So that tôi không phải gửi ảnh chụp chuyển khoản cho BTC.
 **Given** IPN `canceled` hoặc `expired` cho Đơn `pending`
 **When** xử lý
 **Then** `payment` gọi `ordering.markExpired(tx, …)`: Đơn → `expired`, nhả chỗ (AD-4 (b))
+**And** IPN `canceled` hoặc `expired` cho Đơn không còn `pending` (đã `paid`, `expired`, `review`, `cancelled`, `refunded`) chỉ được lưu vào `payment_events`, không đổi trạng thái Đơn
+
+**Given** endpoint IPN
+**When** cấu hình route
+**Then** route được đánh dấu `@Public` (bỏ qua guard đăng nhập người dùng) và dùng raw body parser riêng; body parser JSON toàn cục không áp vào route này; có test xác nhận chữ ký được kiểm trên đúng byte Tingee gửi
 
 **Given** Tingee fake trong test
 **When** chạy test tích hợp
@@ -967,35 +1077,58 @@ So that không có khoản tiền nào về tài khoản mà không ai biết.
 
 **Acceptance Criteria:**
 
-**Given** IPN `success` với `paidAmount` ≠ `total_amount`
-**When** xử lý
-**Then** Đơn → `review` loại `amount_mismatch`, `held -= n`, không phát Vé, tạo `review_item` (`open`) cùng `organization_id` với Đơn trong cùng `tx` (FR-19, FR-21, AD-7)
+**Thứ tự kiểm cố định** cho mọi IPN `success` (và kết quả Đối soát bù ở Story 4.1), dừng ở nhánh đầu tiên khớp:
+1. `orderId` không tồn tại → nhánh `unmatched`
+2. `merchantId` khác `orders.sub_merchant_id` → nhánh Merchant lệch
+3. Sự kiện đã hủy → nhánh `event_cancelled`
+4. Đơn `paid`, `cancelled`, `refunded` hoặc `review` → nhánh `duplicate_payment`
+5. `paidAmount` ≠ `total_amount` → nhánh `amount_mismatch`
+6. Đơn `expired`, hoặc `now()` > `effective_end_at` → nhánh tiền về muộn
+7. Đơn `pending` → `markPaid` (Story 3.5)
 
-**Given** IPN `success` cho Đơn `expired`
-**When** Hạng vé còn chỗ
-**Then** bán có điều kiện `+n`, Đơn → `paid`, phát Vé bình thường (FR-14)
-**And** khi Hạng vé hết chỗ: Đơn → `review` loại `orphan`, không phát Vé, enqueue email báo Người mua; không bao giờ phát Vé vượt số suất (FR-14)
-
-**Given** IPN `success` cho Đơn đã `paid`, `cancelled` hoặc `refunded`
+**Given** IPN `success` với `paidAmount` ≠ `total_amount` cho Đơn `pending` hoặc `expired`
 **When** xử lý
-**Then** tạo `review_item` loại `duplicate_payment` gắn Đơn, không phát Vé
+**Then** Đơn → `review` loại `amount_mismatch`, `held -= n` nếu Đơn đang `pending`, không phát Vé, tạo `review_item` (`open`) cùng `organization_id` với Đơn trong cùng `tx` (FR-19, FR-21, AD-7)
+**And** nhánh này được kiểm trước nhánh tiền về muộn, nên không bao giờ phát Vé khi số tiền lệch
 
-**Given** IPN `success` cho Sự kiện đã hủy
+**Given** IPN `success` đúng số tiền cho Đơn `expired`, Sự kiện chưa kết thúc (`now()` ≤ `effective_end_at`) và không bị khóa
+**When** mọi Hạng vé trong Đơn còn chỗ
+**Then** bán có điều kiện `+n` cho từng Hạng vé theo `ticket_type_id` tăng dần, Đơn → `paid`, phát Vé bình thường (FR-14)
+**And** chỉ cần một Hạng vé trả 0 dòng thì rollback toàn bộ phần bán; Đơn → `review` loại `orphan`, không phát Vé (kể cả một phần), enqueue email báo Người mua; không bao giờ phát Vé vượt số suất (FR-14)
+
+**Given** IPN `success` đúng số tiền nhưng Sự kiện đã kết thúc (`now()` > `effective_end_at`), dù Đơn đang `pending` hay `expired`
 **When** xử lý
-**Then** Đơn → `review` loại `event_cancelled` (tình huống thật xuất hiện khi có Hủy Sự kiện ở Epic 7)
+**Then** Đơn → `review` loại `orphan` (nhả `held` nếu còn), không phát Vé; `review_item` ghi lý do "Sự kiện đã kết thúc" để BTC hoàn tiền (FR-14, FR-24)
+
+**Given** IPN `success` cho Đơn `expired` của Sự kiện đang bị khóa (Story 7.4)
+**When** xử lý
+**Then** Đơn → `review` loại `orphan`, không phát Vé; Đơn `pending` của Sự kiện bị khóa vẫn đi theo `markPaid` bình thường (AD-21, AD-28)
+
+**Given** IPN `success` cho Đơn đã `paid`, `cancelled` (lý do `rejected`), `refunded` hoặc đang `review`
+**When** xử lý
+**Then** tạo `review_item` loại `duplicate_payment` gắn Đơn, không đổi trạng thái Đơn, không phát Vé
+
+**Given** IPN `success` cho Đơn thuộc Sự kiện đã hủy
+**When** xử lý
+**Then** tạo `review_item` loại `event_cancelled` gắn Đơn, không phát Vé; Đơn `expired` → `review` loại `event_cancelled`; Đơn đã `cancelled` (`cancel_reason = event_cancelled`) **giữ nguyên** trạng thái, không chuyển sang `review` (AD-7, AD-28)
+**And** nhánh này được kiểm trước nhánh `duplicate_payment`, nên một khoản tiền về Đơn bị hủy theo Sự kiện chỉ có một mục, và luôn vào danh sách hoàn tiền của Story 7.2
+**And** *Điều chỉnh so với Architecture:* sơ đồ AD-3 không có chuyển `cancelled` → `review`; cần cập nhật bảng AD-7 cho khớp quy tắc "giữ `cancelled`, chỉ tạo `review_item`"
 
 **Given** IPN có `orderId` không tồn tại
 **When** xử lý
-**Then** lưu `payment_events` với `order_id` null, tạo `review_item` loại `unmatched` gắn BTC theo Merchant con, và log cảnh báo
+**Then** lưu `payment_events` với `order_id` null; nếu `merchantId` ứng với Merchant con của một BTC thì tạo `review_item` loại `unmatched` gắn BTC đó và log cảnh báo
+**And** nếu `merchantId` không ứng với BTC nào thì không tạo `review_item` (vì `organization_id NOT NULL`), mà đẩy cảnh báo vận hành mức cao kèm id của `payment_events` để Quản trị Tingee xử lý (Story 4.6)
 
 **Given** IPN có `merchantId` khác `orders.sub_merchant_id`
 **When** xử lý
-**Then** từ chối xử lý nghiệp vụ, lưu event và log cảnh báo
+**Then** không chạy `markPaid` và không đổi trạng thái Đơn; lưu event; tạo `review_item` loại `unmatched` gắn BTC sở hữu Merchant con đã nhận tiền (nếu xác định được, nếu không thì như nhánh trên); đẩy cảnh báo vận hành (AD-7)
+**And** vẫn trả `{"code":"00","message":"Success"}` để Tingee không gửi lại vô hạn; event đã lưu là bằng chứng để xử lý
 
 **Given** `review_items`
 **When** tạo mục
-**Then** mỗi Đơn tối đa một mục `open` cho mỗi loại; mục `duplicate_payment` và `unmatched` chỉ kết thúc bằng `refunded` hoặc `dismissed`
-**And** test tích hợp với Tingee fake phủ đủ 7 nhánh của bảng AD-7
+**Then** mỗi Đơn tối đa một mục `open` cho mỗi loại, **trừ** `duplicate_payment`: loại này unique theo `(order_id, type, payment_event_id)`, nên mỗi khoản trả trùng là một mục riêng và BTC hoàn đủ từng khoản
+**And** mục `duplicate_payment` và `unmatched` chỉ kết thúc bằng `refunded` hoặc `dismissed`
+**And** test tích hợp với Tingee fake phủ đủ 7 nhánh của bảng AD-7, cộng các trường hợp: trả trùng hai lần, Đơn `review` nhận thêm tiền, tiền về muộn nhiều Hạng vé thiếu chỗ một hạng, tiền về sau `effective_end_at`, Merchant không ứng với BTC nào
 
 ### Story 3.7: Trang Đơn tự chuyển "Thành công" theo thời gian thực
 
@@ -1018,6 +1151,9 @@ So that tôi không phải tải lại trang hay đoán tiền đã về chưa.
 **When** trang hiển thị theo trạng thái
 **Then** `awaiting_payment`: "Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền."; đồng hồ về 0 mà Đơn vẫn `pending`: `confirming` "Đang xác nhận thanh toán"; `expired`: màn Hết hạn "Hết thời gian giữ chỗ. Chỗ đã được trả lại." + "Mua lại" + "Nếu bạn đã chuyển tiền, đừng chuyển lại — kiểm tra Vé của tôi hoặc email."; `under_review`: "BTC đang kiểm tra thanh toán" + liên hệ BTC, không lộ loại hay số tiền lệch (FR-14, UX-DR17, UX-DR19)
 **And** `paid`: tự chuyển sang màn "Thành công" của Story 3.3, kèm "Đã gửi Vé tới {email}" (FR-18)
+**And** `cancelled_by_organizer` (BTC từ chối ở Story 4.4): badge "Đã hủy" + "BTC đã hủy Đơn này. Liên hệ BTC để được hoàn tiền nếu bạn đã chuyển." + kênh liên hệ BTC
+**And** `event_cancelled` (Story 7.1): "Sự kiện đã hủy — BTC sẽ liên hệ hoàn tiền." + kênh liên hệ BTC, không có Mã QR vé (UX-DR17)
+**And** `buyerStatus` lạ mà client chưa biết thì hiện trạng thái an toàn "Chúng tôi đang cập nhật trạng thái Đơn." + kênh liên hệ BTC, không bao giờ để màn trống hay kẹt ở màn chờ
 
 **Given** Người mua chờ khoảng 2 phút mà chưa có kết quả
 **When** vẫn ở trạng thái chờ
@@ -1055,6 +1191,7 @@ So that mỗi người tự vào cổng bằng Vé của mình.
 **When** bấm "Chia sẻ Vé" trên `ticket-card`
 **Then** Web Share API chia sẻ link; fallback sao chép link kèm toast "Đã sao chép"
 **And** chủ Vé tạo lại được link; link cũ mất hiệu lực ngay
+**And** tạo lại link chỉ thu hồi đường xem, **không** đổi Mã QR vé; `Dialog` xác nhận ghi rõ "Ai đã thấy hoặc chụp mã QR vẫn có thể dùng mã để vào cổng." *(Câu hỏi mở cho Architecture: có thêm `qr_version` vào phần được ký của AD-16 để đổi được mã khi gửi nhầm hay không.)*
 
 ### Story 3.9: Vé của tôi và Chi tiết Vé
 
@@ -1071,7 +1208,7 @@ So that tôi không bao giờ mất dấu Đơn hay Vé.
 
 **Given** Đơn `pending`
 **When** hiện trong nhóm Đơn đang chờ
-**Then** `order-card` (không bao giờ có QR) có đếm ngược theo `serverNow` + "Tiếp tục thanh toán" mở lại đúng Đơn đó, không tạo Đơn mới; về 0 thì chuyển "Hết hạn" rồi rời nhóm
+**Then** `order-card` (không bao giờ có QR) có đếm ngược theo `serverNow` + "Tiếp tục thanh toán" mở lại đúng Đơn đó, không tạo Đơn mới; đồng hồ về 0 thì thẻ hiện "Đang xác nhận thanh toán" (`confirming`) và vẫn ở nhóm; chỉ khi API trả `buyerStatus` = `expired` (qua `order_changed` hoặc REST) thẻ mới đổi "Hết hạn" rồi rời nhóm (AD-4, UX-DR17)
 **And** Đơn `under_review` hiện "BTC đang kiểm tra thanh toán" + kênh liên hệ BTC; Đơn bị từ chối hiện badge "Đã hủy" + liên hệ BTC; thẻ tự cập nhật qua `order_changed`
 
 **Given** Vé hợp lệ
@@ -1144,7 +1281,9 @@ So that tôi không bao giờ trả tiền mà không có Vé.
 
 **Given** TX2 vừa gắn link cho một Đơn
 **When** commit
-**Then** enqueue job hoãn tra trạng thái đơn Gateway theo `orderId` sau 2 phút, lặp theo backoff đến khi Đơn rời `pending`, và thêm một lần tra tại `expires_at` (FR-20, AD-8)
+**Then** enqueue job hoãn để tra trạng thái giao dịch trên Gateway theo `orderId` sau 2 phút, lặp theo backoff đến khi Đơn rời `pending`, và thêm một lần tra tại `expires_at` (FR-20, AD-8)
+**And** Đơn đã từng có link mà chuyển `expired` vẫn được tra tiếp thêm 3 lần (sau 30 phút, 2 giờ, 24 giờ kể từ khi hết hạn), để bắt khoản tiền về muộn mà IPN bị mất
+**And** mỗi Đơn có số lần tra tối đa; khi tra lỗi hoặc kết quả mơ hồ liên tục vượt mức này, job dừng và đẩy cảnh báo vận hành (Story 4.6) kèm mã Đơn, không lặp vô hạn
 
 **Given** kết quả tra trạng thái
 **When** xử lý
@@ -1222,6 +1361,13 @@ So that khách được phát Vé hoặc được biết sẽ được hoàn ti�
 **When** tôi bấm "Duyệt tay phát Vé" (kèm `Idempotency-Key`)
 **Then** gọi `markPaid(tx, orderId, 'manual', paidAmount)`; compare-and-set có thêm `AND organization_id = :ctxOrg`; bán có điều kiện `+n`; thành công thì phát Vé, mục `resolved` (`approved`), toast "Đã phát {n} Vé cho Đơn {mã}." (FR-21, AD-3, AD-7, AD-31)
 **And** hết chỗ thì Đơn giữ `review`, mục vẫn `open` kèm lý do "hết chỗ"
+**And** Sự kiện đã hủy hoặc đã kết thúc (`now()` > `effective_end_at`) thì nút "Duyệt tay phát Vé" bị tắt và API từ chối; chỉ còn "Từ chối" hoặc "Đã hoàn tay"
+
+**Given** mục `unmatched` đang `open` (tiền về không gắn được Đơn, ví dụ Người mua chuyển tiền với mã sai)
+**When** tôi bấm "Ghép với Đơn", chọn một Đơn `expired` hoặc `review` của cùng BTC có `total_amount` bằng số tiền nhận, và xác nhận (kèm `Idempotency-Key`)
+**Then** trong một transaction: gắn `payment_events.order_id` vào Đơn đó, gọi `markPaid(tx, orderId, 'manual', paidAmount)` với compare-and-set có `AND organization_id = :ctxOrg`, theo đúng quy tắc tồn kho và thứ tự kiểm của Story 3.6; thành công thì phát Vé, mục `resolved` (`approved`) (FR-21, AD-3)
+**And** danh sách Đơn để chọn chỉ lấy trong `orgScope`, lọc theo số tiền và Sự kiện; hết chỗ hoặc Sự kiện đã hủy/kết thúc thì không ghép được, mục vẫn `open` kèm lý do
+**And** audit ghi id giao dịch, Đơn được ghép, người ghép
 
 **Given** mục đang `open`
 **When** tôi bấm "Từ chối" và xác nhận trong `Dialog` nêu hậu quả
@@ -1231,9 +1377,10 @@ So that khách được phát Vé hoặc được biết sẽ được hoàn ti�
 **When** tôi đánh dấu "Đã hoàn tay"
 **Then** Đơn → `refunded`; mục liên quan `resolved` (`refunded`) (FR-21)
 
-**Given** mục `duplicate_payment` hoặc `unmatched`
+**Given** mục `duplicate_payment`, hoặc mục `unmatched` không ghép
 **When** xử lý
 **Then** chỉ có thao tác "Đã hoàn tay" (`refunded`) hoặc "Bỏ qua" (`dismissed`, bắt buộc ghi lý do); không phát Vé (AD-7)
+**And** "Đã hoàn tay" trên mục `duplicate_payment` chỉ đóng mục đó; Đơn gốc giữ nguyên trạng thái (Đơn `paid` vẫn `paid`, Vé vẫn hợp lệ, doanh thu không đổi)
 
 **Given** mọi thao tác ở story này
 **When** thực hiện
@@ -1720,6 +1867,7 @@ So that không ai mua thêm, Vé cũ không vào cổng được và mọi Ngư�
 **Given** đã xác nhận
 **When** gọi `flows.cancelEvent`
 **Then** trong một transaction: khóa dòng Sự kiện `FOR UPDATE` và chuyển `cancelled` bằng compare-and-set; Đơn `pending` → `cancelled` (nhả chỗ); Đơn `paid` → `cancelled` với `cancel_reason = event_cancelled`; mọi Vé `valid` (kể cả đã check-in) → `cancelled`; enqueue email cho từng Người mua có Vé; audit ghi lại (FR-33, AD-27, AD-28, NFR-5)
+**And** Đơn đang `review` giữ nguyên `review` và loại cũ; `review_item` đang `open` của Đơn đó vẫn mở, nút "Duyệt tay phát Vé" bị tắt (Story 4.4); Đơn có `paid_amount` > 0 vẫn nằm trong danh sách hoàn tiền của Story 7.2
 
 **Given** Sự kiện đã hủy
 **When** người mua mở trang công khai, "Vé của tôi" hoặc link chia sẻ Vé
@@ -1798,7 +1946,7 @@ So that dừng bán ngay khi có dấu hiệu lừa đảo, mà không làm hỏ
 
 **Given** xác nhận khóa
 **When** gọi `flows.lockEvent` hoặc `flows.lockOrganization`
-**Then** ghi `locked_at`, `locked_by`, `lock_reason` (trục riêng, không đổi `status`); `sellability` trả "Tạm ngừng bán" và tạo Đơn mới bị từ chối ngay; Đơn `pending` vẫn được trả tiền và phát Vé; Vé đã phát vẫn hợp lệ (FR-35, AD-21, AD-27, AD-28)
+**Then** ghi `locked_at`, `locked_by`, `lock_reason` (trục riêng, không đổi `status`); `sellability` trả `eventReason` = "Bị khóa" (trang Sự kiện hiện banner "Sự kiện tạm thời không nhận Đơn." như Story 2.10–2.11, UX-DR13) và tạo Đơn mới bị từ chối ngay; Đơn `pending` vẫn được trả tiền và phát Vé; Vé đã phát vẫn hợp lệ (FR-35, AD-21, AD-27, AD-28)
 
 **Given** BTC bị khóa
 **When** Owner hoặc Admin mở dashboard
@@ -1821,6 +1969,11 @@ So that không ai vào cổng bằng Vé đó và Người mua biết để đò
 **Given** khóa có chọn "Vô hiệu Vé đã phát" hoặc Sự kiện đã khóa
 **When** gọi `flows.voidTickets`
 **Then** mọi Vé `valid` → `cancelled` với `cancel_reason = voided` trong một transaction; audit ghi số Vé bị vô hiệu (FR-35, AD-28)
+**And** phạm vi: khóa một Sự kiện thì chỉ Vé của Sự kiện đó; khóa cả BTC thì Vé của mọi Sự kiện chưa kết thúc của BTC đó; `Dialog` hiện số Vé theo từng Sự kiện trước khi xác nhận
+
+**Given** Đơn `paid` có Vé bị vô hiệu
+**When** BTC mở dashboard Sự kiện
+**Then** các Đơn này vào danh sách hoàn tiền giống Story 7.2 (banner "{n} Đơn cần hoàn tiền", CSV, "Đã hoàn tay"); doanh thu ở Story 3.11 và 6.2 không tính Đơn có toàn bộ Vé bị `voided`
 
 **Given** Vé đã bị vô hiệu
 **When** quét hoặc tra tay
@@ -1846,7 +1999,12 @@ So that dữ liệu cá nhân của tôi không còn được dùng, đúng quy�
 
 **Given** người dùng đang là Owner của một BTC hoặc còn Đơn `pending`
 **When** xác nhận
-**Then** từ chối, báo rõ lý do ("Chuyển quyền Owner trước" / "Chờ Đơn đang thanh toán kết thúc") (AD-24, UX-DR24)
+**Then** từ chối, báo rõ lý do ("Chuyển quyền Owner trước" kèm link tới thao tác ở Story 2.14 / "Chờ Đơn đang thanh toán kết thúc") (AD-24, UX-DR24)
+**And** nếu tôi là Owner của BTC chỉ có mình tôi (không có Admin), thông báo hướng dẫn mời một Admin rồi chuyển quyền, hoặc liên hệ Tingee để đóng BTC
+
+**Given** người dùng có Đơn đang `review` hoặc có Đơn thuộc danh sách hoàn tiền chưa `refunded`
+**When** xác nhận xóa
+**Then** vẫn cho xóa, nhưng email và SĐT trên các Đơn đó được giữ lại (không ẩn danh) cho tới khi Đơn được `refunded` hoặc mục Cần xử lý đóng, để BTC còn liên hệ hoàn tiền; `Dialog` nói rõ điều này trước khi xác nhận; job ẩn danh chạy lại khi Đơn đóng (NĐ 13 — lưu giữ để thực hiện nghĩa vụ)
 
 **Given** đủ điều kiện
 **When** gọi `flows.deleteAccount`
@@ -1856,10 +2014,17 @@ So that dữ liệu cá nhân của tôi không còn được dùng, đúng quy�
 **When** xong
 **Then** tên, SĐT, email trên Đơn/Vé được thay bằng giá trị ẩn danh; Đơn, `payment_events`, `audit_events` không bị xóa cứng; số tiền, mã Đơn, thời điểm giữ lại ở dạng tối thiểu (FR-38, NFR-8)
 **And** người đó không còn trong danh sách Đơn, CSV, Sheets của Sự kiện sắp diễn ra; Vé đã phát vẫn check-in được bằng mã nhưng không tra tay được (AD-24)
+**And** handler ẩn danh của mô-đun đồng bộ Sheets enqueue `integration.sheet_row_changed` cho mọi Đơn bị ẩn danh thuộc Sự kiện có kết nối Google Sheets, để lần flush kế tiếp ghi đè các cột tên, SĐT, email trên Sheet bằng giá trị ẩn danh (Story 6.5)
+**And** kết nối đang `auth_revoked` thì các dòng này được giữ trong hàng tồn đọng và ghi đè ngay khi BTC kết nối lại (Story 6.6); dashboard của BTC hiện cảnh báo "Có dữ liệu cần cập nhật lên Sheet"
 
 **Given** người dùng đăng nhập lại bằng cùng email sau khi xóa
 **When** xác thực
 **Then** tạo Tài khoản Tickee mới, không nối với dữ liệu cũ
+**And** việc này làm được vì `flows.deleteAccount` đã thay `users.email` của bản ghi cũ bằng giá trị ẩn danh duy nhất và gỡ mọi liên kết Google (`accounts`) ngay khi xóa, không chờ job; unique email không bị trùng
+
+**Given** người dùng chọn "Rút lại đồng ý" (thay vì "Xóa tài khoản")
+**When** xác nhận
+**Then** hệ quả giống "Xóa tài khoản" ở MVP: đăng nhập bị vô hiệu, dữ liệu cá nhân bị ẩn danh theo cùng các quy tắc trên; `Dialog` nói rõ điều này; thời điểm rút đồng ý được lưu (FR-38, NFR-8)
 
 **And** có test kiểm mỗi cột cá nhân trong danh mục đều có handler ẩn danh; thiếu thì test fail
 
