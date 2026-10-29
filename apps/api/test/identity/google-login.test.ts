@@ -1,8 +1,12 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { ErrorResponse, Me } from '@tickee/contracts';
+import { AuthService } from '@thallesp/nestjs-better-auth';
+import { ErrorResponse, GOOGLE_START_PER_IP_PER_HOUR, Me } from '@tickee/contracts';
+import { APIError } from 'better-auth/api';
 import { sql } from 'drizzle-orm';
+import { DrizzleQueryError } from 'drizzle-orm/errors';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { rewriteUnverifiedLinkError } from '../../src/modules/identity/auth.js';
+import { OtpRateLimiter } from '../../src/modules/identity/otp-rate-limit.js';
 import { redactUrlQuery } from '../../src/platform/logging/index.js';
 import { TEST_WEB_ORIGIN } from '../helpers.js';
 import { createHarness, newEmail, sessionCookie, sessionSetCookie, type Harness } from './harness.js';
@@ -58,7 +62,9 @@ afterAll(async () => {
   await h.close();
 });
 beforeEach(async () => {
+  // Mọi request test đến từ cùng một IP: xóa bộ đếm để giới hạn theo IP không lan sang test khác.
   await h.db.orm.execute(sql`DELETE FROM otp_send_events`);
+  await h.db.orm.execute(sql`DELETE FROM google_start_events`);
   tokenEndpoint = { status: 200, profile: null };
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     if (!requestUrl(input).startsWith(GOOGLE_TOKEN_ENDPOINT)) return realFetch(input, init);
@@ -233,6 +239,169 @@ describe('GET /v1/identity/google — bắt đầu', () => {
     const res = await h.http.get('/v1/identity/google').set('cookie', cookie);
     expect(res.status).toBe(302);
     expect(res.headers.location).toMatch(/^https:\/\/accounts\.google\.com\//);
+  });
+});
+
+describe('GET /v1/identity/google — giới hạn theo IP và lỗi khi bắt đầu', () => {
+  const START_LOG = 'Không bắt đầu được đăng nhập Google';
+
+  async function verificationCount(): Promise<number> {
+    const { rows } = await h.db.orm.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM verifications`);
+    return rows[0]!.n;
+  }
+
+  async function startEventCount(ipHmac: string): Promise<number> {
+    const { rows } = await h.db.orm.execute<{ n: number }>(
+      sql`SELECT count(*)::int AS n FROM google_start_events WHERE ip_hmac = ${ipHmac}`,
+    );
+    return rows[0]!.n;
+  }
+
+  /** Ghi sẵn `n` lần bắt đầu cho IP, lùi `minutesAgo` phút. */
+  async function seedStarts(ipHmac: string, n: number, minutesAgo: number): Promise<void> {
+    await h.db.orm.execute(sql`INSERT INTO google_start_events (ip_hmac, created_at)
+      SELECT ${ipHmac}, now() - make_interval(mins => ${minutesAgo}) FROM generate_series(1, ${n})`);
+  }
+
+  /** Mọi 302 lỗi: về màn đăng nhập trên WEB_ORIGIN, không JSON, không cookie state, không cache. */
+  function expectLoginRedirect(res: { status: number; headers: Record<string, unknown>; text?: string }, error: string) {
+    expect(res.status).toBe(302);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(String(res.headers['content-type'] ?? '')).not.toMatch(/json/);
+    expect(setCookies(res).some((c) => c.startsWith('tickee.state='))).toBe(false);
+    expect(res.headers.location).toBe(`${LOGIN_URL}?error=${error}&returnTo=%2Fsu-kien%2Fa`);
+  }
+
+  it('ghi một dòng google_start_events (chỉ HMAC của IP) cho mỗi lần bắt đầu', async () => {
+    const ipHmac = h.app.get(OtpRateLimiter).ipHmac('::ffff:127.0.0.1');
+    await startGoogle({ returnTo: '/su-kien/a' });
+    const { rows } = await h.db.orm.execute<Record<string, unknown>>(sql`SELECT * FROM google_start_events`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.ip_hmac).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(rows)).not.toContain('127.0.0.1');
+    // Request của supertest đi qua IPv4-mapped IPv6 hoặc IPv4 tùy máy.
+    expect([ipHmac, h.app.get(OtpRateLimiter).ipHmac('127.0.0.1')]).toContain(rows[0]!.ip_hmac);
+  });
+
+  it(`lần thứ ${GOOGLE_START_PER_IP_PER_HOUR} trong giờ vẫn qua; lần kế → rate_limited, không ghi verifications, IP khác vẫn qua`, async () => {
+    const proxied = await createHarness({ TRUST_PROXY_HOPS: 1 });
+    try {
+      const ipA = '203.0.113.21';
+      const hmacA = proxied.app.get(OtpRateLimiter).ipHmac(ipA);
+      await seedStarts(hmacA, GOOGLE_START_PER_IP_PER_HOUR - 1, 10);
+      const start = (ip: string) =>
+        proxied.http.get('/v1/identity/google').query({ returnTo: '/su-kien/a' }).set('x-forwarded-for', ip);
+
+      const last = await start(ipA);
+      expect(last.status).toBe(302);
+      expect(last.headers.location).toMatch(/^https:\/\/accounts\.google\.com\//);
+      expect(await startEventCount(hmacA)).toBe(GOOGLE_START_PER_IP_PER_HOUR);
+
+      const before = await verificationCount();
+      const limited = await start(ipA);
+      expectLoginRedirect(limited, 'rate_limited');
+      expect(await verificationCount()).toBe(before);
+      // Lần bị chặn không được ghi.
+      expect(await startEventCount(hmacA)).toBe(GOOGLE_START_PER_IP_PER_HOUR);
+      // Bị chặn là đường bình thường: không log lỗi.
+      expect(proxied.logs.lines.some((l) => l.msg === START_LOG || l.level === 50)).toBe(false);
+
+      const other = await start('198.51.100.22');
+      expect(other.status).toBe(302);
+      expect(other.headers.location).toMatch(/^https:\/\/accounts\.google\.com\//);
+    } finally {
+      await proxied.close();
+    }
+  });
+
+  it('cửa sổ trượt một giờ: lần bắt đầu cũ hơn một giờ không tính', async () => {
+    const proxied = await createHarness({ TRUST_PROXY_HOPS: 1 });
+    try {
+      const ip = '203.0.113.23';
+      await seedStarts(proxied.app.get(OtpRateLimiter).ipHmac(ip), GOOGLE_START_PER_IP_PER_HOUR, 61);
+      const res = await proxied.http.get('/v1/identity/google').set('x-forwarded-for', ip);
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toMatch(/^https:\/\/accounts\.google\.com\//);
+    } finally {
+      await proxied.close();
+    }
+  });
+
+  it('returnTo mặc định `/` → bỏ khỏi URL lỗi', async () => {
+    const proxied = await createHarness({ TRUST_PROXY_HOPS: 1 });
+    try {
+      const ip = '203.0.113.24';
+      await seedStarts(proxied.app.get(OtpRateLimiter).ipHmac(ip), GOOGLE_START_PER_IP_PER_HOUR, 5);
+      const res = await proxied.http.get('/v1/identity/google').query({ returnTo: '//evil.com' }).set('x-forwarded-for', ip);
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toBe(`${LOGIN_URL}?error=rate_limited`);
+    } finally {
+      await proxied.close();
+    }
+  });
+
+  it('song song từ cùng IP khi còn một lượt → đúng một lần qua, còn lại rate_limited (khóa advisory theo IP)', async () => {
+    const proxied = await createHarness({ TRUST_PROXY_HOPS: 1 });
+    try {
+      const ip = '203.0.113.25';
+      const ipHmac = proxied.app.get(OtpRateLimiter).ipHmac(ip);
+      await seedStarts(ipHmac, GOOGLE_START_PER_IP_PER_HOUR - 1, 10);
+      const results = await Promise.all(
+        [0, 1, 2, 3].map(() =>
+          proxied.http.get('/v1/identity/google').query({ returnTo: '/su-kien/a' }).set('x-forwarded-for', ip),
+        ),
+      );
+      const locations = results.map((r) => {
+        expect(r.status).toBe(302);
+        return r.headers.location as string;
+      });
+      expect(locations.filter((l) => l.startsWith('https://accounts.google.com/'))).toHaveLength(1);
+      expect(locations.filter((l) => l === `${LOGIN_URL}?error=rate_limited&returnTo=%2Fsu-kien%2Fa`)).toHaveLength(3);
+      expect(await startEventCount(ipHmac)).toBe(GOOGLE_START_PER_IP_PER_HOUR);
+    } finally {
+      await proxied.close();
+    }
+  });
+
+  it('DB lỗi khi đếm → 302 start_failed (không JSON 500); log chỉ có tên lớp lỗi và SQLSTATE, không query/params', async () => {
+    const leakedParam = newEmail();
+    const leakedQuery = `select "ip_hmac" from "google_start_events" where bi_mat_${randomUUID().replaceAll('-', '')}`;
+    const cause = Object.assign(new Error(`terminating connection ${leakedParam}`), { code: '57P01' });
+    const spy = vi
+      .spyOn(h.app.get(OtpRateLimiter), 'consumeGoogleStart')
+      .mockRejectedValue(new DrizzleQueryError(leakedQuery, [leakedParam], cause));
+    try {
+      const res = await h.http.get('/v1/identity/google').query({ returnTo: '/su-kien/a' });
+      expectLoginRedirect(res, 'start_failed');
+    } finally {
+      spy.mockRestore();
+    }
+    const line = h.logs.lines.findLast((l) => l.msg === START_LOG);
+    expect(line).toMatchObject({ level: 50, errName: 'DrizzleQueryError', code: '57P01' });
+    expect(h.logs.text).not.toContain(leakedParam);
+    expect(h.logs.text).not.toContain(leakedQuery);
+    expect(h.logs.text).not.toContain('terminating connection');
+    expect(h.logs.text).not.toContain('Lỗi không bắt được');
+  });
+
+  it('signInSocial lỗi → 302 start_failed giữ returnTo, không cookie state, không còn dòng google_start_events', async () => {
+    const leaked = `bi-mat-${randomUUID()}`;
+    const api = h.app.get(AuthService).api as { signInSocial: (...args: unknown[]) => Promise<unknown> };
+    const spy = vi
+      .spyOn(api, 'signInSocial')
+      .mockRejectedValue(new APIError('INTERNAL_SERVER_ERROR', { message: leaked, code: 'FAILED_TO_CREATE_VERIFICATION' }));
+    try {
+      const res = await h.http.get('/v1/identity/google').query({ returnTo: '/su-kien/a' });
+      expectLoginRedirect(res, 'start_failed');
+    } finally {
+      spy.mockRestore();
+    }
+    // Lần bắt đầu thất bại không tính vào giới hạn của IP.
+    const { rows } = await h.db.orm.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM google_start_events`);
+    expect(rows[0]!.n).toBe(0);
+    const line = h.logs.lines.findLast((l) => l.msg === START_LOG);
+    expect(line).toMatchObject({ level: 50, errName: 'APIError', code: 'FAILED_TO_CREATE_VERIFICATION' });
+    expect(h.logs.text).not.toContain(leaked);
   });
 });
 

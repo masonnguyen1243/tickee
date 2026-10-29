@@ -5,8 +5,8 @@ import {
   Logger,
   Module,
   type DynamicModule,
-  type OnApplicationBootstrap,
   type OnApplicationShutdown,
+  type OnModuleInit,
 } from '@nestjs/common';
 import type { PgBoss } from 'pg-boss';
 import { createBoss } from './boss.js';
@@ -14,12 +14,16 @@ import { createBoss } from './boss.js';
 export const BOSS = Symbol('BOSS');
 
 @Injectable()
-class BossLifecycle implements OnApplicationBootstrap, OnApplicationShutdown {
+/**
+ * Start pg-boss ở `onModuleInit` (Nest gọi xong mọi `onModuleInit` rồi mới tới `onApplicationBootstrap`), để mô-đun
+ * miền đăng ký queue, lịch và worker trong `onApplicationBootstrap` mà không phụ thuộc thứ tự giữa các mô-đun.
+ */
+class BossLifecycle implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger('Jobs');
 
   constructor(@Inject(BOSS) private readonly boss: PgBoss) {}
 
-  async onApplicationBootstrap(): Promise<void> {
+  async onModuleInit(): Promise<void> {
     this.boss.on('error', (err) => this.logger.error({ err }, 'pg-boss lỗi'));
     await this.boss.start();
     this.logger.log('pg-boss đã chạy');

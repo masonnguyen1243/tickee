@@ -8,6 +8,12 @@ export const OTP_RESEND_AFTER_SECONDS = 60;
 export const OTP_DAILY_FAILURE_LIMIT = 15;
 export const OTP_FAILURE_WINDOW_SECONDS = 24 * 60 * 60;
 
+/**
+ * Mỗi IP được bắt đầu đăng nhập Google (`GET /v1/identity/google`) tối đa chừng này lần trong cửa sổ trượt một giờ.
+ * Đủ rộng cho Wi-Fi dùng chung, vẫn chặn spam ghi `verifications`.
+ */
+export const GOOGLE_START_PER_IP_PER_HOUR = 60;
+
 /** Email chuẩn hóa: bỏ khoảng trắng hai đầu, chữ thường. */
 export const EmailAddress = z.string().trim().toLowerCase().pipe(z.email().max(254));
 
@@ -93,6 +99,10 @@ export const GoogleSignInError = {
   ACCESS_DENIED: 'access_denied',
   /** Google trả `email_verified = false`: không tạo/nối tài khoản. */
   EMAIL_NOT_VERIFIED: 'email_not_verified',
+  /** IP này đã bắt đầu đăng nhập Google quá `GOOGLE_START_PER_IP_PER_HOUR` lần trong một giờ. */
+  RATE_LIMITED: 'rate_limited',
+  /** Lỗi phía server khi bắt đầu (DB, Better Auth…): web hiện banner lỗi chung. */
+  START_FAILED: 'start_failed',
 } as const;
 export type GoogleSignInError = (typeof GoogleSignInError)[keyof typeof GoogleSignInError];
 

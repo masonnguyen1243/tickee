@@ -67,6 +67,13 @@ function googleBannerOf(code: string | undefined): GoogleBanner | null {
   if (code === GoogleSignInError.EMAIL_NOT_VERIFIED) {
     return { tone: 'warning', title: 'Email Google chưa được xác minh. Hãy dùng mã qua email.' };
   }
+  if (code === GoogleSignInError.RATE_LIMITED) {
+    return {
+      tone: 'warning',
+      title: 'Bạn đã thử đăng nhập Google quá nhiều lần. Vui lòng thử lại sau hoặc dùng mã qua email.',
+    };
+  }
+  // `start_failed`, `state_mismatch`, `invalid_code`…
   return { tone: 'danger', title: 'Chưa đăng nhập được bằng Google. Thử lại hoặc dùng mã qua email.' };
 }
 

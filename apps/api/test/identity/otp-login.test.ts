@@ -137,38 +137,29 @@ describe('POST /v1/identity/otp — gửi mã', () => {
     expect(h.email.sent.filter((m) => m.to === email)).toHaveLength(1);
   });
 
-  it('mỗi lần gửi dọn lần gửi > 1 giờ, lần sai > 24 giờ, verification và session hết hạn > 24 giờ', async () => {
+  it('gửi mã không dọn rác: bản ghi hết hạn còn nguyên (job identity.purge-expired của worker lo)', async () => {
     const stale = newEmail();
-    const recent = newEmail();
     const owner = await h.db.orm.execute<{ id: string }>(sql`INSERT INTO users (email) VALUES (${newEmail()}) RETURNING id`);
     const userId = owner.rows[0]!.id;
     await h.db.orm.execute(sql`INSERT INTO sessions (user_id, token, expires_at) VALUES
-      (${userId}, ${`cu-${stale}`}, now() - interval '25 hours'),
-      (${userId}, ${`moi-${recent}`}, now() - interval '23 hours')`);
-    await h.db.orm.execute(sql`INSERT INTO otp_verify_failures (email_hmac, created_at) VALUES
-      ('sai-cu', now() - interval '25 hours'), ('sai-moi', now() - interval '23 hours')`);
+      (${userId}, ${`cu-${stale}`}, now() - interval '25 hours')`);
+    await h.db.orm.execute(sql`INSERT INTO otp_verify_failures (email_hmac, created_at) VALUES ('khong-don', now() - interval '25 hours')`);
     await h.db.orm.execute(
-      sql`INSERT INTO otp_send_events (email_hmac, ip_hmac, created_at) VALUES ('cu', 'cu', now() - interval '61 minutes'), ('moi', 'moi', now() - interval '59 minutes')`,
+      sql`INSERT INTO otp_send_events (email_hmac, ip_hmac, created_at) VALUES ('khong-don', 'khong-don', now() - interval '61 minutes')`,
     );
     await h.db.orm.execute(sql`INSERT INTO verifications (identifier, value, expires_at) VALUES
-      (${`sign-in-otp-${stale}`}, 'x:0', now() - interval '25 hours'),
-      (${`sign-in-otp-${recent}`}, 'x:0', now() - interval '23 hours')`);
+      (${`sign-in-otp-${stale}`}, 'x:0', now() - interval '25 hours')`);
 
     await sendOtp(newEmail()).expect(200);
 
-    const events = await h.db.orm.execute<{ email_hmac: string }>(sql`SELECT email_hmac FROM otp_send_events`);
-    expect(events.rows.map((r) => r.email_hmac)).not.toContain('cu');
-    expect(events.rows.map((r) => r.email_hmac)).toContain('moi');
-    const left = await h.db.orm.execute<{ identifier: string }>(
-      sql`SELECT identifier FROM verifications WHERE identifier IN (${`sign-in-otp-${stale}`}, ${`sign-in-otp-${recent}`})`,
-    );
-    expect(left.rows.map((r) => r.identifier)).toEqual([`sign-in-otp-${recent}`]);
-    const sessionsLeft = await h.db.orm.execute<{ token: string }>(sql`SELECT token FROM sessions WHERE user_id = ${userId}`);
-    expect(sessionsLeft.rows.map((r) => r.token)).toEqual([`moi-${recent}`]);
-    const failuresLeft = await h.db.orm.execute<{ email_hmac: string }>(
-      sql`SELECT email_hmac FROM otp_verify_failures WHERE email_hmac IN ('sai-cu', 'sai-moi')`,
-    );
-    expect(failuresLeft.rows.map((r) => r.email_hmac)).toEqual(['sai-moi']);
+    const counts = await h.db.orm.execute<Record<string, number>>(sql`SELECT
+      (SELECT count(*)::int FROM otp_send_events WHERE email_hmac = 'khong-don') AS sends,
+      (SELECT count(*)::int FROM otp_verify_failures WHERE email_hmac = 'khong-don') AS failures,
+      (SELECT count(*)::int FROM verifications WHERE identifier = ${`sign-in-otp-${stale}`}) AS verifications,
+      (SELECT count(*)::int FROM sessions WHERE user_id = ${userId}) AS sessions`);
+    expect(counts.rows[0]).toEqual({ sends: 1, failures: 1, verifications: 1, sessions: 1 });
+    await h.db.orm.execute(sql`DELETE FROM otp_verify_failures WHERE email_hmac = 'khong-don'`);
+    await h.db.orm.execute(sql`DELETE FROM verifications WHERE identifier = ${`sign-in-otp-${stale}`}`);
   });
 
   it('bảng đếm chỉ có HMAC, không có email hay IP dạng rõ', async () => {

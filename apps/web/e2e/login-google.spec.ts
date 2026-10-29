@@ -106,6 +106,25 @@ test('email_not_verified: banner cảnh báo, rồi xóa error khỏi URL mà ba
   await expect(page.getByLabel('Email')).toBeEditable();
 });
 
+test('rate_limited: banner cảnh báo, giữ returnTo, xóa error khỏi URL', async ({ page }) => {
+  await mockIdentityApi(page);
+  await page.goto(`/dang-nhap?error=rate_limited&returnTo=${ENCODED_RETURN_TO}`);
+  await expect(banner(page)).toHaveText(
+    'Bạn đã thử đăng nhập Google quá nhiều lần. Vui lòng thử lại sau hoặc dùng mã qua email.',
+  );
+  await expect(banner(page)).toHaveAttribute('data-tone', 'warning');
+  await expect(page).toHaveURL(`${WEB_ORIGIN}/dang-nhap?returnTo=${ENCODED_RETURN_TO}`);
+  await expect(page.getByLabel('Email')).toBeEditable();
+});
+
+test('start_failed: banner lỗi chung', async ({ page }) => {
+  await mockIdentityApi(page);
+  await page.goto('/dang-nhap?error=start_failed');
+  await expect(banner(page)).toHaveText('Chưa đăng nhập được bằng Google. Thử lại hoặc dùng mã qua email.');
+  await expect(banner(page)).toHaveAttribute('data-tone', 'danger');
+  await expect(page).toHaveURL(`${WEB_ORIGIN}/dang-nhap`);
+});
+
 test('lỗi khác (state_mismatch): banner lỗi chung', async ({ page }) => {
   await mockIdentityApi(page);
   await page.goto('/dang-nhap?error=state_mismatch');
