@@ -34,5 +34,9 @@ describe('dependency-cruiser (AD-10, AD-25)', () => {
     expect(output).not.toMatch(/src\/modules\/event\/schema\.ts →/);
     // Import trong cùng mô-đun (ngoại lệ $1): không bị báo.
     expect(output).not.toContain('organizer/a.ts');
+    // Better Auth chỉ được import trong modules/identity.
+    expect(output).toMatch(/better-auth-only-in-identity: src\/platform\/auth-leak\.ts → .*better-auth/);
+    expect(output).toMatch(/better-auth-only-in-identity: src\/modules\/organizer\/auth-guard\.ts → .*@thallesp\/nestjs-better-auth/);
+    expect(output).not.toContain('src/modules/identity/auth.ts');
   });
 });

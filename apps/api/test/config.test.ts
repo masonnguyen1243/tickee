@@ -2,7 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { ConfigError, loadConfig } from '../src/platform/config/index.js';
 
 const SECRET = 's3cret-Gi4-tri';
-const apiEnv = { APP_ROLE: 'api', DATABASE_URL: `postgresql://tickee_app:${SECRET}@db:5432/tickee` };
+const apiEnv = {
+  APP_ROLE: 'api',
+  DATABASE_URL: `postgresql://tickee_app:${SECRET}@db:5432/tickee`,
+  BETTER_AUTH_SECRET: `${SECRET}-${'x'.repeat(32)}`,
+  API_PUBLIC_URL: 'https://api.tickee.vn',
+  WEB_ORIGIN: 'https://tickee.vn',
+  SMTP_URL: `smtp://user:${SECRET}@smtp.tickee.vn:587`,
+  EMAIL_FROM: 'Tickee <no-reply@tickee.vn>',
+};
 
 function issuesOf(env: Record<string, string | undefined>): ConfigError {
   try {
@@ -17,7 +25,13 @@ function issuesOf(env: Record<string, string | undefined>): ConfigError {
 describe('loadConfig', () => {
   it('vai api: đọc đủ biến và áp mặc định', () => {
     const config = loadConfig(apiEnv);
-    expect(config).toMatchObject({ APP_ROLE: 'api', PORT: 3001, LOG_LEVEL: 'info', NODE_ENV: 'development' });
+    expect(config).toMatchObject({
+      APP_ROLE: 'api',
+      PORT: 3001,
+      LOG_LEVEL: 'info',
+      NODE_ENV: 'development',
+      TRUST_PROXY_HOPS: 0,
+    });
   });
 
   it('vai migrate chỉ cần MIGRATION_DATABASE_URL, không cần DATABASE_URL', () => {
@@ -28,7 +42,7 @@ describe('loadConfig', () => {
   it('biến tùy chọn đặt rỗng → dùng mặc định; biến bắt buộc rỗng → "thiếu"', () => {
     const config = loadConfig({ ...apiEnv, PORT: '', LOG_LEVEL: '', NODE_ENV: '' });
     expect(config).toMatchObject({ PORT: 3001, LOG_LEVEL: 'info', NODE_ENV: 'development' });
-    const err = issuesOf({ APP_ROLE: 'api', DATABASE_URL: '' });
+    const err = issuesOf({ ...apiEnv, DATABASE_URL: '' });
     expect(err.issues).toEqual([{ variable: 'DATABASE_URL', reason: 'thiếu' }]);
   });
 
@@ -58,13 +72,57 @@ describe('loadConfig', () => {
 
   it('giá trị sai không bao giờ lọt vào thông báo lỗi', () => {
     const err = issuesOf({
-      APP_ROLE: 'api',
+      ...apiEnv,
       DATABASE_URL: `mysql://root:${SECRET}@db/x`,
       PORT: `${SECRET}`,
       LOG_LEVEL: SECRET,
+      BETTER_AUTH_SECRET: SECRET,
+      API_PUBLIC_URL: `https://api.tickee.vn/${SECRET}`,
+      WEB_ORIGIN: `ftp://${SECRET}.vn`,
+      SMTP_URL: `http://${SECRET}@smtp.vn`,
+      AUTH_COOKIE_DOMAIN: `https://${SECRET}`,
     });
-    expect(err.issues.map((i) => i.variable).sort()).toEqual(['DATABASE_URL', 'LOG_LEVEL', 'PORT']);
+    expect(err.issues.map((i) => i.variable).sort()).toEqual([
+      'API_PUBLIC_URL',
+      'AUTH_COOKIE_DOMAIN',
+      'BETTER_AUTH_SECRET',
+      'DATABASE_URL',
+      'LOG_LEVEL',
+      'PORT',
+      'SMTP_URL',
+      'WEB_ORIGIN',
+    ]);
     expect(err.message).not.toContain(SECRET);
     expect(JSON.stringify(err.issues)).not.toContain(SECRET);
+  });
+
+  it('vai api: thiếu biến đăng nhập/email → nêu đủ tên biến', () => {
+    const err = issuesOf({ APP_ROLE: 'api', DATABASE_URL: apiEnv.DATABASE_URL });
+    expect(err.issues.map((i) => i.variable).sort()).toEqual([
+      'API_PUBLIC_URL',
+      'BETTER_AUTH_SECRET',
+      'EMAIL_FROM',
+      'SMTP_URL',
+      'WEB_ORIGIN',
+    ]);
+    expect(err.issues.every((i) => i.reason === 'thiếu')).toBe(true);
+  });
+
+  it('TRUST_PROXY_HOPS: số nguyên ≥ 0, mặc định 0', () => {
+    expect(loadConfig({ ...apiEnv, TRUST_PROXY_HOPS: '2' })).toMatchObject({ TRUST_PROXY_HOPS: 2 });
+    expect(loadConfig({ ...apiEnv, TRUST_PROXY_HOPS: '' })).toMatchObject({ TRUST_PROXY_HOPS: 0 });
+    expect(issuesOf({ ...apiEnv, TRUST_PROXY_HOPS: '-1' }).issues).toEqual([
+      { variable: 'TRUST_PROXY_HOPS', reason: 'ngoài khoảng cho phép' },
+    ]);
+    expect(issuesOf({ ...apiEnv, TRUST_PROXY_HOPS: '1.5' }).issues.map((i) => i.variable)).toEqual(['TRUST_PROXY_HOPS']);
+    expect(issuesOf({ ...apiEnv, TRUST_PROXY_HOPS: 'hai' }).issues.map((i) => i.variable)).toEqual(['TRUST_PROXY_HOPS']);
+  });
+
+  it('BETTER_AUTH_SECRET phải ≥ 32 ký tự; AUTH_COOKIE_DOMAIN tùy chọn', () => {
+    expect(issuesOf({ ...apiEnv, BETTER_AUTH_SECRET: 'ngan' }).issues).toEqual([
+      { variable: 'BETTER_AUTH_SECRET', reason: 'ngoài khoảng cho phép' },
+    ]);
+    expect(loadConfig({ ...apiEnv, AUTH_COOKIE_DOMAIN: 'tickee.vn' })).toMatchObject({ AUTH_COOKIE_DOMAIN: 'tickee.vn' });
+    expect(loadConfig(apiEnv)).not.toHaveProperty('AUTH_COOKIE_DOMAIN');
   });
 });

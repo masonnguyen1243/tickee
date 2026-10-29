@@ -35,6 +35,10 @@ jobs:
       PGHOST: localhost
       PGUSER: postgres
       PGPASSWORD: postgres
+      # Web nhúng biến này lúc build (bước Build và mọi bước turbo build lại). Đặt ở cấp job để `turbo test`
+      # (phụ thuộc build) dùng cùng giá trị, không build lại web thiếu biến trước bước Playwright.
+      # e2e giả lập API bằng page.route nên không cần api chạy thật ở địa chỉ này.
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3001
 
     steps:
       - uses: actions/checkout@v4

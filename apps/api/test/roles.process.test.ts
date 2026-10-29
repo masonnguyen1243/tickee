@@ -4,7 +4,21 @@ import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { databaseUrl, migrationDatabaseUrl } from './helpers.js';
+import { apiConfig, databaseUrl, migrationDatabaseUrl } from './helpers.js';
+
+/** Env tối thiểu cho vai api, lấy từ cấu hình test (không kế thừa env của tiến trình test). */
+function apiRoleEnv(): Record<string, string> {
+  const c = apiConfig();
+  return {
+    APP_ROLE: 'api',
+    DATABASE_URL: c.DATABASE_URL,
+    BETTER_AUTH_SECRET: c.BETTER_AUTH_SECRET,
+    API_PUBLIC_URL: c.API_PUBLIC_URL,
+    WEB_ORIGIN: c.WEB_ORIGIN,
+    SMTP_URL: c.SMTP_URL,
+    EMAIL_FROM: c.EMAIL_FROM,
+  };
+}
 
 // Chạy đúng artefact sẽ vào image: dist/main.js (turbo `test` phụ thuộc `build`).
 const MAIN = fileURLToPath(new URL('../dist/main.js', import.meta.url));
@@ -94,7 +108,7 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
 
   it('vai api: /healthz 200 có x-request-id, SIGTERM → exit 0', async () => {
     const port = await freePort();
-    const p = start({ APP_ROLE: 'api', DATABASE_URL: databaseUrl(), PORT: String(port) });
+    const p = start({ ...apiRoleEnv(), PORT: String(port) });
     try {
       await waitForOutput(p, `api đang nghe cổng ${port}`);
       const res = await fetch(`http://127.0.0.1:${port}/healthz`);

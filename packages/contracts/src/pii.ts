@@ -3,7 +3,7 @@
  * thì khai báo cột ở đây; log tự che theo danh sách này.
  */
 export const PII_COLUMNS = {
-  identity: ['email'],
+  identity: ['email', 'name', 'ip_address', 'user_agent'],
 } as const satisfies Record<string, readonly string[]>;
 
 const snakeToCamel = (s: string): string => s.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());

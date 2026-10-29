@@ -3,7 +3,10 @@ import { pino } from 'pino';
 import { ConfigError, loadConfig, type AppConfig } from './platform/config/index.js';
 import { basePinoOptions } from './platform/logging/index.js';
 
-const bootLog = pino({ ...basePinoOptions(process.env.LOG_LEVEL === 'silent' ? 'silent' : 'info'), name: 'bootstrap' });
+// `context` thay cho `name` của pino: `name` là cột PII (users.name) nên khóa `name` bị che trong log.
+const bootLog = pino(basePinoOptions(process.env.LOG_LEVEL === 'silent' ? 'silent' : 'info')).child({
+  context: 'Bootstrap',
+});
 
 async function main(): Promise<void> {
   let config: AppConfig;
