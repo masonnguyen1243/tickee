@@ -4,8 +4,10 @@ import {
   DEFAULT_RETURN_TO,
   ErrorCode,
   GOOGLE_RETURN_PATH,
+  GoogleSignInError,
   LOGIN_PATH,
   OTP_MAX_ATTEMPTS,
+  SIGN_IN_ERROR_PARAM,
   OTP_RESEND_AFTER_SECONDS,
   type Me,
   type OtpInvalidDetails,
@@ -29,12 +31,20 @@ function usedAttempts(value: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-export interface GoogleSignInStart {
-  /** URL ủy quyền của Google (đã gắn `state`), controller trả 302 tới đây. */
-  url: string;
-  /** Header `set-cookie` của cookie state OAuth. */
-  headers: Headers;
-}
+export type GoogleSignInStart =
+  | {
+      ok: true;
+      /** URL ủy quyền của Google (đã gắn `state`), controller trả 302 tới đây. */
+      url: string;
+      /** Header `set-cookie` của cookie state OAuth. */
+      headers: Headers;
+    }
+  /** IP đã chạm ngưỡng: chưa gọi Better Auth (không ghi `verifications`, không cookie state). */
+  | { ok: false; error: typeof GoogleSignInError.RATE_LIMITED };
+
+/** `?returnTo=…` (đã qua `safeReturnTo`); mặc định `/` thì bỏ. */
+const returnToQuery = (returnTo: string): string =>
+  returnTo === DEFAULT_RETURN_TO ? '' : `?returnTo=${encodeURIComponent(returnTo)}`;
 
 export interface SignInResult {
   consentRequired: boolean;
@@ -53,26 +63,41 @@ export class IdentityService {
   ) {}
 
   /**
-   * Bắt đầu đăng nhập Google. `returnTo` đã qua `safeReturnTo`. Mọi URL quay về là URL tuyệt đối trên `WEB_ORIGIN`
-   * do server tự dựng: lời gọi `auth.api.*` phía server không chạy `originCheck`, nên không nhận URL từ client.
+   * Bắt đầu đăng nhập Google. `returnTo` đã qua `safeReturnTo`. Đếm giới hạn theo IP trong Postgres trước, rồi mới để
+   * Better Auth ghi state vào `verifications`. Mọi URL quay về là URL tuyệt đối trên `WEB_ORIGIN` do server tự dựng:
+   * lời gọi `auth.api.*` phía server không chạy `originCheck`, nên không nhận URL từ client.
    * Thành công (user mới hay cũ) → trang trung gian `/dang-nhap/google`; lỗi → `/dang-nhap?error=…`, cả hai giữ `returnTo`.
    */
-  async startGoogleSignIn(returnTo: string, requestHeaders: Headers): Promise<GoogleSignInStart> {
-    const query = returnTo === DEFAULT_RETURN_TO ? '' : `?returnTo=${encodeURIComponent(returnTo)}`;
+  async startGoogleSignIn(returnTo: string, ip: string, requestHeaders: Headers): Promise<GoogleSignInStart> {
+    const eventId = await this.rateLimiter.consumeGoogleStart(ip);
+    if (eventId === null) return { ok: false, error: GoogleSignInError.RATE_LIMITED };
+    const query = returnToQuery(returnTo);
     const callbackURL = `${this.config.WEB_ORIGIN}${GOOGLE_RETURN_PATH}${query}`;
-    const { headers, response } = await this.auth.api.signInSocial({
-      body: {
-        provider: GOOGLE_PROVIDER_ID,
-        callbackURL,
-        newUserCallbackURL: callbackURL,
-        errorCallbackURL: `${this.config.WEB_ORIGIN}${LOGIN_PATH}${query}`,
-        disableRedirect: true,
-      },
-      headers: requestHeaders,
-      returnHeaders: true,
-    });
-    if (!response.url) throw new Error('Better Auth không trả URL ủy quyền Google');
-    return { url: response.url, headers };
+    try {
+      const { headers, response } = await this.auth.api.signInSocial({
+        body: {
+          provider: GOOGLE_PROVIDER_ID,
+          callbackURL,
+          newUserCallbackURL: callbackURL,
+          errorCallbackURL: `${this.config.WEB_ORIGIN}${LOGIN_PATH}${query}`,
+          disableRedirect: true,
+        },
+        headers: requestHeaders,
+        returnHeaders: true,
+      });
+      if (!response.url) throw new Error('Better Auth không trả URL ủy quyền Google');
+      return { ok: true, url: response.url, headers };
+    } catch (err) {
+      // Như OTP (`release`): lần bắt đầu thất bại không tính vào giới hạn của IP.
+      await this.rateLimiter.releaseGoogleStart(eventId);
+      throw err;
+    }
+  }
+
+  /** `${WEB_ORIGIN}/dang-nhap?error=<mã>&returnTo=…`: đích 302 khi không bắt đầu được đăng nhập Google. */
+  googleSignInErrorUrl(error: GoogleSignInError, returnTo: string): string {
+    const query = returnToQuery(returnTo).replace('?', '&');
+    return `${this.config.WEB_ORIGIN}${LOGIN_PATH}?${SIGN_IN_ERROR_PARAM}=${encodeURIComponent(error)}${query}`;
   }
 
   /** Đếm giới hạn trong Postgres trước, rồi mới để Better Auth tạo (rotate) mã và gửi email. */

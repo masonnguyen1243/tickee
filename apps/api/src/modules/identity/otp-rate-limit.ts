@@ -2,17 +2,18 @@ import { createHmac, hkdfSync } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import {
   ErrorCode,
+  GOOGLE_START_PER_IP_PER_HOUR,
   OTP_DAILY_FAILURE_LIMIT,
   OTP_FAILURE_WINDOW_SECONDS,
   OTP_RESEND_AFTER_SECONDS,
   type OtpLockedDetails,
   type OtpRateLimitedDetails,
 } from '@tickee/contracts';
-import { and, desc, eq, gt, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, sql } from 'drizzle-orm';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { IDENTITY_CONFIG, type IdentityConfig } from './identity.config.js';
-import { otpSendEvents, otpVerifyFailures, sessions, verifications } from './schema.js';
+import { googleStartEvents, otpSendEvents, otpVerifyFailures } from './schema.js';
 
 /** `now()` của Postgres (đầu transaction), cùng mốc với `created_at` mặc định. */
 async function dbNow(tx: Tx): Promise<number> {
@@ -64,7 +65,8 @@ export class OtpRateLimiter {
   /**
    * Kiểm giới hạn rồi ghi một lần gửi, trong một transaction khóa theo email rồi theo IP (`pg_advisory_xact_lock`,
    * luôn cùng thứ tự để không deadlock) để request song song cho cùng email hay cùng IP không cùng lọt.
-   * Vượt giới hạn → `OTP_RATE_LIMITED` kèm `retryAfterSeconds`. Cùng lúc dọn bản ghi cũ (xem `purgeExpired`).
+   * Vượt giới hạn → `OTP_RATE_LIMITED` kèm `retryAfterSeconds`. Không dọn rác ở đây (job
+   * `identity.purge-expired` của vai `worker` lo, xem `identity-janitor.ts`).
    * @returns id của lần gửi, để `release` nếu gửi email thất bại.
    */
   async consume(input: { email: string; ip: string }): Promise<string> {
@@ -74,7 +76,6 @@ export class OtpRateLimiter {
     return this.db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`otp-send:${emailHmac}`}, 0))`);
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`otp-send-ip:${ipHmac}`}, 0))`);
-      await this.purgeExpired(tx);
       const now = await dbNow(tx);
       const lockedMs = await this.lockedForMs(tx, emailHmac, now);
       if (lockedMs !== null) throw otpLocked(lockedMs);
@@ -118,6 +119,32 @@ export class OtpRateLimiter {
     });
   }
 
+  /**
+   * Ghi một lần bắt đầu đăng nhập Google nếu IP còn trong giới hạn (`GOOGLE_START_PER_IP_PER_HOUR` lần trong cửa sổ
+   * trượt một giờ). Đếm và ghi trong một transaction khóa theo IP (`pg_advisory_xact_lock`) để request song song không
+   * cùng lọt. Gọi TRƯỚC `signInSocial`: bị chặn thì không có dòng `verifications` nào được ghi.
+   * @returns id của lần bắt đầu (để `releaseGoogleStart` nếu bắt đầu thất bại), hoặc `null` nếu IP đã chạm ngưỡng
+   * (lần bị chặn không được ghi).
+   */
+  async consumeGoogleStart(ip: string): Promise<string | null> {
+    const ipHmac = this.ipHmac(ip);
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`google-start-ip:${ipHmac}`}, 0))`);
+      const [{ n } = { n: 0 }] = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(googleStartEvents)
+        .where(and(eq(googleStartEvents.ipHmac, ipHmac), gt(googleStartEvents.createdAt, sql`now() - interval '1 hour'`)));
+      if (n >= GOOGLE_START_PER_IP_PER_HOUR) return null;
+      const [event] = await tx.insert(googleStartEvents).values({ ipHmac }).returning({ id: googleStartEvents.id });
+      return event!.id;
+    });
+  }
+
+  /** Bỏ một lần bắt đầu Google khỏi bộ đếm (bắt đầu thất bại thì không tính). */
+  async releaseGoogleStart(eventId: string): Promise<void> {
+    await this.db.orm.delete(googleStartEvents).where(eq(googleStartEvents.id, eventId));
+  }
+
   /** Email đang bị khóa vì nhập sai quá nhiều lần trong 24 giờ → `OTP_LOCKED`. Gọi trước khi xác minh mã. */
   async assertVerifyAllowed(email: string): Promise<void> {
     const emailHmac = this.emailHmac(email);
@@ -156,20 +183,6 @@ export class OtpRateLimiter {
       .limit(OTP_DAILY_FAILURE_LIMIT + 1);
     const pivot = recent[OTP_DAILY_FAILURE_LIMIT]?.createdAt.getTime();
     return pivot === undefined ? null : pivot + OTP_FAILURE_WINDOW_SECONDS * 1000 - now;
-  }
-
-  /**
-   * Dọn rác do `identity` sở hữu: lần gửi đã ra khỏi cửa sổ một giờ; lần nhập sai ra khỏi cửa sổ 24 giờ;
-   * verification hết hạn hơn 24 giờ (`identifier` chứa email dạng rõ) — verification vừa hết hạn được giữ để người
-   * dùng vẫn nhận `OTP_EXPIRED`; session hết hạn hơn 24 giờ (chứa IP, user agent).
-   */
-  private async purgeExpired(tx: Tx): Promise<void> {
-    await tx.delete(otpSendEvents).where(lt(otpSendEvents.createdAt, sql`now() - interval '1 hour'`));
-    await tx
-      .delete(otpVerifyFailures)
-      .where(lt(otpVerifyFailures.createdAt, sql`now() - make_interval(secs => ${OTP_FAILURE_WINDOW_SECONDS})`));
-    await tx.delete(verifications).where(lt(verifications.expiresAt, sql`now() - interval '24 hours'`));
-    await tx.delete(sessions).where(lt(sessions.expiresAt, sql`now() - interval '24 hours'`));
   }
 
   /** Bỏ một lần gửi khỏi bộ đếm (email không gửi được thì không tính). */

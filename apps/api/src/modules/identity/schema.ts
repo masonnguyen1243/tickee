@@ -109,5 +109,19 @@ export const otpVerifyFailures = pgTable(
   (t) => [index('otp_verify_failures_email_hmac_created_at_idx').on(t.emailHmac, t.createdAt)],
 );
 
+/**
+ * Lần bắt đầu đăng nhập Google (`GET /v1/identity/google`) để giới hạn theo IP: mỗi lần ghi một dòng
+ * `verifications` (state OAuth). Chỉ lưu HMAC của IP.
+ */
+export const googleStartEvents = pgTable(
+  'google_start_events',
+  {
+    id: id(),
+    ipHmac: text('ip_hmac').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('google_start_events_ip_hmac_created_at_idx').on(t.ipHmac, t.createdAt)],
+);
+
 /** Schema truyền cho adapter Drizzle của Better Auth. */
 export const authSchema = { users, sessions, accounts, verifications };

@@ -44,3 +44,10 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-4-dang-nhap-bang-google.md`
   summary: Smoke test trên staging: đăng nhập Google rồi `/me` phải 200 từ web origin. Cân nhắc hiện thông báo khi `/me` trả 401 ngay sau callback, thay vì quay về `/dang-nhap` im lặng.
   evidence: `dang-nhap/google/google-return.tsx:25` chuyển về `/dang-nhap` không kèm thông báo khi `/me` 401 (e2e `login-google.spec.ts:133` khẳng định hành vi này). Cookie hỏng do `AUTH_COOKIE_DOMAIN` sai hoặc web/api khác site sẽ làm mọi lần thử lại đều bị quay về như vậy. Retro Epic 1, C5.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-1-ai-2-lam-chac-bat-dau-dang-nhap-google.md`
+  summary: Từ AI-2, chỉ vai `worker` dọn `verifications`/`sessions`/bộ đếm giới hạn. Checklist deploy Story 4.7 phải yêu cầu luôn có ít nhất một worker, và cảnh báo khi job `identity.purge-expired` lỗi hoặc lâu không chạy.
+  evidence: Đã xóa `purgeExpired` khỏi `OtpRateLimiter.consume`. Môi trường chỉ chạy `api` sẽ giữ email dạng rõ (`verifications`) và IP/UA (`sessions`) vô thời hạn.
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-1-ai-2-lam-chac-bat-dau-dang-nhap-google.md`
+  summary: Giới hạn theo IP (OTP và bắt đầu Google) nên gom IPv6 theo /64 để client giữ cả dải không vượt giới hạn.
+  evidence: `ipHmac` băm nguyên địa chỉ. Mức độ medium nhưng chưa kiểm; muốn xác nhận thì thử gửi từ nhiều địa chỉ trong cùng một /64.
