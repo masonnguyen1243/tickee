@@ -104,6 +104,7 @@ context:
 - e2e bấm nút: điều hướng cả trang còn treo thì Playwright không đọc được DOM, nên test chặn điều hướng bằng listener ở `window` (chạy sau React) và kiểm React có `preventDefault` ở lần bấm thứ hai.
 - Kiểm tra (29/10/2026): `pnpm turbo build typecheck lint:deps test --force` 11/11 task (api 108, web 24, contracts 52 test); Playwright 82/82 trên hai project. **Chưa kiểm với Google thật** (AC 1, manual check) — chờ Mason có OAuth client.
 - Ghi chú cho AC 1: đăng nhập OTP **không** tạo dòng `accounts` (emailOTP chỉ `createUser`), nên user OTP sau khi nối Google có **một** dòng `accounts` (`provider_id = 'google'`), không phải hai. Câu "kèm hai dòng `accounts`" trong Acceptance Criteria là sai về Better Auth. Khi kiểm tay, đúng là: một dòng `users`, một dòng `accounts` google.
+- 29/10/2026: Mason đã kiểm đăng nhập bằng Google thật ở local (OAuth client riêng), thành công (AC 1). Walkthrough xong, Mason duyệt ship.
 - Build web cho e2e phải có `NEXT_PUBLIC_API_BASE_URL` lúc build (như CI): thiếu thì `/dang-nhap` không render được vì nút Google gọi `apiBaseUrl()` khi render.
 
 ## Spec Change Log
