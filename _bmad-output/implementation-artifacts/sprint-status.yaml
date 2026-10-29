@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 10-29-2026 15:33
+last_updated: 10-29-2026 15:48
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -159,7 +159,7 @@ action_items:
       sau Google) vào deferred-work.md gắn Story 4.7; từ giờ mục reject có điều kiện
       tương lai phải vào deferred-work"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
   - id: "epic-1-retro-item-7-ai-4-đồng-bộ-spec-với-thực-tế-sửa-câu-ha"
     epic: 1
@@ -168,7 +168,7 @@ action_items:
       token vào epics/PRD (NFR-6); ghi thay đổi so với spec vào Spec Change Log. Trước
       Story 2.1"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
   - id: "epic-1-retro-item-8-ai-5-trước-story-2-2-tách-auth-ts-gom-in"
     epic: 1
