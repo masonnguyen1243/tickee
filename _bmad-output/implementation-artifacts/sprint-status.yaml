@@ -29,13 +29,13 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 10-29-2026 15:48
+last_updated: 10-29-2026 16:30
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
 story_location: _bmad-output/implementation-artifacts
 development_status:
-  epic-1: in-progress
+  epic-1: done
   1-1-dựng-monorepo-theo-structural-seed: done
   1-2-hệ-thống-giao-diện-rạp-tối-và-khung-web: done
   1-3-đăng-nhập-bằng-otp-qua-email: done
@@ -150,7 +150,7 @@ action_items:
       thay vì JSON 500, thêm giới hạn theo IP, tách việc dọn verifications/sessions
       khỏi transaction gửi OTP (job pg-boss định kỳ). Đầu Epic 2"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
   - id: "epic-1-retro-item-6-ai-3-gom-các-mục-triage-bị-reject-vì-chỉ"
     epic: 1
