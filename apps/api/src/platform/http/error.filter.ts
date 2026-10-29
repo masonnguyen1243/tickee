@@ -8,9 +8,16 @@ const MESSAGES: Record<ErrorCode, string> = {
   VALIDATION_FAILED: 'Yêu cầu không hợp lệ.',
   INTERNAL_ERROR: 'Đã có lỗi xảy ra. Vui lòng thử lại.',
   SERVICE_UNAVAILABLE: 'Dịch vụ tạm thời không sẵn sàng.',
+  UNAUTHENTICATED: 'Bạn cần đăng nhập để tiếp tục.',
+  CONSENT_REQUIRED: 'Bạn cần đồng ý xử lý dữ liệu cá nhân để tiếp tục.',
+  OTP_RATE_LIMITED: 'Bạn đã yêu cầu quá nhiều mã. Vui lòng thử lại sau.',
+  OTP_INVALID: 'Mã chưa đúng.',
+  OTP_EXPIRED: 'Mã đã hết hạn.',
+  OTP_ATTEMPTS_EXCEEDED: 'Mã đã hết hiệu lực.',
 };
 
 function codeForStatus(status: number): ErrorCode {
+  if (status === 401) return ErrorCode.UNAUTHENTICATED;
   if (status === 404) return ErrorCode.NOT_FOUND;
   if (status === 503) return ErrorCode.SERVICE_UNAVAILABLE;
   if (status >= 400 && status < 500) return ErrorCode.VALIDATION_FAILED;

@@ -6,9 +6,11 @@ import type { Response } from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ApiModule } from '../src/api.module.js';
-import { configureApiApp } from '../src/roles/api.js';
+import { Public } from '../src/platform/http/index.js';
+import { API_APP_OPTIONS, configureApiApp } from '../src/roles/api.js';
 import { apiConfig, LogCapture } from './helpers.js';
 
+@Public()
 @Controller('boom')
 class BoomController {
   @Get()
@@ -30,7 +32,7 @@ async function buildApp(databaseUrl?: string): Promise<{ app: INestApplication; 
     imports: [ApiModule.forRoot(config, { destination: logs })],
     controllers: [BoomController],
   }).compile();
-  const app = configureApiApp(moduleRef.createNestApplication({ bufferLogs: true }), { shutdownHooks: false });
+  const app = configureApiApp(moduleRef.createNestApplication(API_APP_OPTIONS), { shutdownHooks: false });
   await app.init();
   return { app, logs };
 }

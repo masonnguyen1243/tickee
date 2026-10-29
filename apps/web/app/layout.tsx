@@ -1,7 +1,8 @@
 import type { Metadata, Viewport } from 'next';
 import { Be_Vietnam_Pro } from 'next/font/google';
-import type { ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 
+import { NoticeToast } from '@/components/tickee/notice-toast';
 import { Toaster } from '@/components/ui/sonner';
 
 import { Providers } from './providers';
@@ -37,6 +38,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <Providers>{children}</Providers>
         <Toaster />
+        <Suspense fallback={null}>
+          <NoticeToast />
+        </Suspense>
       </body>
     </html>
   );

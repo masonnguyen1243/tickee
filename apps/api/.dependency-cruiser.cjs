@@ -11,6 +11,9 @@ for (const [from, targets] of Object.entries(graph)) {
 
 const alt = (names) => `(${names.join('|')})`;
 
+/** Gói Better Auth (kể cả adapter NestJS) — chỉ `identity` được import. */
+const AUTH_PACKAGES = '(better-auth|@better-auth/[^/]+|@thallesp/nestjs-better-auth)';
+
 /** Với mỗi A: cấm import modules/B khi B ∉ graph[A]. */
 const directionRules = modules
   .map((from) => {
@@ -70,6 +73,15 @@ module.exports = {
       severity: 'error',
       from: { path: '^src/platform/' },
       to: { path: '^src/(modules|flows)/' },
+    },
+    {
+      name: 'better-auth-only-in-identity',
+      comment: 'Better Auth chỉ được dùng trong modules/identity (AD-19); nơi khác đi qua modules/identity/index.ts.',
+      severity: 'error',
+      from: { path: '^src/', pathNot: '^src/modules/identity/' },
+      to: {
+        path: [`^${AUTH_PACKAGES}(/|$)`, `(^|/)node_modules/${AUTH_PACKAGES}/`],
+      },
     },
     {
       name: 'no-circular',

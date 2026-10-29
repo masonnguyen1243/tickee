@@ -1,0 +1,6 @@
+{
+  "translateTime": "SYS:HH:MM:ss",
+  "ignore": "pid,hostname,context",
+  "messageFormat": "{if context}[{context}] {end}{msg}",
+  "singleLine": true
+}

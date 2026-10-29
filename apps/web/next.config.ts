@@ -4,6 +4,8 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
+  // `next dev` không tự sinh AGENTS.md khi phát hiện AI agent; ngữ cảnh agent của repo quản lý ở gốc.
+  agentRules: false,
 };
 
 export default nextConfig;

@@ -5,6 +5,12 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   VALIDATION_FAILED: 400,
   INTERNAL_ERROR: 500,
   SERVICE_UNAVAILABLE: 503,
+  UNAUTHENTICATED: 401,
+  CONSENT_REQUIRED: 403,
+  OTP_RATE_LIMITED: 429,
+  OTP_INVALID: 400,
+  OTP_EXPIRED: 400,
+  OTP_ATTEMPTS_EXCEEDED: 400,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

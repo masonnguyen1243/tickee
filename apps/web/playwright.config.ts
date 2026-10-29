@@ -6,7 +6,9 @@ export const PORT_UI_KIT_OFF = 3101;
 
 const MOBILE_VIEWPORT = { width: 375, height: 667 };
 
-// Chạy trên bản build sẵn (`pnpm turbo build`), không phải `next dev`.
+// Chạy trên bản build sẵn (`pnpm turbo build`), không phải `next dev`. Bản build phải có NEXT_PUBLIC_API_BASE_URL
+// (biến được nhúng lúc build; CI đặt ở bước build): e2e không chạy api thật mà giả lập `/v1/identity/*` bằng
+// `page.route` theo mẫu `**/v1/identity/**`, nên giá trị nào cũng được miễn là có.
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,

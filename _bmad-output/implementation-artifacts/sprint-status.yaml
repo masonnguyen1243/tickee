@@ -29,16 +29,16 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 10-28-2026 16:46
+last_updated: 10-29-2026 09:30
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
 story_location: _bmad-output/implementation-artifacts
 development_status:
   epic-1: in-progress
-  1-1-dựng-monorepo-theo-structural-seed: review
-  1-2-hệ-thống-giao-diện-rạp-tối-và-khung-web: review
-  1-3-đăng-nhập-bằng-otp-qua-email: backlog
+  1-1-dựng-monorepo-theo-structural-seed: done
+  1-2-hệ-thống-giao-diện-rạp-tối-và-khung-web: done
+  1-3-đăng-nhập-bằng-otp-qua-email: review
   1-4-đăng-nhập-bằng-google: backlog
   epic-1-retrospective: optional
 
@@ -117,16 +117,21 @@ development_status:
   8-2-dòng-giới-thiệu-tickee: backlog
   epic-8-retrospective: optional
 
+# Action items committed during retrospectives (section created by the retrospective workflow)
 action_items:
   - epic: 4
-    action: "Chốt với Tingee: API tra trạng thái theo orderId (Story 4.1) và API Token (Story 4.5); nếu chưa có thì ghi phương án dự phòng vào story trước khi bắt đầu E4"
+    action: "Chốt với Tingee: API tra trạng thái theo orderId (Story 4.1) và API Token
+      (Story 4.5); nếu chưa có thì ghi phương án dự phòng vào story trước khi bắt
+      đầu E4"
     owner: "Mason"
     status: open
   - epic: 4
-    action: "Chốt nhà cung cấp hạ tầng/email/giám sát theo pháp chế NĐ 53/2022 trước Story 4.7 và Closed Beta"
+    action: "Chốt nhà cung cấp hạ tầng/email/giám sát theo pháp chế NĐ 53/2022 trước
+      Story 4.7 và Closed Beta"
     owner: "Mason"
     status: open
   - epic: 3
-    action: "Quyết định có thêm qr_version vào phần ký của AD-16 hay không trước khi làm Story 3.8"
+    action: "Quyết định có thêm qr_version vào phần ký của AD-16 hay không trước khi
+      làm Story 3.8"
     owner: "Mason"
     status: open

@@ -13,12 +13,22 @@ export const migrationDatabaseUrl = (): string => {
   return url;
 };
 
+/** Origin web giả lập trong test: CORS và Better Auth chỉ tin origin này. */
+export const TEST_WEB_ORIGIN = 'http://web.tickee.test';
+
 export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
   APP_ROLE: 'api',
   NODE_ENV: 'test',
   LOG_LEVEL: 'info',
   PORT: 0,
+  TRUST_PROXY_HOPS: 0,
   DATABASE_URL: databaseUrl(),
+  BETTER_AUTH_SECRET: 'test-only-secret-khong-dung-o-dau-khac-0123456789',
+  API_PUBLIC_URL: 'http://api.tickee.test',
+  WEB_ORIGIN: TEST_WEB_ORIGIN,
+  // Không có SMTP trong test: test thay EMAIL_TRANSPORT bằng transport giả; cổng 1 để lỡ gọi thật thì lỗi ngay.
+  SMTP_URL: 'smtp://127.0.0.1:1',
+  EMAIL_FROM: 'Tickee <no-reply@tickee.test>',
   ...overrides,
 });
 
