@@ -59,6 +59,12 @@ export const apiConfigSchema = z.object({
   SMTP_URL: smtpUrl,
   /** Người gửi email, vd. `Tickee <no-reply@tickee.vn>`. */
   EMAIL_FROM: z.string().min(3),
+  /**
+   * OAuth client "Web application" của Google (đăng nhập Google, Story 1.4). Redirect URI đăng ký trên Google phải
+   * là `<API_PUBLIC_URL>/v1/auth/callback/google`. Test/CI dùng giá trị giả.
+   */
+  GOOGLE_CLIENT_ID: z.string().min(1),
+  GOOGLE_CLIENT_SECRET: z.string().min(1),
 });
 
 export const workerConfigSchema = z.object({

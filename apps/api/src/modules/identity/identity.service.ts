@@ -1,7 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { AuthService } from '@thallesp/nestjs-better-auth';
 import {
+  DEFAULT_RETURN_TO,
   ErrorCode,
+  GOOGLE_RETURN_PATH,
+  LOGIN_PATH,
   OTP_MAX_ATTEMPTS,
   OTP_RESEND_AFTER_SECONDS,
   type Me,
@@ -12,7 +15,8 @@ import { isAPIError } from 'better-auth/api';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
-import { otpDelivery, type Auth, type AuthSession, type OtpDeliveryState } from './auth.js';
+import { GOOGLE_PROVIDER_ID, otpDelivery, type Auth, type AuthSession, type OtpDeliveryState } from './auth.js';
+import { IDENTITY_CONFIG, type IdentityConfig } from './identity.config.js';
 import { OtpRateLimiter } from './otp-rate-limit.js';
 import { users } from './schema.js';
 
@@ -23,6 +27,13 @@ const signInIdentifier = (email: string): string => `sign-in-otp-${email}`;
 function usedAttempts(value: string): number {
   const n = Number.parseInt(value.slice(value.lastIndexOf(':') + 1), 10);
   return Number.isFinite(n) ? n : 0;
+}
+
+export interface GoogleSignInStart {
+  /** URL ủy quyền của Google (đã gắn `state`), controller trả 302 tới đây. */
+  url: string;
+  /** Header `set-cookie` của cookie state OAuth. */
+  headers: Headers;
 }
 
 export interface SignInResult {
@@ -38,7 +49,31 @@ export class IdentityService {
     @Inject(AuthService) private readonly auth: AuthService<Auth>,
     @Inject(OtpRateLimiter) private readonly rateLimiter: OtpRateLimiter,
     @Inject(DATABASE) private readonly db: Database,
+    @Inject(IDENTITY_CONFIG) private readonly config: IdentityConfig,
   ) {}
+
+  /**
+   * Bắt đầu đăng nhập Google. `returnTo` đã qua `safeReturnTo`. Mọi URL quay về là URL tuyệt đối trên `WEB_ORIGIN`
+   * do server tự dựng: lời gọi `auth.api.*` phía server không chạy `originCheck`, nên không nhận URL từ client.
+   * Thành công (user mới hay cũ) → trang trung gian `/dang-nhap/google`; lỗi → `/dang-nhap?error=…`, cả hai giữ `returnTo`.
+   */
+  async startGoogleSignIn(returnTo: string, requestHeaders: Headers): Promise<GoogleSignInStart> {
+    const query = returnTo === DEFAULT_RETURN_TO ? '' : `?returnTo=${encodeURIComponent(returnTo)}`;
+    const callbackURL = `${this.config.WEB_ORIGIN}${GOOGLE_RETURN_PATH}${query}`;
+    const { headers, response } = await this.auth.api.signInSocial({
+      body: {
+        provider: GOOGLE_PROVIDER_ID,
+        callbackURL,
+        newUserCallbackURL: callbackURL,
+        errorCallbackURL: `${this.config.WEB_ORIGIN}${LOGIN_PATH}${query}`,
+        disableRedirect: true,
+      },
+      headers: requestHeaders,
+      returnHeaders: true,
+    });
+    if (!response.url) throw new Error('Better Auth không trả URL ủy quyền Google');
+    return { url: response.url, headers };
+  }
 
   /** Đếm giới hạn trong Postgres trước, rồi mới để Better Auth tạo (rotate) mã và gửi email. */
   async sendSignInCode(email: string, ip: string): Promise<SendOtpResponse> {

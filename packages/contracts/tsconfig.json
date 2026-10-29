@@ -2,7 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    // `URL` (WHATWG) có ở cả trình duyệt lẫn Node; lib ES không khai báo nó.
+    "lib": ["ES2024", "DOM"]
   },
   "include": ["src"]
 }

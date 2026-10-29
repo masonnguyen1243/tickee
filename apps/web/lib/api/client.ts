@@ -9,10 +9,14 @@ export type ApiRequestOptions<S extends z.ZodType> = {
   init?: RequestInit;
 };
 
-function apiBaseUrl(): string {
+/**
+ * Gốc REST của api, đã gồm `/v1` (vd. `http://localhost:3001/v1`). Dùng cả để dựng `href` cho điều hướng cả trang
+ * tới api (bắt đầu đăng nhập Google).
+ */
+export function apiBaseUrl(): string {
   const base = process.env.NEXT_PUBLIC_API_BASE_URL;
   if (!base) throw new Error('Thiếu biến môi trường NEXT_PUBLIC_API_BASE_URL');
-  return base.replace(/\/+$/, '');
+  return `${base.replace(/\/+$/, '')}/v1`;
 }
 
 async function readJson(res: Response): Promise<unknown> {
@@ -40,7 +44,7 @@ export async function performApiRequest<S extends z.ZodType>(
   }
   new Headers(extraHeaders).forEach((value, key) => headers.set(key, value));
 
-  const url = `${apiBaseUrl()}/v1${path}`;
+  const url = `${apiBaseUrl()}${path}`;
   let res: Response;
   try {
     res = await fetch(url, { ...init, headers, credentials: 'include' });

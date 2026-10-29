@@ -1,6 +1,6 @@
-import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Post, Query, Req, Res } from '@nestjs/common';
 import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
-import { SendOtpRequest, VerifyOtpRequest, type Me, type SendOtpResponse, type VerifyOtpResponse } from '@tickee/contracts';
+import { safeReturnTo, SendOtpRequest, VerifyOtpRequest, type Me, type SendOtpResponse, type VerifyOtpResponse } from '@tickee/contracts';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { Response } from 'express';
 import { parseRequest } from '../../platform/http/index.js';
@@ -36,6 +36,24 @@ export class IdentityController {
     const { consentRequired, headers } = await this.identity.signInWithCode(email, otp, fromNodeHeaders(req.headers));
     forwardSetCookies(headers, res);
     return { consentRequired };
+  }
+
+  /**
+   * Bắt đầu đăng nhập Google bằng điều hướng cả trang: đặt cookie state rồi 302 sang Google. `returnTo` sai → `/`.
+   * Miễn consent: người đã đăng nhập mà chưa đồng ý vẫn bắt đầu được (điều hướng, không phải lời gọi API).
+   */
+  @Get('google')
+  @AllowAnonymous()
+  @ConsentExempt()
+  async google(
+    @Query('returnTo') returnTo: unknown,
+    @Req() req: RequestWithSession,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { url, headers } = await this.identity.startGoogleSignIn(safeReturnTo(returnTo), fromNodeHeaders(req.headers));
+    forwardSetCookies(headers, res);
+    res.setHeader('cache-control', 'no-store');
+    res.redirect(302, url);
   }
 
   @Get('me')

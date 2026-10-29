@@ -1,12 +1,13 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { EmailAddress, ErrorCode, OTP_LENGTH } from '@tickee/contracts';
+import { EmailAddress, ErrorCode, GoogleSignInError, OTP_LENGTH } from '@tickee/contracts';
 import { OctagonAlert } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 
 import { OtpInput } from '@/components/tickee/otp-input';
+import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,7 +22,7 @@ import {
   sendOtp,
   verifyOtp,
 } from '@/lib/auth/api';
-import { CONSENT_PATH, withReturnTo } from '@/lib/auth/return-to';
+import { CONSENT_PATH, LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
 
 type Step = { kind: 'email' } | { kind: 'code'; email: string; resendAt: number };
 
@@ -58,6 +59,17 @@ function verifyErrorOf(error: unknown): FieldError {
   return { message: error instanceof ApiError ? error.message : GENERIC_ERROR };
 }
 
+type GoogleBanner = { tone: 'warning' | 'danger'; title: string };
+
+/** Banner cho `?error=<mã>` của luồng Google. Hủy trên Google thì không báo gì. */
+function googleBannerOf(code: string | undefined): GoogleBanner | null {
+  if (!code || code === GoogleSignInError.ACCESS_DENIED) return null;
+  if (code === GoogleSignInError.EMAIL_NOT_VERIFIED) {
+    return { tone: 'warning', title: 'Email Google chưa được xác minh. Hãy dùng mã qua email.' };
+  }
+  return { tone: 'danger', title: 'Chưa đăng nhập được bằng Google. Thử lại hoặc dùng mã qua email.' };
+}
+
 function ErrorText({ id, error }: { id: string; error: FieldError | null }) {
   // Vùng luôn có mặt để trình đọc màn hình thông báo khi lỗi xuất hiện.
   return (
@@ -91,10 +103,12 @@ type LoginFormProps = {
    * Chưa có thì không render cả separator.
    */
   alternativeSignIn?: ReactNode;
+  /** Mã `error` mà luồng Google gắn khi quay về màn đăng nhập (đọc một lần, rồi xóa khỏi URL). */
+  googleError?: string;
 };
 
-/** Màn đăng nhập OTP email: bước email → bước mã. */
-export function LoginForm({ returnTo, alternativeSignIn }: LoginFormProps) {
+/** Màn đăng nhập: Google (nếu có) hoặc OTP email, bước email → bước mã. */
+export function LoginForm({ returnTo, alternativeSignIn, googleError }: LoginFormProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const ids = useId();
@@ -110,6 +124,15 @@ export function LoginForm({ returnTo, alternativeSignIn }: LoginFormProps) {
   const [partialCode, setPartialCode] = useState('');
   const [otpKey, setOtpKey] = useState(0);
   const lastSubmitted = useRef<string | null>(null);
+  // Giữ banner trong state: URL bị xóa `error` ngay sau đó, tải lại trang sẽ không hiện lại.
+  const [googleBanner] = useState(() => googleBannerOf(googleError));
+
+  useEffect(() => {
+    if (googleError === undefined) return;
+    // `history.replaceState` (Next đồng bộ với router) thay vì `router.replace`: không render lại trang server,
+    // không mất state của form. Giữ `returnTo`, bỏ `error` và `error_description`.
+    window.history.replaceState(window.history.state, '', withReturnTo(LOGIN_PATH, returnTo));
+  }, [googleError, returnTo]);
 
   const secondsLeft = useSecondsUntil(step.kind === 'code' ? step.resendAt : null);
 
@@ -182,6 +205,7 @@ export function LoginForm({ returnTo, alternativeSignIn }: LoginFormProps) {
   if (step.kind === 'email') {
     return (
       <div className="flex flex-col gap-section">
+        {googleBanner ? <StatusBanner tone={googleBanner.tone} title={googleBanner.title} /> : null}
         {alternativeSignIn ? (
           <>
             {alternativeSignIn}

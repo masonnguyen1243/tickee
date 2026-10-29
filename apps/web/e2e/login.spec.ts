@@ -1,53 +1,8 @@
-import { expect, test, type Page, type Request } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
-import { PORT } from '../playwright.config';
+import { apiError, EMAIL, me, mockIdentityApi, unauthenticated, WEB_ORIGIN, type Call, type Reply } from './identity-mock';
 
-/*
- * Màn đăng nhập OTP và đồng ý NĐ 13 với API giả bằng `page.route` (không cần api thật).
- * Bản build phải có NEXT_PUBLIC_API_BASE_URL (nhúng lúc build); route khớp mọi host qua `**\/v1/identity/**`.
- */
-
-const WEB_ORIGIN = `http://localhost:${PORT}`;
-const EMAIL = 'an.nguyen@vidu.vn';
-const USER_ID = '019a3b2c-1234-7abc-8def-0123456789ab';
-
-type Reply = { status: number; body?: unknown };
-type Handler = (request: Request) => Reply | Promise<Reply>;
-type Call = { method: string; path: string; body: unknown };
-
-const apiError = (status: number, code: string, details: unknown = null): Reply => ({
-  status,
-  body: { error: { code, message: 'Lỗi giả lập', details } },
-});
-
-const unauthenticated = (): Reply => apiError(401, 'UNAUTHENTICATED');
-const me = (consentedAt: string | null): Reply => ({ status: 200, body: { id: USER_ID, email: EMAIL, consentedAt } });
-
-/** Giả lập `/v1/identity/*`; mặc định `me` → 401 (chưa đăng nhập). Trả về danh sách lời gọi để kiểm. */
-async function mockIdentityApi(page: Page, handlers: Record<string, Handler> = {}): Promise<Call[]> {
-  const calls: Call[] = [];
-  const cors = {
-    'access-control-allow-origin': WEB_ORIGIN,
-    'access-control-allow-credentials': 'true',
-    'access-control-allow-methods': 'GET, POST, OPTIONS',
-    'access-control-allow-headers': 'accept, content-type',
-  };
-  await page.route('**/v1/identity/**', async (route) => {
-    const request = route.request();
-    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
-    const path = new URL(request.url()).pathname.replace(/^.*\/v1/, '');
-    const key = `${request.method()} ${path}`;
-    calls.push({ method: request.method(), path, body: request.postDataJSON() as unknown });
-    const handler = handlers[key] ?? (key === 'GET /identity/me' ? unauthenticated : undefined);
-    const reply = handler ? await handler(request) : apiError(500, 'INTERNAL_ERROR');
-    return route.fulfill({
-      status: reply.status,
-      headers: { ...cors, 'content-type': 'application/json' },
-      body: reply.body === undefined ? '' : JSON.stringify(reply.body),
-    });
-  });
-  return calls;
-}
+/* Màn đăng nhập OTP và đồng ý NĐ 13 với API giả bằng `page.route` (xem `identity-mock.ts`). */
 
 const otpSent = (): Reply => ({ status: 200, body: { resendAfterSeconds: 60 } });
 

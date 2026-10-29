@@ -10,6 +10,8 @@ const apiEnv = {
   WEB_ORIGIN: 'https://tickee.vn',
   SMTP_URL: `smtp://user:${SECRET}@smtp.tickee.vn:587`,
   EMAIL_FROM: 'Tickee <no-reply@tickee.vn>',
+  GOOGLE_CLIENT_ID: '123-abc.apps.googleusercontent.com',
+  GOOGLE_CLIENT_SECRET: `GOCSPX-${SECRET}`,
 };
 
 function issuesOf(env: Record<string, string | undefined>): ConfigError {
@@ -102,10 +104,23 @@ describe('loadConfig', () => {
       'API_PUBLIC_URL',
       'BETTER_AUTH_SECRET',
       'EMAIL_FROM',
+      'GOOGLE_CLIENT_ID',
+      'GOOGLE_CLIENT_SECRET',
       'SMTP_URL',
       'WEB_ORIGIN',
     ]);
     expect(err.issues.every((i) => i.reason === 'thiếu')).toBe(true);
+  });
+
+  it('vai api: thiếu hoặc rỗng biến Google → dừng, chỉ nêu tên biến, không in giá trị', () => {
+    const err = issuesOf({ ...apiEnv, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: undefined });
+    expect(err.issues).toEqual([
+      { variable: 'GOOGLE_CLIENT_ID', reason: 'thiếu' },
+      { variable: 'GOOGLE_CLIENT_SECRET', reason: 'thiếu' },
+    ]);
+    const other = issuesOf({ ...apiEnv, GOOGLE_CLIENT_ID: undefined });
+    expect(other.message).toContain('GOOGLE_CLIENT_ID');
+    expect(other.message).not.toContain(SECRET);
   });
 
   it('TRUST_PROXY_HOPS: số nguyên ≥ 0, mặc định 0', () => {
