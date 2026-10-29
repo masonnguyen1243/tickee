@@ -149,6 +149,7 @@ Người dùng đăng ký và đăng nhập Tài khoản Tickee bằng Google ho
 
 **Hệ quả:**
 - OTP qua email chỉ dùng được một lần, có thời hạn và giới hạn số lần nhập sai. `[ASSUMPTION: OTP hiệu lực 5 phút, tối đa 5 lần nhập sai]`
+- Gửi lại mã không mở thêm lượt đoán vô hạn: một email nhập sai hơn 15 lần trong 24 giờ thì bị tạm khóa đăng nhập bằng OTP (nếu email đó là tài khoản Google thì vẫn đăng nhập được bằng Google). Đã hiện thực ở Story 1.3.
 - Không có luồng đăng nhập bằng mật khẩu hay bằng SĐT ở MVP.
 - Owner bắt buộc bật xác thực hai lớp (2FA). `[ASSUMPTION: giữ yêu cầu 2FA cho Owner như BRD; phương thức do Architecture chọn]`
 - Dù đăng nhập bằng cách nào, cùng một email luôn ra cùng một Tài khoản Tickee.

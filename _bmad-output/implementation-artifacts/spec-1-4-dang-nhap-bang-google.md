@@ -90,7 +90,7 @@ context:
   - 320px không cuộn ngang
 
 **Acceptance Criteria:**
-- Given chạy local với OAuth client Google thật, when bấm "Tiếp tục với Google" bằng một email đã đăng nhập OTP trước đó, then về đúng `returnTo`, và `users` vẫn chỉ có một dòng cho email đó, kèm hai dòng `accounts`.
+- Given chạy local với OAuth client Google thật, when bấm "Tiếp tục với Google" bằng một email đã đăng nhập OTP trước đó, then về đúng `returnTo`, và `users` vẫn chỉ có một dòng cho email đó, kèm một dòng `accounts` (`provider_id = 'google'`; đăng nhập OTP không tạo dòng `accounts`).
 - Given `pnpm turbo build typecheck lint:deps test` và Playwright, then tất cả pass.
 - Given log api trong luồng Google, then không có email, code, state hay token.
 
@@ -108,6 +108,8 @@ context:
 - Build web cho e2e phải có `NEXT_PUBLIC_API_BASE_URL` lúc build (như CI): thiếu thì `/dang-nhap` không render được vì nút Google gọi `apiBaseUrl()` khi render.
 
 ## Spec Change Log
+
+- 2026-10-29 (retro Epic 1, AI-4): AC 1 sửa "kèm hai dòng `accounts`" thành "kèm một dòng `accounts`" (`provider_id = 'google'`). emailOTP chỉ `createUser`, không tạo `accounts` (Implementation Notes, Triage #17).
 
 ## Review Triage Log
 
