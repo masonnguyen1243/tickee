@@ -4,6 +4,9 @@ import { z } from 'zod';
 export const OTP_LENGTH = 6;
 export const OTP_MAX_ATTEMPTS = 5;
 export const OTP_RESEND_AFTER_SECONDS = 60;
+/** Quá số lần nhập sai này trong 24 giờ (cộng dồn qua các mã) thì email bị khóa gửi và xác minh. */
+export const OTP_DAILY_FAILURE_LIMIT = 15;
+export const OTP_FAILURE_WINDOW_SECONDS = 24 * 60 * 60;
 
 /** Email chuẩn hóa: bỏ khoảng trắng hai đầu, chữ thường. */
 export const EmailAddress = z.string().trim().toLowerCase().pipe(z.email().max(254));
@@ -36,6 +39,10 @@ export type Me = z.infer<typeof Me>;
 /** `details` của lỗi `OTP_RATE_LIMITED`. */
 export const OtpRateLimitedDetails = z.object({ retryAfterSeconds: z.number().int().positive() });
 export type OtpRateLimitedDetails = z.infer<typeof OtpRateLimitedDetails>;
+
+/** `details` của lỗi `OTP_LOCKED`. */
+export const OtpLockedDetails = z.object({ retryAfterSeconds: z.number().int().positive() });
+export type OtpLockedDetails = z.infer<typeof OtpLockedDetails>;
 
 /** `details` của lỗi `OTP_INVALID`. */
 export const OtpInvalidDetails = z.object({ remainingAttempts: z.number().int().min(1) });

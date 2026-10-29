@@ -14,6 +14,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   OTP_INVALID: 'Mã chưa đúng.',
   OTP_EXPIRED: 'Mã đã hết hạn.',
   OTP_ATTEMPTS_EXCEEDED: 'Mã đã hết hiệu lực.',
+  OTP_LOCKED: 'Bạn đã nhập sai quá nhiều lần. Vui lòng thử lại sau.',
 };
 
 function codeForStatus(status: number): ErrorCode {

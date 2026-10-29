@@ -16,6 +16,7 @@ import {
   hasErrorCode,
   ME_QUERY_KEY,
   remainingAttempts,
+  retryAfterHours,
   retryAfterMinutes,
   sendOtp,
   verifyOtp,
@@ -33,13 +34,20 @@ function rateLimitedMessage(error: ApiError): string {
   return `Bạn đã yêu cầu quá nhiều mã. Thử lại sau ${retryAfterMinutes(error)} phút.`;
 }
 
+/** Khóa theo ngày: không kèm "Gửi mã mới" vì gửi cũng bị khóa. */
+function lockedMessage(error: ApiError): string {
+  return `Bạn đã nhập sai quá nhiều lần. Thử lại sau ${retryAfterHours(error)} giờ.`;
+}
+
 function sendErrorOf(error: unknown): FieldError {
+  if (hasErrorCode(error, ErrorCode.OTP_LOCKED)) return { message: lockedMessage(error) };
   if (hasErrorCode(error, ErrorCode.OTP_RATE_LIMITED)) return { message: rateLimitedMessage(error) };
   if (hasErrorCode(error, ErrorCode.VALIDATION_FAILED)) return { message: 'Email chưa đúng định dạng.' };
   return { message: error instanceof ApiError ? error.message : GENERIC_ERROR };
 }
 
 function verifyErrorOf(error: unknown): FieldError {
+  if (hasErrorCode(error, ErrorCode.OTP_LOCKED)) return { message: lockedMessage(error) };
   if (hasErrorCode(error, ErrorCode.OTP_INVALID)) {
     const left = remainingAttempts(error);
     return { message: left === null ? 'Mã chưa đúng.' : `Mã chưa đúng, còn ${left} lần` };

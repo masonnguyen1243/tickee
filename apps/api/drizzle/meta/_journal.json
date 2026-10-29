@@ -15,6 +15,13 @@
       "when": 1793238461931,
       "tag": "0001_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793246215028,
+      "tag": "0002_otp_verify_failures",
+      "breakpoints": true
     }
   ]
 }

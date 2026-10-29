@@ -2,7 +2,11 @@ import type { Metadata } from 'next';
 
 import { StatusBanner } from '@/components/tickee/status-banner';
 
-export const metadata: Metadata = { title: 'Chính sách xử lý dữ liệu cá nhân · Tickee' };
+// Bản nháp chờ pháp chế: không cho máy tìm kiếm lập chỉ mục.
+export const metadata: Metadata = {
+  title: 'Chính sách xử lý dữ liệu cá nhân · Tickee',
+  robots: { index: false, follow: false },
+};
 
 /*
  * NỘI DUNG TẠM — chờ pháp chế xác nhận; phải thay bằng bản đã duyệt trước Closed Beta.

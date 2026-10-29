@@ -52,14 +52,26 @@ export class IdentityService {
     }
     if (delivery.failure) {
       await this.rateLimiter.release(eventId);
+      // Better Auth đã lưu mã mới (0 lần sai) dù email không đi: xóa đi, nếu không mỗi vòng "gửi → 503" lại cho
+      // thêm 5 lần đoán mà không tốn lượt gửi.
+      const context = await this.auth.instance.$context;
+      await context.internalAdapter.deleteVerificationByIdentifier(signInIdentifier(email));
       // Không gắn `cause`: lỗi SMTP có thể chứa địa chỉ email, mà ErrorFilter log `cause` của lỗi 5xx.
       throw new AppError(ErrorCode.SERVICE_UNAVAILABLE, 'Chưa gửi được email. Vui lòng thử lại sau ít phút.');
     }
     return { resendAfterSeconds: OTP_RESEND_AFTER_SECONDS };
   }
 
-  /** Xác minh mã; user chỉ được tạo ở lần xác minh đúng đầu tiên (`signInEmailOTP`). */
+  /**
+   * Xác minh mã; user chỉ được tạo ở lần xác minh đúng đầu tiên (`signInEmailOTP`). Email đang bị khóa theo ngày
+   * thì từ chối trước khi tới Better Auth; mỗi lần đoán sai một mã đang tồn tại được ghi lại để tính ngưỡng khóa.
+   */
   async signInWithCode(email: string, otp: string, requestHeaders: Headers): Promise<SignInResult> {
+    await this.rateLimiter.assertVerifyAllowed(email);
+    // Chỉ đếm lần sai khi có mã để đoán: nếu không, ai biết email cũng khóa được người đó 24 giờ chỉ bằng
+    // 16 request verify mà không cần gửi mã nào.
+    const context = await this.auth.instance.$context;
+    const hadCode = (await context.internalAdapter.findVerificationValue(signInIdentifier(email))) !== null;
     try {
       const { headers, response } = await this.auth.api.signInEmailOTP({
         body: { email, otp },
@@ -70,7 +82,15 @@ export class IdentityService {
       const user = response.user as typeof response.user & Pick<AuthSession['user'], 'consentedAt'>;
       return { consentRequired: !user.consentedAt, headers };
     } catch (err) {
-      throw await this.mapOtpError(err, email);
+      const mapped = await this.mapOtpError(err, email);
+      if (
+        hadCode &&
+        mapped instanceof AppError &&
+        (mapped.code === ErrorCode.OTP_INVALID || mapped.code === ErrorCode.OTP_ATTEMPTS_EXCEEDED)
+      ) {
+        throw (await this.rateLimiter.recordVerifyFailure(email)) ?? mapped;
+      }
+      throw mapped;
     }
   }
 
