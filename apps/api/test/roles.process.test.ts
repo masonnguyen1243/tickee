@@ -17,6 +17,8 @@ function apiRoleEnv(): Record<string, string> {
     WEB_ORIGIN: c.WEB_ORIGIN,
     SMTP_URL: c.SMTP_URL,
     EMAIL_FROM: c.EMAIL_FROM,
+    GOOGLE_CLIENT_ID: c.GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET: c.GOOGLE_CLIENT_SECRET,
   };
 }
 

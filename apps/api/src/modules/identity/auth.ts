@@ -1,8 +1,17 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { Logger } from '@nestjs/common';
-import { ErrorCode, OTP_LENGTH, OTP_MAX_ATTEMPTS, type ErrorResponse } from '@tickee/contracts';
+import {
+  ErrorCode,
+  GoogleSignInError,
+  LOGIN_PATH,
+  OTP_LENGTH,
+  OTP_MAX_ATTEMPTS,
+  SIGN_IN_ERROR_PARAM,
+  type ErrorResponse,
+} from '@tickee/contracts';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { createAuthMiddleware, isAPIError } from 'better-auth/api';
 import { emailOTP } from 'better-auth/plugins/email-otp';
 import type { Request, Response } from 'express';
 import type { Database } from '../../platform/db/index.js';
@@ -11,19 +20,26 @@ import type { IdentityConfig } from './identity.config.js';
 import { buildOtpEmail } from './otp-email.js';
 import { authSchema } from './schema.js';
 
-/** Better Auth mount dưới REST `/v1` (Story 1.4 mở callback Google qua allowlist bên dưới). */
+/** Better Auth mount dưới REST `/v1` (chỉ callback Google mở ra ngoài, qua allowlist bên dưới). */
 export const AUTH_BASE_PATH = '/v1/auth';
 
 /** OTP hết hạn sau 300 giây (AD-19). */
 export const OTP_EXPIRES_IN_SECONDS = 300;
 
+/** Mã provider Google của Better Auth (cột `accounts.provider_id`). */
+export const GOOGLE_PROVIDER_ID = 'google';
+
 /**
- * Đường dẫn HTTP của Better Auth (tương đối với `/v1/auth`, so khớp chính xác sau khi chuẩn hóa) được mở cho bên
- * ngoài. Mặc định đóng hết: web chỉ đi qua `/v1/identity/*`, nơi có giới hạn gửi mã và `SessionGuard`/`ConsentGuard`;
- * endpoint Better Auth gọi thẳng qua HTTP thì bỏ qua cả hai. Story 1.4 thêm đăng nhập Google (sign-in, callback).
+ * Đường dẫn HTTP của Better Auth (tương đối với `/v1/auth`, so khớp chính xác pathname sau khi chuẩn hóa, bỏ qua
+ * query) được mở cho bên ngoài. Mặc định đóng hết: web chỉ đi qua `/v1/identity/*`, nơi có giới hạn gửi mã và
+ * `SessionGuard`/`ConsentGuard`; endpoint Better Auth gọi thẳng qua HTTP thì bỏ qua cả hai. Chỉ mở callback Google
+ * (Google điều hướng trình duyệt về đây); bắt đầu đăng nhập Google đi qua `GET /v1/identity/google`.
  * Chỉ chặn HTTP: `auth.api.*` phía server vẫn gọi được.
  */
-export const AUTH_HTTP_ALLOWLIST: readonly string[] = [];
+export const AUTH_HTTP_ALLOWLIST: readonly string[] = [`/callback/${GOOGLE_PROVIDER_ID}`];
+
+/** Phương thức HTTP được qua cổng: Google quay về callback bằng điều hướng GET top-level. */
+const AUTH_HTTP_METHODS: ReadonlySet<string> = new Set(['GET']);
 
 const NOT_FOUND_BODY: ErrorResponse = {
   error: { code: ErrorCode.NOT_FOUND, message: 'Không tìm thấy tài nguyên.', details: null },
@@ -43,7 +59,7 @@ export function isAuthHttpPathAllowed(url: string, allowlist: readonly string[] 
 
 /** Middleware của `AuthModule`, chạy trước handler Better Auth: ngoài allowlist → 404 dạng lỗi chuẩn. */
 export function authHttpGate(req: Request, res: Response, next: () => void): void {
-  if (isAuthHttpPathAllowed(req.originalUrl ?? req.url)) {
+  if (AUTH_HTTP_METHODS.has(req.method) && isAuthHttpPathAllowed(req.originalUrl ?? req.url)) {
     next();
     return;
   }
@@ -86,6 +102,31 @@ export function logBetterAuth(level: string, message: unknown, ...args: unknown[
   else authLogger.log(meta, msg);
 }
 
+/** Không lưu token của Google: Tickee chỉ cần danh tính, không gọi API Google thay người dùng. */
+const WITHOUT_PROVIDER_TOKENS = { accessToken: null, refreshToken: null, idToken: null } as const;
+
+/** Callback OAuth của Better Auth (`/callback/:id`). */
+const OAUTH_CALLBACK_ENDPOINT = '/callback/:id';
+
+/**
+ * Better Auth kiểm `email_verified` của provider *trước* `validateUserInfo` khi email đã có user (nối tài khoản), và
+ * khi đó trả `account_not_linked`. Với cấu hình của Tickee (`trustedProviders: []`, liên kết bật, user OTP luôn
+ * `emailVerified`, user Google chỉ được tạo khi email đã xác minh) mã này chỉ xảy ra khi Google báo email chưa xác
+ * minh, nên đổi thành `email_not_verified` để web hiện đúng thông báo dù email mới hay đã có.
+ */
+export function rewriteUnverifiedLinkError(location: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(location);
+  } catch {
+    return null;
+  }
+  if (url.searchParams.get(SIGN_IN_ERROR_PARAM) !== 'account_not_linked') return null;
+  url.searchParams.set(SIGN_IN_ERROR_PARAM, GoogleSignInError.EMAIL_NOT_VERIFIED);
+  url.searchParams.delete('error_description');
+  return url.toString();
+}
+
 /** Better Auth (AD-19) — nơi duy nhất cấp session. Chỉ được dựng trong mô-đun `identity`. */
 export function createAuth(config: IdentityConfig, db: Database, emailTransport: EmailTransport) {
   return betterAuth({
@@ -100,7 +141,48 @@ export function createAuth(config: IdentityConfig, db: Database, emailTransport:
         // Chỉ `POST /v1/identity/consent` ghi cột này; client không tự đặt được.
         consentedAt: { type: 'date', required: false, input: false },
       },
+      // Chạy trước khi tạo user, nối tài khoản hay đăng nhập lại bằng Google: email Google chưa xác minh thì từ chối,
+      // không ghi `users`/`accounts`/`sessions` nào. Callback chuyển lỗi về `errorCallbackURL?error=email_not_verified`.
+      validateUserInfo: ({ user, source }) => {
+        if (source.method === 'oauth' && user.emailVerified !== true) {
+          return { error: GoogleSignInError.EMAIL_NOT_VERIFIED, errorDescription: 'Email chưa được xác minh' };
+        }
+        return undefined;
+      },
     },
+    socialProviders: {
+      google: {
+        clientId: config.GOOGLE_CLIENT_ID,
+        clientSecret: config.GOOGLE_CLIENT_SECRET,
+        // Chỉ `openid email profile` (mặc định của Better Auth); không gộp scope đã cấp trước đó.
+        includeGrantedScopes: false,
+        // `users.name` lấy theo Google; không lưu ảnh đại diện.
+        mapProfileToUser: () => ({ image: undefined }),
+      },
+    },
+    account: {
+      // Cùng email (chữ thường) luôn là một user: Google tự nối vào user OTP sẵn có. Không tin provider nào
+      // (`trustedProviders: []`) để Better Auth luôn đòi `email_verified`; `requireLocalEmailVerified` giữ mặc định.
+      accountLinking: { enabled: true, trustedProviders: [], updateUserInfoOnLink: true },
+    },
+    databaseHooks: {
+      account: {
+        create: { before: async (account) => ({ data: { ...account, ...WITHOUT_PROVIDER_TOKENS } }) },
+        update: { before: async (account) => ({ data: { ...account, ...WITHOUT_PROVIDER_TOKENS } }) },
+      },
+    },
+    hooks: {
+      after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== OAUTH_CALLBACK_ENDPOINT) return;
+        const returned = ctx.context.returned;
+        const location = isAPIError(returned) ? returned.headers?.get('location') : null;
+        const rewritten = location ? rewriteUnverifiedLinkError(location) : null;
+        if (rewritten) throw ctx.redirect(rewritten);
+      }),
+    },
+    // Lỗi OAuth không gắn được với một state hợp lệ (state sai/hết hạn) về màn đăng nhập của web, không về
+    // `/v1/auth/error` (đã bị cổng HTTP chặn).
+    onAPIError: { errorURL: `${config.WEB_ORIGIN}${LOGIN_PATH}` },
     // Không tự xóa verification hết hạn của người khác mỗi lần tra: nếu xóa, người nhập mã đã hết hạn
     // nhận `INVALID_OTP` thay vì `OTP_EXPIRED`. Bản ghi bị thay khi gửi mã mới hoặc bị tiêu khi xác minh.
     verification: { disableCleanup: true },
@@ -111,6 +193,7 @@ export function createAuth(config: IdentityConfig, db: Database, emailTransport:
     advanced: {
       database: { generateId: false },
       cookiePrefix: 'tickee',
+      // Áp cho mọi cookie của Better Auth (session OTP/Google, state OAuth `tickee.state`).
       // httpOnly + SameSite=Lax là mặc định của Better Auth; Secure (và tiền tố `__Secure-`) khi api chạy HTTPS,
       // theo URL công khai chứ không theo NODE_ENV (staging HTTPS cũng phải có Secure).
       useSecureCookies: new URL(config.API_PUBLIC_URL).protocol === 'https:',

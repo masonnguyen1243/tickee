@@ -554,17 +554,19 @@ describe('session, đồng ý NĐ 13 và đăng xuất', () => {
 });
 
 describe('ranh giới HTTP', () => {
-  it('mọi endpoint HTTP của Better Auth dưới /v1/auth trả 404 (allowlist rỗng), kể cả khi có session', async () => {
+  it('mọi endpoint HTTP của Better Auth dưới /v1/auth (trừ callback Google) trả 404, kể cả khi có session', async () => {
     const { cookie } = await signIn(newEmail());
     const endpoints = Object.values(h.app.get(AuthService).api as Record<string, { path?: unknown }>)
       .map((e) => e.path)
       .filter((p): p is string => typeof p === 'string');
     // Đủ endpoint lõi + emailOTP (gồm hai đường dẫn OTP gốc).
     expect(endpoints).toEqual(expect.arrayContaining(['/email-otp/send-verification-otp', '/sign-in/email-otp']));
+    expect(endpoints).toEqual(expect.arrayContaining(['/sign-in/social', '/get-session', '/callback/:id']));
     expect(endpoints.length).toBeGreaterThan(20);
 
     const email = newEmail();
     const sentBefore = h.email.sent.length;
+    // `/callback/:id` chỉ mở cho đúng `GET /callback/google` (kiểm riêng trong google-login.test.ts); mọi id khác vẫn 404.
     for (const path of endpoints) {
       const url = `/v1/auth${path.replace(/:[^/]+/g, 'x')}`;
       for (const method of ['get', 'post'] as const) {
@@ -580,6 +582,11 @@ describe('ranh giới HTTP', () => {
   });
 
   it('allowlist so khớp đường dẫn đã chuẩn hóa, chỉ dưới /v1/auth', () => {
+    expect(isAuthHttpPathAllowed('/v1/auth/callback/google?code=x&state=y')).toBe(true);
+    expect(isAuthHttpPathAllowed('/v1/auth/callback/google/')).toBe(false);
+    expect(isAuthHttpPathAllowed('/v1/auth/callback/github')).toBe(false);
+    expect(isAuthHttpPathAllowed('/v1/auth/callback/google/../../sign-in/social')).toBe(false);
+    expect(isAuthHttpPathAllowed('/v1/auth/sign-in/social')).toBe(false);
     const allow = ['/get-session'];
     expect(isAuthHttpPathAllowed('/v1/auth/get-session?x=1', allow)).toBe(true);
     expect(isAuthHttpPathAllowed('/v1/auth/./get-session', allow)).toBe(true);

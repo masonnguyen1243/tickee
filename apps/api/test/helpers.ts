@@ -29,6 +29,9 @@ export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
   // Không có SMTP trong test: test thay EMAIL_TRANSPORT bằng transport giả; cổng 1 để lỡ gọi thật thì lỗi ngay.
   SMTP_URL: 'smtp://127.0.0.1:1',
   EMAIL_FROM: 'Tickee <no-reply@tickee.test>',
+  // OAuth client giả: test chặn `fetch` tới token endpoint của Google, không gọi Google thật.
+  GOOGLE_CLIENT_ID: 'test-client-id.apps.googleusercontent.com',
+  GOOGLE_CLIENT_SECRET: 'test-only-google-client-secret',
   ...overrides,
 });
 

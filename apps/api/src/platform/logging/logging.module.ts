@@ -1,7 +1,7 @@
 import type { IncomingMessage } from 'node:http';
 import { LoggerModule } from 'nestjs-pino';
 import type { DestinationStream } from 'pino';
-import { basePinoOptions, genReqId } from './pino-options.js';
+import { basePinoOptions, genReqId, httpSerializers } from './pino-options.js';
 
 const PROBE_PATHS = new Set(['/healthz', '/readyz']);
 
@@ -16,6 +16,7 @@ export function createLoggerModule({ level, destination }: LoggingOptions) {
   const options = {
     ...basePinoOptions(level),
     genReqId,
+    serializers: httpSerializers,
     customProps: (req: IncomingMessage & { id?: unknown }) => ({ requestId: req.id }),
     autoLogging: { ignore: (req: IncomingMessage) => PROBE_PATHS.has((req.url ?? '').split('?')[0] ?? '') },
   };

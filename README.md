@@ -56,7 +56,8 @@ Mailpit: SMTP `localhost:1025`, giao diện `http://localhost:8025`.
 ### Đăng nhập bằng mã OTP ở local
 
 1. Chạy đủ docker compose, api (`APP_ROLE=api`) và web như trên. `.env` cần các biến đăng nhập/email của `.env.example`
-   (`BETTER_AUTH_SECRET`, `API_PUBLIC_URL`, `WEB_ORIGIN`, `SMTP_URL`, `EMAIL_FROM`); thiếu thì api dừng và nêu tên biến.
+   (`BETTER_AUTH_SECRET`, `API_PUBLIC_URL`, `WEB_ORIGIN`, `SMTP_URL`, `EMAIL_FROM`, `GOOGLE_CLIENT_ID`,
+   `GOOGLE_CLIENT_SECRET`); thiếu thì api dừng và nêu tên biến.
 2. Mở `http://localhost:3000/dang-nhap`, nhập email bất kỳ rồi bấm "Gửi mã".
 3. Lấy mã 6 số trong Mailpit: `http://localhost:8025` (mọi email gửi ra ở local đều nằm ở đây, không tới hộp thư thật).
 4. Nhập mã. Tài khoản mới phải qua màn đồng ý NĐ 13 (`/dong-y`) rồi mới về trang `returnTo`.
@@ -64,6 +65,20 @@ Mailpit: SMTP `localhost:1025`, giao diện `http://localhost:8025`.
 Giới hạn gửi mã: 1 lần/60 giây và 5 lần/giờ mỗi email, 20 lần/giờ mỗi IP. Nhập sai quá 15 lần trong 24 giờ thì email
 bị khóa cả gửi lẫn xác minh (`OTP_LOCKED`). Muốn thử lại ngay ở local:
 `psql postgresql://tickee_migrator:tickee_migrator@localhost:5432/tickee -c 'DELETE FROM otp_send_events; DELETE FROM otp_verify_failures'`.
+
+### Đăng nhập bằng Google ở local
+
+1. Vào Google Cloud Console → APIs & Services → Credentials (`https://console.cloud.google.com/apis/credentials`).
+   Lần đầu phải cấu hình OAuth consent screen (loại External, chế độ Testing, thêm email của bạn vào Test users;
+   scope chỉ cần `openid`, `email`, `profile`).
+2. Create credentials → OAuth client ID → loại **Web application**.
+   Authorized redirect URIs: `http://localhost:3001/v1/auth/callback/google` (tức `<API_PUBLIC_URL>/v1/auth/callback/google`;
+   staging/production thêm URI theo `API_PUBLIC_URL` của môi trường đó). Không cần Authorized JavaScript origins.
+3. Đặt `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` vào `.env` (không commit) rồi khởi động lại api.
+4. Mở `http://localhost:3000/dang-nhap` → "Tiếp tục với Google". Cùng email với tài khoản OTP thì vẫn là một tài khoản
+   (thêm một dòng `accounts` với `provider_id = 'google'`). Google chưa xác minh email thì không đăng nhập được.
+
+Hai biến này bắt buộc với vai api; test và CI dùng giá trị giả (test chặn lời gọi tới token endpoint của Google).
 
 ## Kiểm tra
 
@@ -95,6 +110,7 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `WEB_ORIGIN`             | api         | origin duy nhất được CORS kèm cookie |
 | `AUTH_COOKIE_DOMAIN`     | api         | tùy chọn; tên miền cha cho cookie session (vd. `tickee.vn`) |
 | `SMTP_URL`, `EMAIL_FROM` | api         | gửi email OTP; local là Mailpit `smtp://localhost:1025` |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | api | bắt buộc; OAuth client Google, redirect URI `<API_PUBLIC_URL>/v1/auth/callback/google` |
 | `NEXT_PUBLIC_API_BASE_URL` | web       | gốc REST của api; client thêm `/v1`; nhúng lúc build |
 | `TICKEE_UI_KIT`          | web         | `1` bật `/ui-kit`; production không đặt (404) |
 
