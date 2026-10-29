@@ -169,6 +169,8 @@ Code review PR #8 (29/10/2026), diff `origin/main...HEAD` (bỏ lockfile, `drizz
 
 ## Spec Change Log
 
+- 2026-10-29 (retro Epic 1, AI-4): ghi nhận hai hành vi không có trong AC gốc, nay đã đưa vào `epics.md` (Story 1.3) và PRD (FR-1): giới hạn gửi theo IP là 20 mã mỗi giờ (`OTP_SEND_LIMITS.ipPerHour`); trần sai theo ngày, hơn 15 lần sai trong 24 giờ thì khóa gửi và xác minh mã, trả `OTP_LOCKED` (bảng `otp_verify_failures`, migration `0002`, code review PR #8).
+
 ## Review Triage Log
 
 Lượt 1. Diff review loại `_bmad-output` (spec là claims, chỉ đưa cho lớp edge), `pnpm-lock.yaml` và `drizzle/meta` (file sinh tự động). Mã route: P1–P11 là các nhóm patch.

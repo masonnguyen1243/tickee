@@ -435,7 +435,8 @@ So that tôi vào được Tickee mà không cần nhớ mật khẩu.
 **Then** hệ thống gửi mã 6 số qua `EmailTransport` (Mailpit ở local) bằng Better Auth `emailOTP` (gắn vào NestJS qua `@thallesp/nestjs-better-auth`), và màn hiện "Mã đã gửi tới {email}" kèm đếm ngược gửi lại (FR-1, UX-DR14)
 **And** bản ghi user chỉ được tạo khi OTP được xác minh đúng lần đầu, không tạo lúc gửi mã
 **And** OTP lưu dạng hash, hiệu lực 5 phút, dùng một lần; gửi mã mới làm mã cũ hết hiệu lực
-**And** giới hạn gửi mã: 1 lần mỗi 60 giây và tối đa 5 mã mỗi giờ cho mỗi email, kèm giới hạn theo IP, đếm trong Postgres; vượt giới hạn hiện "Bạn đã yêu cầu quá nhiều mã. Thử lại sau {n} phút." (NFR-6)
+**And** giới hạn gửi mã: 1 lần mỗi 60 giây và tối đa 5 mã mỗi giờ cho mỗi email, kèm giới hạn theo IP (tối đa 20 mã mỗi giờ), đếm trong Postgres; vượt giới hạn hiện "Bạn đã yêu cầu quá nhiều mã. Thử lại sau {n} phút." (NFR-6)
+**And** một email nhập sai hơn 15 lần trong 24 giờ thì bị khóa cả gửi mã lẫn xác minh mã tới khi lần sai cũ nhất ra khỏi cửa sổ 24 giờ; API trả `OTP_LOCKED`, màn hiện "Bạn đã nhập sai quá nhiều lần. Thử lại sau {n} giờ." (NFR-6)
 
 **Given** ô `otp-input` 6 ô
 **When** tôi dán cả mã vào ô đầu hoặc trình duyệt tự điền (`autocomplete="one-time-code"`)
@@ -482,6 +483,7 @@ So that tôi không phải chờ mã email.
 **Then** vẫn là cùng một Tài khoản Tickee, không tạo bản ghi user thứ hai (FR-1)
 **And** chiều ngược lại (đăng ký Google trước, sau đó dùng OTP) cũng ra cùng tài khoản
 **And** chỉ tự liên kết khi Google trả `email_verified = true`; email chưa xác minh thì từ chối đăng nhập Google với thông báo "Email Google chưa được xác minh. Hãy dùng mã qua email.", không tạo hay nối tài khoản
+**And** Tickee không lưu token của Google (`access_token`, `refresh_token`, `id_token` luôn null); `users.name` lấy theo Google
 
 **Given** tôi hủy giữa chừng trên màn Google
 **When** quay về Tickee

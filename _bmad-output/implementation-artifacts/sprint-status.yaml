@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 10-29-2026 15:10
+last_updated: 10-29-2026 15:48
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -39,8 +39,8 @@ development_status:
   1-1-dựng-monorepo-theo-structural-seed: done
   1-2-hệ-thống-giao-diện-rạp-tối-và-khung-web: done
   1-3-đăng-nhập-bằng-otp-qua-email: done
-  1-4-đăng-nhập-bằng-google: review
-  epic-1-retrospective: optional
+  1-4-đăng-nhập-bằng-google: done
+  epic-1-retrospective: done
 
   epic-2: backlog
   2-1-tạo-btc-và-khung-dashboard: backlog
@@ -135,3 +135,54 @@ action_items:
       làm Story 3.8"
     owner: "Mason"
     status: open
+  - id: "epic-1-retro-item-4-ai-1-story-nhỏ-bịt-rò-pii-trong-log-che"
+    epic: 1
+    action: "AI-1: Story nhỏ bịt rò PII trong log: che IP/UA của pino-http, redact
+      theo đường dẫn thay vì khóa name trần, ErrorFilter chỉ log {type, code} cho
+      DrizzleQueryError, logBetterAuth bỏ e.message của lỗi DB; có test cho cả hai
+      đường. Làm trước Story 2.6"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
+  - id: "epic-1-retro-item-5-ai-2-làm-chắc-get-v1-identity-google-bắt"
+    epic: 1
+    action: "AI-2: Làm chắc GET /v1/identity/google: bắt lỗi rồi chuyển về /dang-nhap?error=…
+      thay vì JSON 500, thêm giới hạn theo IP, tách việc dọn verifications/sessions
+      khỏi transaction gửi OTP (job pg-boss định kỳ). Đầu Epic 2"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
+  - id: "epic-1-retro-item-6-ai-3-gom-các-mục-triage-bị-reject-vì-chỉ"
+    epic: 1
+    action: "AI-3: Gom các mục triage bị reject vì chỉ gặp khi deploy (1.1 #11, 1.2
+      #5, 1.3 #9/#10/#38, TRUST_PROXY_HOPS, 1.4 #24, redirect im lặng khi /me 401
+      sau Google) vào deferred-work.md gắn Story 4.7; từ giờ mục reject có điều kiện
+      tương lai phải vào deferred-work"
+    owner: "Mason"
+    status: done
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
+  - id: "epic-1-retro-item-7-ai-4-đồng-bộ-spec-với-thực-tế-sửa-câu-ha"
+    epic: 1
+    action: "AI-4: Đồng bộ spec với thực tế: sửa câu hai dòng accounts ở spec 1.4;
+      đưa OTP_LOCKED (15 lần sai/24 giờ), giới hạn IP 20 lần/giờ, không lưu Google
+      token vào epics/PRD (NFR-6); ghi thay đổi so với spec vào Spec Change Log. Trước
+      Story 2.1"
+    owner: "Mason"
+    status: done
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
+  - id: "epic-1-retro-item-8-ai-5-trước-story-2-2-tách-auth-ts-gom-in"
+    epic: 1
+    action: "AI-5: Trước Story 2.2: tách auth.ts, gom internalAdapter và định dạng
+      <hash>:<attempts> của Better Auth vào một adapter có test ghim hành vi 1.7;
+      tách login-form.tsx thành hook, gộp phần map lỗi bị lặp"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
+  - id: "epic-1-retro-item-9-ai-6-trước-epic-3-thêm-e2e-smoke-full-st"
+    epic: 1
+    action: "AI-6: Trước Epic 3: thêm e2e smoke full-stack (web + api thật + Mailpit)
+      cho OTP → đồng ý → returnTo → đăng xuất trong CI; gộp bước đăng xuất bị chép
+      và sửa e2e lỗi lẻ khi từ chối đồng ý"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
