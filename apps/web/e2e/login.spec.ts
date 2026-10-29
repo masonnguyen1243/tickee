@@ -120,6 +120,19 @@ test('Backspace ở ô trống lùi về ô trước và xóa số ở đó', as
   expect(verifyCalls(calls)).toHaveLength(0);
 });
 
+test('gõ đè lên ô đã có số: chỉ giữ số mới, các ô khác không đổi', async ({ page }) => {
+  await mockIdentityApi(page, { 'POST /identity/otp': otpSent });
+  await requestCode(page);
+  const boxes = otpBoxes(page);
+  await boxes.first().click();
+  await page.keyboard.type('123');
+  await boxes.first().click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('9');
+  const values = await boxes.evaluateAll((inputs) => inputs.map((i) => (i as HTMLInputElement).value));
+  expect(values).toEqual(['9', '2', '3', '', '', '']);
+});
+
 test('mã sai: "Mã chưa đúng, còn N lần", lỗi gắn vào ô bằng aria-describedby', async ({ page }) => {
   await mockIdentityApi(page, {
     'POST /identity/otp': otpSent,
@@ -164,6 +177,37 @@ test('mã hết hạn: "Mã đã hết hạn" + "Gửi mã mới" gửi lại m�
   await expect.poll(() => calls.filter((c) => c.path === '/identity/otp').length).toBe(2);
   await expect(page.getByText('Mã đã hết hạn')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Xác nhận' })).toBeVisible();
+});
+
+test('gửi lại ở bước mã bị giới hạn: "Bạn đã yêu cầu quá nhiều mã. Thử lại sau n phút."', async ({ page }) => {
+  let sends = 0;
+  await mockIdentityApi(page, {
+    'POST /identity/otp': () => (++sends === 1 ? otpSent() : apiError(429, 'OTP_RATE_LIMITED', { retryAfterSeconds: 90 })),
+    'POST /identity/otp/verify': () => apiError(400, 'OTP_EXPIRED'),
+  });
+  await requestCode(page);
+  await pasteCode(page, '123456');
+  await page.getByRole('button', { name: 'Gửi mã mới' }).click();
+  await expect(page.getByText('Bạn đã yêu cầu quá nhiều mã. Thử lại sau 2 phút.')).toBeVisible();
+  expect(sends).toBe(2);
+});
+
+test('nhập sai quá nhiều lần trong ngày (OTP_LOCKED): thông báo theo giờ, không có "Gửi mã mới"', async ({ page }) => {
+  let sends = 0;
+  await mockIdentityApi(page, {
+    'POST /identity/otp': () => (++sends === 1 ? otpSent() : apiError(429, 'OTP_LOCKED', { retryAfterSeconds: 120 })),
+    'POST /identity/otp/verify': () => apiError(429, 'OTP_LOCKED', { retryAfterSeconds: 5000 }),
+  });
+  await requestCode(page);
+  await pasteCode(page, '123456');
+  await expect(page.getByText('Bạn đã nhập sai quá nhiều lần. Thử lại sau 2 giờ.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Gửi mã mới' })).toHaveCount(0);
+
+  // Bước email: gửi mã cũng bị khóa.
+  await page.getByRole('button', { name: 'Đổi email' }).click();
+  await page.getByRole('button', { name: 'Gửi mã' }).click();
+  await expect(page.getByText('Bạn đã nhập sai quá nhiều lần. Thử lại sau 1 giờ.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Gửi mã mới' })).toHaveCount(0);
 });
 
 test('hết lượt nhập: "Mã đã hết hiệu lực" + "Gửi mã mới"; "Đổi email" về bước email', async ({ page }) => {
@@ -222,6 +266,34 @@ test('"Không đồng ý": đăng xuất, về trang trước kèm thông báo r
   await expect(page.getByRole('link', { name: 'Đăng nhập' })).toBeVisible();
 });
 
+test('"Không đồng ý" khi session đã hết (sign-out 401) vẫn về returnTo kèm thông báo', async ({ page }) => {
+  let signedIn = true;
+  await mockIdentityApi(page, {
+    'GET /identity/me': () => (signedIn ? me(null) : unauthenticated()),
+    'POST /identity/sign-out': () => {
+      signedIn = false;
+      return unauthenticated();
+    },
+  });
+  await page.goto(`/dong-y?returnTo=${encodeURIComponent('/chinh-sach-du-lieu')}`);
+  await page.getByRole('button', { name: 'Không đồng ý' }).click();
+  await expect(page.getByText('Bạn cần đồng ý để dùng Tickee.')).toBeVisible();
+  await expect.poll(() => new URL(page.url()).pathname + new URL(page.url()).search).toBe('/chinh-sach-du-lieu');
+});
+
+test('màn đồng ý: ẩn danh → sang đăng nhập kèm returnTo; đã đồng ý → đi thẳng returnTo', async ({ page }) => {
+  let state: 'anonymous' | 'consented' = 'anonymous';
+  await mockIdentityApi(page, {
+    'GET /identity/me': () => (state === 'anonymous' ? unauthenticated() : me('2026-10-29T01:02:03.000Z')),
+  });
+  await page.goto('/dong-y?returnTo=/x');
+  await page.waitForURL('**/dang-nhap?returnTo=%2Fx');
+
+  state = 'consented';
+  await page.goto('/dong-y?returnTo=/x');
+  await page.waitForURL(`${WEB_ORIGIN}/x`);
+});
+
 test('CONSENT_REQUIRED từ một query → chuyển sang màn đồng ý kèm returnTo', async ({ page }) => {
   await mockIdentityApi(page, { 'GET /identity/me': () => apiError(403, 'CONSENT_REQUIRED') });
   await page.goto('/?xem=1');
@@ -244,6 +316,22 @@ test('menu tài khoản: chưa đăng nhập có "Đăng nhập"; đã đăng nh
 
   signedIn = true;
   await page.reload();
+  await page.getByRole('button', { name: `Tài khoản: ${EMAIL}` }).click();
+  await page.getByRole('menuitem', { name: 'Đăng xuất' }).click();
+  await page.waitForURL(`${WEB_ORIGIN}/`);
+  await expect(page.getByRole('link', { name: 'Đăng nhập' })).toBeVisible();
+});
+
+test('menu tài khoản: "Đăng xuất" khi session đã hết (sign-out 401) vẫn về trang chủ', async ({ page }) => {
+  let signedIn = true;
+  await mockIdentityApi(page, {
+    'GET /identity/me': () => (signedIn ? me('2026-10-29T01:02:03.000Z') : unauthenticated()),
+    'POST /identity/sign-out': () => {
+      signedIn = false;
+      return unauthenticated();
+    },
+  });
+  await page.goto('/chinh-sach-du-lieu');
   await page.getByRole('button', { name: `Tài khoản: ${EMAIL}` }).click();
   await page.getByRole('menuitem', { name: 'Đăng xuất' }).click();
   await page.waitForURL(`${WEB_ORIGIN}/`);

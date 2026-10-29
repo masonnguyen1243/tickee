@@ -2,6 +2,7 @@ import {
   ErrorCode,
   Me,
   OtpInvalidDetails,
+  OtpLockedDetails,
   OtpRateLimitedDetails,
   SendOtpResponse,
   VerifyOtpResponse,
@@ -46,6 +47,13 @@ export function retryAfterMinutes(error: ApiError): number {
   const parsed = OtpRateLimitedDetails.safeParse(error.details);
   const seconds = parsed.success ? parsed.data.retryAfterSeconds : 60;
   return Math.max(1, Math.ceil(seconds / 60));
+}
+
+/** Số giờ chờ khi email bị khóa vì nhập sai quá nhiều lần: làm tròn lên, tối thiểu 1. */
+export function retryAfterHours(error: ApiError): number {
+  const parsed = OtpLockedDetails.safeParse(error.details);
+  const seconds = parsed.success ? parsed.data.retryAfterSeconds : 3600;
+  return Math.max(1, Math.ceil(seconds / 3600));
 }
 
 export function remainingAttempts(error: ApiError): number | null {

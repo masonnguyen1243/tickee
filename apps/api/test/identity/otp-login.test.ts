@@ -4,6 +4,7 @@ import { APIError } from 'better-auth/api';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isAuthHttpPathAllowed } from '../../src/modules/identity/auth.js';
+import { OtpRateLimiter } from '../../src/modules/identity/otp-rate-limit.js';
 import { PUBLIC_ROUTE_KEY } from '../../src/platform/http/index.js';
 import { TEST_WEB_ORIGIN } from '../helpers.js';
 import { createHarness, newEmail, sessionCookie, sessionSetCookie, type Harness } from './harness.js';
@@ -59,7 +60,11 @@ describe('POST /v1/identity/otp — gửi mã', () => {
 
     const code = h.email.lastCodeFor(email);
     expect(code).toMatch(/^\d{6}$/);
-    expect(h.email.sent.at(-1)?.subject).toBe('Mã đăng nhập Tickee của bạn');
+    const message = h.email.sent.at(-1)!;
+    expect(message.subject).toBe('Mã đăng nhập Tickee của bạn');
+    expect(message.html).toContain(code);
+    expect(message.text).toContain('trong 5 phút');
+    expect(message.html).toContain('trong 5 phút');
     expect(await countRows('users', email)).toBe(0);
 
     const { rows } = await h.db.orm.execute<{ value: string }>(
@@ -132,9 +137,16 @@ describe('POST /v1/identity/otp — gửi mã', () => {
     expect(h.email.sent.filter((m) => m.to === email)).toHaveLength(1);
   });
 
-  it('mỗi lần gửi dọn lần gửi ngoài cửa sổ 1 giờ và verification hết hạn quá 24 giờ', async () => {
+  it('mỗi lần gửi dọn lần gửi > 1 giờ, lần sai > 24 giờ, verification và session hết hạn > 24 giờ', async () => {
     const stale = newEmail();
     const recent = newEmail();
+    const owner = await h.db.orm.execute<{ id: string }>(sql`INSERT INTO users (email) VALUES (${newEmail()}) RETURNING id`);
+    const userId = owner.rows[0]!.id;
+    await h.db.orm.execute(sql`INSERT INTO sessions (user_id, token, expires_at) VALUES
+      (${userId}, ${`cu-${stale}`}, now() - interval '25 hours'),
+      (${userId}, ${`moi-${recent}`}, now() - interval '23 hours')`);
+    await h.db.orm.execute(sql`INSERT INTO otp_verify_failures (email_hmac, created_at) VALUES
+      ('sai-cu', now() - interval '25 hours'), ('sai-moi', now() - interval '23 hours')`);
     await h.db.orm.execute(
       sql`INSERT INTO otp_send_events (email_hmac, ip_hmac, created_at) VALUES ('cu', 'cu', now() - interval '61 minutes'), ('moi', 'moi', now() - interval '59 minutes')`,
     );
@@ -151,6 +163,12 @@ describe('POST /v1/identity/otp — gửi mã', () => {
       sql`SELECT identifier FROM verifications WHERE identifier IN (${`sign-in-otp-${stale}`}, ${`sign-in-otp-${recent}`})`,
     );
     expect(left.rows.map((r) => r.identifier)).toEqual([`sign-in-otp-${recent}`]);
+    const sessionsLeft = await h.db.orm.execute<{ token: string }>(sql`SELECT token FROM sessions WHERE user_id = ${userId}`);
+    expect(sessionsLeft.rows.map((r) => r.token)).toEqual([`moi-${recent}`]);
+    const failuresLeft = await h.db.orm.execute<{ email_hmac: string }>(
+      sql`SELECT email_hmac FROM otp_verify_failures WHERE email_hmac IN ('sai-cu', 'sai-moi')`,
+    );
+    expect(failuresLeft.rows.map((r) => r.email_hmac)).toEqual(['sai-moi']);
   });
 
   it('bảng đếm chỉ có HMAC, không có email hay IP dạng rõ', async () => {
@@ -173,10 +191,79 @@ describe('POST /v1/identity/otp — gửi mã', () => {
     expect(errorOf(res.body).code).toBe('SERVICE_UNAVAILABLE');
     const { rows } = await h.db.orm.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM otp_send_events`);
     expect(rows[0]!.n).toBe(0);
+    // Mã Better Auth vừa tạo (email không đi) bị xóa: không đoán được mã nào.
+    const stored = await h.db.orm.execute<{ n: number }>(
+      sql`SELECT count(*)::int AS n FROM verifications WHERE identifier = ${`sign-in-otp-${email}`}`,
+    );
+    expect(stored.rows[0]!.n).toBe(0);
+    for (const otp of ['000000', '123456']) expect((await verifyOtp(email, otp)).status).toBe(400);
+    expect(await countRows('users', email)).toBe(0);
 
     h.email.failWith = null;
     await sendOtp(email).expect(200);
     expect(h.logs.text).not.toContain(email);
+  });
+
+  it('auth.api.sendVerificationOTP lỗi → 5xx, không tính lượt gửi; thử lại ngay được', async () => {
+    const email = newEmail();
+    const api = h.app.get(AuthService).api as { sendVerificationOTP: (...args: unknown[]) => Promise<unknown> };
+    const spy = vi.spyOn(api, 'sendVerificationOTP').mockRejectedValue(new APIError('INTERNAL_SERVER_ERROR'));
+    try {
+      const res = await sendOtp(email);
+      expect(res.status).toBeGreaterThanOrEqual(500);
+      const { rows } = await h.db.orm.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM otp_send_events`);
+      expect(rows[0]!.n).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+    await sendOtp(email).expect(200);
+  });
+
+  it('TRUST_PROXY_HOPS=1: giới hạn theo IP lấy từ X-Forwarded-For', async () => {
+    const proxied = await createHarness({ TRUST_PROXY_HOPS: 1 });
+    try {
+      const send = (ip: string) =>
+        proxied.http.post('/v1/identity/otp').set('x-forwarded-for', ip).send({ email: newEmail() });
+      for (let i = 0; i < 20; i++) await send('203.0.113.1').expect(200);
+      await send('203.0.113.2').expect(200);
+      const blocked = await send('203.0.113.1');
+      expect(blocked.status).toBe(429);
+      expect(errorOf(blocked.body).code).toBe('OTP_RATE_LIMITED');
+    } finally {
+      await proxied.close();
+    }
+  });
+
+  it('TRUST_PROXY_HOPS=0 (mặc định): X-Forwarded-For do client gửi bị bỏ qua', async () => {
+    for (let i = 0; i < 20; i++) {
+      await h.http
+        .post('/v1/identity/otp')
+        .set('x-forwarded-for', `203.0.113.${i + 1}`)
+        .send({ email: newEmail() })
+        .expect(200);
+    }
+    const res = await h.http.post('/v1/identity/otp').set('x-forwarded-for', '198.51.100.7').send({ email: newEmail() });
+    expect(res.status).toBe(429);
+  });
+
+  it('gửi song song cho các email khác nhau từ cùng IP không vượt 20 lần mỗi giờ', async () => {
+    const proxied = await createHarness({ TRUST_PROXY_HOPS: 1 });
+    try {
+      const ipHmac = proxied.app.get(OtpRateLimiter).ipHmac('203.0.113.9');
+      for (let i = 0; i < 19; i++) {
+        await proxied.db.orm.execute(
+          sql`INSERT INTO otp_send_events (email_hmac, ip_hmac, created_at) VALUES (${`hat-giong-${i}`}, ${ipHmac}, now() - interval '10 minutes')`,
+        );
+      }
+      const results = await Promise.all(
+        [0, 1, 2].map(() =>
+          proxied.http.post('/v1/identity/otp').set('x-forwarded-for', '203.0.113.9').send({ email: newEmail() }),
+        ),
+      );
+      expect(results.map((r) => r.status).sort()).toEqual([200, 429, 429]);
+    } finally {
+      await proxied.close();
+    }
   });
 });
 
@@ -239,6 +326,73 @@ describe('POST /v1/identity/otp/verify — xác minh mã', () => {
       expect(errorOf(after.body).code).toBe('OTP_ATTEMPTS_EXCEEDED');
     }
     expect(await countRows('users', email)).toBe(0);
+  });
+
+  it('mã đúng chỉ dùng được một lần: lần hai → 400, không tạo session mới', async () => {
+    const email = newEmail();
+    await sendOtp(email).expect(200);
+    const code = h.email.lastCodeFor(email);
+    await verifyOtp(email, code).expect(200);
+    const again = await verifyOtp(email, code);
+    expect(again.status).toBe(400);
+    expect(await countRows('sessions', email)).toBe(1);
+  });
+
+  it('quá 15 lần sai trong 24 giờ (qua nhiều mã) → khóa xác minh và gửi bằng OTP_LOCKED; hết cửa sổ thì mở', async () => {
+    const email = newEmail();
+    // 3 mã × 5 lần sai = 15 lần sai: chưa khóa.
+    for (let round = 0; round < 3; round++) {
+      await ageSendEvents(61);
+      await sendOtp(email).expect(200);
+      const code = h.email.lastCodeFor(email);
+      for (let k = 1; k <= OTP_MAX_ATTEMPTS; k++) {
+        const res = await verifyOtp(email, wrongCode(code, k));
+        expect(res.status).toBe(400);
+        expect(['OTP_INVALID', 'OTP_ATTEMPTS_EXCEEDED']).toContain(errorOf(res.body).code);
+      }
+    }
+    await ageSendEvents(61);
+    await sendOtp(email).expect(200);
+    const code = h.email.lastCodeFor(email);
+
+    // Lần sai thứ 16 → khóa.
+    const locked = await verifyOtp(email, wrongCode(code));
+    expect(locked.status).toBe(429);
+    const error = errorOf(locked.body);
+    expect(error.code).toBe('OTP_LOCKED');
+    const { retryAfterSeconds } = error.details as { retryAfterSeconds: number };
+    expect(retryAfterSeconds).toBeGreaterThan(24 * 3600 - 300);
+    expect(retryAfterSeconds).toBeLessThanOrEqual(24 * 3600);
+
+    // Khóa cả mã đúng và cả gửi mã.
+    const right = await verifyOtp(email, code);
+    expect(right.status).toBe(429);
+    expect(errorOf(right.body).code).toBe('OTP_LOCKED');
+    await ageSendEvents(61);
+    const send = await sendOtp(email);
+    expect(send.status).toBe(429);
+    expect(errorOf(send.body)).toMatchObject({ code: 'OTP_LOCKED', details: { retryAfterSeconds: expect.any(Number) } });
+    expect(await countRows('users', email)).toBe(0);
+
+    // Các lần sai rời cửa sổ 24 giờ → gửi và xác minh lại được.
+    await h.db.orm.execute(sql`UPDATE otp_verify_failures SET created_at = created_at - interval '25 hours'`);
+    await ageSendEvents(61);
+    await sendOtp(email).expect(200);
+    await verifyOtp(email, h.email.lastCodeFor(email)).expect(200);
+  });
+
+  it('verify khi email không có mã nào không bị tính là lần sai: người lạ không khóa được email', async () => {
+    const email = newEmail();
+    const failures = async () =>
+      (await h.db.orm.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM otp_verify_failures`)).rows[0]!.n;
+    const before = await failures();
+    for (let i = 0; i < 20; i++) {
+      const res = await verifyOtp(email, '000000');
+      expect(res.status).toBe(400);
+    }
+    expect(await failures()).toBe(before);
+    await sendOtp(email).expect(200);
+    await verifyOtp(email, h.email.lastCodeFor(email)).expect(200);
   });
 
   it('mã hết hạn (quá 300 giây) → OTP_EXPIRED', async () => {

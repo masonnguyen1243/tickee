@@ -106,6 +106,47 @@ context:
 - Given `pnpm turbo build typecheck lint:deps test` và Playwright, then tất cả pass; một import `better-auth` ngoài `modules/identity` làm `lint:deps` đỏ.
 - Given log api khi chạy toàn luồng, then không chứa email, mã OTP hay token session.
 
+### Review Findings
+
+Code review PR #8 (29/10/2026), diff `origin/main...HEAD` (bỏ lockfile, `drizzle/meta`, `_bmad-output`). 4 lớp: blind, edge, verification-gap, acceptance. 50 finding.
+
+- [x] [Review][Decision] Không có trần số lần nhập sai qua các lần gửi lại — Mỗi lần gửi mã mới, bộ đếm 5 lần sai lại bắt đầu từ 0. Với 5 mã/giờ cho một email, kẻ tấn công thử được 25 mã/giờ (~600/ngày), không giới hạn theo thời gian. Không gian mã là 10⁶, nên đoán trúng ~0,06%/ngày cho mỗi email bị nhắm. **Mason chọn phương án 1 (29/10/2026):** thêm trần sai theo ngày, chuyển thành patch bên dưới.
+- [x] [Review][Patch] Trần sai theo ngày: một email nhập sai quá 15 lần trong 24 giờ thì khóa cả gửi mã lẫn xác minh mã cho email đó đến khi lần sai cũ nhất ra khỏi cửa sổ 24 giờ. Thêm mã lỗi `OTP_LOCKED` (429, `details.retryAfterSeconds`). UI hiện "Bạn đã nhập sai quá nhiều lần. Thử lại sau {n} giờ." (n làm tròn lên, tối thiểu 1). Bảng đếm chỉ lưu HMAC [apps/api/src/modules/identity/identity.service.ts:62]
+- [x] [Review][Patch] SMTP lỗi để lại một mã mới không bị giới hạn: phải xóa verification `sign-in-otp-<email>` khi gửi thất bại [apps/api/src/modules/identity/identity.service.ts:53]
+- [x] [Review][Patch] `sessions` hết hạn (giữ `ip_address`/`user_agent`) không bao giờ bị xóa: thêm vào lượt dọn bản ghi [apps/api/src/modules/identity/otp-rate-limit.ts:107]
+- [x] [Review][Patch] Test `TRUST_PROXY_HOPS` ở tầng request (theo `X-Forwarded-For`) và test gửi song song cho các email khác nhau từ cùng IP [apps/api/src/roles/api.ts:22]
+- [x] [Review][Patch] Test nội dung HTML của email OTP có mã và "5 phút" [apps/api/src/modules/identity/otp-email.ts:10]
+- [x] [Review][Patch] Test trả lại lượt đếm khi `sendVerificationOTP` ném lỗi (nhánh catch) [apps/api/src/modules/identity/identity.service.ts:49]
+- [x] [Review][Patch] e2e: đăng xuất nhận 401 vẫn hoàn tất (từ chối đồng ý, menu tài khoản) [apps/web/lib/auth/api.ts:35]
+- [x] [Review][Patch] e2e: `/dong-y` khi ẩn danh chuyển sang `/dang-nhap`, khi đã đồng ý chuyển về `returnTo` [apps/web/app/(public)/dong-y/consent-form.tsx:28]
+- [x] [Review][Patch] e2e: gõ đè lên ô `OtpInput` đã có số [apps/web/components/tickee/otp-input.tsx:88]
+- [x] [Review][Patch] e2e: gửi lại mã ở bước nhập mã bị 429 thì hiện thông báo [apps/web/app/(public)/dang-nhap/login-form.tsx:117]
+- [x] [Review][Patch] Test mã đúng không dùng lại được lần hai [apps/api/test/identity/otp-login.test.ts]
+- [x] [Review][Patch] `logBetterAuth` ném TypeError khi message không phải chuỗi (`session.mjs:370` gọi `logger.error(e)`) [apps/api/src/modules/identity/auth.ts:77]
+- [x] [Review][Patch] Trang `/chinh-sach-du-lieu` (bản nháp) thiếu `robots: noindex` [apps/web/app/(public)/chinh-sach-du-lieu/page.tsx:11]
+- [x] [Review][Defer] pino-http log IP/User-Agent dạng rõ; che khóa `name` ở mọi log [apps/api/src/platform/logging/pino-options.ts] — deferred: có từ Story 1.1, đã ghi ở deferred-work (Triage #7, #8)
+- [x] [Review][Defer] `DrizzleQueryError` lọt ra `ErrorFilter` nên log cả params chứa email [apps/api/src/platform/http/error.filter.ts:40] — deferred: có từ Story 1.1, đã ghi ở deferred-work (Triage #31)
+
+**Rejected:**
+- Cookie `Secure` theo scheme; ở production vẫn chấp nhận `http`, secret mẫu, `SMTP_URL` rỗng, `TRUST_PROXY_HOPS` không chặn trên, không kiểm same-site/cookie domain (low): chỉ gặp khi cấu hình sai lúc deploy, sửa phải thêm `superRefine` (Triage #9, #10, #38).
+- Implementation/Design Notes mô tả cơ chế chặn khác code: muốn sửa phải sửa spec.
+- `Separator` "hoặc" chưa render (low): chưa có nút Google thì một chữ "hoặc" đứng riêng là vô nghĩa.
+- e2e `CONSENT_REQUIRED` giả lập qua `/me` (low): test vẫn chứng minh handler chạy; hiện chưa có query nào khác trả mã này.
+- Thay đổi ngoài spec (`pnpm dev`, pino-pretty, `agentRules`) (false): người dùng yêu cầu trong session.
+- Chặn mã của nạn nhân bằng cách verify sai; IP xoay IPv6 /64, `::ffff`, `unknown`, email alias, cổng trong XFF (low): Triage #11, #28.
+- Dọn bản ghi không có index (low): `otp_send_events` chỉ giữ 1 giờ nên bảng nhỏ.
+- Từ chối đồng ý vẫn giữ tài khoản; chưa rút được đồng ý; chưa lưu phiên bản chính sách; CSRF consent/sign-out: Triage #4, #5, #18.
+- Văn bản đồng ý chưa nêu IP/UA, bên xử lý SMTP, thời hạn lưu: là bản nháp, phải thay trước Closed Beta theo Quyết định.
+- IP trong `sessions` lấy từ XFF (low): chưa tính năng nào đọc cột này.
+- `verifications.identifier` chưa có trong PII (low): không có đường log nào ghi giá trị này.
+- Thiếu `Retry-After`/`Cache-Control: no-store` (low).
+- `identity/index.ts` chưa export `OptionalAuth`/kiểu session (low): chưa mô-đun nào cần; thêm khi Epic 2 dùng.
+- Mất bản ghi mã → `OTP_ATTEMPTS_EXCEEDED`, kể cả sau khi hết hạn (low): đằng nào cũng dẫn tới "Gửi mã mới" (Triage #12).
+- Test `ConsentGuard` + `@OptionalAuth` chưa đồng ý, e2e đếm ngược (low).
+- Trạng thái nút gửi lại lệch sau 429 (low): Triage #14.
+- `release` ném lỗi, rotate rồi SMTP lỗi, verify đồng thời, đua 23505, đổi email khi đang gửi, đua khi từ chối, đăng xuất lỗi im lặng, `/dang-nhap/` có `/` cuối: Triage #30, #13, #12, #33, #43, #44, #45, #42.
+- Dán mã lẫn số khác (vd. ngày tháng) (low): hiếm, sửa phải thêm nhánh.
+
 ## Implementation Notes
 
 - `SessionGuard` (`modules/identity/session.guard.ts`) thay `AuthGuard` của thư viện (`disableGlobalAuthGuard: true`). Guard của thư viện bỏ mất cookie mới khi Better Auth gia hạn session; có test cho trường hợp này. Guard vẫn tôn trọng `@AllowAnonymous`/`@OptionalAuth`. Cả `SessionGuard` lẫn `ConsentGuard` đăng ký trong `IdentityModule` theo đúng thứ tự.
@@ -121,6 +162,10 @@ context:
   - `pnpm turbo build typecheck lint:deps test --force`: 11/11 task, api 65, web 41, contracts 20 test.
   - Playwright 46/46 trên `ios-webkit` và `android-chromium`.
   - Smoke test local với Mailpit thật do agent triển khai chạy.
+- Sau code review PR #8 (29/10/2026), đã áp 13 patch trong Review Findings:
+  - Cơ chế chặn HTTP của Better Auth trong code bây giờ là `authHttpGate` với `AUTH_HTTP_ALLOWLIST` đang trống, nên mọi route `/v1/auth/*` đều trả 404, kể cả `get-session`. Ghi chú về `disabledPaths` ở trên đã cũ.
+  - Trần sai theo ngày dùng bảng `otp_verify_failures` (migration `0002`) và mã lỗi `OTP_LOCKED`. Lần sai chỉ được ghi khi email có mã đang chờ xác minh; nếu không, ai biết email cũng khóa được người đó chỉ bằng request verify mà không cần gửi mã.
+  - Kiểm tra: `pnpm turbo build typecheck lint:deps test --force` chạy xong 11/11 task, gồm api 81, web 46, contracts 20 test; Playwright 60/60.
 
 ## Spec Change Log
 

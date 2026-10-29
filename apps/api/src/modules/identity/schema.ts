@@ -95,5 +95,19 @@ export const otpSendEvents = pgTable(
   ],
 );
 
+/**
+ * Lần xác minh mã sai (NFR-6, khóa theo ngày): quá `OTP_DAILY_FAILURE_LIMIT` lần trong 24 giờ thì email bị khóa
+ * gửi và xác minh. Chỉ lưu HMAC của email.
+ */
+export const otpVerifyFailures = pgTable(
+  'otp_verify_failures',
+  {
+    id: id(),
+    emailHmac: text('email_hmac').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('otp_verify_failures_email_hmac_created_at_idx').on(t.emailHmac, t.createdAt)],
+);
+
 /** Schema truyền cho adapter Drizzle của Better Auth. */
 export const authSchema = { users, sessions, accounts, verifications };
