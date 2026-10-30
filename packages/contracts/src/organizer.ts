@@ -114,3 +114,35 @@ export type MembershipList = z.infer<typeof MembershipList>;
 export const CREATE_ORGANIZATION_PATH = '/tao-btc';
 /** Trang đích dashboard của một BTC. */
 export const organizationDashboardPath = (organizationId: string): string => `/btc/${organizationId}`;
+
+/** Các mục cấp BTC của dashboard (khóa ổn định; nhãn và icon do web khai báo). */
+export const OrganizationSection = {
+  EVENTS: 'events',
+  CREATE_EVENT: 'create-event',
+  REVIEW_QUEUE: 'review-queue',
+  TOKEN: 'token',
+  MEMBERS: 'members',
+  PAYOUT_ACCOUNT: 'payout-account',
+  SETTINGS: 'settings',
+  SCAN: 'scan',
+} as const;
+export type OrganizationSection = (typeof OrganizationSection)[keyof typeof OrganizationSection];
+
+/** Đoạn đường dẫn của từng mục, sau `/btc/{id}`. Danh sách Sự kiện là chính trang đích. */
+export const ORGANIZATION_SECTION_SEGMENTS: Readonly<Record<OrganizationSection, string>> = {
+  events: '',
+  'create-event': 'su-kien/tao',
+  'review-queue': 'can-xu-ly',
+  token: 'token',
+  members: 'thanh-vien',
+  'payout-account': 'tai-khoan-nhan-tien',
+  settings: 'cai-dat',
+  scan: 'quet-ve',
+};
+
+/** `/btc/{id}` (Sự kiện) hoặc `/btc/{id}/{đoạn của mục}`. */
+export function organizationSectionPath(organizationId: string, section: OrganizationSection): string {
+  const segment = ORGANIZATION_SECTION_SEGMENTS[section];
+  const base = organizationDashboardPath(organizationId);
+  return segment === '' ? base : `${base}/${segment}`;
+}

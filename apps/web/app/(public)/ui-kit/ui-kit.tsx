@@ -1,7 +1,7 @@
 'use client';
 
 import { formatVnd } from '@tickee/contracts';
-import { Inbox } from 'lucide-react';
+import { Inbox, Settings } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 
@@ -13,6 +13,16 @@ import type { StatusTone } from '@/components/tickee/tone';
 import { Wordmark } from '@/components/tickee/wordmark';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 const TONES: { tone: StatusTone; badge: string; title: string; description: string }[] = [
   { tone: 'success', badge: 'Đã thanh toán', title: 'Đang mở bán', description: 'Người mua có thể đặt vé ngay.' },
@@ -157,6 +167,39 @@ export function UiKit() {
         <Button variant="secondary" className="w-full" onClick={() => toast.success('Đã lưu thay đổi')}>
           Hiện thông báo
         </Button>
+      </Section>
+
+      <Section id="kit-overlays" title="Sheet và tooltip">
+        <Sheet>
+          <SheetTrigger asChild>
+            <Button variant="secondary" className="w-full" data-testid="kit-sheet-trigger">
+              Mở Sheet
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="bottom">
+            <SheetHeader>
+              <SheetTitle>Chính sách hoàn vé</SheetTitle>
+              <SheetDescription>Sheet từ dưới lên; Esc, bấm nền mờ hoặc nút Đóng đều đóng.</SheetDescription>
+            </SheetHeader>
+            <p className="text-body">Ban tổ chức hoàn vé trước ngày diễn ra 3 ngày.</p>
+            <SheetClose asChild>
+              <Button variant="primary-on-light" className="w-full">
+                Đã hiểu
+              </Button>
+            </SheetClose>
+          </SheetContent>
+        </Sheet>
+        <div className="flex items-center gap-3">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="Cài đặt" data-testid="kit-tooltip-trigger">
+                <Settings aria-hidden="true" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Cài đặt</TooltipContent>
+          </Tooltip>
+          <p className="text-meta text-muted-foreground">Rê chuột hoặc Tab tới nút để xem tooltip.</p>
+        </div>
       </Section>
 
       <Section id="kit-type" title="Chữ và số tiền">

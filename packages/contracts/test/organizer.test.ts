@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { PII_KEYS } from '../src/pii.js';
 import {
   CreateOrganizationRequest,
+  ORGANIZATION_SECTION_SEGMENTS,
+  OrganizationSection,
+  organizationSectionPath,
   Permission,
   ROLE_PERMISSIONS,
   roleHasPermission,
@@ -95,5 +98,26 @@ describe('CreateOrganizationRequest', () => {
     for (const key of ['contact_phone', 'contactPhone', 'contact_email', 'contactEmail']) {
       expect(PII_KEYS).toContain(key);
     }
+  });
+});
+
+describe('organizationSectionPath', () => {
+  const id = '019a3b2c-5678-7abc-8def-0123456789ab';
+
+  it('đường dẫn các mục cấp BTC đúng UX-DR34', () => {
+    expect(organizationSectionPath(id, OrganizationSection.EVENTS)).toBe(`/btc/${id}`);
+    expect(organizationSectionPath(id, OrganizationSection.CREATE_EVENT)).toBe(`/btc/${id}/su-kien/tao`);
+    expect(organizationSectionPath(id, OrganizationSection.REVIEW_QUEUE)).toBe(`/btc/${id}/can-xu-ly`);
+    expect(organizationSectionPath(id, OrganizationSection.TOKEN)).toBe(`/btc/${id}/token`);
+    expect(organizationSectionPath(id, OrganizationSection.MEMBERS)).toBe(`/btc/${id}/thanh-vien`);
+    expect(organizationSectionPath(id, OrganizationSection.PAYOUT_ACCOUNT)).toBe(`/btc/${id}/tai-khoan-nhan-tien`);
+    expect(organizationSectionPath(id, OrganizationSection.SETTINGS)).toBe(`/btc/${id}/cai-dat`);
+    expect(organizationSectionPath(id, OrganizationSection.SCAN)).toBe(`/btc/${id}/quet-ve`);
+  });
+
+  it('mỗi mục một đoạn đường dẫn riêng', () => {
+    const segments = Object.values(ORGANIZATION_SECTION_SEGMENTS);
+    expect(new Set(segments).size).toBe(segments.length);
+    expect(Object.keys(ORGANIZATION_SECTION_SEGMENTS).sort()).toEqual(Object.values(OrganizationSection).sort());
   });
 });
