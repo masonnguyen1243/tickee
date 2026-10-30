@@ -3,7 +3,7 @@ import { ErrorResponse, Me, OTP_MAX_ATTEMPTS, SendOtpResponse, VerifyOtpResponse
 import { APIError } from 'better-auth/api';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { isAuthHttpPathAllowed } from '../../src/modules/identity/auth.js';
+import { isAuthHttpPathAllowed } from '../../src/modules/identity/auth-http-gate.js';
 import { OtpRateLimiter } from '../../src/modules/identity/otp-rate-limit.js';
 import { PUBLIC_ROUTE_KEY } from '../../src/platform/http/index.js';
 import { TEST_WEB_ORIGIN } from '../helpers.js';

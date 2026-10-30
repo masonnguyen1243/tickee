@@ -5,7 +5,7 @@ import { APIError } from 'better-auth/api';
 import { sql } from 'drizzle-orm';
 import { DrizzleQueryError } from 'drizzle-orm/errors';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { rewriteUnverifiedLinkError } from '../../src/modules/identity/auth.js';
+import { rewriteUnverifiedLinkError } from '../../src/modules/identity/google-callback.js';
 import { OtpRateLimiter } from '../../src/modules/identity/otp-rate-limit.js';
 import { redactUrlQuery } from '../../src/platform/logging/index.js';
 import { TEST_WEB_ORIGIN } from '../helpers.js';
