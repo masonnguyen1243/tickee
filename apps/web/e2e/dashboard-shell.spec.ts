@@ -188,6 +188,19 @@ test.describe('desktop ≥ lg', () => {
     await page.waitForURL(`**${base}/token`);
     await expect(sidebar(page).getByRole('link', { name: 'Token' })).toHaveAttribute('aria-current', 'page');
   });
+
+  test('bàn phím: Tab đầu tiên tới "Bỏ qua đến nội dung", Enter đưa focus vào nội dung', async ({ page, browserName }) => {
+    const tab = browserName === 'webkit' ? 'Alt+Tab' : 'Tab';
+    await openDashboard(page);
+    await expect(sidebar(page)).toBeVisible();
+
+    await page.keyboard.press(tab);
+    const skip = page.getByRole('link', { name: 'Bỏ qua đến nội dung' });
+    await expect(skip).toBeFocused();
+    await expect(skip).toBeInViewport();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('main')).toBeFocused();
+  });
 });
 
 test('tablet 900px: sidebar chỉ icon, mỗi mục có tên truy cập và tooltip là tên mục', async ({ page }) => {
@@ -452,6 +465,39 @@ test('tải lại BTC ở nền bị 5xx khi đã có dữ liệu: giữ khung v
   await expect(page.getByRole('navigation', { name: 'Điều hướng BTC' })).toBeVisible();
   await expect(page.getByRole('heading', { name: ORG_NAME })).toBeVisible();
   await expect(page.getByText('Chưa tải được BTC')).toHaveCount(0);
+});
+
+test('tải lại BTC ở nền bị 401 → đăng nhập; đăng nhập OTP xong quay lại trang BTC, không bị đẩy về lần nữa', async ({
+  page,
+}) => {
+  let signedIn = true;
+  await mockIdentityApi(page, {
+    'GET /identity/me': () => (signedIn ? me(CONSENTED) : unauthenticated()),
+    'POST /identity/otp': () => ({ status: 200, body: { resendAfterSeconds: 60 } }),
+    'POST /identity/otp/verify': () => {
+      signedIn = true;
+      return { status: 200, body: { consentRequired: false } };
+    },
+  });
+  await mockOrganizerApi(page, {
+    [`GET /orgs/${ORG_ID}`]: () => (signedIn ? organization() : unauthenticated()),
+  });
+  await page.goto(base);
+  await expect(page.getByRole('heading', { name: ORG_NAME })).toBeVisible();
+
+  // Session hết hạn; quá `staleTime` rồi quay lại tab → tải lại nền nhận 401.
+  signedIn = false;
+  await page.clock.setFixedTime(Date.now() + 60_000);
+  await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+  await page.waitForURL(`**/dang-nhap?returnTo=${encodeURIComponent(base)}`);
+
+  await page.getByLabel('Email').fill(EMAIL);
+  await page.getByRole('button', { name: 'Gửi mã' }).click();
+  await page.getByRole('group', { name: 'Mã đăng nhập 6 số' }).locator('input').first().fill('123456');
+  await page.waitForURL(`**${base}`);
+  await expect(page.getByRole('navigation', { name: 'Điều hướng BTC' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: ORG_NAME })).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe(base);
 });
 
 test('không phải thành viên (NOT_A_MEMBER): empty-state hiện có, không có điều hướng', async ({ page }) => {

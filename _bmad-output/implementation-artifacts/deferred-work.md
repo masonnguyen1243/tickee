@@ -75,3 +75,9 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-1-b-khung-dashboard-responsive.md`
   summary: Repo chưa có cấu hình Prettier và bước kiểm định dạng, nên code mới có thể lệch kiểu (nháy kép, 80 cột) mà CI không bắt.
   evidence: Không có `.prettierrc`; pipeline `build typecheck lint:deps test` không kiểm định dạng (review B1).
+
+## Deferred from: code review of spec-2-1-b-khung-dashboard-responsive.md (2026-10-30)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-1-b-khung-dashboard-responsive.md`
+  summary: Mục "Cài đặt" của dashboard mô tả "Sửa tên và kênh liên hệ của BTC" nhưng gắn quyền `org.read`, và ma trận FR-4 chưa có quyền sửa BTC. Story nào làm sửa BTC phải thêm quyền mới vào FR-4 (và quyết định Admin có được sửa hay không).
+  evidence: `apps/web/lib/organizer/nav.ts:63`; test "danh sách quyền đúng FR-4" khóa danh sách hiện tại. Chưa story nào trong Epic 2 sở hữu việc sửa BTC (code review 30/10, blind-hunter).

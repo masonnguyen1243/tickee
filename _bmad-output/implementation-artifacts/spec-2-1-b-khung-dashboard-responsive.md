@@ -102,6 +102,27 @@ context:
 - Given `pnpm turbo build typecheck lint:deps test` và Playwright, then tất cả pass, kể cả `create-organization.spec.ts` hiện có.
 - Given ở 375px trên trang Sự kiện có nội dung dài, when cuộn xuống cuối, then phần cuối nội dung không bị tab bar che.
 
+### Review Findings
+
+Code review 30/10/2026 (diff `23870ee..162a4cd`, gộp phần A và B; 4 lớp: blind, edge-case, verification-gap, acceptance).
+
+- [x] [Review][Patch] Đang có dữ liệu BTC mà tải lại nền gặp 401 (session hết hạn, đăng xuất ở tab khác) thì về đăng nhập; đăng nhập OTP xong quay lại `/btc/{id}` lại bị đẩy về đăng nhập, vì TanStack Query giữ `error` 401 trong lúc refetch khi đã có `data`, và unmount hủy fetch rồi revert về lỗi cũ (vòng lặp tới khi tải lại trang). Xóa query BTC (`removeQueries`) trước khi chuyển sang đăng nhập (medium) [apps/web/components/tickee/dashboard-shell.tsx:76]
+- [x] [Review][Patch] `LoadingContent` đặt `aria-label` trên `div` không có role (ARIA cấm trên phần tử generic) nên trình đọc màn hình không báo đang tải. Dùng `role="status"` (low) [apps/web/components/tickee/dashboard-shell.tsx:50]
+- [x] [Review][Patch] Không có link "Bỏ qua đến nội dung": từ `md` trở lên phải Tab qua switcher, 6 mục sidebar, wordmark, menu tài khoản rồi mới tới `<main>` ở mọi trang (WCAG 2.4.1). Thêm skip link tới `#main` trong shell (low) [apps/web/components/tickee/dashboard-shell.tsx:33]
+- [x] [Review][Patch] Comment nói `returnTo` giữ cả query và hash "như `AccountMenu`", nhưng `AccountMenu` bỏ hash. Sửa comment (low) [apps/web/components/tickee/dashboard-shell.tsx:79]
+- [x] [Review][Defer] Mục "Cài đặt" mô tả "Sửa tên và kênh liên hệ của BTC" nhưng gắn `org.read`, và ma trận FR-4 chưa có quyền sửa BTC [apps/web/lib/organizer/nav.ts:63] — deferred: chưa story nào sở hữu việc sửa BTC; khi thêm thì phải quyết định quyền mới trong FR-4 (Admin có được sửa không).
+
+**Rejected** (phần B):
+- `low` — Sheet "Thêm" vẫn mở khi xoay máy qua mốc `md`: hiếm, sửa phải thêm listener `matchMedia`.
+- `low` — `orgId` viết hoa trong URL làm click nav đầu tiên tải lại cả khung: link nội bộ luôn chữ thường; cùng gốc với mục defer B8.
+- `false` — "OwnerOnly chỉ chặn ở 2 trang": đúng như spec yêu cầu (hai mục chỉ dành cho Owner), và cả nav lẫn `OwnerOnly` cùng suy ra từ ma trận.
+- Sửa spec — `NOT_A_MEMBER` không có nút hành động: spec quy định giữ `empty-state` hiện có.
+- `low` — Thiếu `not-found.tsx`/`error.tsx` trong `btc/[orgId]`: sub-path lạ hiếm gặp; lỗi render chỉ do lỗi lập trình.
+- `low` — `robots`/tiêu đề lặp ở 9 trang, tiêu đề tab không có tên BTC: trang dashboard cần đăng nhập mới có nội dung; chưa có hại cụ thể.
+- `low` — Tiền tố `su-kien` khai báo ở hai nơi: hiện vẫn khớp; gom lại khi 2.7 thêm trang chi tiết Sự kiện.
+- `low` — e2e `toBe(4)` gắn với `MAX_RETRIES`: test cố ý kiểm đủ 2 lần thử lại.
+- `low` — `organizer-mock` chỉ cho GET/POST/OPTIONS trong CORS: chưa có mock PATCH/DELETE nào; sửa một dòng khi cần.
+
 ## Implementation Notes
 
 - Mỗi mục trong `lib/organizer/nav.ts` mang một quyền của FR-4: Sự kiện `events.manage`, Cần xử lý `review_queue.handle`, Token `token.view`, Thành viên `members.manage`, Tài khoản nhận tiền `payout_account.manage`, Cài đặt `org.read`, Quét vé `checkin.scan`. Mục hiện khi `roleHasPermission(role, permission)`; `isOwnerOnly` suy ra từ quyền của Admin.

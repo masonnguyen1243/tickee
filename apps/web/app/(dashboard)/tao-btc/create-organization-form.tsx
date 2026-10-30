@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ApiError } from '@/lib/api/errors';
 import { fetchMe, hasErrorCode, ME_QUERY_KEY } from '@/lib/auth/api';
-import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
+import { CONSENT_PATH, LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
 import { createOrganization, MEMBERSHIPS_QUERY_KEY } from '@/lib/organizer/api';
 
 type Field = 'name' | 'contactPhone' | 'contactEmail';
@@ -76,12 +76,15 @@ export function CreateOrganizationForm() {
 
   useEffect(() => {
     if (hasErrorCode(me.error, ErrorCode.UNAUTHENTICATED)) router.replace(withReturnTo(LOGIN_PATH, CREATE_ORGANIZATION_PATH));
-  }, [me.error, router]);
+    // Chưa đồng ý NĐ 13: sang màn đồng ý trước khi điền (gửi form cũng chỉ nhận CONSENT_REQUIRED và mất dữ liệu).
+    else if (me.data && !me.data.consentedAt) router.replace(withReturnTo(CONSENT_PATH, CREATE_ORGANIZATION_PATH));
+  }, [me.error, me.data, router]);
 
   const create = useMutation({
     mutationFn: createOrganization,
-    onSuccess: async (org) => {
-      await queryClient.invalidateQueries({ queryKey: MEMBERSHIPS_QUERY_KEY });
+    onSuccess: (org) => {
+      // Không chờ refetch memberships: BTC đã tạo, chuyển trang ngay.
+      void queryClient.invalidateQueries({ queryKey: MEMBERSHIPS_QUERY_KEY });
       router.replace(organizationDashboardPath(org.id));
     },
     onError: (error) => {
@@ -120,11 +123,12 @@ export function CreateOrganizationForm() {
     if (errors[field]) setErrors((e) => ({ ...e, [field]: undefined }));
   };
 
-  // Lỗi không thuộc trường nào (mạng, 5xx…): banner tại chỗ + "Thử lại".
+  // Lỗi không thuộc trường nào (mạng, 5xx…): banner tại chỗ + "Thử lại". CONSENT_REQUIRED do `Providers` chuyển trang.
   const failure =
     create.error &&
     !hasErrorCode(create.error, ErrorCode.VALIDATION_FAILED) &&
-    !hasErrorCode(create.error, ErrorCode.UNAUTHENTICATED)
+    !hasErrorCode(create.error, ErrorCode.UNAUTHENTICATED) &&
+    !hasErrorCode(create.error, ErrorCode.CONSENT_REQUIRED)
       ? create.error
       : null;
 

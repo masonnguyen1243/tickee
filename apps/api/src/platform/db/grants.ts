@@ -12,9 +12,24 @@ export const APPEND_ONLY_TABLES = ['public.audit_events'] as const;
 /**
  * Cấp quyền DML cho `tickee_app` trên mọi bảng hiện có (schema `public` và `pgboss`).
  * Bảng mới ở story sau tự có quyền nhờ `ALTER DEFAULT PRIVILEGES` trong migration 0000.
- * Idempotent; chạy bằng `tickee_migrator` sau migration.
+ * Idempotent; chạy bằng `tickee_migrator` sau migration. Chạy trong một transaction: GRANT bên dưới cấp lại
+ * UPDATE/DELETE cho bảng append-only, nên lỗi giữa chừng không được để lại trạng thái chưa REVOKE.
  */
-export async function grantAppRole(client: pg.Pool | pg.PoolClient, schemas: readonly string[]): Promise<void> {
+export async function grantAppRole(pool: pg.Pool, schemas: readonly string[]): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await grantInTransaction(client, schemas);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function grantInTransaction(client: pg.PoolClient, schemas: readonly string[]): Promise<void> {
   for (const schema of schemas) {
     const s = `"${schema.replaceAll('"', '""')}"`;
     await client.query(`GRANT USAGE ON SCHEMA ${s} TO ${APP_DB_ROLE}`);

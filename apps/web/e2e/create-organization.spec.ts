@@ -106,6 +106,43 @@ test('401 lúc gửi form → đăng nhập kèm returnTo=/tao-btc', async ({ pa
   await page.waitForURL('**/dang-nhap?returnTo=%2Ftao-btc');
 });
 
+test('tạo xong: menu tài khoản có "Dashboard BTC" trỏ BTC mới mà không cần tải lại trang', async ({ page }) => {
+  let createdOrganization = false;
+  await mockIdentityApi(page, { 'GET /identity/me': signedIn });
+  await mockOrganizerApi(page, {
+    'POST /orgs': () => {
+      createdOrganization = true;
+      return created();
+    },
+    'GET /me/memberships': () => ({
+      status: 200,
+      body: createdOrganization ? [{ organizationId: ORG_ID, name: 'CLB Cờ Vua Quận 3', role: 'owner' }] : [],
+    }),
+    [`GET /orgs/${ORG_ID}`]: () => organization(),
+  });
+  const accountMenu = () => page.getByRole('button', { name: `Tài khoản: ${EMAIL}` }).click();
+
+  await page.goto('/tao-btc');
+  await accountMenu();
+  await expect(page.getByRole('menuitem', { name: 'Tạo BTC' })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await nameInput(page).fill('CLB Cờ Vua Quận 3');
+  await submit(page);
+  await page.waitForURL(`**/btc/${ORG_ID}`);
+  await accountMenu();
+  await expect(page.getByRole('menuitem', { name: 'Dashboard BTC' })).toHaveAttribute('href', `/btc/${ORG_ID}`);
+  await expect(page.getByRole('menuitem', { name: 'Tạo BTC' })).toHaveCount(0);
+});
+
+test('chưa đồng ý NĐ 13 mở /tao-btc → sang màn đồng ý trước khi điền form', async ({ page }) => {
+  await mockIdentityApi(page, { 'GET /identity/me': () => me(null) });
+  const calls = await mockOrganizerApi(page);
+  await page.goto('/tao-btc');
+  await page.waitForURL('**/dong-y?returnTo=%2Ftao-btc');
+  expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+});
+
 test('menu tài khoản: chưa đồng ý NĐ 13 thì không hỏi memberships, không bị chuyển sang /dong-y', async ({ page }) => {
   await mockIdentityApi(page, { 'GET /identity/me': () => me(null) });
   const calls = await mockOrganizerApi(page);
