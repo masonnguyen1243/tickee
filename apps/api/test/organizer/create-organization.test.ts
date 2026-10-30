@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Database } from '../../src/platform/db/index.js';
 import { runMigrations } from '../../src/roles/migrate.js';
 import { databaseUrl, migrationDatabaseUrl } from '../helpers.js';
-import { createHarness, signUp, type Harness } from '../identity/harness.js';
+import { createHarness, signUp, signUpWithTotp, type Harness } from '../identity/harness.js';
 
 let h: Harness;
 
@@ -73,7 +73,7 @@ describe('POST /v1/orgs — tạo BTC', () => {
   });
 
   it('bỏ trống cả hai ô liên hệ vẫn hợp lệ → lưu null', async () => {
-    const user = await signUp(h);
+    const user = await signUpWithTotp(h);
     const res = await create(user.cookie, { name: 'BTC không liên hệ', contactPhone: '', contactEmail: '' }).expect(201);
     const org = await h.http.get(`/v1/orgs/${res.body.id}`).set('cookie', user.cookie).expect(200);
     expect(Organization.parse(org.body)).toMatchObject({ contactPhone: null, contactEmail: null });
@@ -152,7 +152,7 @@ describe('GET /v1/me/memberships và GET /v1/orgs/:orgId', () => {
   });
 
   it('GET /v1/orgs/:orgId trả kênh liên hệ', async () => {
-    const user = await signUp(h);
+    const user = await signUpWithTotp(h);
     const id = (
       await create(user.cookie, { name: 'BTC', contactPhone: '+84 901 234 567', contactEmail: 'LH@Vidu.vn' }).expect(201)
     ).body.id;

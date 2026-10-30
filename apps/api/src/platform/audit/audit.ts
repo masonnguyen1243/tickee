@@ -2,7 +2,14 @@ import type { Tx } from '../db/index.js';
 import { auditEvents } from './schema.js';
 
 /** Hành động audit: `<đối tượng>.<động từ>`. Story sau thêm vào union này. */
-export type AuditAction = 'organization.created';
+export type AuditAction =
+  | 'organization.created'
+  /** Xác nhận đăng ký TOTP (lần đầu hoặc đăng ký lại). */
+  | 'totp.enrolled'
+  /** Sai TOTP/mã khôi phục đủ ngưỡng: khóa xác minh. */
+  | 'totp.locked'
+  /** Step-up bằng mã khôi phục: mã hết hiệu lực và TOTP bị gỡ. */
+  | 'totp.recovery_code_used';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api/errors";
 import { hasErrorCode } from "@/lib/auth/api";
 import { LOGIN_PATH, withReturnTo } from "@/lib/auth/return-to";
+import { totpRequiredReason } from "@/lib/auth/totp";
 import {
   fetchMemberships,
   fetchOrganization,
@@ -133,9 +134,12 @@ export function DashboardShell({
     );
   }, [unauthenticated, pathname, router, queryClient, orgId]);
 
-  // 401 chuyển sang đăng nhập ở effect trên; CONSENT_REQUIRED do `Providers` chuyển sang màn đồng ý.
+  // 401 chuyển sang đăng nhập ở effect trên; CONSENT_REQUIRED và TOTP_REQUIRED `enroll` do `Providers` chuyển sang
+  // màn đồng ý / đăng ký TOTP. `step_up` thì `Providers` mở dialog; đóng dialog thì còn banner lỗi + "Thử lại".
   const redirecting =
-    unauthenticated || hasErrorCode(org.error, ErrorCode.CONSENT_REQUIRED);
+    unauthenticated ||
+    hasErrorCode(org.error, ErrorCode.CONSENT_REQUIRED) ||
+    totpRequiredReason(org.error) === "enroll";
   if (org.isPending || redirecting) {
     return (
       <div className="flex min-h-dvh">

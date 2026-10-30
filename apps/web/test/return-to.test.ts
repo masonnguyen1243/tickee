@@ -9,6 +9,11 @@ describe('withReturnTo, withNotice', () => {
     expect(withReturnTo('/dang-nhap', '/..//evil.com')).toBe('/dang-nhap');
   });
 
+  it('màn đăng ký TOTP nhận returnTo; chính nó không làm đích', () => {
+    expect(withReturnTo('/bao-mat/totp', '/btc/x')).toBe('/bao-mat/totp?returnTo=%2Fbtc%2Fx');
+    expect(withReturnTo('/bao-mat/totp', '/bao-mat/totp?returnTo=/btc/x')).toBe('/bao-mat/totp');
+  });
+
   it('đích dưới màn đăng nhập (trang trung gian Google) bị bỏ', () => {
     expect(withReturnTo('/dang-nhap', '/dang-nhap/google?returnTo=/a')).toBe('/dang-nhap');
   });

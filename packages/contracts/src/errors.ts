@@ -26,6 +26,15 @@ export const ErrorCode = {
   NOT_A_MEMBER: 'NOT_A_MEMBER',
   /** Là thành viên nhưng vai trò không có quyền này (vd. Admin gọi thao tác chỉ Owner). */
   FORBIDDEN_ROLE: 'FORBIDDEN_ROLE',
+  /**
+   * Request mang vai Owner (route BTC mà vai giải ra là `owner`) nhưng chưa đăng ký TOTP hoặc session chưa step-up
+   * trong `STEP_UP_TTL_MS`; `details.reason` (`TotpRequiredDetails`).
+   */
+  TOTP_REQUIRED: 'TOTP_REQUIRED',
+  /** Mã TOTP hoặc mã khôi phục sai (kể cả mã khôi phục đã dùng); `details.remainingAttempts`. */
+  TOTP_INVALID: 'TOTP_INVALID',
+  /** Sai `TOTP_MAX_FAILURES` lần liên tiếp: khóa xác minh theo user; `details.retryAfterSeconds`. */
+  TOTP_LOCKED: 'TOTP_LOCKED',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

@@ -21,7 +21,10 @@ export const apiError = (status: number, code: string, details: unknown = null):
 });
 
 export const unauthenticated = (): Reply => apiError(401, 'UNAUTHENTICATED');
-export const me = (consentedAt: string | null): Reply => ({ status: 200, body: { id: USER_ID, email: EMAIL, consentedAt } });
+export const me = (consentedAt: string | null, twoFactorEnabled = false): Reply => ({
+  status: 200,
+  body: { id: USER_ID, email: EMAIL, consentedAt, twoFactorEnabled },
+});
 
 /** Giả lập `/v1/identity/*`; mặc định `me` → 401 (chưa đăng nhập). Trả về danh sách lời gọi để kiểm. */
 export async function mockIdentityApi(page: Page, handlers: Record<string, Handler> = {}): Promise<Call[]> {
