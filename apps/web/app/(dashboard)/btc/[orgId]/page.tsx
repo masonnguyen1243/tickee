@@ -2,10 +2,9 @@ import type { Metadata } from 'next';
 
 import { OrganizationHome } from './organization-home';
 
-export const metadata: Metadata = { title: 'Dashboard BTC · Tickee', robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: 'Sự kiện · Tickee', robots: { index: false, follow: false } };
 
-/** Trang đích dashboard của một BTC (tối thiểu; khung sidebar/switcher thuộc phần B của Story 2.1). */
-export default async function OrganizationPage({ params }: { params: Promise<{ orgId: string }> }) {
-  const { orgId } = await params;
-  return <OrganizationHome orgId={orgId} />;
+/** Trang đích dashboard của một BTC: danh sách Sự kiện (khung và dữ liệu BTC do layout dựng). */
+export default function OrganizationPage() {
+  return <OrganizationHome />;
 }

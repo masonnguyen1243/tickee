@@ -19,6 +19,8 @@ test('tạo thành công: gửi tên + liên hệ đã chuẩn hóa, chuyển sa
     [`GET /orgs/${ORG_ID}`]: () => organization(),
   });
   await page.goto('/tao-btc');
+  await expect(page.getByRole('link', { name: 'Tickee — Trang chủ' })).toBeVisible();
+  await expect(page.getByRole('button', { name: `Tài khoản: ${EMAIL}` })).toBeVisible();
   await nameInput(page).fill('  CLB Cờ Vua Quận 3 ');
   await page.getByLabel('Số điện thoại').fill('0901 234 567');
   await submit(page);
