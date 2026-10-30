@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 10-30-2026 10:40
+last_updated: 10-30-2026 11:30
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -176,8 +176,10 @@ action_items:
       <hash>:<attempts> của Better Auth vào một adapter có test ghim hành vi 1.7;
       tách login-form.tsx thành hook, gộp phần map lỗi bị lặp"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
+    note: "Phần API xong qua PR #17 (spec-epic-1-ai-5-tach-auth-va-adapter-better-auth.md);
+      phần web (tách login-form.tsx) đã chuyển sang deferred-work.md"
   - id: "epic-1-retro-item-9-ai-6-trước-epic-3-thêm-e2e-smoke-full-st"
     epic: 1
     action: "AI-6: Trước Epic 3: thêm e2e smoke full-stack (web + api thật + Mailpit)
