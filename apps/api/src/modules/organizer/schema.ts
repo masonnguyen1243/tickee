@@ -16,7 +16,10 @@ export const organizations = pgTable('organizations', {
     .$onUpdate(() => new Date()),
 });
 
-/** Thành viên BTC (`owner`/`admin`). Mỗi BTC đúng một Owner (unique index một phần). */
+/**
+ * Thành viên BTC (`owner`/`admin`). Unique index một phần chỉ bảo đảm tối đa một Owner mỗi BTC; "đúng một" do luồng
+ * tạo BTC (cùng transaction) giữ, DB không chặn BTC không có Owner.
+ */
 export const members = pgTable(
   'members',
   {

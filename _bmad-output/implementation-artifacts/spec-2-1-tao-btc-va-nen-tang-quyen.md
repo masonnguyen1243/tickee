@@ -94,6 +94,32 @@ context:
 - Given log api trong luồng tạo BTC, then không có tên BTC hay giá trị trường nào trong audit.
 - Given `pnpm turbo build typecheck lint:deps test` và Playwright, then tất cả pass.
 
+### Review Findings
+
+Code review 30/10/2026 (diff `23870ee..162a4cd`, gộp phần A và B; 4 lớp: blind, edge-case, verification-gap, acceptance).
+
+- [x] [Review][Patch] Ma trận quyền của Admin là "tất cả trừ `OWNER_ONLY`": quyền mới thêm sau này (vd. chuyển Owner ở 2.14) mặc định thuộc về Admin nếu quên cập nhật `OWNER_ONLY`, và test "Admin thiếu đúng…" vẫn pass. Đổi sang danh sách cho phép tường minh cho từng vai (medium) [packages/contracts/src/organizer.ts:41]
+- [x] [Review][Patch] `/tao-btc` không xử lý tài khoản chưa đồng ý NĐ 13: điền xong form mới nhận `CONSENT_REQUIRED`, banner "Chưa tạo được BTC" nháy trước khi chuyển sang `/dong-y`, quay lại thì form trống. Chuyển sang màn đồng ý ngay khi `me.data.consentedAt` rỗng (như `AccountMenu`) và loại `CONSENT_REQUIRED` khỏi `failure` (cùng loại với E8) (low) [apps/web/app/(dashboard)/tao-btc/create-organization-form.tsx:77]
+- [x] [Review][Patch] `onSuccess` chờ `invalidateQueries` refetch memberships xong (gồm cả 2 lần thử lại khi 5xx, ~3 giây) rồi mới chuyển trang; nút "Tạo BTC" quay mãi dù BTC đã tạo. Bỏ `await` (low) [apps/web/app/(dashboard)/tao-btc/create-organization-form.tsx:84]
+- [x] [Review][Patch] Chưa có test nào kiểm memberships được làm mới sau khi tạo BTC: xóa dòng `invalidateQueries` thì mọi test vẫn pass. Thêm e2e: mock memberships trả `[]` tới khi POST chạy rồi trả BTC mới; tạo xong, không reload, mở menu tài khoản thấy "Dashboard BTC" trỏ `/btc/{id}` (low) [apps/web/e2e/create-organization.spec.ts:15]
+- [x] [Review][Patch] `grantAppRole` chạy từng câu autocommit: giữa `GRANT … ON ALL TABLES` (cấp lại UPDATE/DELETE) và `REVOKE` trên `audit_events` có một khoảng hở, và nếu migrate lỗi giữa chừng (vd. ở schema `pgboss`) thì bảng audit sửa/xóa được tới lần migrate sau. Chạy cả hàm trong một transaction trên một client (low) [apps/api/src/platform/db/grants.ts:17]
+- [x] [Review][Patch] Comment "Mỗi BTC đúng một Owner" nói quá: unique index một phần chỉ bảo đảm tối đa một Owner, DB vẫn cho BTC không có Owner (2.14 chuyển quyền cần biết điều này). Sửa thành "tối đa một Owner ở mức DB" (low) [apps/api/src/modules/organizer/schema.ts:18]
+
+**Rejected** (phần A):
+- `false`/`low` — Query key organizer không gắn theo user: đăng xuất đã `queryClient.clear()`; chỉ lộ khi session hết hạn rồi đăng nhập tài khoản khác trong 30 giây.
+- Đã defer — `POST /v1/orgs` thiếu idempotency (mất response rồi "Thử lại" tạo BTC trùng) và giới hạn tần suất: đã có trong deferred-work (B7/E5).
+- Sửa spec — `ContactPhone` từ chối số bàn 11 số (`028 3822 1234`) và hotline 1900/1800: mẫu `^(0|\+84)\d{9}$` là quyết định của spec (Mason chốt 29/10). Nên xem lại khi làm Landing BTC/Closed Beta vì CLB hay để số bàn.
+- `low` — `ContactPhone` nhận `0000000000`: không gây hại thật, chặn thêm cần luật đầu số.
+- `low` — Tên NFD (gõ dấu tổ hợp) chạm giới hạn 100: đã reject ở E7.
+- `low` — Tên chỉ gồm ký tự zero-width lọt qua `trim()`: hiếm, sửa phải thêm refine.
+- `low` — Lỗi `VALIDATION_FAILED` không khớp trường nào rơi về thông báo của ô Tên: web và api dùng chung schema nên form không thể gây ra.
+- `low` — Không chuyển focus tới ô lỗi đầu tiên: `role="alert"` đã đọc lỗi cho trình đọc màn hình; sửa phải thêm effect.
+- `low` — Memberships lỗi thì menu tài khoản không có mục dashboard: query tự tải lại khi focus/mount lại; thêm "Thử lại" là thêm nhánh.
+- `low` — Bộ test cách ly hỏng với route `@All()`: không có route nào dùng, và nếu có thì test lỗi to (đúng hành vi).
+- `low` — `@ConsentExempt()` + `@RequirePermission()` không bị chặn như `@Public()`: chưa có route nào kết hợp; nằm cùng hướng với mục defer B3/B4/V3.
+- `low` — Vai bị đổi giữa lúc guard resolve và handler ghi DB: khoảng hở mili giây; xem lại ở 2.4 khi có thao tác xóa Admin.
+- Sửa spec — Email bị chuẩn hóa chữ thường + tối đa 254 mà Spec Change Log không ghi: không gây lỗi, chỉ thiếu ghi chép.
+
 ## Implementation Notes
 
 - `app/(dashboard)/layout.tsx` có header giống layout công khai (wordmark + menu tài khoản) để trang dùng được. Không có sidebar, switcher hay bottom-tab-bar (phần B).

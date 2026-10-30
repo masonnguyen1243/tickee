@@ -28,19 +28,22 @@ export const Permission = {
 export type Permission = (typeof Permission)[keyof typeof Permission];
 export const permissionSchema = z.enum(Permission);
 
-const ALL_PERMISSIONS = Object.values(Permission);
-
-/** Chỉ Owner: liên kết/đổi tài khoản nhận tiền, mời/xóa thành viên, mua Token. */
-const OWNER_ONLY: readonly Permission[] = [
-  Permission.MEMBERS_MANAGE,
-  Permission.PAYOUT_ACCOUNT_MANAGE,
-  Permission.TOKEN_PURCHASE,
-];
-
-/** Ma trận quyền FR-4: vai → các quyền có. */
+/**
+ * Ma trận quyền FR-4: vai → các quyền có. Owner có mọi quyền. Admin liệt kê tường minh (thiếu liên kết/đổi tài khoản
+ * nhận tiền, mời/xóa thành viên, mua Token), để quyền mới thêm sau không tự thuộc về Admin.
+ */
 export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
-  owner: ALL_PERMISSIONS,
-  admin: ALL_PERMISSIONS.filter((p) => !OWNER_ONLY.includes(p)),
+  owner: Object.values(Permission),
+  admin: [
+    Permission.ORG_READ,
+    Permission.TOKEN_VIEW,
+    Permission.EVENTS_MANAGE,
+    Permission.ORDERS_VIEW,
+    Permission.REVIEW_QUEUE_HANDLE,
+    Permission.CHECKERS_MANAGE,
+    Permission.CHECKIN_SCAN,
+    Permission.CHECKIN_LOOKUP,
+  ],
 };
 
 export function roleHasPermission(role: Role, permission: Permission): boolean {
