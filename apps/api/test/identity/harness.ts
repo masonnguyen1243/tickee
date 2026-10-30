@@ -113,17 +113,22 @@ export function sessionCookie(setCookie: string[] | string | undefined): string 
 }
 
 /**
- * Tạo tài khoản mới bằng OTP và đồng ý NĐ 13 → cookie session + id. Xóa bộ đếm gửi OTP trước (mọi request test
- * cùng một IP).
+ * Đăng nhập bằng OTP → cookie của một session mới (không gọi consent). Dùng để mở session thứ hai cho tài khoản đã có
+ * (tài khoản đã bật 2FA thì session mới chưa qua lớp hai). Xóa bộ đếm gửi OTP trước (mọi request test cùng một IP).
  */
-export async function signUp(h: Harness, email = newEmail()): Promise<{ cookie: string; userId: string; email: string }> {
+export async function signIn(h: Harness, email: string): Promise<string> {
   await h.db.orm.execute(sql`DELETE FROM otp_send_events`);
   await h.http.post('/v1/identity/otp').send({ email }).expect(200);
   const verified = await h.http
     .post('/v1/identity/otp/verify')
     .send({ email, otp: h.email.lastCodeFor(email) })
     .expect(200);
-  const cookie = sessionCookie(verified.headers['set-cookie']);
+  return sessionCookie(verified.headers['set-cookie']);
+}
+
+/** Tạo tài khoản mới bằng OTP và đồng ý NĐ 13 → cookie session + id. */
+export async function signUp(h: Harness, email = newEmail()): Promise<{ cookie: string; userId: string; email: string }> {
+  const cookie = await signIn(h, email);
   const consent = await h.http.post('/v1/identity/consent').set('cookie', cookie).expect(200);
   return { cookie, userId: Me.parse(consent.body).id, email };
 }
@@ -178,8 +183,8 @@ export interface TotpUser {
 }
 
 /**
- * Đăng ký TOTP cho `user` (enroll → verify bằng mã đúng). Plugin xoay session nên `user.cookie` được thay bằng cookie
- * mới (đã step-up). Trả khóa nhập tay và 10 mã khôi phục.
+ * Bật 2FA cho `user` (enroll → verify bằng mã đúng). Plugin xoay session nên `user.cookie` được thay bằng cookie mới
+ * (đã qua lớp hai). Trả khóa nhập tay và 10 mã khôi phục.
  */
 export async function enrollTotp(h: Harness, user: TotpUser): Promise<{ manualKey: string; recoveryCodes: string[] }> {
   const started = await h.http.post('/v1/identity/totp/enroll').set('cookie', user.cookie).expect(200);
@@ -193,7 +198,7 @@ export async function enrollTotp(h: Harness, user: TotpUser): Promise<{ manualKe
   return { manualKey, recoveryCodes: TotpEnrollVerifyResponse.parse(verified.body).recoveryCodes };
 }
 
-/** Tài khoản mới đã đồng ý NĐ 13 và đã đăng ký TOTP (session đã step-up): dùng làm Owner trong test BTC. */
+/** Tài khoản mới đã đồng ý NĐ 13 và đã bật 2FA (session đã qua lớp hai). */
 export async function signUpWithTotp(h: Harness, email = newEmail()): Promise<TotpUser & { manualKey: string }> {
   const user = await signUp(h, email);
   const { manualKey } = await enrollTotp(h, user);

@@ -2,8 +2,10 @@ import { Body, Controller, HttpCode, Inject, Post, Req, Res } from '@nestjs/comm
 import {
   RecoveryCodeRequest,
   TotpCodeRequest,
+  TotpDisableRequest,
   type RecoveryCodeResponse,
   type StepUpResponse,
+  type TotpDisableResponse,
   type TotpEnrollResponse,
   type TotpEnrollVerifyResponse,
 } from '@tickee/contracts';
@@ -16,8 +18,9 @@ import type { RequestWithSession } from './session.guard.js';
 import { TotpService } from './totp.service.js';
 
 /**
- * TOTP của web dưới `/v1/identity/totp` (endpoint HTTP gốc của plugin `twoFactor` bị cổng HTTP chặn). Cả bốn route
- * nằm trong `TOTP_EXEMPT_ROUTES` và cần đăng nhập (`SessionGuard`).
+ * Xác thực hai lớp của web dưới `/v1/identity/totp` (endpoint HTTP gốc của plugin `twoFactor` bị cổng HTTP chặn). Mọi
+ * route cần đăng nhập (`SessionGuard`). Chỉ `step-up` và `recovery` nằm trong `TOTP_EXEMPT_ROUTES`; `enroll` chỉ gọi
+ * được khi chưa bật 2FA (guard không chặn), `disable` đòi session đã qua lớp hai (`TotpGuard`).
  */
 @Controller('identity/totp')
 export class TotpController {
@@ -33,7 +36,10 @@ export class TotpController {
     return this.totp.beginEnrollment(req.session!, fromNodeHeaders(req.headers));
   }
 
-  /** Xác nhận đăng ký bằng mã đầu tiên → 10 mã khôi phục (hiện một lần) + cookie session mới đã step-up. */
+  /**
+   * Bật 2FA: xác nhận đăng ký bằng mã đầu tiên → 10 mã khôi phục (hiện một lần) + cookie session mới đã qua lớp hai.
+   * Các session khác của user phải nhập mã ở request kế tiếp.
+   */
   @Post('enroll/verify')
   @HttpCode(200)
   @ConsentExempt()
@@ -49,7 +55,7 @@ export class TotpController {
     return { recoveryCodes };
   }
 
-  /** Step-up bằng mã TOTP. */
+  /** Step-up bằng mã TOTP (nhập mã sau đăng nhập): qua lớp hai tới hết session. */
   @Post('step-up')
   @HttpCode(200)
   @ConsentExempt()
@@ -64,12 +70,20 @@ export class TotpController {
     return { stepUpAt };
   }
 
-  /** Step-up bằng mã khôi phục: TOTP bị gỡ, web chuyển sang đăng ký lại. */
+  /** Step-up bằng mã khôi phục: TOTP bị gỡ, web đưa tới trang Bảo mật tài khoản để bật lại. */
   @Post('recovery')
   @HttpCode(200)
   @ConsentExempt()
   recovery(@Body() body: unknown, @Req() req: RequestWithSession): Promise<RecoveryCodeResponse> {
     const { recoveryCode } = parseRequest(RecoveryCodeRequest, body);
     return this.totp.useRecoveryCode(req.session!, recoveryCode);
+  }
+
+  /** Tắt 2FA bằng mã TOTP hiện tại hoặc một mã khôi phục chưa dùng. */
+  @Post('disable')
+  @HttpCode(200)
+  @ConsentExempt()
+  disable(@Body() body: unknown, @Req() req: RequestWithSession): Promise<TotpDisableResponse> {
+    return this.totp.disable(req.session!, parseRequest(TotpDisableRequest, body), fromNodeHeaders(req.headers));
   }
 }

@@ -19,9 +19,9 @@ import {
   beginTotpEnrollment,
   confirmTotpEnrollment,
   groupManualKey,
+  isTotpRequired,
   recoveryCodesText,
   totpErrorMessage,
-  totpRequiredReason,
 } from '@/lib/auth/totp';
 import { copyWithToast } from '@/lib/clipboard';
 
@@ -263,7 +263,7 @@ export function EnrollForm({ returnTo }: { returnTo: string }) {
 
   const finish = () => {
     // Bỏ các query đang lỗi TOTP_REQUIRED để trang đích tải lại từ đầu với session mới.
-    queryClient.removeQueries({ predicate: (query) => totpRequiredReason(query.state.error) !== null });
+    queryClient.removeQueries({ predicate: (query) => isTotpRequired(query.state.error) });
     void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY });
     router.replace(returnTo);
   };
@@ -320,7 +320,7 @@ export function EnrollForm({ returnTo }: { returnTo: string }) {
       <div className="flex flex-col gap-2">
         <h1 className="text-headline">Bật xác thực hai lớp</h1>
         <p className="text-body text-muted-foreground">
-          Owner cần xác thực hai lớp để quản lý BTC và tài khoản nhận tiền.
+          Mỗi lần đăng nhập, Tickee sẽ hỏi thêm mã trong ứng dụng xác thực trên điện thoại của bạn.
         </p>
       </div>
       {body}

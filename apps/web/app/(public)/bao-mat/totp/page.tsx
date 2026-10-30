@@ -1,6 +1,7 @@
+import { ACCOUNT_SECURITY_PATH } from '@tickee/contracts';
 import type { Metadata } from 'next';
 
-import { safeReturnTo } from '@/lib/auth/return-to';
+import { DEFAULT_RETURN_TO, safeReturnTo } from '@/lib/auth/return-to';
 
 import { EnrollForm } from './enroll-form';
 
@@ -11,8 +12,14 @@ export const metadata: Metadata = {
 
 type TotpEnrollPageProps = { searchParams: Promise<{ returnTo?: string | string[] }> };
 
-/** Đăng ký TOTP cho Owner (FR-1): chặn toàn màn như `/dong-y`, xong thì về `returnTo`. */
+/**
+ * Bật xác thực hai lớp (FR-1), vào từ trang Bảo mật tài khoản: toàn màn như `/dong-y`, xong thì về `returnTo`
+ * (thiếu, rỗng hoặc không an toàn thì về trang Bảo mật tài khoản).
+ */
 export default async function TotpEnrollPage({ searchParams }: TotpEnrollPageProps) {
   const { returnTo } = await searchParams;
-  return <EnrollForm returnTo={safeReturnTo(returnTo)} />;
+  const target = safeReturnTo(returnTo);
+  // `safeReturnTo` trả trang chủ khi từ chối; chỉ giữ trang chủ khi chính `returnTo` là trang chủ.
+  const rejected = target === DEFAULT_RETURN_TO && returnTo !== DEFAULT_RETURN_TO;
+  return <EnrollForm returnTo={rejected ? ACCOUNT_SECURITY_PATH : target} />;
 }

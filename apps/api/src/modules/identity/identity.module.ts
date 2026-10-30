@@ -14,12 +14,13 @@ import { SessionGuard } from './session.guard.js';
 import { SignInOtpStore } from './sign-in-otp-store.js';
 import { TotpAttemptLimiter } from './totp-attempts.js';
 import { TotpController } from './totp.controller.js';
+import { TotpGuard } from './totp.guard.js';
 import { TotpService } from './totp.service.js';
 import { TotpStore } from './totp-store.js';
 
 /**
  * Tài khoản Tickee (AD-19): Better Auth mount ở `/v1/auth/*`, endpoint của web ở `/v1/identity/*`,
- * và hai guard toàn cục — `SessionGuard` rồi `ConsentGuard` (Nest chạy theo đúng thứ tự khai báo ở đây).
+ * và ba guard toàn cục — `SessionGuard`, `TotpGuard` rồi `ConsentGuard` (Nest chạy theo đúng thứ tự khai báo ở đây).
  * Cần `DbModule` và `EmailModule` (toàn cục) có mặt ở gốc DI.
  */
 @Module({})
@@ -57,6 +58,7 @@ export class IdentityModule {
         TotpAttemptLimiter,
         TotpService,
         { provide: APP_GUARD, useClass: SessionGuard },
+        { provide: APP_GUARD, useClass: TotpGuard },
         { provide: APP_GUARD, useClass: ConsentGuard },
       ],
     };

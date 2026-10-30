@@ -9,28 +9,34 @@ import {
   TotpRequiredReason,
   type RecoveryCodeResponse,
   type StepUpResponse,
+  type TotpDisableRequest,
+  type TotpDisableResponse,
   type TotpEnrollResponse,
   type TotpRequiredDetails,
 } from '@tickee/contracts';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { audit } from '../../platform/audit/index.js';
-import { DATABASE, type Database } from '../../platform/db/index.js';
-import { EMAIL_TRANSPORT, type EmailTransport } from '../../platform/email/index.js';
+import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
+import { EMAIL_TRANSPORT, type EmailMessage, type EmailTransport } from '../../platform/email/index.js';
 import { AppError } from '../../platform/http/index.js';
 import type { AuthSession } from './auth.js';
 import { IDENTITY_CONFIG, type IdentityConfig } from './identity.config.js';
 import { totpRecoveryCodes } from './schema.js';
 import { TotpAttemptLimiter } from './totp-attempts.js';
-import { buildRecoveryCodeUsedEmail } from './totp-email.js';
+import { buildRecoveryCodeUsedEmail, buildTotpDisabledEmail } from './totp-email.js';
 import { TotpStore, type TotpVerification } from './totp-store.js';
 
-export function totpRequired(reason: TotpRequiredReason): AppError {
-  const details: TotpRequiredDetails = { reason };
+/** 403 `TOTP_REQUIRED` `step_up`: tài khoản đã bật 2FA mà session chưa qua lớp hai (`TotpGuard`). */
+export function totpRequired(): AppError {
+  const details: TotpRequiredDetails = { reason: TotpRequiredReason.STEP_UP };
   return new AppError(ErrorCode.TOTP_REQUIRED, 'Bạn cần xác thực hai lớp để tiếp tục.', { details });
 }
 
 const alreadyEnabled = () =>
   new AppError(ErrorCode.VALIDATION_FAILED, 'Bạn đã bật xác thực hai lớp.', { status: 409 });
+
+const notEnabled = () =>
+  new AppError(ErrorCode.VALIDATION_FAILED, 'Bạn chưa bật xác thực hai lớp.', { status: 409 });
 
 const notStarted = () =>
   new AppError(ErrorCode.VALIDATION_FAILED, 'Phiên đăng ký đã hết. Hãy bắt đầu đăng ký lại.', { status: 409 });
@@ -52,8 +58,9 @@ export interface EnrollmentConfirmed {
 }
 
 /**
- * TOTP cho Owner (FR-1, AD-26): đăng ký, step-up và mã khôi phục. Plugin `twoFactor` chỉ được chạm qua `TotpStore`;
- * bộ đếm sai liên tiếp ở `TotpAttemptLimiter`.
+ * Xác thực hai lớp tự bật (FR-1, AD-26): bật (đăng ký), step-up sau đăng nhập, mã khôi phục và tắt. Không ai bị buộc
+ * bật; luật đòi qua lớp hai nằm ở `TotpGuard`. Plugin `twoFactor` chỉ được chạm qua `TotpStore`; bộ đếm sai liên tiếp
+ * (dùng chung cho mọi lần nhập mã) ở `TotpAttemptLimiter`.
  */
 @Injectable()
 export class TotpService {
@@ -80,8 +87,9 @@ export class TotpService {
   }
 
   /**
-   * Xác nhận đăng ký bằng mã đầu tiên. Đúng → plugin bật TOTP và xoay session; Tickee sinh bộ 10 mã khôi phục mới
-   * (bộ cũ hết hiệu lực), đặt `step_up_at = now()` cho session mới và ghi audit `totp.enrolled`.
+   * Bật 2FA: xác nhận đăng ký bằng mã đầu tiên. Đúng → plugin bật TOTP và xoay session; Tickee sinh bộ 10 mã khôi phục
+   * mới (bộ cũ hết hiệu lực), xóa `step_up_at` của mọi session khác của user (phải nhập mã ở request kế tiếp), đặt
+   * `step_up_at = now()` cho session mới và ghi audit `totp.enrolled`.
    */
   async confirmEnrollment(session: AuthSession, code: string, requestHeaders: Headers): Promise<EnrollmentConfirmed> {
     const userId = session.user.id;
@@ -95,6 +103,7 @@ export class TotpService {
         await this.limiter.succeed(tx, userId);
         await tx.delete(totpRecoveryCodes).where(eq(totpRecoveryCodes.userId, userId));
         await tx.insert(totpRecoveryCodes).values(codes.map((c) => ({ userId, codeHmac: this.recoveryHmac(c) })));
+        await this.store.clearStepUps(tx, userId);
         if (!(await this.store.markStepUp(tx, userId, sessionToken))) throw sessionGone();
         await audit.record(tx, {
           actorUserId: userId,
@@ -112,14 +121,17 @@ export class TotpService {
     return { recoveryCodes: codes.map(formatRecoveryCode), headers: verified.headers };
   }
 
-  /** Step-up bằng mã TOTP: đúng → `step_up_at = now()` cho session hiện tại. Chưa đăng ký → `TOTP_REQUIRED` enroll. */
+  /**
+   * Step-up bằng mã TOTP: đúng → `step_up_at = now()` cho session hiện tại (qua lớp hai tới hết session). Chưa bật
+   * 2FA → 409.
+   */
   async stepUp(
     session: AuthSession,
     code: string,
     requestHeaders: Headers,
   ): Promise<StepUpResponse & { headers: Headers }> {
     const userId = session.user.id;
-    if (!(await this.store.isEnabled(userId))) throw totpRequired(TotpRequiredReason.ENROLL);
+    if (!(await this.store.isEnabled(userId))) throw notEnabled();
     const verified = await this.checkCode(userId, () => this.store.verify(requestHeaders, code));
     const sessionToken = verified.rotatedSessionToken ?? session.session.token;
     let stepUpAt: Date;
@@ -138,29 +150,18 @@ export class TotpService {
   }
 
   /**
-   * Step-up bằng mã khôi phục: mã hết hiệu lực, TOTP hiện tại bị gỡ (lần request Owner kế tiếp ra `TOTP_REQUIRED`
-   * enroll), audit `totp.recovery_code_used`; sau khi commit gửi email báo cho user (lỗi gửi chỉ ghi log).
-   * Mã sai hoặc đã dùng → `TOTP_INVALID`, tính vào cùng bộ đếm với TOTP.
+   * Step-up bằng mã khôi phục: mã hết hiệu lực, TOTP hiện tại bị gỡ (2FA về chưa bật; muốn bảo vệ lại thì bật lại ở
+   * trang Bảo mật), session hiện tại qua lớp hai, audit `totp.recovery_code_used`; sau khi commit gửi email báo cho
+   * user (lỗi gửi chỉ ghi log). Mã sai hoặc đã dùng → `TOTP_INVALID`, tính vào cùng bộ đếm với TOTP. Chưa bật → 409.
    */
   async useRecoveryCode(session: AuthSession, recoveryCode: string): Promise<RecoveryCodeResponse> {
     const userId = session.user.id;
-    if (!(await this.store.isEnabled(userId))) throw totpRequired(TotpRequiredReason.ENROLL);
+    if (!(await this.store.isEnabled(userId))) throw notEnabled();
     await this.limiter.begin(userId);
     let stepUpAt: Date | null;
     try {
       stepUpAt = await this.db.transaction(async (tx) => {
-        const [used] = await tx
-          .update(totpRecoveryCodes)
-          .set({ usedAt: sql`now()` })
-          .where(
-            and(
-              eq(totpRecoveryCodes.userId, userId),
-              eq(totpRecoveryCodes.codeHmac, this.recoveryHmac(recoveryCode)),
-              isNull(totpRecoveryCodes.usedAt),
-            ),
-          )
-          .returning({ id: totpRecoveryCodes.id });
-        if (!used) return null;
+        if (!(await this.consumeRecoveryCode(tx, userId, recoveryCode))) return null;
         await this.limiter.succeed(tx, userId);
         await this.store.remove(tx, userId);
         const at = await this.store.markStepUp(tx, userId, session.session.token);
@@ -174,22 +175,100 @@ export class TotpService {
         return at;
       });
     } catch (err) {
-      await this.limiter.restore(userId);
+      await this.limiter.restore(userId).catch(() => undefined);
       throw err;
     }
     if (!stepUpAt) throw await this.limiter.fail(userId);
-    await this.notifyRecoveryCodeUsed(session.user.email);
+    await this.notify(session.user.email, buildRecoveryCodeUsedEmail(), 'Không gửi được email báo dùng mã khôi phục');
     return { stepUpAt: stepUpAt.toISOString(), reenrollRequired: true };
   }
 
-  /** Gửi đồng bộ như OTP (api chưa có pg-boss); lỗi gửi không làm hỏng step-up đã commit. */
-  private async notifyRecoveryCodeUsed(to: string): Promise<void> {
+  /**
+   * Tắt 2FA bằng mã TOTP hiện tại hoặc một mã khôi phục chưa dùng (cùng bộ đếm sai với step-up). Đúng → gỡ TOTP, xóa
+   * mọi mã khôi phục và `step_up_at` của mọi session, audit `totp.disabled` (dùng mã khôi phục thì thêm
+   * `totp.recovery_code_used`); sau khi commit gửi email báo (lỗi gửi chỉ
+   * ghi log). Sai → `TOTP_INVALID`/`TOTP_LOCKED`. Chưa bật → 409. `TotpGuard` đã đòi session qua lớp hai trước.
+   */
+  async disable(
+    session: AuthSession,
+    proof: TotpDisableRequest,
+    requestHeaders: Headers,
+  ): Promise<TotpDisableResponse> {
+    const userId = session.user.id;
+    if (!(await this.store.isEnabled(userId))) throw notEnabled();
+    if ('code' in proof) {
+      await this.checkCode(userId, () => this.store.verify(requestHeaders, proof.code));
+      try {
+        await this.db.transaction(async (tx) => {
+          await this.limiter.succeed(tx, userId);
+          await this.removeTwoFactor(tx, userId);
+        });
+      } catch (err) {
+        await this.limiter.restore(userId).catch(() => undefined);
+        throw err;
+      }
+    } else {
+      await this.limiter.begin(userId);
+      let disabled: boolean;
+      try {
+        disabled = await this.db.transaction(async (tx) => {
+          if (!(await this.consumeRecoveryCode(tx, userId, proof.recoveryCode))) return false;
+          await this.limiter.succeed(tx, userId);
+          await audit.record(tx, {
+            actorUserId: userId,
+            organizationId: null,
+            action: 'totp.recovery_code_used',
+            target: { type: 'user', id: userId },
+          });
+          await this.removeTwoFactor(tx, userId);
+          return true;
+        });
+      } catch (err) {
+        await this.limiter.restore(userId).catch(() => undefined);
+        throw err;
+      }
+      if (!disabled) throw await this.limiter.fail(userId);
+    }
+    await this.notify(session.user.email, buildTotpDisabledEmail(), 'Không gửi được email báo tắt xác thực hai lớp');
+    return { twoFactorEnabled: false };
+  }
+
+  /** Tắt 2FA trong `tx`: gỡ TOTP (kèm `step_up_at` mọi session), xóa mọi mã khôi phục, audit `totp.disabled`. */
+  private async removeTwoFactor(tx: Tx, userId: string): Promise<void> {
+    await this.store.remove(tx, userId);
+    await tx.delete(totpRecoveryCodes).where(eq(totpRecoveryCodes.userId, userId));
+    await audit.record(tx, {
+      actorUserId: userId,
+      organizationId: null,
+      action: 'totp.disabled',
+      target: { type: 'user', id: userId },
+    });
+  }
+
+  /** Đánh dấu mã khôi phục (đã chuẩn hóa) là đã dùng nếu nó của user và chưa dùng. @returns có mã như vậy không. */
+  private async consumeRecoveryCode(tx: Tx, userId: string, recoveryCode: string): Promise<boolean> {
+    const [used] = await tx
+      .update(totpRecoveryCodes)
+      .set({ usedAt: sql`now()` })
+      .where(
+        and(
+          eq(totpRecoveryCodes.userId, userId),
+          eq(totpRecoveryCodes.codeHmac, this.recoveryHmac(recoveryCode)),
+          isNull(totpRecoveryCodes.usedAt),
+        ),
+      )
+      .returning({ id: totpRecoveryCodes.id });
+    return used !== undefined;
+  }
+
+  /** Gửi đồng bộ như OTP (api chưa có pg-boss); lỗi gửi không làm hỏng thay đổi đã commit. */
+  private async notify(to: string, message: Omit<EmailMessage, 'to'>, failureLog: string): Promise<void> {
     try {
-      await this.email.send({ to, ...buildRecoveryCodeUsedEmail() });
+      await this.email.send({ to, ...message });
     } catch (err) {
       // Chỉ tên lớp lỗi: message của lỗi SMTP có thể chứa địa chỉ email.
       const errName = (err as { constructor?: { name?: string } } | null)?.constructor?.name ?? 'Unknown';
-      this.logger.warn({ errName }, 'Không gửi được email báo dùng mã khôi phục');
+      this.logger.warn({ errName }, failureLog);
     }
   }
 

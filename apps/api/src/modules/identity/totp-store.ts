@@ -110,16 +110,24 @@ export class TotpStore {
   }
 
   /**
-   * Gỡ TOTP của user (dùng mã khôi phục): xóa secret, tắt `two_factor_enabled` và xóa `step_up_at` của mọi session
-   * của user (người gọi tự đánh dấu lại session hiện tại nếu cần), để session khác không qua guard sau khi đăng ký lại.
+   * Gỡ TOTP của user (dùng mã khôi phục, tắt 2FA): xóa secret, tắt `two_factor_enabled` và xóa `step_up_at` của mọi
+   * session của user (người gọi tự đánh dấu lại session hiện tại nếu cần).
    */
   async remove(tx: Tx, userId: string): Promise<void> {
     await tx.delete(twoFactors).where(eq(twoFactors.userId, userId));
-    await tx.update(sessions).set({ stepUpAt: null }).where(eq(sessions.userId, userId));
+    await this.clearStepUps(tx, userId);
     await tx
       .update(users)
       .set({ twoFactorEnabled: false, updatedAt: sql`now()` })
       .where(eq(users.id, userId));
+  }
+
+  /**
+   * Xóa `step_up_at` của mọi session của user: session nào của user cũng phải qua lớp hai lại ở request kế tiếp
+   * (vd. lúc bật 2FA; người gọi đánh dấu lại session hiện tại bằng `markStepUp` trong cùng transaction).
+   */
+  async clearStepUps(tx: Tx, userId: string): Promise<void> {
+    await tx.update(sessions).set({ stepUpAt: null }).where(eq(sessions.userId, userId));
   }
 
   /**

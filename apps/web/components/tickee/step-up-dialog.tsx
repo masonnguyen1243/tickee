@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { stepUpWithRecoveryCode, stepUpWithTotp, totpErrorMessage, totpRequiredReason } from '@/lib/auth/totp';
+import { signOut } from '@/lib/auth/api';
+import { isTotpNotEnabled, stepUpWithRecoveryCode, stepUpWithTotp, totpErrorMessage } from '@/lib/auth/totp';
 
 import { OtpInput } from './otp-input';
 
@@ -27,12 +28,15 @@ function FieldError({ id, message }: { id: string; message: string | null }) {
 }
 
 type StepUpFormProps = {
+  /** Qua lớp hai bằng mã TOTP (hoặc tài khoản đã không còn bật 2FA): người gọi thử lại thao tác dở. */
   onSuccess: () => void;
-  onReenroll: () => void;
-  onCancel: () => void;
+  /** Qua lớp hai bằng mã khôi phục: 2FA cũ đã bị gỡ. */
+  onRecovered: () => void;
+  /** Đã đăng xuất (session ở server đã hủy). */
+  onSignedOut: () => void;
 };
 
-function StepUpForm({ onSuccess, onReenroll, onCancel }: StepUpFormProps) {
+function StepUpForm({ onSuccess, onRecovered, onSignedOut }: StepUpFormProps) {
   const ids = useId();
   const labelId = `${ids}-label`;
   const errorId = `${ids}-error`;
@@ -43,9 +47,12 @@ function StepUpForm({ onSuccess, onReenroll, onCancel }: StepUpFormProps) {
   const [recoveryCode, setRecoveryCode] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  // Lỗi `TOTP_REQUIRED` (chưa đăng ký) do `Providers` chuyển sang màn đăng ký; ở đây chỉ báo lỗi tại ô.
+  // 409: tài khoản đã tắt 2FA ở nơi khác, không còn gì phải nhập → coi như đã qua (thao tác dở được thử lại).
   const onError = (err: unknown) => {
-    if (totpRequiredReason(err) !== null) return;
+    if (isTotpNotEnabled(err)) {
+      onSuccess();
+      return;
+    }
     setError(totpErrorMessage(err));
   };
   const totp = useMutation({
@@ -57,8 +64,13 @@ function StepUpForm({ onSuccess, onReenroll, onCancel }: StepUpFormProps) {
       setPartial('');
     },
   });
-  const recovery = useMutation({ mutationFn: stepUpWithRecoveryCode, onSuccess: onReenroll, onError });
-  const pending = totp.isPending || recovery.isPending;
+  const recovery = useMutation({ mutationFn: stepUpWithRecoveryCode, onSuccess: onRecovered, onError });
+  const logout = useMutation({
+    mutationFn: signOut,
+    onSuccess: onSignedOut,
+    onError: () => setError('Chưa đăng xuất được. Vui lòng thử lại.'),
+  });
+  const pending = totp.isPending || recovery.isPending || logout.isPending;
 
   const submitTotp = (code: string) => {
     if (pending) return;
@@ -134,17 +146,27 @@ function StepUpForm({ onSuccess, onReenroll, onCancel }: StepUpFormProps) {
             aria-describedby={errorId}
           />
           <p className="text-meta text-muted-foreground">
-            Dùng mã khôi phục sẽ gỡ xác thực hai lớp hiện tại; bạn cần đăng ký lại ngay sau đó.
+            Dùng mã khôi phục sẽ gỡ xác thực hai lớp hiện tại; sau đó bạn bật lại với thiết bị mới.
           </p>
         </>
       )}
       <FieldError id={errorId} message={error} />
       <DialogFooter>
-        <Button type="submit" className="w-full" loading={pending || totp.isSuccess || recovery.isSuccess}>
+        <Button
+          type="submit"
+          className="w-full"
+          loading={totp.isPending || recovery.isPending || totp.isSuccess || recovery.isSuccess}
+        >
           Xác nhận
         </Button>
-        <Button type="button" variant="secondary" className="w-full" onClick={onCancel}>
-          Hủy
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-full"
+          loading={logout.isPending || logout.isSuccess}
+          onClick={() => !pending && logout.mutate()}
+        >
+          Đăng xuất
         </Button>
         <Button
           type="button"
@@ -163,20 +185,26 @@ function StepUpForm({ onSuccess, onReenroll, onCancel }: StepUpFormProps) {
 type StepUpDialogProps = StepUpFormProps & { open: boolean };
 
 /**
- * Dialog step-up TOTP tại chỗ (UX-DR TOTP): mở khi api trả `TOTP_REQUIRED` `step_up`, không chuyển trang để giữ dữ
- * liệu form đang nhập. Mã sai báo tại ô và giữ dialog; đúng thì `onSuccess` (người gọi thử lại thao tác dở). Mã khôi
- * phục đúng → `onReenroll` (TOTP cũ đã bị gỡ).
+ * Dialog "Xác thực hai lớp" tại chỗ (UX-DR42): mở khi api trả `TOTP_REQUIRED` ở bất kỳ trang nào, không chuyển trang
+ * để giữ dữ liệu form đang nhập. Mã sai báo tại ô và giữ dialog; đúng thì `onSuccess` (người gọi thử lại thao tác dở).
+ * Mã khôi phục đúng → `onRecovered` (TOTP cũ đã bị gỡ). Không đóng được bằng Esc/lớp phủ: chưa qua lớp hai thì mọi
+ * thao tác đều bị chặn, lối ra duy nhất ngoài nhập mã là "Đăng xuất".
  */
-export function StepUpDialog({ open, onSuccess, onReenroll, onCancel }: StepUpDialogProps) {
+export function StepUpDialog({ open, onSuccess, onRecovered, onSignedOut }: StepUpDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && onCancel()}>
-      <DialogContent>
-        <DialogHeader>
+    <Dialog open={open}>
+      <DialogContent
+        showCloseButton={false}
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onPointerDownOutside={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+      >
+        <DialogHeader className="pr-0">
           <DialogTitle>Xác thực hai lớp</DialogTitle>
-          <DialogDescription>Nhập mã trong ứng dụng xác thực để tiếp tục thao tác của bạn.</DialogDescription>
+          <DialogDescription>Nhập mã trong ứng dụng xác thực để tiếp tục dùng tài khoản.</DialogDescription>
         </DialogHeader>
         {/* Dựng lại form mỗi lần mở để không giữ mã/lỗi của lần trước. */}
-        {open ? <StepUpForm onSuccess={onSuccess} onReenroll={onReenroll} onCancel={onCancel} /> : null}
+        {open ? <StepUpForm onSuccess={onSuccess} onRecovered={onRecovered} onSignedOut={onSignedOut} /> : null}
       </DialogContent>
     </Dialog>
   );

@@ -27,7 +27,7 @@ const errorOf = (body: unknown) => ErrorResponse.parse(body).error;
 
 beforeAll(async () => {
   h = await createHarness({}, { controllers: [OwnerOnlyTestController, EventsTestController, MissingOrgParamController] });
-  // Owner phải đăng ký TOTP và step-up (Story 2.2) để tới được route BTC.
+  // Owner đã bật 2FA và qua lớp hai (Story 2.2) để kiểm `stepUpAt` được chép vào ctx.
   owner = await signUpWithTotp(h);
   admin = await signUp(h);
   outsider = await signUp(h);

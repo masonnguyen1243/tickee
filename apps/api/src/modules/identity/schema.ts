@@ -35,7 +35,7 @@ export const sessions = pgTable(
     expiresAt: timestamptz('expires_at').notNull(),
     ipAddress: text('ip_address'),
     userAgent: text('user_agent'),
-    /** Mốc step-up TOTP gần nhất của session (Story 2.2); hiệu lực `STEP_UP_TTL_MS`. `null` = chưa step-up. */
+    /** Mốc step-up TOTP gần nhất của session (Story 2.2); hiệu lực tới hết session. `null` = chưa step-up. */
     stepUpAt: timestamptz('step_up_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

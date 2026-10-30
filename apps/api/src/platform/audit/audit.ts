@@ -4,12 +4,14 @@ import { auditEvents } from './schema.js';
 /** Hành động audit: `<đối tượng>.<động từ>`. Story sau thêm vào union này. */
 export type AuditAction =
   | 'organization.created'
-  /** Xác nhận đăng ký TOTP (lần đầu hoặc đăng ký lại). */
+  /** Bật 2FA: xác nhận đăng ký TOTP (lần đầu hoặc bật lại). */
   | 'totp.enrolled'
   /** Sai TOTP/mã khôi phục đủ ngưỡng: khóa xác minh. */
   | 'totp.locked'
   /** Step-up bằng mã khôi phục: mã hết hiệu lực và TOTP bị gỡ. */
-  | 'totp.recovery_code_used';
+  | 'totp.recovery_code_used'
+  /** Người dùng tự tắt 2FA (bằng TOTP hoặc mã khôi phục): secret và mã khôi phục bị xóa. */
+  | 'totp.disabled';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

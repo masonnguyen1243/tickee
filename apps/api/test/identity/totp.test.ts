@@ -6,6 +6,7 @@ import {
   StepUpResponse,
   TOTP_LOCK_MS,
   TOTP_MAX_FAILURES,
+  TotpDisableResponse,
   TotpEnrollResponse,
   TotpEnrollVerifyResponse,
 } from '@tickee/contracts';
@@ -16,6 +17,7 @@ import {
   createHarness,
   enrollTotp,
   sessionCookie,
+  signIn,
   signUp,
   signUpWithTotp,
   totpCode,
@@ -42,6 +44,9 @@ const verifyEnroll = (cookie: string, code: string) =>
 const stepUp = (cookie: string, code: string) => h.http.post('/v1/identity/totp/step-up').set('cookie', cookie).send({ code });
 const recover = (cookie: string, recoveryCode: string) =>
   h.http.post('/v1/identity/totp/recovery').set('cookie', cookie).send({ recoveryCode });
+const disable = (cookie: string, body: unknown) => h.http.post('/v1/identity/totp/disable').set('cookie', cookie).send(body as object);
+const rowCount = async (table: 'two_factors' | 'totp_recovery_codes', userId: string) =>
+  (await h.db.pool.query(`SELECT 1 FROM ${table} WHERE user_id = $1`, [userId])).rows.length;
 const me = async (cookie: string) => Me.parse((await h.http.get('/v1/identity/me').set('cookie', cookie).expect(200)).body);
 
 const tokenOf = (cookie: string) => decodeURIComponent(cookie.split('=')[1]!).split('.')[0]!;
@@ -198,11 +203,12 @@ describe('step-up', () => {
     expect(res.headers['set-cookie']).toBeUndefined();
   });
 
-  it('chưa đăng ký → 403 TOTP_REQUIRED enroll', async () => {
+  it('chưa bật 2FA → 409, không tính vào bộ đếm', async () => {
     const user = await signUp(h);
     const res = await stepUp(user.cookie, '123456');
-    expect(res.status).toBe(403);
-    expect(errorOf(res.body)).toMatchObject({ code: 'TOTP_REQUIRED', details: { reason: 'enroll' } });
+    expect(res.status).toBe(409);
+    expect(errorOf(res.body)).toMatchObject({ code: 'VALIDATION_FAILED', message: 'Bạn chưa bật xác thực hai lớp.' });
+    expect((await h.db.pool.query('SELECT 1 FROM totp_verify_failures WHERE user_id = $1', [user.userId])).rows).toHaveLength(0);
   });
 
   it('sai lần 1–4 → TOTP_INVALID còn 4..1; lần 5 → 429 TOTP_LOCKED + audit; khóa thì mã đúng cũng bị từ chối', async () => {
@@ -263,18 +269,19 @@ describe('step-up', () => {
     const wrong = wrongTotpCode(user.manualKey);
     for (let i = 0; i < 4; i++) await stepUp(user.cookie, wrong).expect(400);
     await stepUp(user.cookie, wrong).expect(429);
-    const other = await signUp(h, user.email);
-    expect((await stepUp(other.cookie, totpCode(user.manualKey))).status).toBe(429);
+    const other = await signIn(h, user.email);
+    expect((await stepUp(other, totpCode(user.manualKey))).status).toBe(429);
   });
 });
 
 describe('mã khôi phục', () => {
-  it('mã chưa dùng → step-up, mã hết hiệu lực, TOTP bị gỡ, audit + email; đăng ký lại sinh bộ mới, bộ cũ hết hiệu lực', async () => {
+  it('mã chưa dùng → qua lớp hai, mã hết hiệu lực, TOTP bị gỡ, audit + email; bật lại sinh bộ mới, bộ cũ hết hiệu lực', async () => {
     const user = await signUp(h);
     const first = await enrollTotp(h, user);
     await h.db.orm.execute(sql`UPDATE sessions SET step_up_at = NULL WHERE token = ${tokenOf(user.cookie)}`);
+    await h.http.get('/v1/test-protected').set('cookie', user.cookie).expect(403);
     // Một session khác của cùng user đã step-up: dùng mã khôi phục phải xóa step-up của nó.
-    const other = await signUp(h, user.email);
+    const other = { cookie: await signIn(h, user.email) };
     await stepUp(other.cookie, totpCode(first.manualKey)).expect(200);
     expect(await stepUpAtOf(other.cookie)).not.toBeNull();
     const sentBefore = h.email.sent.length;
@@ -287,6 +294,9 @@ describe('mã khôi phục', () => {
     expect(await stepUpAtOf(other.cookie)).toBeNull();
     const { rows } = await h.db.pool.query('SELECT 1 FROM two_factors WHERE user_id = $1', [user.userId]);
     expect(rows).toHaveLength(0);
+    // 2FA đã gỡ: không session nào của user bị đòi TOTP nữa.
+    await h.http.get('/v1/test-protected').set('cookie', user.cookie).expect(200);
+    await h.http.get('/v1/test-protected').set('cookie', other.cookie).expect(200);
 
     const actions = await auditActions(user.userId);
     expect(actions.at(-1)).toEqual({ action: 'totp.recovery_code_used', organization_id: null, changed_fields: [] });
@@ -296,9 +306,10 @@ describe('mã khôi phục', () => {
     expect(mail[0]!.subject).toContain('mã khôi phục');
     for (const code of first.recoveryCodes) expect(mail[0]!.text).not.toContain(code);
 
-    // Đã gỡ TOTP: dùng tiếp mã khôi phục → đòi đăng ký.
+    // Đã gỡ TOTP: dùng tiếp mã khôi phục → 409 chưa bật.
     const again = await recover(user.cookie, first.recoveryCodes[1]!);
-    expect(errorOf(again.body)).toMatchObject({ code: 'TOTP_REQUIRED', details: { reason: 'enroll' } });
+    expect(again.status).toBe(409);
+    expect(errorOf(again.body).code).toBe('VALIDATION_FAILED');
 
     // Đăng ký lại: bộ mới; mã cũ (đã dùng hoặc chưa) → TOTP_INVALID, tính vào bộ đếm.
     const second = await enrollTotp(h, user);
@@ -338,5 +349,101 @@ describe('mã khôi phục', () => {
     const locked = await recover(user.cookie, 'AAAAA-AAAAA');
     expect(locked.status).toBe(429);
     expect(errorOf(locked.body).code).toBe('TOTP_LOCKED');
+  });
+});
+
+describe('tắt 2FA', () => {
+  it('mã TOTP đúng → tắt, xóa secret + mã khôi phục + step_up_at mọi session, audit + email; request sau không đòi TOTP', async () => {
+    const user = await signUp(h);
+    const { manualKey, recoveryCodes } = await enrollTotp(h, user);
+    const other = await signIn(h, user.email);
+    await stepUp(other, totpCode(manualKey)).expect(200);
+    const fresh = await signIn(h, user.email);
+    await h.http.get('/v1/test-protected').set('cookie', fresh).expect(403);
+    const sentBefore = h.email.sent.length;
+
+    const res = await disable(user.cookie, { code: totpCode(manualKey) }).expect(200);
+    expect(TotpDisableResponse.parse(res.body)).toEqual({ twoFactorEnabled: false });
+
+    expect((await me(user.cookie)).twoFactorEnabled).toBe(false);
+    expect(await rowCount('two_factors', user.userId)).toBe(0);
+    expect(await rowCount('totp_recovery_codes', user.userId)).toBe(0);
+    for (const cookie of [user.cookie, other, fresh]) {
+      expect(await stepUpAtOf(cookie)).toBeNull();
+      // Không còn 2FA: mọi session của user (kể cả session chưa từng qua lớp hai) dùng tiếp được.
+      await h.http.get('/v1/test-protected').set('cookie', cookie).expect(200);
+    }
+    expect((await auditActions(user.userId)).at(-1)).toEqual({
+      action: 'totp.disabled',
+      organization_id: null,
+      changed_fields: [],
+    });
+    const mail = h.email.sent.slice(sentBefore);
+    expect(mail).toHaveLength(1);
+    expect(mail[0]!.to).toBe(user.email);
+    expect(mail[0]!.subject).toContain('tắt xác thực hai lớp');
+
+    // Mã khôi phục cũ hết hiệu lực; tắt lần nữa → 409; bật lại được với bộ mã mới.
+    expect((await recover(user.cookie, recoveryCodes[0]!)).status).toBe(409);
+    expect((await disable(user.cookie, { code: totpCode(manualKey) })).status).toBe(409);
+    const again = await enrollTotp(h, user);
+    expect(again.manualKey).not.toBe(manualKey);
+    await stepUp(user.cookie, totpCode(again.manualKey)).expect(200);
+  });
+
+  it('mã khôi phục đúng → tắt; sai (khôi phục hay TOTP) → TOTP_INVALID cùng bộ đếm; sai dạng → VALIDATION_FAILED', async () => {
+    const user = await signUp(h);
+    const { manualKey, recoveryCodes } = await enrollTotp(h, user);
+
+    const wrongRecovery = await disable(user.cookie, { recoveryCode: 'AAAAA-AAAAA' });
+    expect(wrongRecovery.status).toBe(400);
+    expect(errorOf(wrongRecovery.body)).toMatchObject({ code: 'TOTP_INVALID', details: { remainingAttempts: 4 } });
+    const wrongTotp = await disable(user.cookie, { code: wrongTotpCode(manualKey) });
+    expect(errorOf(wrongTotp.body)).toMatchObject({ code: 'TOTP_INVALID', details: { remainingAttempts: 3 } });
+    for (const body of [{}, { code: '12' }, { recoveryCode: 'abc' }, { code: totpCode(manualKey), recoveryCode: recoveryCodes[0] }]) {
+      const res = await disable(user.cookie, body);
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expect(errorOf(res.body).code).toBe('VALIDATION_FAILED');
+    }
+    expect((await me(user.cookie)).twoFactorEnabled).toBe(true);
+
+    await disable(user.cookie, { recoveryCode: recoveryCodes[3]!.toLowerCase() }).expect(200);
+    expect((await me(user.cookie)).twoFactorEnabled).toBe(false);
+    expect(await rowCount('two_factors', user.userId)).toBe(0);
+    expect(await rowCount('totp_recovery_codes', user.userId)).toBe(0);
+    expect((await auditActions(user.userId)).map((a) => a.action)).toEqual(
+      expect.arrayContaining(['totp.recovery_code_used', 'totp.disabled']),
+    );
+    const { rows } = await h.db.pool.query<{ failed_count: number }>(
+      'SELECT failed_count FROM totp_verify_failures WHERE user_id = $1',
+      [user.userId],
+    );
+    expect(rows[0]?.failed_count).toBe(0);
+  });
+
+  it('sai 5 lần → khóa (cùng bộ đếm với step-up); đang khóa thì mã đúng cũng bị từ chối', async () => {
+    const user = await signUpWithTotp(h);
+    const wrong = wrongTotpCode(user.manualKey);
+    for (let i = 0; i < 4; i++) await disable(user.cookie, { code: wrong }).expect(400);
+    const locked = await disable(user.cookie, { code: wrong });
+    expect(locked.status).toBe(429);
+    expect(errorOf(locked.body).code).toBe('TOTP_LOCKED');
+    expect((await disable(user.cookie, { code: totpCode(user.manualKey) })).status).toBe(429);
+    expect((await stepUp(user.cookie, totpCode(user.manualKey))).status).toBe(429);
+    expect((await me(user.cookie)).twoFactorEnabled).toBe(true);
+  });
+
+  it('chưa bật → 409; gửi email lỗi không làm hỏng việc tắt, log không chứa email', async () => {
+    const plain = await signUp(h);
+    const res = await disable(plain.cookie, { code: '123456' });
+    expect(res.status).toBe(409);
+    expect(errorOf(res.body).code).toBe('VALIDATION_FAILED');
+
+    const user = await signUpWithTotp(h);
+    h.email.failWith = new Error(`SMTP từ chối ${user.email}`);
+    await disable(user.cookie, { code: totpCode(user.manualKey) }).expect(200);
+    expect((await me(user.cookie)).twoFactorEnabled).toBe(false);
+    expect(h.logs.lines.some((l) => l.msg === 'Không gửi được email báo tắt xác thực hai lớp')).toBe(true);
+    expect(h.logs.text).not.toContain(user.email);
   });
 });

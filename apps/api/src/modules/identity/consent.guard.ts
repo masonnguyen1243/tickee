@@ -10,7 +10,7 @@ const CONSENT_EXEMPT_KEY = 'identity:consent-exempt';
 export const ConsentExempt = () => SetMetadata(CONSENT_EXEMPT_KEY, true);
 
 /**
- * Guard toàn cục số 2, chạy sau `SessionGuard` (thứ tự đăng ký trong `IdentityModule`).
+ * Guard toàn cục số 3, chạy sau `SessionGuard` và `TotpGuard` (thứ tự đăng ký trong `IdentityModule`).
  * Có session mà `consentedAt` còn `null` → 403 `CONSENT_REQUIRED`, trừ route `@ConsentExempt()`.
  * Request ẩn danh và route công khai thì bỏ qua.
  */

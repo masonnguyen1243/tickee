@@ -62,8 +62,10 @@ export const DEFAULT_RETURN_TO = '/';
 export const LOGIN_PATH = '/dang-nhap';
 /** Màn đồng ý NĐ 13 của web. */
 export const CONSENT_PATH = '/dong-y';
-/** Màn đăng ký TOTP của web (QR, khóa nhập tay, mã 6 số, rồi mã khôi phục). */
+/** Màn đăng ký TOTP của web (QR, khóa nhập tay, mã 6 số, rồi mã khôi phục); thiếu `returnTo` thì về trang Bảo mật. */
 export const TOTP_ENROLL_PATH = '/bao-mat/totp';
+/** Trang "Bảo mật tài khoản" của web (bật/tắt xác thực hai lớp), dùng chung mọi vai. */
+export const ACCOUNT_SECURITY_PATH = '/tai-khoan/bao-mat';
 /** Trang trung gian của web mà Google quay về sau khi đăng nhập thành công. */
 export const GOOGLE_RETURN_PATH = `${LOGIN_PATH}/google`;
 
@@ -114,7 +116,7 @@ export type GoogleSignInError = (typeof GoogleSignInError)[keyof typeof GoogleSi
 export const SIGN_IN_ERROR_PARAM = 'error';
 
 // ---------------------------------------------------------------------------------------------------------------
-// TOTP cho Owner (FR-1, NFR-6, AD-26)
+// Xác thực hai lớp tự bật (TOTP) cho mọi tài khoản (FR-1, NFR-6, AD-26)
 // ---------------------------------------------------------------------------------------------------------------
 
 /** Mã TOTP: 6 số, chu kỳ 30 giây, issuer "Tickee" (ứng dụng xác thực hiển thị tên này). */
@@ -122,10 +124,7 @@ export const TOTP_DIGITS = 6;
 export const TOTP_PERIOD_SECONDS = 30;
 export const TOTP_ISSUER = 'Tickee';
 
-/** Step-up có hiệu lực 12 giờ kể từ lần xác minh TOTP (hoặc mã khôi phục) gần nhất của session. */
-export const STEP_UP_TTL_MS = 12 * 60 * 60 * 1000;
-
-/** Sai liên tiếp chừng này lần (TOTP và mã khôi phục, cả xác nhận đăng ký lẫn step-up) thì khóa xác minh. */
+/** Sai liên tiếp chừng này lần (TOTP và mã khôi phục: xác nhận đăng ký, step-up, tắt 2FA) thì khóa xác minh. */
 export const TOTP_MAX_FAILURES = 5;
 /** Thời gian khóa xác minh TOTP theo user. */
 export const TOTP_LOCK_MS = 15 * 60 * 1000;
@@ -169,14 +168,14 @@ export type TotpCodeRequest = z.input<typeof TotpCodeRequest>;
 
 /**
  * Kết quả xác nhận đăng ký: 10 mã khôi phục (dạng `XXXXX-XXXXX`) chỉ trả đúng lần này. API set cookie session mới
- * (đã step-up).
+ * (đã qua lớp hai); các session khác của user phải nhập mã ở request kế tiếp.
  */
 export const TotpEnrollVerifyResponse = z.object({
   recoveryCodes: z.array(z.string()).length(RECOVERY_CODE_COUNT),
 });
 export type TotpEnrollVerifyResponse = z.infer<typeof TotpEnrollVerifyResponse>;
 
-/** Kết quả step-up bằng TOTP. */
+/** Kết quả step-up bằng TOTP: session hiện tại đã qua lớp hai tới hết session. */
 export const StepUpResponse = z.object({ stepUpAt: z.iso.datetime() });
 export type StepUpResponse = z.infer<typeof StepUpResponse>;
 
@@ -185,8 +184,8 @@ export const RecoveryCodeRequest = z.object({ recoveryCode: RecoveryCode });
 export type RecoveryCodeRequest = z.input<typeof RecoveryCodeRequest>;
 
 /**
- * Step-up bằng mã khôi phục thành công: mã đã hết hiệu lực và TOTP hiện tại bị gỡ, nên phải đăng ký lại
- * (`reenrollRequired` luôn `true`).
+ * Step-up bằng mã khôi phục thành công: mã đã hết hiệu lực và TOTP hiện tại bị gỡ (2FA về chưa bật), nên muốn bảo vệ
+ * lại thì phải bật lại với thiết bị mới (`reenrollRequired` luôn `true`).
  */
 export const RecoveryCodeResponse = z.object({
   stepUpAt: z.iso.datetime(),
@@ -194,9 +193,25 @@ export const RecoveryCodeResponse = z.object({
 });
 export type RecoveryCodeResponse = z.infer<typeof RecoveryCodeResponse>;
 
-/** Lý do của `TOTP_REQUIRED`: chưa đăng ký → màn đăng ký; đã đăng ký mà chưa/hết step-up → dialog step-up. */
+/**
+ * `POST /v1/identity/totp/disable`: tắt 2FA bằng mã TOTP hiện tại (`code`) hoặc một mã khôi phục chưa dùng
+ * (`recoveryCode`), đúng một trong hai.
+ */
+export const TotpDisableRequest = z.union([
+  z.strictObject({ code: TotpCode }),
+  z.strictObject({ recoveryCode: RecoveryCode }),
+]);
+export type TotpDisableRequest = z.input<typeof TotpDisableRequest>;
+
+/** Kết quả tắt 2FA: secret và mã khôi phục đã bị xóa. */
+export const TotpDisableResponse = z.object({ twoFactorEnabled: z.literal(false) });
+export type TotpDisableResponse = z.infer<typeof TotpDisableResponse>;
+
+/**
+ * Lý do của `TOTP_REQUIRED`: chỉ còn `step_up` (tài khoản đã bật 2FA mà session chưa qua lớp hai). Không ai bị buộc
+ * bật 2FA nên không có lý do "chưa đăng ký".
+ */
 export const TotpRequiredReason = {
-  ENROLL: 'enroll',
   STEP_UP: 'step_up',
 } as const;
 export type TotpRequiredReason = (typeof TotpRequiredReason)[keyof typeof TotpRequiredReason];
@@ -214,18 +229,15 @@ export const TotpLockedDetails = OtpLockedDetails;
 export type TotpLockedDetails = z.infer<typeof TotpLockedDetails>;
 
 /**
- * Endpoint không bao giờ trả `TOTP_REQUIRED` (dạng `METHOD /v1/...` như Express khai báo route), khai báo một chỗ.
- * Owner chưa đăng ký hay chưa step-up vẫn phải gọi được các route này để đăng ký, step-up, đăng xuất và để web
- * dựng khung trang.
+ * Endpoint không bao giờ trả `TOTP_REQUIRED` (dạng `METHOD /v1/...` như Express khai báo route), khai báo một chỗ và
+ * do `TotpGuard` của `identity` đọc. Session chưa qua lớp hai vẫn phải nhập mã, dùng mã khôi phục, đăng xuất và để
+ * web biết tài khoản đang đăng nhập (`me`). Endpoint đăng nhập (`@AllowAnonymous`) và `/v1/auth/*` vốn không qua guard.
  */
 export const TOTP_EXEMPT_ROUTES: readonly string[] = [
-  'POST /v1/identity/totp/enroll',
-  'POST /v1/identity/totp/enroll/verify',
   'POST /v1/identity/totp/step-up',
   'POST /v1/identity/totp/recovery',
   'POST /v1/identity/sign-out',
   'GET /v1/identity/me',
-  'GET /v1/me/memberships',
 ];
 
 /** Route `METHOD path` (path theo khai báo route, vd. `/v1/orgs/:orgId`) có trong `TOTP_EXEMPT_ROUTES` không. */

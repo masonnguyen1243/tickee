@@ -1,17 +1,20 @@
 import { describe, expect, it } from 'vitest';
+import * as identity from '../src/identity.js';
 import {
+  ACCOUNT_SECURITY_PATH,
   formatRecoveryCode,
   isTotpExemptRoute,
   Me,
   RecoveryCodeRequest,
   safeReturnTo,
   SendOtpRequest,
-  STEP_UP_TTL_MS,
   TOTP_ENROLL_PATH,
   TOTP_EXEMPT_ROUTES,
   TOTP_LOCK_MS,
   TOTP_MAX_FAILURES,
   TotpCodeRequest,
+  TotpDisableRequest,
+  TotpDisableResponse,
   TotpRequiredDetails,
   VerifyOtpRequest,
 } from '../src/identity.js';
@@ -45,10 +48,10 @@ describe('schema identity', () => {
 });
 
 describe('TOTP', () => {
-  it('thông số: step-up 12 giờ, khóa 15 phút sau 5 lần sai', () => {
-    expect(STEP_UP_TTL_MS).toBe(12 * 3_600_000);
+  it('thông số: khóa 15 phút sau 5 lần sai; step-up hiệu lực hết session (không có mốc giờ)', () => {
     expect(TOTP_MAX_FAILURES).toBe(5);
     expect(TOTP_LOCK_MS).toBe(15 * 60_000);
+    expect('STEP_UP_TTL_MS' in identity).toBe(false);
   });
 
   it('mã lỗi TOTP có trong ErrorCode', () => {
@@ -75,30 +78,41 @@ describe('TOTP', () => {
     expect(RecoveryCodeRequest.safeParse({ recoveryCode }).success).toBe(false);
   });
 
-  it('TotpRequiredDetails chỉ nhận enroll | step_up', () => {
-    expect(TotpRequiredDetails.safeParse({ reason: 'enroll' }).success).toBe(true);
+  it('TotpRequiredDetails chỉ nhận step_up (không còn lý do enroll)', () => {
     expect(TotpRequiredDetails.safeParse({ reason: 'step_up' }).success).toBe(true);
+    expect(TotpRequiredDetails.safeParse({ reason: 'enroll' }).success).toBe(false);
     expect(TotpRequiredDetails.safeParse({ reason: 'khac' }).success).toBe(false);
   });
 
-  it('danh sách route miễn đúng AD-26', () => {
+  it('danh sách route miễn đúng AD-26: nhập mã, mã khôi phục, đăng xuất, me', () => {
     expect([...TOTP_EXEMPT_ROUTES].sort()).toEqual(
       [
-        'POST /v1/identity/totp/enroll',
-        'POST /v1/identity/totp/enroll/verify',
         'POST /v1/identity/totp/step-up',
         'POST /v1/identity/totp/recovery',
         'POST /v1/identity/sign-out',
         'GET /v1/identity/me',
-        'GET /v1/me/memberships',
       ].sort(),
     );
     expect(isTotpExemptRoute('get', '/v1/identity/me')).toBe(true);
     expect(isTotpExemptRoute('GET', '/v1/orgs/:orgId')).toBe(false);
+    expect(isTotpExemptRoute('GET', '/v1/me/memberships')).toBe(false);
+    expect(isTotpExemptRoute('POST', '/v1/identity/totp/disable')).toBe(false);
   });
 
-  it('màn đăng ký TOTP không làm đích returnTo', () => {
+  it('tắt 2FA: đúng một trong mã TOTP hoặc mã khôi phục (chuẩn hóa)', () => {
+    expect(TotpDisableRequest.parse({ code: '123456' })).toEqual({ code: '123456' });
+    expect(TotpDisableRequest.parse({ recoveryCode: ' abcde-fgh23 ' })).toEqual({ recoveryCode: 'ABCDEFGH23' });
+    for (const body of [{}, { code: '12345' }, { recoveryCode: 'abc' }, { code: '123456', recoveryCode: 'ABCDE-FGH23' }]) {
+      expect(TotpDisableRequest.safeParse(body).success, JSON.stringify(body)).toBe(false);
+    }
+    expect(TotpDisableResponse.safeParse({ twoFactorEnabled: false }).success).toBe(true);
+    expect(TotpDisableResponse.safeParse({ twoFactorEnabled: true }).success).toBe(false);
+  });
+
+  it('màn đăng ký TOTP không làm đích returnTo; trang Bảo mật thì được', () => {
     expect(safeReturnTo(TOTP_ENROLL_PATH)).toBe('/');
     expect(safeReturnTo(`${TOTP_ENROLL_PATH}?returnTo=/x`)).toBe('/');
+    expect(ACCOUNT_SECURITY_PATH).toBe('/tai-khoan/bao-mat');
+    expect(safeReturnTo(ACCOUNT_SECURITY_PATH)).toBe(ACCOUNT_SECURITY_PATH);
   });
 });

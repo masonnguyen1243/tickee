@@ -1,13 +1,15 @@
 import {
+  ACCOUNT_SECURITY_PATH,
   ErrorCode,
   RecoveryCodeResponse,
   StepUpResponse,
+  TOTP_DIGITS,
+  TotpDisableResponse,
   TotpEnrollResponse,
   TotpEnrollVerifyResponse,
   TotpInvalidDetails,
   TotpLockedDetails,
-  TotpRequiredDetails,
-  type TotpRequiredReason,
+  type TotpDisableRequest,
 } from '@tickee/contracts';
 
 import { apiRequest } from '@/lib/api/client';
@@ -27,17 +29,38 @@ export const confirmTotpEnrollment = (code: string) =>
 export const stepUpWithTotp = (code: string) =>
   apiRequest('/identity/totp/step-up', { schema: StepUpResponse, init: post({ code }) });
 
-/** Step-up bằng mã khôi phục: TOTP cũ bị gỡ, phải đăng ký lại. */
+/** Step-up bằng mã khôi phục: TOTP cũ bị gỡ (2FA về chưa bật), bật lại ở trang Bảo mật tài khoản. */
 export const stepUpWithRecoveryCode = (recoveryCode: string) =>
   apiRequest('/identity/totp/recovery', { schema: RecoveryCodeResponse, init: post({ recoveryCode }) });
 
-/** Lý do của lỗi `TOTP_REQUIRED`, hoặc `null` nếu không phải lỗi này. */
-export function totpRequiredReason(error: unknown): TotpRequiredReason | null {
-  if (!(error instanceof ApiError) || error.code !== ErrorCode.TOTP_REQUIRED) return null;
-  const parsed = TotpRequiredDetails.safeParse(error.details);
-  // Thiếu `details` hợp lệ: coi như cần step-up (dialog tự chuyển sang đăng ký nếu api báo chưa đăng ký).
-  return parsed.success ? parsed.data.reason : 'step_up';
+/** Tắt 2FA bằng mã TOTP hoặc mã khôi phục (xem `disableTotpRequest`). */
+export const disableTotp = (body: TotpDisableRequest) =>
+  apiRequest('/identity/totp/disable', { schema: TotpDisableResponse, init: post(body) });
+
+const TOTP_INPUT = new RegExp(`^\\d{${TOTP_DIGITS}}$`);
+
+/**
+ * Một ô nhận cả mã TOTP lẫn mã khôi phục: đúng `TOTP_DIGITS` chữ số là mã TOTP (mã khôi phục không bao giờ toàn số
+ * và dài hơn), còn lại gửi như mã khôi phục (api chuẩn hóa và kiểm).
+ */
+export function disableTotpRequest(input: string): TotpDisableRequest {
+  const value = input.replace(/\s+/g, '');
+  return TOTP_INPUT.test(value) ? { code: value } : { recoveryCode: input.trim() };
 }
+
+/** Lỗi là `TOTP_REQUIRED` (tài khoản đã bật 2FA mà session chưa qua lớp hai). */
+export const isTotpRequired = (error: unknown): boolean =>
+  error instanceof ApiError && error.code === ErrorCode.TOTP_REQUIRED;
+
+/** 409 `VALIDATION_FAILED` của step-up / mã khôi phục / tắt: tài khoản đã không còn bật 2FA (vd. tắt ở nơi khác). */
+export const isTotpNotEnabled = (error: unknown): boolean =>
+  error instanceof ApiError && error.code === ErrorCode.VALIDATION_FAILED && error.status === 409;
+
+/** Tham số query của trang Bảo mật tài khoản: vừa dùng mã khôi phục (2FA cũ đã bị gỡ) → hiện banner bật lại. */
+export const RECOVERY_USED_PARAM = 'da-dung-ma-khoi-phuc';
+
+/** Trang Bảo mật tài khoản kèm banner "Xác thực hai lớp cũ đã được gỡ…". */
+export const RECOVERY_USED_PATH = `${ACCOUNT_SECURITY_PATH}?${RECOVERY_USED_PARAM}=1`;
 
 /** Thông báo lỗi tại ô cho mã TOTP / mã khôi phục. */
 export function totpErrorMessage(error: unknown): string {
@@ -66,7 +89,7 @@ export function recoveryCodesText(codes: readonly string[], email?: string): str
     email ? `Tài khoản: ${email}` : null,
     '',
     'Mỗi mã chỉ dùng được một lần. Dùng một mã khi không mở được ứng dụng xác thực;',
-    'sau đó Tickee sẽ yêu cầu đăng ký lại xác thực hai lớp.',
+    'xác thực hai lớp cũ sẽ được gỡ và bạn bật lại trong Bảo mật tài khoản.',
     '',
     ...codes,
     '',

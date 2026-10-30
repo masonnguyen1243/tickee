@@ -5,7 +5,7 @@ import { Test } from '@nestjs/testing';
 import { ErrorResponse, Permission } from '@tickee/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RequirePermission } from '../../src/platform/access/index.js';
-import { createHarness, signUp, signUpWithTotp, type Harness } from '../identity/harness.js';
+import { createHarness, signUp, type Harness } from '../identity/harness.js';
 import { discoverRoutes, ORG_ROUTE, type DiscoveredRoute } from './routes.js';
 import { EventsTestController, OwnerOnlyTestController } from './test-controllers.js';
 
@@ -23,8 +23,7 @@ let orgB: string;
 beforeAll(async () => {
   h = await createHarness({}, { imports: [DiscoveryModule], controllers: [OwnerOnlyTestController, EventsTestController] });
   routes = discoverRoutes(h.app);
-  // Owner A đã step-up TOTP để phép đối chứng trên BTC A đi tới tận handler.
-  ownerA = await signUpWithTotp(h);
+  ownerA = await signUp(h);
   const ownerB = await signUp(h);
   orgA = (await h.http.post('/v1/orgs').set('cookie', ownerA.cookie).send({ name: 'BTC A' }).expect(201)).body.id;
   orgB = (await h.http.post('/v1/orgs').set('cookie', ownerB.cookie).send({ name: 'BTC B' }).expect(201)).body.id;

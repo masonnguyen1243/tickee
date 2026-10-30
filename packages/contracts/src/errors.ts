@@ -27,8 +27,8 @@ export const ErrorCode = {
   /** Là thành viên nhưng vai trò không có quyền này (vd. Admin gọi thao tác chỉ Owner). */
   FORBIDDEN_ROLE: 'FORBIDDEN_ROLE',
   /**
-   * Request mang vai Owner (route BTC mà vai giải ra là `owner`) nhưng chưa đăng ký TOTP hoặc session chưa step-up
-   * trong `STEP_UP_TTL_MS`; `details.reason` (`TotpRequiredDetails`).
+   * Tài khoản đã bật 2FA mà session chưa qua lớp hai (chưa nhập TOTP hay mã khôi phục), gọi route ngoài
+   * `TOTP_EXEMPT_ROUTES`; `details.reason` luôn `step_up` (`TotpRequiredDetails`).
    */
   TOTP_REQUIRED: 'TOTP_REQUIRED',
   /** Mã TOTP hoặc mã khôi phục sai (kể cả mã khôi phục đã dùng); `details.remainingAttempts`. */
