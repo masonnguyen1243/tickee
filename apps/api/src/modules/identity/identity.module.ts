@@ -3,13 +3,15 @@ import { APP_GUARD } from '@nestjs/core';
 import { AuthModule } from '@thallesp/nestjs-better-auth';
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { EMAIL_TRANSPORT, type EmailTransport } from '../../platform/email/index.js';
-import { authHttpGate, createAuth } from './auth.js';
+import { authHttpGate } from './auth-http-gate.js';
+import { createAuth } from './auth.js';
 import { ConsentGuard } from './consent.guard.js';
 import { IDENTITY_CONFIG, type IdentityConfig } from './identity.config.js';
 import { IdentityController } from './identity.controller.js';
 import { IdentityService } from './identity.service.js';
 import { OtpRateLimiter } from './otp-rate-limit.js';
 import { SessionGuard } from './session.guard.js';
+import { SignInOtpStore } from './sign-in-otp-store.js';
 
 /**
  * Tài khoản Tickee (AD-19): Better Auth mount ở `/v1/auth/*`, endpoint của web ở `/v1/identity/*`,
@@ -45,6 +47,7 @@ export class IdentityModule {
       providers: [
         { provide: IDENTITY_CONFIG, useValue: config },
         OtpRateLimiter,
+        SignInOtpStore,
         IdentityService,
         { provide: APP_GUARD, useClass: SessionGuard },
         { provide: APP_GUARD, useClass: ConsentGuard },

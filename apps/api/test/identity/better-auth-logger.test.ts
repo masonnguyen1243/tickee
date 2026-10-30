@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { logBetterAuth } from '../../src/modules/identity/auth.js';
+import { logBetterAuth } from '../../src/modules/identity/better-auth-logger.js';
 
 describe('logBetterAuth', () => {
   afterEach(() => {

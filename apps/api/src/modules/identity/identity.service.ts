@@ -6,7 +6,6 @@ import {
   GOOGLE_RETURN_PATH,
   GoogleSignInError,
   LOGIN_PATH,
-  OTP_MAX_ATTEMPTS,
   SIGN_IN_ERROR_PARAM,
   OTP_RESEND_AFTER_SECONDS,
   type Me,
@@ -17,19 +16,12 @@ import { isAPIError } from 'better-auth/api';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
-import { GOOGLE_PROVIDER_ID, otpDelivery, type Auth, type AuthSession, type OtpDeliveryState } from './auth.js';
+import { GOOGLE_PROVIDER_ID, type Auth, type AuthSession } from './auth.js';
 import { IDENTITY_CONFIG, type IdentityConfig } from './identity.config.js';
+import { otpDelivery, type OtpDeliveryState } from './otp-delivery.js';
 import { OtpRateLimiter } from './otp-rate-limit.js';
 import { users } from './schema.js';
-
-/** Định danh verification mà plugin emailOTP dùng cho mã đăng nhập (`toOTPIdentifier`). */
-const signInIdentifier = (email: string): string => `sign-in-otp-${email}`;
-
-/** Số lần nhập sai đã ghi trong verification (`"<hash>:<attempts>"`). */
-function usedAttempts(value: string): number {
-  const n = Number.parseInt(value.slice(value.lastIndexOf(':') + 1), 10);
-  return Number.isFinite(n) ? n : 0;
-}
+import { SignInOtpStore } from './sign-in-otp-store.js';
 
 export type GoogleSignInStart =
   | {
@@ -58,6 +50,7 @@ export class IdentityService {
   constructor(
     @Inject(AuthService) private readonly auth: AuthService<Auth>,
     @Inject(OtpRateLimiter) private readonly rateLimiter: OtpRateLimiter,
+    @Inject(SignInOtpStore) private readonly otpStore: SignInOtpStore,
     @Inject(DATABASE) private readonly db: Database,
     @Inject(IDENTITY_CONFIG) private readonly config: IdentityConfig,
   ) {}
@@ -114,8 +107,7 @@ export class IdentityService {
       await this.rateLimiter.release(eventId);
       // Better Auth đã lưu mã mới (0 lần sai) dù email không đi: xóa đi, nếu không mỗi vòng "gửi → 503" lại cho
       // thêm 5 lần đoán mà không tốn lượt gửi.
-      const context = await this.auth.instance.$context;
-      await context.internalAdapter.deleteVerificationByIdentifier(signInIdentifier(email));
+      await this.otpStore.delete(email);
       // Không gắn `cause`: lỗi SMTP có thể chứa địa chỉ email, mà ErrorFilter log `cause` của lỗi 5xx.
       throw new AppError(ErrorCode.SERVICE_UNAVAILABLE, 'Chưa gửi được email. Vui lòng thử lại sau ít phút.');
     }
@@ -130,8 +122,7 @@ export class IdentityService {
     await this.rateLimiter.assertVerifyAllowed(email);
     // Chỉ đếm lần sai khi có mã để đoán: nếu không, ai biết email cũng khóa được người đó 24 giờ chỉ bằng
     // 16 request verify mà không cần gửi mã nào.
-    const context = await this.auth.instance.$context;
-    const hadCode = (await context.internalAdapter.findVerificationValue(signInIdentifier(email))) !== null;
+    const hadCode = await this.otpStore.has(email);
     try {
       const { headers, response } = await this.auth.api.signInEmailOTP({
         body: { email, otp },
@@ -192,9 +183,7 @@ export class IdentityService {
         return attemptsExceeded();
       case 'INVALID_OTP': {
         // Better Auth đã ghi lại lần sai vào phần `:attempts`; còn 0 lượt (lần sai thứ 5) hoặc không còn mã → hết hiệu lực.
-        const context = await this.auth.instance.$context;
-        const verification = await context.internalAdapter.findVerificationValue(signInIdentifier(email));
-        const remaining = verification ? OTP_MAX_ATTEMPTS - usedAttempts(verification.value) : 0;
+        const remaining = await this.otpStore.remainingAttempts(email);
         if (remaining <= 0) return attemptsExceeded();
         const details: OtpInvalidDetails = { remainingAttempts: remaining };
         return new AppError(ErrorCode.OTP_INVALID, `Mã chưa đúng, còn ${remaining} lần.`, { details });
