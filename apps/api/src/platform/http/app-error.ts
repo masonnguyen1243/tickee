@@ -12,6 +12,8 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   OTP_EXPIRED: 400,
   OTP_ATTEMPTS_EXCEEDED: 400,
   OTP_LOCKED: 429,
+  NOT_A_MEMBER: 403,
+  FORBIDDEN_ROLE: 403,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

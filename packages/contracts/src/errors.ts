@@ -19,6 +19,13 @@ export const ErrorCode = {
   OTP_ATTEMPTS_EXCEEDED: 'OTP_ATTEMPTS_EXCEEDED',
   /** Email nhập sai mã quá nhiều lần trong 24 giờ: khóa cả gửi lẫn xác minh; `details.retryAfterSeconds`. */
   OTP_LOCKED: 'OTP_LOCKED',
+  /**
+   * Người gọi không là thành viên BTC trong đường dẫn. Trả cả khi BTC không tồn tại hoặc `orgId` sai dạng,
+   * để không lộ BTC nào có thật.
+   */
+  NOT_A_MEMBER: 'NOT_A_MEMBER',
+  /** Là thành viên nhưng vai trò không có quyền này (vd. Admin gọi thao tác chỉ Owner). */
+  FORBIDDEN_ROLE: 'FORBIDDEN_ROLE',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

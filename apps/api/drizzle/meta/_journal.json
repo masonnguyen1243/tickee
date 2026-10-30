@@ -29,6 +29,13 @@
       "when": 1793265517470,
       "tag": "0003_google_start_events",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793323719626,
+      "tag": "0004_organizer",
+      "breakpoints": true
     }
   ]
 }

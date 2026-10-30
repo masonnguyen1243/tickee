@@ -19,6 +19,11 @@ test.describe('theme sáng (prefers-color-scheme: light)', () => {
     await expect(page.getByTestId('kit-button-primary-on-light')).toHaveCSS('background-color', 'rgb(28, 20, 22)');
     await expect(page.getByTestId('kit-button-primary-on-light')).toHaveCSS('color', 'rgb(255, 247, 248)');
   });
+
+  test('chữ trong ô nhập (components/ui/input) dùng --foreground', async ({ page }) => {
+    await page.goto('/dang-nhap');
+    await expect(page.getByLabel('Email')).toHaveCSS('color', 'rgb(28, 25, 23)');
+  });
 });
 
 test.describe('theme tối (prefers-color-scheme: dark)', () => {
@@ -34,6 +39,12 @@ test.describe('theme tối (prefers-color-scheme: dark)', () => {
     // Dark mode: button-primary-on-light thành button-primary (coral, chữ mực).
     await expect(page.getByTestId('kit-button-primary-on-light')).toHaveCSS('background-color', 'rgb(255, 77, 106)');
     await expect(page.getByTestId('kit-button-primary-on-light')).toHaveCSS('color', 'rgb(31, 10, 16)');
+  });
+
+  // `text-input` từng sinh thêm `color: var(--input)` (trùng nền `bg-muted`) và đè `text-foreground`: chữ vô hình.
+  test('chữ trong ô nhập (components/ui/input) dùng --foreground', async ({ page }) => {
+    await page.goto('/dang-nhap');
+    await expect(page.getByLabel('Email')).toHaveCSS('color', 'rgb(245, 242, 242)');
   });
 });
 

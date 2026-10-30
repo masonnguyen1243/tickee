@@ -4,6 +4,12 @@ import type pg from 'pg';
 export const APP_DB_ROLE = 'tickee_app';
 
 /**
+ * Bảng chỉ cho INSERT/SELECT với `tickee_app` (`schema.table`). Thu UPDATE/DELETE/TRUNCATE sau khi cấp quyền,
+ * nên quyền này vẫn bị chặn sau mỗi lần migrate.
+ */
+export const APPEND_ONLY_TABLES = ['public.audit_events'] as const;
+
+/**
  * Cấp quyền DML cho `tickee_app` trên mọi bảng hiện có (schema `public` và `pgboss`).
  * Bảng mới ở story sau tự có quyền nhờ `ALTER DEFAULT PRIVILEGES` trong migration 0000.
  * Idempotent; chạy bằng `tickee_migrator` sau migration.
@@ -20,5 +26,15 @@ export async function grantAppRole(client: pg.Pool | pg.PoolClient, schemas: rea
     );
     await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA ${s} GRANT USAGE, SELECT ON SEQUENCES TO ${APP_DB_ROLE}`);
     await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA ${s} GRANT EXECUTE ON FUNCTIONS TO ${APP_DB_ROLE}`);
+  }
+  // Phải chạy sau GRANT ở trên (GRANT ... ON ALL TABLES cấp lại UPDATE/DELETE cho mọi bảng).
+  for (const table of APPEND_ONLY_TABLES) {
+    const [schema, name] = table.split('.') as [string, string];
+    if (!schemas.includes(schema)) continue;
+    const { rows } = await client.query<{ exists: boolean }>('SELECT to_regclass($1) IS NOT NULL AS exists', [
+      `"${schema}"."${name}"`,
+    ]);
+    if (!rows[0]?.exists) continue;
+    await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON TABLE "${schema}"."${name}" FROM ${APP_DB_ROLE}`);
   }
 }
