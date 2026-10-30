@@ -15,6 +15,8 @@ const MESSAGES: Record<ErrorCode, string> = {
   OTP_EXPIRED: 'Mã đã hết hạn.',
   OTP_ATTEMPTS_EXCEEDED: 'Mã đã hết hiệu lực.',
   OTP_LOCKED: 'Bạn đã nhập sai quá nhiều lần. Vui lòng thử lại sau.',
+  NOT_A_MEMBER: 'Bạn không phải thành viên của BTC này.',
+  FORBIDDEN_ROLE: 'Vai trò của bạn không được thực hiện thao tác này.',
 };
 
 function codeForStatus(status: number): ErrorCode {

@@ -51,3 +51,17 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-1-ai-2-lam-chac-bat-dau-dang-nhap-google.md`
   summary: Giới hạn theo IP (OTP và bắt đầu Google) nên gom IPv6 theo /64 để client giữ cả dải không vượt giới hạn.
   evidence: `ipHmac` băm nguyên địa chỉ. Mức độ medium nhưng chưa kiểm; muốn xác nhận thì thử gửi từ nhiều địa chỉ trong cùng một /64.
+
+- source_spec: none
+  summary: Story 2.1 phần B — khung dashboard responsive: dashboard-sidebar ≥ lg với BTC switcher ở đầu và "Tạo BTC mới" ở cuối, sidebar thu thành icon md–lg, bottom-tab-bar < md (Sự kiện · Cần xử lý · Quét vé · Thêm), ẩn mục chỉ dành cho Owner với Admin, đổi BTC về danh sách Sự kiện, empty-state "Chưa có Sự kiện nào." + "Tạo Sự kiện" (UX-DR34).
+  evidence: Tách khỏi Story 2.1 khi chạy bmad-build (29/10/2026, Mason chọn Split). Phần A (tạo BTC, AccessResolver/@RequirePermission, orgScope, audit, bộ test cách ly, GET /v1/me/memberships) là nền quyền ship được riêng; gom cả hai thì spec vượt xa giới hạn kích thước.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-1-tao-btc-va-nen-tang-quyen.md`
+  summary: Bộ test cách ly hiện mới kiểm ở mức guard. Khi có tài nguyên con (Story 2.7 Sự kiện), cần seed tài nguyên thật của BTC B và gọi qua đường dẫn của BTC A (`/v1/orgs/A/events/<id của B>`) để bắt IDOR ở các handler quên `orgScope`.
+  evidence: `fill()` trong `apps/api/test/organizer/isolation.test.ts` thay mọi param con bằng UUID ngẫu nhiên (review B1, medium).
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-1-tao-btc-va-nen-tang-quyen.md`
+  summary: `POST /v1/orgs` chưa có giới hạn tần suất và idempotency key. Mất response rồi bấm "Thử lại" sẽ tạo BTC trùng; một tài khoản cũng có thể tạo hàng loạt BTC vào hàng duyệt Closed Beta (Story 2.5).
+  evidence: Hiện chỉ chặn bấm đúp ở client (`isPending || isSuccess`) (review B7/E5, medium).
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-1-tao-btc-va-nen-tang-quyen.md`
+  summary: `PermissionGuard` và cổng `AccessResolver` đang gắn với `:orgId`. Epic 5 (`/v1/checkin/events/:eventId`) cần mở rộng cổng, ví dụ resolver theo phạm vi route. Kiểm `@Public()` + `@RequirePermission` nên chuyển lên lúc khởi động hoặc vào bộ test route.
+  evidence: Review B3/B4/V3. Hiện lỗi cấu hình chỉ lộ khi có request.

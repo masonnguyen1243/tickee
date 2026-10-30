@@ -1,9 +1,10 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
-import { Controller, Get, Req, type INestApplication } from '@nestjs/common';
+import { Controller, Get, Req, type INestApplication, type Type } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { OptionalAuth } from '@thallesp/nestjs-better-auth';
-import { OTP_LENGTH } from '@tickee/contracts';
+import { Me, OTP_LENGTH } from '@tickee/contracts';
+import { sql } from 'drizzle-orm';
 import request from 'supertest';
 import { ApiModule } from '../../src/api.module.js';
 import type { ApiConfig } from '../../src/platform/config/index.js';
@@ -56,12 +57,19 @@ export interface Harness {
   close(): Promise<void>;
 }
 
-export async function createHarness(overrides: Partial<ApiConfig> = {}): Promise<Harness> {
+export interface HarnessOptions {
+  /** Controller test thêm vào gốc DI (vd. route BTC chỉ Owner để kiểm guard quyền). */
+  controllers?: Type[];
+  /** Module thêm vào gốc DI (vd. `DiscoveryModule` cho bộ test cách ly). */
+  imports?: Type[];
+}
+
+export async function createHarness(overrides: Partial<ApiConfig> = {}, options: HarnessOptions = {}): Promise<Harness> {
   const logs = new LogCapture();
   const email = new FakeEmailTransport();
   const moduleRef = await Test.createTestingModule({
-    imports: [ApiModule.forRoot(apiConfig(overrides), { destination: logs })],
-    controllers: [ProtectedController],
+    imports: [ApiModule.forRoot(apiConfig(overrides), { destination: logs }), ...(options.imports ?? [])],
+    controllers: [ProtectedController, ...(options.controllers ?? [])],
   })
     .overrideProvider(EMAIL_TRANSPORT)
     .useValue(email)
@@ -95,4 +103,20 @@ export function sessionSetCookie(setCookie: string[] | string | undefined): stri
 /** Cặp `tên=giá trị` của cookie session (để gửi lại ở request sau). */
 export function sessionCookie(setCookie: string[] | string | undefined): string {
   return sessionSetCookie(setCookie).split(';')[0]!;
+}
+
+/**
+ * Tạo tài khoản mới bằng OTP và đồng ý NĐ 13 → cookie session + id. Xóa bộ đếm gửi OTP trước (mọi request test
+ * cùng một IP).
+ */
+export async function signUp(h: Harness, email = newEmail()): Promise<{ cookie: string; userId: string; email: string }> {
+  await h.db.orm.execute(sql`DELETE FROM otp_send_events`);
+  await h.http.post('/v1/identity/otp').send({ email }).expect(200);
+  const verified = await h.http
+    .post('/v1/identity/otp/verify')
+    .send({ email, otp: h.email.lastCodeFor(email) })
+    .expect(200);
+  const cookie = sessionCookie(verified.headers['set-cookie']);
+  const consent = await h.http.post('/v1/identity/consent').set('cookie', cookie).expect(200);
+  return { cookie, userId: Me.parse(consent.body).id, email };
 }
