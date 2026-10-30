@@ -53,7 +53,7 @@ Không có trang khám phá Sự kiện (PRD §10 — không phải chợ vé). 
 |---|---|---|
 | Vé của tôi | Menu tài khoản; link trong email Vé; nút sau "Thành công" | Ba nhóm: Vé còn hiệu lực · Đơn đang chờ / "BTC đang kiểm tra thanh toán" (`order-card`) · Lịch sử (FR-22, FR-24) |
 | Chi tiết Vé | Hàng Vé trong Vé của tôi; link Vé được chia sẻ (quyền truy cập do Architecture quyết — Open Questions #11) | Mã QR vé, chia sẻ Vé bằng link/ảnh (FR-22), Social Ticket Card (FR-25, Should) |
-| Tài khoản | Menu tài khoản | Xóa Tài khoản Tickee / rút đồng ý (FR-38) |
+| Tài khoản | Menu tài khoản | **Bảo mật tài khoản**: bật/tắt xác thực hai lớp (FR-1); Xóa Tài khoản Tickee / rút đồng ý (FR-38). Dùng chung cho mọi vai (Người mua, Owner, Admin, CTV) vì cùng một Tài khoản Tickee. |
 
 ### BTC (dashboard)
 
@@ -317,9 +317,19 @@ Ai được mở link, có phải đăng nhập không, và có thấy Mã QR v�
 | BTC bị khóa (góc nhìn BTC) | Mọi trang của BTC | `status-banner` danger không đóng được "BTC đang bị khóa — mọi Sự kiện ngừng nhận Đơn." + "Liên hệ Tingee"; vẫn xem được Đơn, check-in, xuất CSV; không tạo/mở bán Sự kiện (FR-35) `[ASSUMPTION]` (quyền còn lại khi bị khóa — Open Questions #9). |
 | Sự kiện bị khóa (góc nhìn BTC) | Tổng quan Sự kiện | `status-banner` danger "Sự kiện bị khóa — ngừng nhận Đơn."; Vé đã phát vẫn check-in được trừ khi Quản trị Tingee vô hiệu (`[ASSUMPTION]` kế thừa PRD (FR-35)). Nút "Mở bán"/"Ẩn" tắt kèm lý do. |
 | Mất mạng | Dashboard | Toast một lần "Mất kết nối. Đang thử lại…"; số liệu real-time giữ giá trị cuối + nhãn "Cập nhật lúc HH:MM" `[ASSUMPTION]`. |
-| 2FA Owner | Đăng nhập Owner | Chưa quyết — phương thức chưa chốt: Open Questions #2 (PRD OQ #9). |
+| Owner chưa bật 2FA | Danh sách Sự kiện của BTC | Thẻ gợi ý có thể đóng "Bật xác thực hai lớp để bảo vệ tài khoản nhận tiền." + "Bật ngay" → Bảo mật tài khoản. Không chặn thao tác. Không dùng `status-banner` (banner đi qua `reporting.notices`, Story 2.5). |
 | Sau khi Hủy Sự kiện | Sự kiện (BTC) | `status-badge` "Đã hủy"; `status-banner` danger trên Tổng quan "Sự kiện đã hủy · {n} Đơn cần hoàn tiền" + "Xuất danh sách hoàn tiền"; tab Đơn lọc sẵn Đơn Đã thanh toán chưa "Đã hoàn tay"; mọi thao tác bán tắt (FR-33). Xem Flow 4. |
 | Đã hoàn tay hết | Sự kiện (BTC) | Banner đổi sang neutral "Đã hoàn tay mọi Đơn." và có thể đóng `[ASSUMPTION]`. |
+
+### Tài khoản (mọi vai)
+
+| Trạng thái | Bề mặt | Cách thể hiện |
+|---|---|---|
+| Bật 2FA | Bảo mật tài khoản | Mã QR + khóa nhập tay (nhóm 4 ký tự, chỉ xuống dòng giữa các nhóm) + ô mã 6 số; đúng → màn 10 mã khôi phục với "Tải xuống", "Sao chép", checkbox "Tôi đã lưu mã khôi phục" mở "Xong". |
+| Nhập mã sau đăng nhập | Mọi trang | API trả `TOTP_REQUIRED` → `Dialog` "Xác thực hai lớp": mã 6 số, link "Dùng mã khôi phục", nút "Đăng xuất"; đúng → tiếp tục thao tác dở; sai → lỗi tại ô; bị khóa → "Thử lại sau N phút". |
+| Tắt 2FA | Bảo mật tài khoản | `Dialog` nêu hậu quả "Tài khoản chỉ còn được bảo vệ bằng email." + ô mã TOTP hoặc mã khôi phục; xong → toast "Đã tắt xác thực hai lớp", email báo. |
+| Đã dùng mã khôi phục | Bảo mật tài khoản | `status-banner` warning "Xác thực hai lớp cũ đã được gỡ. Bật lại với thiết bị mới." |
+| Xác nhận lại (`REAUTH_REQUIRED`) | Đổi tài khoản nhận tiền, Chuyển quyền Owner | `Dialog` "Xác nhận để tiếp tục": đã bật 2FA → mã TOTP; chưa bật → "Gửi mã tới {email}" + ô OTP; đúng → thực hiện thao tác, giữ dữ liệu đã nhập. |
 
 ### Landing BTC
 
@@ -455,7 +465,7 @@ Minh họa: [Tổng quan Sự kiện](mockups/key-dashboard-event.html) (bước
 
 Anh Tuấn, chủ nhiệm CLB ABC, trước đây thu tiền bằng Google Forms rồi dò sao kê; mở Tickee từ link giới thiệu của Tingee, trên laptop buổi tối.
 
-1. Anh đăng ký Tài khoản Tickee bằng email (OTP), đồng ý điều khoản dữ liệu cá nhân, tạo BTC "CLB ABC" — anh là Owner. Thiết lập 2FA (Open Questions #2, PRD OQ #9).
+1. Anh đăng ký Tài khoản Tickee bằng email (OTP), đồng ý điều khoản dữ liệu cá nhân, tạo BTC "CLB ABC" — anh là Owner. Dashboard gợi ý bật xác thực hai lớp; anh bật ngay (quét QR bằng Google Authenticator, lưu 10 mã khôi phục). Nếu để sau, anh vẫn làm tiếp được.
 2. Banner trên dashboard dẫn anh tới **Tài khoản nhận tiền**: liên kết tài khoản CLB qua Tingee. Kết quả hiện ngay: dùng được QR động. CLB đã được duyệt Closed Beta nên không có banner "Chờ duyệt Closed Beta".
 3. Anh bấm "Tạo Sự kiện" → `wizard-stepper` bước 1 **Thông tin**: tên, thời gian, địa điểm, mô tả, ảnh, chính sách hoàn vé.
 4. Bước 2 **Hạng vé**: "Đơn nam" 300.000đ, 32 suất, giờ mở/đóng bán; thêm "Đôi nam".
@@ -544,7 +554,7 @@ Nhóm theo người quyết; số thứ tự liên tục để dẫn chiếu ("O
 **PM**
 
 1. **Phòng chờ** khi Sự kiện đông (NFR-3, PRD OQ #5): Người mua thấy gì.
-2. **2FA Owner** — phương thức và UI thiết lập (PRD OQ #9).
+2. ~~**2FA Owner**~~ — **Đã chốt (30/10/2026):** TOTP tự bật cho mọi tài khoản (PRD FR-1); UI ở State Patterns "Tài khoản (mọi vai)".
 3. **Tra tay theo tên + số cuối SĐT** vượt phạm vi FR-29 (SĐT/email đầy đủ là bắt buộc, đã có) — PM/Architecture xác nhận (quyền riêng tư: CTV thấy danh sách tên khớp). Đây là nơi theo dõi chính của `[ASSUMPTION]` này.
 4. **Email + liên hệ BTC cho mọi loại Cần xử lý** — PM xác nhận kênh liên hệ BTC. Đây là nơi theo dõi chính của `[ASSUMPTION]` này.
 5. **Hàng "Cần xử lý" gộp cấp BTC** vượt phạm vi FR-31 — PM xác nhận.

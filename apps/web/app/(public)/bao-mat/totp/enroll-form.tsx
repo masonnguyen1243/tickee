@@ -114,7 +114,7 @@ function ScanStep({
         <QrImage uri={enrollment.totpUri} />
         <div className="flex flex-col gap-2">
           <p className="text-meta text-muted-foreground">Không quét được? Nhập khóa này vào ứng dụng:</p>
-          <p data-testid="manual-key" className="font-mono text-body break-all tabular-nums">
+          <p data-testid="manual-key" className="font-mono text-body break-words tabular-nums">
             {groupManualKey(enrollment.manualKey)}
           </p>
           <Button

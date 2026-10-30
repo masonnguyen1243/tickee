@@ -23,7 +23,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 
 **4.1 Tài khoản và phân quyền**
 
-- FR-1: Người dùng đăng ký/đăng nhập Tài khoản Tickee bằng Google hoặc OTP qua email (BTC đăng ký bằng email). OTP dùng một lần, hiệu lực 5 phút, tối đa 5 lần nhập sai. Không có đăng nhập bằng mật khẩu hay SĐT. Owner bắt buộc bật 2FA. Cùng một email luôn ra cùng một Tài khoản Tickee.
+- FR-1: Người dùng đăng ký/đăng nhập Tài khoản Tickee bằng Google hoặc OTP qua email (BTC đăng ký bằng email). OTP dùng một lần, hiệu lực 5 phút, tối đa 5 lần nhập sai. Không có đăng nhập bằng mật khẩu hay SĐT. Mọi tài khoản tự bật/tắt được 2FA (TOTP); thao tác nhạy cảm luôn xác nhận lại bằng TOTP hoặc OTP email. Cùng một email luôn ra cùng một Tài khoản Tickee.
 - FR-2: Một Tài khoản Tickee tạo được BTC và trở thành Owner. Chỉ Owner được mời/xóa Admin. Một tài khoản có thể thuộc nhiều BTC và chuyển qua lại giữa chúng. Mọi thay đổi phân quyền được ghi nhật ký.
 - FR-3: Người mua xem trang Sự kiện không cần đăng nhập. Khi bấm "Mua", hệ thống bắt đăng nhập rồi đưa về đúng Hạng vé và số lượng đã chọn. Email trong form được tự điền. Đồng ý xử lý dữ liệu cá nhân theo NĐ 13/2023 khi tạo tài khoản. Checkout ghi rõ thông tin trong form sẽ được chia sẻ cho BTC.
 - FR-38: Người dùng xóa được Tài khoản Tickee hoặc rút lại đồng ý xử lý dữ liệu. Sau khi xóa thì không đăng nhập được nữa và không còn xuất hiện trong dữ liệu Người mua của các Sự kiện sắp diễn ra. Dữ liệu giao dịch mà pháp luật bắt buộc lưu được giữ ở dạng tối thiểu. Hệ thống cảnh báo trước nếu tài khoản còn Vé hợp lệ của Sự kiện chưa diễn ra.
@@ -96,7 +96,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 - NFR-3 (Chịu tải): 5.000 người cùng mua một Sự kiện 300 Vé mà không bán quá số suất. Phòng chờ đang hoãn; tạm dựa vào giới hạn tốc độ và cache trang (AD-31, AD-37).
 - NFR-4 (Sẵn sàng): Uptime 99,9%/tháng cho Checkout, IPN và check-in.
 - NFR-5 (Toàn vẹn): Ghi thanh toán, phát Vé và lên lịch email/Sheets diễn ra trọn gói hoặc không diễn ra gì. Có PITR (RPO ≤ 5 phút, RTO ≤ 1 giờ).
-- NFR-6 (Bảo mật): HTTPS toàn bộ. Request tới Tingee và IPN đều có chữ ký được xác thực. Mã QR vé được ký số. Owner bắt buộc 2FA.
+- NFR-6 (Bảo mật): HTTPS toàn bộ. Request tới Tingee và IPN đều có chữ ký được xác thực. Mã QR vé được ký số. Mọi tài khoản tự bật được 2FA; Quản trị Tingee bắt buộc 2FA.
 - NFR-7 (Cách ly): BTC này không đọc được dữ liệu BTC khác. CTV chỉ đọc dữ liệu check-in của Sự kiện được giao.
 - NFR-8 (Dữ liệu cá nhân): Thu đồng ý theo NĐ 13/2023. Không lưu thông tin ngân hàng của Người mua. Dữ liệu Người mua chỉ dùng cho Sự kiện họ mua. Log che SĐT/email.
 - NFR-9 (Khả dụng): Mobile-first, chạy trên Safari iOS và Chrome Android bản hiện hành, giao diện tiếng Việt.
@@ -123,7 +123,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 - AD-13: mọi bảng của BTC có `organization_id NOT NULL`, truy vấn qua `orgScope(ctx)`. Chỉ có 4 đường đọc chéo: `buyerScope`, `shareScope`, `systemScope`, `platformAdminScope`. Có bộ test cách ly chạy trong CI.
 - AD-17: realtime bằng Postgres `NOTIFY` → SSE chỉ là tín hiệu, REST mới là sự thật. Có 5 topic (`order_changed`, `event_orders_changed`, `event_checkins_changed`, `org_review_items_changed`, `org_status_changed`). Một hook `useLiveResource` lo SSE, `visibilitychange` và polling dự phòng (2 giây ở màn chờ thanh toán, 10 giây ở dashboard).
 - AD-18: `audit_events` chỉ cho INSERT, ghi trong cùng transaction, không chứa giá trị PII.
-- AD-26: `AccessResolver` + `@RequirePermission`. Ma trận quyền khai báo trong `packages/contracts`. Endpoint BTC dưới `/v1/orgs/:orgId/…`, endpoint CTV dưới `/v1/checkin/events/:eventId/…`. Owner và Quản trị Tingee cần step-up TOTP (12 giờ đối với Owner). Mã lỗi quyền: `NOT_A_MEMBER`, `FORBIDDEN_ROLE`, `TOTP_REQUIRED`, `CHECKER_REVOKED`, `EVENT_ENDED`.
+- AD-26: `AccessResolver` + `@RequirePermission`. Ma trận quyền khai báo trong `packages/contracts`. Endpoint BTC dưới `/v1/orgs/:orgId/…`, endpoint CTV dưới `/v1/checkin/events/:eventId/…`. Tài khoản đã bật 2FA nhập TOTP sau mỗi lần đăng nhập (hiệu lực hết session); Quản trị Tingee bắt buộc 2FA; thao tác nhạy cảm cần xác nhận lại (`REAUTH_REQUIRED`). Mã lỗi quyền: `NOT_A_MEMBER`, `FORBIDDEN_ROLE`, `TOTP_REQUIRED`, `REAUTH_REQUIRED`, `CHECKER_REVOKED`, `EVENT_ENDED`.
 - AD-31: các `POST` từ trình duyệt dùng `Idempotency-Key`. Mỗi người mua tối đa một Đơn `pending` cho mỗi Sự kiện. Giới hạn tốc độ tạo Đơn và tra tay, đếm trong Postgres.
 - Quy ước chung: UUIDv7, `snake_case` cho DB, lỗi dạng `{error:{code,message,details}}`, phân trang cursor, `x-request-id`, response có hạn chót thì kèm `serverNow`, cô lập READ COMMITTED + UPDATE có điều kiện.
 
@@ -234,7 +234,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 - UX-DR39: Tab Check-in: `checkin-progress` theo từng Hạng vé (realtime), link mời CTV chung ("Sao chép link", tạo link mới), danh sách CTV có "Thu hồi"/"Khôi phục", trạng thái link còn hạn/hết hạn.
 - UX-DR40: Các trạng thái dashboard: Chờ duyệt Closed Beta, Closed Beta bị thu hồi, chưa liên kết tài khoản (Owner thấy "Liên kết ngay", Admin thấy "Nhờ Owner…"), đang liên kết, liên kết thất bại, Token dưới ngưỡng/chạm hạn mức, mất quyền Google Sheets, BTC/Sự kiện bị khóa, Đã hủy kèm "{n} Đơn cần hoàn tiền" + "Xuất danh sách hoàn tiền", đã hoàn tay hết. Admin mở URL dành cho Owner → empty-state "Chỉ Owner xem được mục này." Bị xóa khỏi BTC giữa phiên → `Dialog` rồi chuyển BTC.
 - UX-DR41: Form Hạng vé có lỗi tại trường "Tối thiểu {n} — đã bán và đang giữ chỗ." và kiểm giá ≥ 2.000đ. Sửa thời gian/địa điểm khi đã phát Vé → `Dialog` báo sẽ gửi email cho Người mua. "Hủy Sự kiện" yêu cầu gõ tên Sự kiện.
-- UX-DR42: Màn đăng ký TOTP khi trở thành Owner và màn step-up TOTP khi API trả `TOTP_REQUIRED` (bổ sung theo Architecture).
+- UX-DR42: Trang "Bảo mật tài khoản" bật/tắt 2FA (QR, khóa nhập tay, mã khôi phục); màn nhập mã TOTP khi API trả `TOTP_REQUIRED`; màn xác nhận lại (TOTP hoặc OTP email) khi API trả `REAUTH_REQUIRED` (bổ sung theo Architecture, sửa theo Sprint Change Proposal 30/10/2026).
 
 **Landing và Quản trị Tingee**
 
@@ -308,7 +308,7 @@ Người dùng đăng ký/đăng nhập bằng Google hoặc OTP email và đồ
 **UX-DR chính:** UX-DR1–9, UX-DR14, UX-DR43, UX-DR45–46
 
 ### Epic 2: BTC thiết lập và mở bán Sự kiện
-Owner tạo BTC, bật TOTP (kèm mã khôi phục), mời Admin, liên kết và đổi tài khoản nhận tiền, chuyển quyền Owner, được Quản trị Tingee duyệt Closed Beta. Sau đó tạo Sự kiện, Hạng vé, form mua, mở bán và chia sẻ link có OG preview.
+Owner tạo BTC, có thể bật 2FA (kèm mã khôi phục), mời Admin, liên kết và đổi tài khoản nhận tiền, chuyển quyền Owner, được Quản trị Tingee duyệt Closed Beta. Sau đó tạo Sự kiện, Hạng vé, form mua, mở bán và chia sẻ link có OG preview.
 **FRs covered:** FR-2, FR-4, FR-5, FR-7, FR-8, FR-9, FR-10, FR-37
 **UX-DR chính:** UX-DR10–13, UX-DR34, UX-DR36, UX-DR40–42, UX-DR44 (phần duyệt Closed Beta)
 
@@ -491,7 +491,7 @@ So that tôi không phải chờ mã email.
 
 ## Epic 2: BTC thiết lập và mở bán Sự kiện
 
-Owner tạo BTC, bật TOTP, mời Admin, liên kết tài khoản nhận tiền và được Quản trị Tingee duyệt vào Closed Beta. Owner/Admin tạo Sự kiện, Hạng vé, form mua vé, mở bán và chia sẻ trang Sự kiện công khai có OG preview. Epic dựng guard quyền, audit, cách ly BTC và nguồn trạng thái bán mà mọi epic sau dựa vào.
+Owner tạo BTC, có thể bật 2FA, mời Admin, liên kết tài khoản nhận tiền và được Quản trị Tingee duyệt vào Closed Beta. Owner/Admin tạo Sự kiện, Hạng vé, form mua vé, mở bán và chia sẻ trang Sự kiện công khai có OG preview. Epic dựng guard quyền, audit, cách ly BTC và nguồn trạng thái bán mà mọi epic sau dựa vào.
 
 ### Story 2.1: Tạo BTC và khung dashboard
 
@@ -523,43 +523,45 @@ So that tôi bắt đầu chuẩn bị bán Vé cho CLB.
 **And** danh sách Sự kiện trống hiện `empty-state` "Chưa có Sự kiện nào." + "Tạo Sự kiện"
 **And** cuối BTC switcher có mục "Tạo BTC mới", mở cùng màn tạo BTC; người đã thuộc BTC khác vẫn tạo được BTC mới và trở thành Owner của BTC đó (FR-2)
 
-### Story 2.2: TOTP cho Owner
+### Story 2.2: Xác thực hai lớp tự bật (TOTP)
 
-As a Owner,
-I want bật xác thực hai lớp bằng ứng dụng TOTP,
-So that không ai chiếm được tài khoản nhận tiền của BTC chỉ bằng email.
+As a người dùng Tickee (đặc biệt là Owner),
+I want tự bật hoặc tắt xác thực hai lớp bằng ứng dụng TOTP,
+So that người khác không vào được tài khoản của tôi chỉ bằng email.
 
 **Acceptance Criteria:**
 
-**Given** tôi vừa trở thành Owner và chưa đăng ký TOTP
-**When** tôi gọi bất kỳ API nào với vai Owner
-**Then** API trả `TOTP_REQUIRED` và web đưa tôi tới màn đăng ký TOTP: mã QR + khóa nhập tay, nhập mã 6 số để xác nhận (Better Auth `twoFactor`, `allowPasswordless: true`) (FR-1, NFR-6, UX-DR42)
+**Given** tôi đã đăng nhập và chưa bật 2FA
+**When** mở trang "Bảo mật tài khoản" và chọn "Bật xác thực hai lớp"
+**Then** thấy mã QR và khóa nhập tay, nhập mã 6 số để xác nhận (Better Auth `twoFactor`, `allowPasswordless: true`); không ai bị buộc bật, kể cả Owner (FR-1, NFR-6, UX-DR42)
+**And** Owner chưa bật 2FA thấy gợi ý bật trong dashboard, nhưng không bị chặn thao tác
 
-**Given** tôi đã đăng ký TOTP và đăng nhập bằng Google hoặc OTP email
-**When** request với vai Owner mà session chưa có step-up hoặc step-up đã quá 12 giờ
-**Then** API trả `TOTP_REQUIRED`; web hiện màn step-up nhập mã TOTP; xác nhận đúng thì ghi `stepUpAt` vào session và thử lại thao tác dở (AD-26)
-**And** sai mã hiện lỗi tại ô, không mất thao tác đang làm
-**And** xác minh TOTP có giới hạn tốc độ: sai 5 lần liên tiếp thì khóa xác minh 15 phút theo user; ghi audit
-
-**Given** luật `TOTP_REQUIRED`
-**When** Owner chưa đăng ký hoặc chưa step-up gọi API
-**Then** các endpoint sau được miễn: đăng ký TOTP (enroll, verify enroll), step-up, dùng mã khôi phục, đăng xuất, `GET /v1/me/memberships`, `GET /v1/me`; danh sách miễn khai báo một chỗ trong `packages/contracts` và có test
-
-**Given** tôi vừa đăng ký TOTP thành công
+**Given** tôi vừa bật 2FA thành công
 **When** màn xác nhận hiện
 **Then** hệ thống sinh 10 mã khôi phục dùng một lần (DB chỉ lưu hash), hiện một lần duy nhất kèm nút "Tải xuống" và "Sao chép", và yêu cầu tôi xác nhận "Tôi đã lưu mã khôi phục" trước khi tiếp tục
+**And** session hiện tại coi như đã qua lớp hai; các session khác của tôi phải nhập mã ở request kế tiếp
+
+**Given** tài khoản đã bật 2FA
+**When** đăng nhập bằng Google hoặc OTP email
+**Then** mọi request ngoài danh sách miễn trả `TOTP_REQUIRED` cho tới khi nhập đúng mã TOTP hoặc mã khôi phục; hiệu lực tới hết session; web hiện màn nhập mã, nhập đúng thì tiếp tục thao tác dở (AD-26)
+**And** sai mã thì báo lỗi tại ô, không mất thao tác
+**And** sai 5 lần liên tiếp thì khóa xác minh 15 phút theo user; ghi audit
+
+**Given** luật `TOTP_REQUIRED`
+**When** session chưa qua lớp hai gọi API
+**Then** các endpoint sau được miễn: nhập mã (step-up), dùng mã khôi phục, đăng xuất, `GET /v1/identity/me`; danh sách miễn khai báo một chỗ trong `packages/contracts` và có test
+
+**Given** tài khoản đã bật 2FA
+**When** chọn "Tắt xác thực hai lớp" và nhập đúng mã TOTP hoặc mã khôi phục
+**Then** 2FA tắt, secret và mã khôi phục bị xóa, email báo cho tôi, audit ghi lại
 
 **Given** tôi mất thiết bị TOTP
-**When** nhập một mã khôi phục ở màn step-up
-**Then** step-up thành công, mã đó hết hiệu lực, tôi được đưa tới màn đăng ký lại TOTP; audit ghi lại và email báo cho tôi
+**When** nhập một mã khôi phục ở màn nhập mã
+**Then** qua được lớp hai, mã đó hết hiệu lực, 2FA cũ bị gỡ, tôi được đưa tới trang Bảo mật tài khoản để bật lại; audit ghi lại và email báo cho tôi
 
-**Given** tôi mất cả thiết bị TOTP lẫn mã khôi phục
-**When** liên hệ Tingee
-**Then** Quản trị Tingee (đã step-up) có thao tác "Đặt lại TOTP" cho một user ở `/admin`, bắt buộc ghi lý do; TOTP và mã khôi phục cũ bị xóa, mọi phiên của user bị hủy, user phải đăng ký lại ở lần đăng nhập kế tiếp; audit ghi lại và email báo cho user và các Owner/Admin của BTC liên quan
-
-**Given** tôi là Admin hoặc chỉ là Người mua
-**When** dùng Tickee
-**Then** không bị yêu cầu TOTP
+**Given** tài khoản chưa bật 2FA
+**When** dùng Tickee ở bất kỳ vai nào
+**Then** không bị hỏi TOTP (riêng Quản trị Tingee: xem Story 2.5)
 
 ### Story 2.3: Landing BTC
 
@@ -619,7 +621,7 @@ So that chỉ BTC được tin cậy mới bán được Vé có phí khi chưa 
 
 **Given** tài khoản có cờ `platform_admin`
 **When** truy cập `/v1/admin/*` hoặc `/admin` của web
-**Then** API chỉ nhận request từ dải IP cho phép (cấu hình trusted proxy để lấy đúng IP) và yêu cầu step-up TOTP cho mỗi session; mọi lần đọc dữ liệu qua `platformAdminScope` đều ghi audit (FR-4, AD-26)
+**Then** API chỉ nhận request từ dải IP cho phép (cấu hình trusted proxy để lấy đúng IP) và yêu cầu step-up TOTP cho mỗi session (tài khoản Quản trị Tingee chưa bật 2FA thì phải bật trước khi vào `/admin`); mọi lần đọc dữ liệu qua `platformAdminScope` đều ghi audit (FR-4, AD-26)
 **And** tài khoản không có cờ nhận `FORBIDDEN_ROLE`
 
 **Given** cần cấp hoặc thu hồi quyền Quản trị Tingee
@@ -640,6 +642,10 @@ So that chỉ BTC được tin cậy mới bán được Vé có phí khi chưa 
 **Given** BTC đã được duyệt
 **When** Quản trị Tingee bấm "Thu hồi" và xác nhận trong `Dialog` "Sự kiện có phí của {BTC} sẽ Tạm ngừng bán."
 **Then** `closed_beta_status` = đã thu hồi; dashboard BTC hiện banner danger không đóng được; audit ghi lại (FR-37)
+
+**Given** người dùng mất cả thiết bị TOTP lẫn mã khôi phục
+**When** liên hệ Tingee
+**Then** Quản trị Tingee (đã step-up) có thao tác "Đặt lại TOTP" cho một user ở `/admin`, bắt buộc ghi lý do; TOTP và mã khôi phục cũ bị xóa, mọi phiên của user bị hủy, 2FA của user về trạng thái chưa bật; audit ghi lại và email báo cho user và các Owner/Admin của BTC liên quan (chuyển từ Story 2.2, Sprint Change Proposal 30/10/2026)
 
 ### Story 2.6: Liên kết tài khoản nhận tiền
 
@@ -843,7 +849,7 @@ So that tiền vé về đúng tài khoản khi CLB đổi ngân hàng mà khôn
 
 **Given** BTC đã liên kết tài khoản nhận tiền
 **When** Owner bấm "Đổi tài khoản nhận tiền"
-**Then** yêu cầu step-up TOTP mới (không dùng step-up cũ) rồi mới hiện form liên kết như Story 2.6; cùng quy tắc chặn VietinBank và lỗi tại chỗ (FR-5, AD-6, AD-26)
+**Then** yêu cầu xác nhận lại ngay lúc thao tác (`REAUTH_REQUIRED`): nhập mã TOTP nếu đã bật 2FA, nếu chưa thì nhập mã OTP gửi qua email rồi mới hiện form liên kết như Story 2.6; cùng quy tắc chặn VietinBank và lỗi tại chỗ (FR-5, AD-6, AD-26)
 
 **Given** liên kết tài khoản mới thành công
 **When** lưu
@@ -873,16 +879,12 @@ So that BTC vẫn có người chịu trách nhiệm khi tôi rời CLB hoặc m
 
 **Given** tôi là Owner, BTC có ít nhất một Admin
 **When** tôi chọn một Admin ở trang Thành viên và bấm "Chuyển quyền Owner"
-**Then** yêu cầu step-up TOTP mới; `Dialog` nêu hậu quả ("{tên} sẽ là Owner, quản lý tài khoản nhận tiền và Token. Bạn sẽ thành Admin.") và yêu cầu gõ tên BTC để xác nhận (FR-2, AD-26)
+**Then** yêu cầu xác nhận lại như Story 2.13; `Dialog` nêu hậu quả ("{tên} sẽ là Owner, quản lý tài khoản nhận tiền và Token. Bạn sẽ thành Admin.") và yêu cầu gõ tên BTC để xác nhận (FR-2, AD-26)
 
 **Given** đã xác nhận
 **When** gọi `flows.transferOwnership(orgId, toUserId)`
 **Then** trong một transaction: Owner cũ → `admin`, Admin được chọn → `owner`; unique index "mỗi BTC đúng một Owner" vẫn đúng sau commit (đổi thứ tự cập nhật hoặc dùng ràng buộc deferrable); audit ghi lại (FR-2, AD-26)
 **And** email báo cho cả hai người và mọi Admin còn lại
-
-**Given** người nhận chưa đăng ký TOTP
-**When** họ dùng vai Owner lần đầu
-**Then** gặp luồng bắt buộc đăng ký TOTP của Story 2.2
 
 **Given** BTC không có Admin nào
 **When** Owner mở thao tác
