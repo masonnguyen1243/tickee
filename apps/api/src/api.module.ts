@@ -10,8 +10,9 @@ import { createLoggerModule, type LoggingOptions } from './platform/logging/inde
 
 /**
  * Gốc DI của vai `api`. Story sau thêm mô-đun miền vào `imports`.
- * Guard toàn cục (session rồi đồng ý NĐ 13) do `IdentityModule` đăng ký: route nào không `@Public()` /
- * `@AllowAnonymous()` đều cần đăng nhập và đã đồng ý. Guard quyền (`@RequirePermission`) do `OrganizerModule` đăng ký.
+ * Guard toàn cục (session, 2FA rồi đồng ý NĐ 13) do `IdentityModule` đăng ký: route nào không `@Public()` /
+ * `@AllowAnonymous()` đều cần đăng nhập, đã qua lớp hai (nếu đã bật 2FA) và đã đồng ý. Guard quyền
+ * (`@RequirePermission`) do `OrganizerModule` đăng ký.
  */
 @Module({})
 export class ApiModule {
@@ -23,7 +24,7 @@ export class ApiModule {
         DbModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-api' }),
         EmailModule.forRoot({ url: config.SMTP_URL, from: config.EMAIL_FROM }),
         IdentityModule.forRoot(config),
-        // Sau IdentityModule: PermissionGuard chạy sau SessionGuard và ConsentGuard.
+        // Sau IdentityModule: PermissionGuard chạy sau SessionGuard, TotpGuard và ConsentGuard.
         OrganizerModule.forRoot(config),
       ],
       controllers: [HealthController],

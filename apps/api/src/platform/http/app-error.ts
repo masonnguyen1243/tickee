@@ -14,6 +14,9 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   OTP_LOCKED: 429,
   NOT_A_MEMBER: 403,
   FORBIDDEN_ROLE: 403,
+  TOTP_REQUIRED: 403,
+  TOTP_INVALID: 400,
+  TOTP_LOCKED: 429,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

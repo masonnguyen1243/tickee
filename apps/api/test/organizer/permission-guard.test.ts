@@ -4,7 +4,7 @@ import { ErrorResponse, Permission, Role } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RequirePermission } from '../../src/platform/access/index.js';
-import { createHarness, newEmail, sessionCookie, signUp, type Harness } from '../identity/harness.js';
+import { createHarness, newEmail, sessionCookie, signUp, signUpWithTotp, type Harness } from '../identity/harness.js';
 import { EventsTestController, OwnerOnlyTestController } from './test-controllers.js';
 
 /** Cấu hình sai: `@RequirePermission` trên route không có `:orgId`. */
@@ -18,7 +18,7 @@ class MissingOrgParamController {
 }
 
 let h: Harness;
-let owner: Awaited<ReturnType<typeof signUp>>;
+let owner: Awaited<ReturnType<typeof signUpWithTotp>>;
 let admin: Awaited<ReturnType<typeof signUp>>;
 let outsider: Awaited<ReturnType<typeof signUp>>;
 let orgId: string;
@@ -27,7 +27,8 @@ const errorOf = (body: unknown) => ErrorResponse.parse(body).error;
 
 beforeAll(async () => {
   h = await createHarness({}, { controllers: [OwnerOnlyTestController, EventsTestController, MissingOrgParamController] });
-  owner = await signUp(h);
+  // Owner đã bật 2FA và qua lớp hai (Story 2.2) để kiểm `stepUpAt` được chép vào ctx.
+  owner = await signUpWithTotp(h);
   admin = await signUp(h);
   outsider = await signUp(h);
   const res = await h.http.post('/v1/orgs').set('cookie', owner.cookie).send({ name: 'BTC kiểm guard' }).expect(201);
@@ -49,7 +50,7 @@ describe('PermissionGuard', () => {
       organizationId: orgId,
       role: 'owner',
       assignedEventIds: [],
-      stepUpAt: null,
+      stepUpAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
     });
   });
 

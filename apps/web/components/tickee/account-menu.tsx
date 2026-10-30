@@ -1,8 +1,8 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CREATE_ORGANIZATION_PATH, organizationDashboardPath } from '@tickee/contracts';
-import { CircleUserRound, LayoutDashboard, LogOut, Plus } from 'lucide-react';
+import { ACCOUNT_SECURITY_PATH, CREATE_ORGANIZATION_PATH, organizationDashboardPath } from '@tickee/contracts';
+import { CircleUserRound, LayoutDashboard, LogOut, Plus, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
@@ -21,8 +21,8 @@ import { fetchMemberships, MEMBERSHIPS_QUERY_KEY } from '@/lib/organizer/api';
 
 /**
  * Menu tài khoản ở header. Chưa đăng nhập: link "Đăng nhập" (kèm `returnTo` là trang hiện tại).
- * Đã đăng nhập: email, lối vào dashboard ("Dashboard BTC" mở BTC đầu tiên, chưa có BTC thì "Tạo BTC") và
- * "Đăng xuất" (hủy session ở server, xóa cache, về trang chủ).
+ * Đã đăng nhập: email, lối vào dashboard ("Dashboard BTC" mở BTC đầu tiên, chưa có BTC thì "Tạo BTC"),
+ * "Bảo mật tài khoản" (bật/tắt xác thực hai lớp, mọi vai) và "Đăng xuất" (hủy session ở server, xóa cache, về trang chủ).
  * Đặt trong `<Suspense>` vì dùng `useSearchParams`.
  */
 export function AccountMenu() {
@@ -87,6 +87,12 @@ export function AccountMenu() {
             </Link>
           </DropdownMenuItem>
         ) : null}
+        <DropdownMenuItem asChild>
+          <Link href={ACCOUNT_SECURITY_PATH}>
+            <ShieldCheck aria-hidden="true" />
+            Bảo mật tài khoản
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuItem
           disabled={logout.isPending}
           onSelect={(event) => {

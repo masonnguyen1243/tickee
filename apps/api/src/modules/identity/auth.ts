@@ -1,7 +1,16 @@
-import { GoogleSignInError, LOGIN_PATH, OTP_LENGTH, OTP_MAX_ATTEMPTS } from '@tickee/contracts';
+import {
+  GoogleSignInError,
+  LOGIN_PATH,
+  OTP_LENGTH,
+  OTP_MAX_ATTEMPTS,
+  TOTP_DIGITS,
+  TOTP_ISSUER,
+  TOTP_PERIOD_SECONDS,
+} from '@tickee/contracts';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { emailOTP } from 'better-auth/plugins/email-otp';
+import { twoFactor } from 'better-auth/plugins/two-factor';
 import type { Database } from '../../platform/db/index.js';
 import type { EmailTransport } from '../../platform/email/index.js';
 import { logBetterAuth } from './better-auth-logger.js';
@@ -44,6 +53,13 @@ export function createAuth(config: IdentityConfig, db: Database, emailTransport:
           return { error: GoogleSignInError.EMAIL_NOT_VERIFIED, errorDescription: 'Email chưa được xác minh' };
         }
         return undefined;
+      },
+    },
+    session: {
+      additionalFields: {
+        // Chỉ `TotpService` (qua `TotpStore`) ghi cột này. Plugin `twoFactor` xoay session lúc xác nhận đăng ký và
+        // chép mọi trường của session cũ sang session mới (test `totp-store.test.ts` ghim hành vi này).
+        stepUpAt: { type: 'date', required: false, input: false },
       },
     },
     socialProviders: {
@@ -90,6 +106,13 @@ export function createAuth(config: IdentityConfig, db: Database, emailTransport:
         : {}),
     },
     plugins: [
+      // TOTP cho Owner (AD-26). Endpoint HTTP của plugin không mở (`AUTH_HTTP_ALLOWLIST`); web đi qua
+      // `/v1/identity/totp/*`, và mọi chỗ chạm plugin nằm trong `TotpStore`.
+      twoFactor({
+        issuer: TOTP_ISSUER,
+        allowPasswordless: true,
+        totpOptions: { digits: TOTP_DIGITS, period: TOTP_PERIOD_SECONDS },
+      }),
       emailOTP({
         otpLength: OTP_LENGTH,
         expiresIn: OTP_EXPIRES_IN_SECONDS,

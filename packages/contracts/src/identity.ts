@@ -39,6 +39,8 @@ export const Me = z.object({
   email: z.email(),
   /** Thời điểm đồng ý NĐ 13 (ISO 8601); `null` = chưa đồng ý. */
   consentedAt: z.iso.datetime().nullable(),
+  /** Đã đăng ký (và xác nhận) TOTP. */
+  twoFactorEnabled: z.boolean(),
 });
 export type Me = z.infer<typeof Me>;
 
@@ -60,6 +62,10 @@ export const DEFAULT_RETURN_TO = '/';
 export const LOGIN_PATH = '/dang-nhap';
 /** Màn đồng ý NĐ 13 của web. */
 export const CONSENT_PATH = '/dong-y';
+/** Màn đăng ký TOTP của web (QR, khóa nhập tay, mã 6 số, rồi mã khôi phục); thiếu `returnTo` thì về trang Bảo mật. */
+export const TOTP_ENROLL_PATH = '/bao-mat/totp';
+/** Trang "Bảo mật tài khoản" của web (bật/tắt xác thực hai lớp), dùng chung mọi vai. */
+export const ACCOUNT_SECURITY_PATH = '/tai-khoan/bao-mat';
 /** Trang trung gian của web mà Google quay về sau khi đăng nhập thành công. */
 export const GOOGLE_RETURN_PATH = `${LOGIN_PATH}/google`;
 
@@ -67,13 +73,13 @@ export const GOOGLE_RETURN_PATH = `${LOGIN_PATH}/google`;
 const UNSAFE_RETURN_TO_CHARS = /[\u0000- \u007f\\]/;
 const PROBE_ORIGIN = 'http://tickee.invalid';
 /** Không quay về chính các màn trong luồng đăng nhập (tránh vòng lặp). */
-const FLOW_PATHS = [LOGIN_PATH, CONSENT_PATH];
+const FLOW_PATHS = [LOGIN_PATH, CONSENT_PATH, TOTP_ENROLL_PATH];
 
 /**
  * `returnTo` chỉ nhận đường dẫn nội bộ (chống open redirect): bắt đầu bằng `/`, không bắt đầu bằng `//` hoặc `/\`,
  * không có scheme, và khi phân giải vẫn ở cùng origin. Sai hoặc thiếu → `/`. Hợp lệ thì trả dạng đã chuẩn hóa
  * (`pathname + search + hash`): `/..//evil.com` chuẩn hóa thành `//evil.com` nên bị từ chối. Mọi đường dẫn dưới
- * màn đăng nhập/đồng ý (kể cả `/dang-nhap/`, `/dang-nhap/google`) không làm đích quay về để tránh vòng lặp.
+ * màn đăng nhập/đồng ý/đăng ký TOTP (kể cả `/dang-nhap/`, `/dang-nhap/google`) không làm đích quay về để tránh vòng lặp.
  * Dùng chung web và api (api kiểm `returnTo` trước khi bắt đầu đăng nhập Google).
  */
 export function safeReturnTo(raw: unknown): string {
@@ -108,3 +114,133 @@ export type GoogleSignInError = (typeof GoogleSignInError)[keyof typeof GoogleSi
 
 /** Tham số query mang mã lỗi của luồng Google trên màn đăng nhập. */
 export const SIGN_IN_ERROR_PARAM = 'error';
+
+// ---------------------------------------------------------------------------------------------------------------
+// Xác thực hai lớp tự bật (TOTP) cho mọi tài khoản (FR-1, NFR-6, AD-26)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Mã TOTP: 6 số, chu kỳ 30 giây, issuer "Tickee" (ứng dụng xác thực hiển thị tên này). */
+export const TOTP_DIGITS = 6;
+export const TOTP_PERIOD_SECONDS = 30;
+export const TOTP_ISSUER = 'Tickee';
+
+/** Sai liên tiếp chừng này lần (TOTP và mã khôi phục: xác nhận đăng ký, step-up, tắt 2FA) thì khóa xác minh. */
+export const TOTP_MAX_FAILURES = 5;
+/** Thời gian khóa xác minh TOTP theo user. */
+export const TOTP_LOCK_MS = 15 * 60 * 1000;
+
+/** Số mã khôi phục sinh mỗi lần đăng ký; mỗi mã dùng một lần. */
+export const RECOVERY_CODE_COUNT = 10;
+/** Bảng chữ của mã khôi phục: bỏ ký tự dễ nhầm (0/O, 1/I/L, U). */
+export const RECOVERY_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789';
+/** Mã khôi phục gồm 10 ký tự, hiển thị dạng `XXXXX-XXXXX`. */
+export const RECOVERY_CODE_LENGTH = 10;
+
+export const TotpCode = z.string().regex(new RegExp(`^\\d{${TOTP_DIGITS}}$`));
+
+/**
+ * Mã khôi phục người dùng nhập: bỏ khoảng trắng và dấu gạch, chữ hoa → đúng `RECOVERY_CODE_LENGTH` ký tự trong
+ * `RECOVERY_CODE_ALPHABET`. Dạng chuẩn hóa này là thứ được băm và so khớp.
+ */
+export const RecoveryCode = z
+  .string()
+  .transform((s) => s.replace(/[\s-]+/g, '').toUpperCase())
+  .pipe(z.string().regex(new RegExp(`^[${RECOVERY_CODE_ALPHABET}]{${RECOVERY_CODE_LENGTH}}$`)));
+
+/** `XXXXXXXXXX` → `XXXXX-XXXXX` (dạng hiển thị, tải xuống). */
+export function formatRecoveryCode(normalized: string): string {
+  const half = RECOVERY_CODE_LENGTH / 2;
+  return `${normalized.slice(0, half)}-${normalized.slice(half)}`;
+}
+
+/** `POST /v1/identity/totp/enroll`: bắt đầu (hoặc bắt đầu lại) đăng ký. */
+export const TotpEnrollResponse = z.object({
+  /** `otpauth://totp/...` để dựng QR. */
+  totpUri: z.string().startsWith('otpauth://totp/'),
+  /** Khóa base32 để nhập tay vào ứng dụng xác thực. */
+  manualKey: z.string().min(1),
+});
+export type TotpEnrollResponse = z.infer<typeof TotpEnrollResponse>;
+
+/** `POST /v1/identity/totp/enroll/verify` và `POST /v1/identity/totp/step-up`. */
+export const TotpCodeRequest = z.object({ code: TotpCode });
+export type TotpCodeRequest = z.input<typeof TotpCodeRequest>;
+
+/**
+ * Kết quả xác nhận đăng ký: 10 mã khôi phục (dạng `XXXXX-XXXXX`) chỉ trả đúng lần này. API set cookie session mới
+ * (đã qua lớp hai); các session khác của user phải nhập mã ở request kế tiếp.
+ */
+export const TotpEnrollVerifyResponse = z.object({
+  recoveryCodes: z.array(z.string()).length(RECOVERY_CODE_COUNT),
+});
+export type TotpEnrollVerifyResponse = z.infer<typeof TotpEnrollVerifyResponse>;
+
+/** Kết quả step-up bằng TOTP: session hiện tại đã qua lớp hai tới hết session. */
+export const StepUpResponse = z.object({ stepUpAt: z.iso.datetime() });
+export type StepUpResponse = z.infer<typeof StepUpResponse>;
+
+/** `POST /v1/identity/totp/recovery` */
+export const RecoveryCodeRequest = z.object({ recoveryCode: RecoveryCode });
+export type RecoveryCodeRequest = z.input<typeof RecoveryCodeRequest>;
+
+/**
+ * Step-up bằng mã khôi phục thành công: mã đã hết hiệu lực và TOTP hiện tại bị gỡ (2FA về chưa bật), nên muốn bảo vệ
+ * lại thì phải bật lại với thiết bị mới (`reenrollRequired` luôn `true`).
+ */
+export const RecoveryCodeResponse = z.object({
+  stepUpAt: z.iso.datetime(),
+  reenrollRequired: z.literal(true),
+});
+export type RecoveryCodeResponse = z.infer<typeof RecoveryCodeResponse>;
+
+/**
+ * `POST /v1/identity/totp/disable`: tắt 2FA bằng mã TOTP hiện tại (`code`) hoặc một mã khôi phục chưa dùng
+ * (`recoveryCode`), đúng một trong hai.
+ */
+export const TotpDisableRequest = z.union([
+  z.strictObject({ code: TotpCode }),
+  z.strictObject({ recoveryCode: RecoveryCode }),
+]);
+export type TotpDisableRequest = z.input<typeof TotpDisableRequest>;
+
+/** Kết quả tắt 2FA: secret và mã khôi phục đã bị xóa. */
+export const TotpDisableResponse = z.object({ twoFactorEnabled: z.literal(false) });
+export type TotpDisableResponse = z.infer<typeof TotpDisableResponse>;
+
+/**
+ * Lý do của `TOTP_REQUIRED`: chỉ còn `step_up` (tài khoản đã bật 2FA mà session chưa qua lớp hai). Không ai bị buộc
+ * bật 2FA nên không có lý do "chưa đăng ký".
+ */
+export const TotpRequiredReason = {
+  STEP_UP: 'step_up',
+} as const;
+export type TotpRequiredReason = (typeof TotpRequiredReason)[keyof typeof TotpRequiredReason];
+
+/** `details` của lỗi `TOTP_REQUIRED`. */
+export const TotpRequiredDetails = z.object({ reason: z.enum(TotpRequiredReason) });
+export type TotpRequiredDetails = z.infer<typeof TotpRequiredDetails>;
+
+/** `details` của lỗi `TOTP_INVALID`. */
+export const TotpInvalidDetails = z.object({ remainingAttempts: z.number().int().min(1) });
+export type TotpInvalidDetails = z.infer<typeof TotpInvalidDetails>;
+
+/** `details` của lỗi `TOTP_LOCKED` (cùng dạng `OtpLockedDetails`). */
+export const TotpLockedDetails = OtpLockedDetails;
+export type TotpLockedDetails = z.infer<typeof TotpLockedDetails>;
+
+/**
+ * Endpoint không bao giờ trả `TOTP_REQUIRED` (dạng `METHOD /v1/...` như Express khai báo route), khai báo một chỗ và
+ * do `TotpGuard` của `identity` đọc. Session chưa qua lớp hai vẫn phải nhập mã, dùng mã khôi phục, đăng xuất và để
+ * web biết tài khoản đang đăng nhập (`me`). Endpoint đăng nhập (`@AllowAnonymous`) và `/v1/auth/*` vốn không qua guard.
+ */
+export const TOTP_EXEMPT_ROUTES: readonly string[] = [
+  'POST /v1/identity/totp/step-up',
+  'POST /v1/identity/totp/recovery',
+  'POST /v1/identity/sign-out',
+  'GET /v1/identity/me',
+];
+
+/** Route `METHOD path` (path theo khai báo route, vd. `/v1/orgs/:orgId`) có trong `TOTP_EXEMPT_ROUTES` không. */
+export function isTotpExemptRoute(method: string, path: string): boolean {
+  return TOTP_EXEMPT_ROUTES.includes(`${method.toUpperCase()} ${path}`);
+}

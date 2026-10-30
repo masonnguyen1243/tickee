@@ -151,7 +151,10 @@ Người dùng đăng ký và đăng nhập Tài khoản Tickee bằng Google ho
 - OTP qua email chỉ dùng được một lần, có thời hạn và giới hạn số lần nhập sai. `[ASSUMPTION: OTP hiệu lực 5 phút, tối đa 5 lần nhập sai]`
 - Gửi lại mã không mở thêm lượt đoán vô hạn: một email nhập sai hơn 15 lần trong 24 giờ thì bị tạm khóa đăng nhập bằng OTP (nếu email đó là tài khoản Google thì vẫn đăng nhập được bằng Google). Đã hiện thực ở Story 1.3.
 - Không có luồng đăng nhập bằng mật khẩu hay bằng SĐT ở MVP.
-- Owner bắt buộc bật xác thực hai lớp (2FA). `[ASSUMPTION: giữ yêu cầu 2FA cho Owner như BRD; phương thức do Architecture chọn]`
+- Mọi Tài khoản Tickee tự bật hoặc tắt xác thực hai lớp (2FA) bằng ứng dụng xác thực (TOTP) ở trang "Bảo mật tài khoản". Owner được khuyến khích bật nhưng không bắt buộc.
+- Tài khoản đã bật 2FA phải nhập mã TOTP sau mỗi lần đăng nhập (Google hoặc OTP email) mới dùng được tài khoản. Có 10 mã khôi phục dùng một lần cho trường hợp mất thiết bị.
+- Tắt 2FA phải nhập mã TOTP (hoặc mã khôi phục) hiện tại; hệ thống gửi email báo.
+- Thao tác nhạy cảm (đổi tài khoản nhận tiền, chuyển quyền Owner) luôn yêu cầu xác nhận lại ngay lúc thao tác: nhập mã TOTP nếu đã bật 2FA, nếu chưa bật thì nhập mã OTP gửi qua email; kèm email cảnh báo.
 - Dù đăng nhập bằng cách nào, cùng một email luôn ra cùng một Tài khoản Tickee.
 
 **Ngoài phạm vi:** đăng nhập bằng OTP qua SĐT, SSO tài khoản Tingee `[ASSUMPTION: SSO Tingee để sau MVP]`.
@@ -512,7 +515,7 @@ Các con số dưới đây là mục tiêu đề xuất. Đội kỹ thuật c�
 | NFR-3 | Chịu tải | 5.000 người cùng vào mua một Sự kiện 300 Vé mà không bán quá số suất. Có phòng chờ cho Sự kiện đông Người mua `[ASSUMPTION: tiêu chí bật phòng chờ — Câu hỏi mở #5]` |
 | NFR-4 | Sẵn sàng | Uptime 99,9%/tháng cho Checkout, IPN và check-in |
 | NFR-5 | Toàn vẹn dữ liệu | Ghi nhận thanh toán, phát Vé và lên lịch gửi email/Sheets diễn ra trọn gói hoặc không diễn ra gì. Sao lưu và khôi phục được về một thời điểm bất kỳ |
-| NFR-6 | Bảo mật | Toàn bộ dùng HTTPS. Mọi request tới Tingee và mọi IPN đều có chữ ký được xác thực. Mã QR vé được ký số. Owner bắt buộc 2FA |
+| NFR-6 | Bảo mật | Toàn bộ dùng HTTPS. Mọi request tới Tingee và mọi IPN đều có chữ ký được xác thực. Mã QR vé được ký số. Mọi tài khoản tự bật được 2FA (TOTP); Quản trị Tingee bắt buộc 2FA; thao tác nhạy cảm luôn xác nhận lại (FR-1) |
 | NFR-7 | Cách ly dữ liệu | BTC này không đọc được dữ liệu của BTC khác. CTV chỉ đọc được dữ liệu check-in của Sự kiện được giao |
 | NFR-8 | Dữ liệu cá nhân | Thu thập sự đồng ý xử lý dữ liệu theo NĐ 13/2023. Không lưu thông tin tài khoản ngân hàng của Người mua. Dữ liệu Người mua chỉ dùng cho Sự kiện họ đã mua |
 | NFR-9 | Khả dụng | Tối ưu cho điện thoại. Chạy được trên Safari iOS và Chrome Android bản hiện hành. Giao diện tiếng Việt |
@@ -617,6 +620,7 @@ Các mã trong cột BRD (FR-xx, BR-xx, R-xx) là mã của BRD, không phải m
 | Closed Beta 5–10 Sự kiện | Closed Beta 2–5 Sự kiện thật | Đã chốt khi bàn về chỉ số thành công |
 | Giới hạn số Vé có phí cho BTC mới (R-01) | Không áp trần. Thay bằng việc chỉ BTC được duyệt vào Closed Beta mới bán Vé có phí (FR-37) | Kiểm soát rủi ro lừa đảo khi chưa có KYC |
 | Điều kiện mở công khai có "Mẫu ZNS đã duyệt" | Bỏ điều kiện này | ZNS không thuộc MVP |
+| Bắt buộc 2FA cho Owner (NFR-06, §12) | 2FA là tính năng tự bật cho mọi tài khoản; Owner được khuyến khích; thao tác nhạy cảm luôn xác nhận lại bằng TOTP hoặc OTP email | Đưa 2FA thành tính năng bảo mật chung, không chặn BTC ngay khi vừa tạo BTC (Mason chốt 30/10/2026) |
 
 ### 11.4 Lộ trình và điều kiện ra mắt
 
@@ -664,7 +668,7 @@ Các mã trong cột BRD (FR-xx, BR-xx, R-xx) là mã của BRD, không phải m
 6. **Google Sheets:** hệ thống xử lý thế nào khi BTC sửa hoặc xóa cột/dòng, hoặc khi quyền OAuth hết hạn?
 7. **Xử lý báo cáo vi phạm:** ai trực, thời gian phản hồi bao lâu, có báo cho BTC hoặc Người mua không? Vé đã phát của Sự kiện bị khóa xử lý ra sao?
 8. **Thời gian lưu dữ liệu Người mua** sau Sự kiện: chờ pháp chế. Ảnh hưởng đến FR-24.
-9. **Phương thức 2FA cho Owner.**
+9. ~~**Phương thức 2FA cho Owner.**~~ — **Đã chốt (30/10/2026):** TOTP qua ứng dụng xác thực, tự bật cho mọi tài khoản; không bắt buộc với Owner (FR-1, §11.3).
 10. **Chuyển nhượng Vé:** chia sẻ link hoặc ảnh Vé có đủ không, hay cần đổi tên người giữ Vé?
 11. **Doanh thu Token với Đơn nhiều Vé:** Token tính theo giao dịch, nên một Đơn 10 Vé chỉ bị trừ một lần. Tingee có muốn tính theo số Vé không? Có cần sửa mục tiêu BO-05 của BRD không?
 
@@ -672,7 +676,7 @@ Các mã trong cột BRD (FR-xx, BR-xx, R-xx) là mã của BRD, không phải m
 
 - §3: Người mua, thành viên BTC và CTV dùng chung một loại Tài khoản Tickee.
 - §3: Danh sách trạng thái Đơn, Vé và Sự kiện do PM đề xuất.
-- FR-1: OTP hiệu lực 5 phút, tối đa 5 lần nhập sai. Giữ 2FA cho Owner. SSO Tingee để sau MVP.
+- FR-1: OTP hiệu lực 5 phút, tối đa 5 lần nhập sai. 2FA (TOTP) tự bật cho mọi tài khoản, không bắt buộc với Owner. SSO Tingee để sau MVP.
 - FR-3, FR-38: Thu đồng ý NĐ 13 một lần khi tạo Tài khoản Tickee, kèm thông báo chia sẻ dữ liệu ở Checkout. Có xóa Tài khoản Tickee và rút lại đồng ý.
 - FR-4: Quản trị Tingee dùng SSO nội bộ, 2FA, giới hạn IP, và là ngoại lệ duy nhất được xem dữ liệu nhiều BTC.
 - FR-7: "Ẩn" nghĩa là tạm dừng nhận Đơn. Có báo email khi sửa thời gian hoặc địa điểm.

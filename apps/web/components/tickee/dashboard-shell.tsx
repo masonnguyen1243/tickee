@@ -133,7 +133,9 @@ export function DashboardShell({
     );
   }, [unauthenticated, pathname, router, queryClient, orgId]);
 
-  // 401 chuyển sang đăng nhập ở effect trên; CONSENT_REQUIRED do `Providers` chuyển sang màn đồng ý.
+  // 401 chuyển sang đăng nhập ở effect trên; CONSENT_REQUIRED do `Providers` chuyển sang màn đồng ý. TOTP_REQUIRED
+  // thì `Providers` mở dialog "Xác thực hai lớp" tại chỗ (dưới dialog là banner lỗi + "Thử lại"); qua lớp hai thì
+  // query BTC tự tải lại. Không ai bị buộc bật 2FA nên không có nhánh chuyển sang màn đăng ký.
   const redirecting =
     unauthenticated || hasErrorCode(org.error, ErrorCode.CONSENT_REQUIRED);
   if (org.isPending || redirecting) {

@@ -17,6 +17,9 @@ const MESSAGES: Record<ErrorCode, string> = {
   OTP_LOCKED: 'Bạn đã nhập sai quá nhiều lần. Vui lòng thử lại sau.',
   NOT_A_MEMBER: 'Bạn không phải thành viên của BTC này.',
   FORBIDDEN_ROLE: 'Vai trò của bạn không được thực hiện thao tác này.',
+  TOTP_REQUIRED: 'Bạn cần xác thực hai lớp để tiếp tục.',
+  TOTP_INVALID: 'Mã chưa đúng.',
+  TOTP_LOCKED: 'Bạn đã nhập sai quá nhiều lần. Vui lòng thử lại sau.',
 };
 
 function codeForStatus(status: number): ErrorCode {

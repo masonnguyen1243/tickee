@@ -157,11 +157,21 @@ export class IdentityService {
       .set({ consentedAt: sql`now()`, updatedAt: sql`now()` })
       .where(and(eq(users.id, session.user.id), isNull(users.consentedAt)));
     const [user] = await this.db.orm
-      .select({ id: users.id, email: users.email, consentedAt: users.consentedAt })
+      .select({
+        id: users.id,
+        email: users.email,
+        consentedAt: users.consentedAt,
+        twoFactorEnabled: users.twoFactorEnabled,
+      })
       .from(users)
       .where(eq(users.id, session.user.id));
     if (!user) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Bạn cần đăng nhập để tiếp tục.');
-    return { id: user.id, email: user.email, consentedAt: user.consentedAt?.toISOString() ?? null };
+    return {
+      id: user.id,
+      email: user.email,
+      consentedAt: user.consentedAt?.toISOString() ?? null,
+      twoFactorEnabled: user.twoFactorEnabled,
+    };
   }
 
   toMe(session: AuthSession): Me {
@@ -170,6 +180,7 @@ export class IdentityService {
       id: session.user.id,
       email: session.user.email,
       consentedAt: consentedAt ? new Date(consentedAt).toISOString() : null,
+      twoFactorEnabled: session.user.twoFactorEnabled === true,
     };
   }
 

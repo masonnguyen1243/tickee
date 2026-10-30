@@ -9,7 +9,7 @@ export interface AccessContext {
   role: Role;
   /** Sự kiện được giao (CTV, Epic 5); thành viên BTC luôn `[]`. */
   assignedEventIds: string[];
-  /** Mốc step-up TOTP gần nhất (Story 2.2); chưa có thì `null`. */
+  /** Mốc session qua lớp hai (TOTP/mã khôi phục, Story 2.2), hiệu lực hết session; chưa có thì `null`. */
   stepUpAt: Date | null;
 }
 

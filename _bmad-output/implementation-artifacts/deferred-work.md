@@ -89,3 +89,17 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-1-ai-5-tach-auth-va-adapter-better-auth.md`
   summary: `signInWithCode` tra `SignInOtpStore.has()` trước và `remainingAttempts()` sau `signInEmailOTP` bằng các lần đọc riêng; hai verify song song cho cùng email có thể báo số lượt còn lại lệch một hoặc `hadCode` cũ.
   evidence: Có từ trước AI-5 (cùng thứ tự gọi `internalAdapter` ở `identity.service.ts`); review AI-5 (blind-hunter) ngày 2026-10-30.
+
+- source_spec: none
+  summary: Story 2.2 phần B — Quản trị Tingee (đã step-up) "Đặt lại TOTP" cho một user ở `/admin`: bắt buộc lý do, xóa TOTP và mã khôi phục, hủy mọi phiên, buộc đăng ký lại; audit; email báo user và các Owner/Admin của BTC liên quan.
+  evidence: Tách khỏi Story 2.2 khi chạy bmad-build ngày 2026-10-30 (Mason chọn Split). Cần khu `/admin`, step-up cho Quản trị Tingee và `ADMIN_ALLOWED_CIDRS` mà Story 2.5 dựng; làm cùng hoặc ngay sau 2.5.
+
+## Deferred from: code review of spec-2-2-totp-cho-owner.md (2026-10-30)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-totp-cho-owner.md`
+  summary: Chưa có test ghim việc trả lại lượt (`TotpAttemptLimiter.restore`) khi xác minh TOTP/mã khôi phục lỗi hệ thống; bỏ dòng `restore` trong `catch` của `TotpService` thì không test nào hỏng.
+  evidence: Review 30/10 (verification-gap): chỉ nhánh `not_started` được test; cần stub `TotpStore.verify` ném lỗi rồi kiểm lần sai kế tiếp còn `remainingAttempts: 4`.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-totp-cho-owner.md`
+  summary: Nhánh "step-up giữa thao tác rồi gửi lại mutation" của `Providers` mới chỉ test bằng e2e mock `POST /orgs` (API thật không đòi TOTP ở đó). Story đầu tiên có mutation thuộc BTC (2.4 mời/xóa Admin) phải thêm test API + e2e thật cho `TOTP_REQUIRED` → step-up → gửi lại.
+  evidence: Review 30/10 (blind-hunter): route `@RequirePermission` duy nhất hiện là `GET /v1/orgs/:orgId`.

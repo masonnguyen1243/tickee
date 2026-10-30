@@ -1,4 +1,4 @@
-import { boolean, index, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, index, integer, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, id, timestamptz } from '../../platform/db/index.js';
 
 /*
@@ -18,6 +18,8 @@ export const users = pgTable('users', {
   image: text('image'),
   /** Thời điểm đồng ý xử lý dữ liệu cá nhân (NĐ 13/2023); `null` = chưa đồng ý. */
   consentedAt: timestamptz('consented_at'),
+  /** Plugin `twoFactor` bật khi xác nhận đăng ký TOTP; `TotpStore` tắt khi user dùng mã khôi phục. */
+  twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -33,6 +35,8 @@ export const sessions = pgTable(
     expiresAt: timestamptz('expires_at').notNull(),
     ipAddress: text('ip_address'),
     userAgent: text('user_agent'),
+    /** Mốc step-up TOTP gần nhất của session (Story 2.2); hiệu lực tới hết session. `null` = chưa step-up. */
+    stepUpAt: timestamptz('step_up_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -123,5 +127,53 @@ export const googleStartEvents = pgTable(
   (t) => [index('google_start_events_ip_hmac_created_at_idx').on(t.ipHmac, t.createdAt)],
 );
 
+/**
+ * Bảng của plugin `twoFactor` (Better Auth 1.7, model `twoFactor`). Chỉ `TotpStore` đọc/ghi trực tiếp.
+ * `secret` và `backupCodes` do plugin mã hóa đối xứng bằng `BETTER_AUTH_SECRET`; mã dự phòng của plugin không dùng
+ * (mã khôi phục của Tickee ở `totp_recovery_codes`). Lockout của plugin chỉ chạy khi chưa có session nên hai cột
+ * đếm/khóa không dùng; bộ đếm của Tickee ở `totp_verify_failures`.
+ */
+export const twoFactors = pgTable('two_factors', {
+  id: id(),
+  secret: text('secret').notNull(),
+  backupCodes: text('backup_codes').notNull(),
+  userId: uuid('user_id')
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  /** `false` khi mới bắt đầu đăng ký, `true` sau khi xác nhận mã đầu tiên. */
+  verified: boolean('verified').notNull().default(true),
+  failedVerificationCount: integer('failed_verification_count').notNull().default(0),
+  lockedUntil: timestamptz('locked_until'),
+});
+
+/** Mã khôi phục TOTP: 10 mã mỗi lần đăng ký, dùng một lần. Chỉ lưu HMAC của mã đã chuẩn hóa. */
+export const totpRecoveryCodes = pgTable(
+  'totp_recovery_codes',
+  {
+    id: id(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    codeHmac: text('code_hmac').notNull(),
+    usedAt: timestamptz('used_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('totp_recovery_codes_user_id_code_hmac_key').on(t.userId, t.codeHmac)],
+);
+
+/**
+ * Bộ đếm xác minh TOTP sai liên tiếp theo user (cả TOTP lẫn mã khôi phục): đủ `TOTP_MAX_FAILURES` lần thì khóa tới
+ * `locked_until`. Đúng thì đặt lại về 0.
+ */
+export const totpVerifyFailures = pgTable('totp_verify_failures', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  failedCount: integer('failed_count').notNull().default(0),
+  lockedUntil: timestamptz('locked_until'),
+  updatedAt: updatedAt(),
+});
+
 /** Schema truyền cho adapter Drizzle của Better Auth. */
-export const authSchema = { users, sessions, accounts, verifications };
+export const authSchema = { users, sessions, accounts, verifications, twoFactors };

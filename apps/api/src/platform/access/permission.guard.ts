@@ -11,13 +11,22 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Kiểu request tối thiểu guard cần (`platform` không import kiểu của `identity`). */
 type GuardRequest = RequestWithAccess & {
   user?: { id: string } | null;
+  /** Session Better Auth do `SessionGuard` gắn; `stepUpAt` là cột `sessions.step_up_at` (Story 2.2). */
+  session?: { session?: { stepUpAt?: Date | string | null } } | null;
   params?: Record<string, string | undefined>;
 };
 
+const toDate = (value: Date | string | null | undefined): Date | null => {
+  if (value === null || value === undefined) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 /**
- * Guard toàn cục số 3 (sau `SessionGuard` và `ConsentGuard`): chỉ chạy ở route `@RequirePermission`.
+ * Guard toàn cục số 4 (sau `SessionGuard`, `TotpGuard` và `ConsentGuard`): chỉ chạy ở route `@RequirePermission`.
  * Không là thành viên (kể cả BTC không tồn tại hay `orgId` sai dạng) → 403 `NOT_A_MEMBER`; vai thiếu quyền →
- * 403 `FORBIDDEN_ROLE`. Qua thì gắn `req.accessContext`.
+ * 403 `FORBIDDEN_ROLE`. Qua thì gắn `req.accessContext` (kèm `stepUpAt` của session để story sau dùng). Luật 2FA
+ * không nằm ở đây mà ở `TotpGuard` của `identity` (AD-26).
  */
 @Injectable()
 export class PermissionGuard implements CanActivate {
@@ -57,7 +66,7 @@ export class PermissionGuard implements CanActivate {
       organizationId: organizationId.toLowerCase(),
       role: access.role,
       assignedEventIds: [],
-      stepUpAt: null,
+      stepUpAt: toDate(req.session?.session?.stepUpAt),
     };
     return true;
   }
