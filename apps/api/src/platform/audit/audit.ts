@@ -19,7 +19,17 @@ export type AuditAction =
   /** Người được mời nhận lời mời và thành Admin (đối tượng: tài khoản). */
   | 'member.joined'
   /** Owner xóa một Admin khỏi BTC (đối tượng: tài khoản bị xóa). */
-  | 'member.removed';
+  | 'member.removed'
+  /** CLI cấp cờ Quản trị Tingee (actor: tài khoản `--by`; đối tượng: tài khoản được cấp; không thuộc BTC nào). */
+  | 'platform_admin.granted'
+  /** CLI thu cờ Quản trị Tingee (actor: tài khoản `--by`; đối tượng: tài khoản bị thu). */
+  | 'platform_admin.revoked'
+  /** Quản trị Tingee đọc dữ liệu nhiều BTC qua `platformAdminScope` (một dòng mỗi request đọc). */
+  | 'platform_admin.read'
+  /** Quản trị Tingee duyệt BTC vào Closed Beta (kể cả duyệt lại BTC đã bị thu hồi). */
+  | 'organization.closed_beta_approved'
+  /** Quản trị Tingee thu hồi Closed Beta của BTC. */
+  | 'organization.closed_beta_revoked';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

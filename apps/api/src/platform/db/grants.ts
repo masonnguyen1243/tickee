@@ -10,6 +10,27 @@ export const APP_DB_ROLE = 'tickee_app';
 export const APPEND_ONLY_TABLES = ['public.audit_events'] as const;
 
 /**
+ * Cột `tickee_app` không được UPDATE (`schema.table` → tên cột). Sau mỗi lần migrate, bảng bị thu UPDATE cấp bảng rồi
+ * được cấp lại UPDATE theo từng cột còn lại (đọc từ `information_schema.columns`), nên cột mới thêm sau vẫn ghi được.
+ * `users.platform_admin`: cờ Quản trị Tingee chỉ đổi bằng CLI chạy role `tickee_migrator` (AD-26). DB chặn mọi UPDATE
+ * cột này từ `tickee_app` (kể cả khi tầng ứng dụng có lỗi). INSERT KHÔNG bị chặn theo cột (Drizzle liệt kê mọi cột,
+ * giá trị `default`, khi INSERT): `tickee_app` vẫn INSERT được dòng có cờ `true`; điều ngăn việc đó chỉ là Better Auth
+ * không khai báo trường này nên không nhận từ input, và không code nào khác INSERT `users`.
+ */
+export const UPDATE_PROTECTED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+  'public.users': ['platform_admin'],
+};
+
+const quoteIdent = (name: string) => `"${name.replaceAll('"', '""')}"`;
+
+async function tableExists(client: pg.PoolClient, schema: string, name: string): Promise<boolean> {
+  const { rows } = await client.query<{ exists: boolean }>('SELECT to_regclass($1) IS NOT NULL AS exists', [
+    `${quoteIdent(schema)}.${quoteIdent(name)}`,
+  ]);
+  return rows[0]?.exists === true;
+}
+
+/**
  * Cấp quyền DML cho `tickee_app` trên mọi bảng hiện có (schema `public` và `pgboss`).
  * Bảng mới ở story sau tự có quyền nhờ `ALTER DEFAULT PRIVILEGES` trong migration 0000.
  * Idempotent; chạy bằng `tickee_migrator` sau migration. Chạy trong một transaction: GRANT bên dưới cấp lại
@@ -46,10 +67,23 @@ async function grantInTransaction(client: pg.PoolClient, schemas: readonly strin
   for (const table of APPEND_ONLY_TABLES) {
     const [schema, name] = table.split('.') as [string, string];
     if (!schemas.includes(schema)) continue;
-    const { rows } = await client.query<{ exists: boolean }>('SELECT to_regclass($1) IS NOT NULL AS exists', [
-      `"${schema}"."${name}"`,
-    ]);
-    if (!rows[0]?.exists) continue;
+    if (!(await tableExists(client, schema, name))) continue;
     await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON TABLE "${schema}"."${name}" FROM ${APP_DB_ROLE}`);
+  }
+  for (const [table, protectedColumns] of Object.entries(UPDATE_PROTECTED_COLUMNS)) {
+    const [schema, name] = table.split('.') as [string, string];
+    if (!schemas.includes(schema)) continue;
+    if (!(await tableExists(client, schema, name))) continue;
+    const { rows } = await client.query<{ column_name: string }>(
+      'SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position',
+      [schema, name],
+    );
+    const updatable = rows.map((r) => r.column_name).filter((c) => !protectedColumns.includes(c));
+    const target = `${quoteIdent(schema)}.${quoteIdent(name)}`;
+    // REVOKE cấp bảng thu luôn UPDATE theo cột đã cấp ở lần migrate trước (cột đã xóa/đổi tên không còn sót).
+    await client.query(`REVOKE UPDATE ON TABLE ${target} FROM ${APP_DB_ROLE}`);
+    if (updatable.length > 0) {
+      await client.query(`GRANT UPDATE (${updatable.map(quoteIdent).join(', ')}) ON TABLE ${target} TO ${APP_DB_ROLE}`);
+    }
   }
 }

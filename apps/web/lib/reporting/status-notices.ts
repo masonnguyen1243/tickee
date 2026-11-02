@@ -1,0 +1,44 @@
+import type { StatusNotice, StatusNoticeCode } from '@tickee/contracts';
+
+/*
+ * Nội dung `status-banner` theo mã thông báo trạng thái (AD-34). Web chỉ ánh xạ `code` → nội dung; mức độ, đóng được
+ * hay không và thứ tự do api trả. Khác `lib/notices.ts` (toast một lần qua `?notice=`).
+ */
+
+export type StatusNoticeContent = { title: string; description?: string };
+
+/** Mỗi mã trong `StatusNoticeCode` bắt buộc có nội dung (thiếu thì lỗi typecheck). */
+export const STATUS_NOTICE_CONTENT: Readonly<Record<StatusNoticeCode, StatusNoticeContent>> = {
+  CLOSED_BETA_REVOKED: {
+    title: 'Closed Beta đã bị thu hồi',
+    description: 'Hạng vé có phí của BTC đang Tạm ngừng bán. Hạng vé 0đ vẫn bán bình thường.',
+  },
+  // Chưa có kênh liên hệ Tingee nên không có nút (quyết định 02/11/2026).
+  CLOSED_BETA_PENDING: {
+    title: 'Chờ duyệt Closed Beta',
+    description: 'Tingee sẽ liên hệ qua SĐT hoặc email liên hệ của BTC để xác minh.',
+  },
+};
+
+const DISMISSED_PREFIX = 'tickee:thong-bao-da-dong:';
+
+/** Khóa `sessionStorage` của một banner đã đóng: theo `code` + `version`, nên trạng thái đổi thì banner hiện lại. */
+export const statusNoticeDismissKey = (notice: Pick<StatusNotice, 'code' | 'version'>): string =>
+  `${DISMISSED_PREFIX}${notice.code}:${notice.version}`;
+
+/** Đã đóng trong phiên trình duyệt này chưa; storage bị chặn thì coi như chưa (banner vẫn hiện). */
+export function isStatusNoticeDismissed(notice: Pick<StatusNotice, 'code' | 'version'>): boolean {
+  try {
+    return window.sessionStorage.getItem(statusNoticeDismissKey(notice)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveStatusNoticeDismissed(notice: Pick<StatusNotice, 'code' | 'version'>): void {
+  try {
+    window.sessionStorage.setItem(statusNoticeDismissKey(notice), '1');
+  } catch {
+    // Không lưu được: banner chỉ ẩn tới khi tải lại trang.
+  }
+}

@@ -20,6 +20,12 @@ export const users = pgTable('users', {
   consentedAt: timestamptz('consented_at'),
   /** Plugin `twoFactor` bật khi xác nhận đăng ký TOTP; `TotpStore` tắt khi user dùng mã khôi phục. */
   twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
+  /**
+   * Cờ Quản trị Tingee (AD-26). Chỉ CLI `admin:grant`/`admin:revoke` (role `tickee_migrator`) đổi. DB chặn UPDATE cột
+   * này từ `tickee_app` (`UPDATE_PROTECTED_COLUMNS`); INSERT thì DB không chặn, chỉ dựa vào việc Better Auth không khai
+   * báo trường nên không nhận từ input (user mới luôn mang mặc định `false`).
+   */
+  platformAdmin: boolean('platform_admin').notNull().default(false),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

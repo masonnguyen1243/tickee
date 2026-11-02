@@ -15,7 +15,9 @@
     "start": "node --env-file-if-exists=../../.env dist/main.js",
     "test": "vitest run",
     "lint:deps": "depcruise src --config .dependency-cruiser.cjs",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "admin:grant": "node --env-file-if-exists=../../.env dist/roles/admin-cli.js grant",
+    "admin:revoke": "node --env-file-if-exists=../../.env dist/roles/admin-cli.js revoke"
   },
   "dependencies": {
     "@nestjs/common": "12.3.2",

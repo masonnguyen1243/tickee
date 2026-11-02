@@ -121,3 +121,24 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-4-moi-va-xoa-admin.md`
   summary: `organization_invitations` giữ `email` (PII) mãi mãi: lời mời đã nhận, đã thu hồi hay hết hạn không bao giờ bị xóa, và lời mời hết hạn nằm trong "Lời mời đang chờ" tới khi Owner thu hồi tay. Cần chốt thời hạn giữ rồi thêm job dọn (như `identity.purge-expired`).
   evidence: Review 02/11 (blind-hunter, edge-case-hunter). Chưa có janitor cho bảng này; thời hạn giữ dữ liệu cho audit/NĐ 13 chưa có trong PRD, liên quan Story 7.6 (xóa tài khoản, rút đồng ý).
+
+## Deferred from: tách phạm vi Story 2.5 khi build (2026-11-02) — phải xong trước Closed Beta
+
+- source_spec: none
+  summary: Story 2.5 phần sau — giới hạn `/v1/admin/*` theo dải IP `ADMIN_ALLOWED_CIDRS` (kiểm bằng Zod khi khởi động, thiếu/sai ở production thì api không khởi động) cùng cấu hình trusted proxy để lấy đúng IP client (FR-4, AD-26).
+  evidence: Tách khỏi Story 2.5 theo quyết định của Mason (02/11): chỉ có tác dụng khi đã deploy và dính `TRUST_PROXY_HOPS` đang nằm trong checklist Story 4.7 ở file này; không chặn 2.6/2.10. Phải xong trước khi mở `/admin` trên môi trường thật.
+- source_spec: none
+  summary: Story 2.5 phần sau — thao tác "Đặt lại TOTP" cho một user ở `/admin` (Quản trị Tingee đã step-up, lý do bắt buộc; xóa TOTP + mã khôi phục, hủy mọi phiên, 2FA về chưa bật; audit; email báo user và Owner/Admin của các BTC liên quan), chuyển từ Story 2.2 theo Sprint Change Proposal 30/10/2026.
+  evidence: Tách khỏi Story 2.5 theo quyết định của Mason (02/11): chỉ cần khi đã có người dùng thật mất thiết bị; là mục tiêu độc lập (luồng hỗ trợ tài khoản), không story nào phụ thuộc. Phải xong trước Closed Beta.
+
+## Deferred from: code review of spec-2-5-duyet-btc-vao-closed-beta.md (2026-11-02)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-duyet-btc-vao-closed-beta.md`
+  summary: `StatusNotice` chưa có id đối tượng (BTC/Sự kiện): khóa đóng banner trong `sessionStorage` và React key chỉ là `code:version`, nên story đầu tiên phát thông báo phạm vi `event` hoặc `dismissible: true` phải thêm id đối tượng vào hợp đồng và vào cả hai khóa.
+  evidence: Review 02/11 (blind-hunter, edge-case-hunter), triage #5. Hôm nay chưa với tới: hai mã Closed Beta đều không đóng được và đều phạm vi `organization`, `version` là mốc thời gian theo BTC. Hai thông báo Sự kiện cùng mã + version sẽ trùng React key và đóng một cái ẩn luôn cái kia; khóa đóng còn dính sang BTC khác trong cùng tab.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-duyet-btc-vao-closed-beta.md`
+  summary: `GET /v1/admin/organizations` (hàng duyệt Closed Beta) chưa phân trang; tab "Đã duyệt" tăng theo số BTC.
+  evidence: Review 02/11, triage #9. Closed Beta chỉ vài chục BTC nên chưa thành vấn đề; thêm `limit` + cursor trước khi mở rộng ngoài Closed Beta.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-duyet-btc-vao-closed-beta.md`
+  summary: CLI Quản trị Tingee chưa có `admin:list` để xem ai đang có cờ, và README chỉ hướng dẫn chạy local; Story 4.7 cần ghi cách chạy `dist/roles/admin-cli.js` trong image ở staging/production (ai được chạy, cấp `MIGRATION_DATABASE_URL` thế nào).
+  evidence: Review 02/11 (blind-hunter), triage #11. Hiện muốn xem danh sách admin phải chạy SQL bằng role migrator.

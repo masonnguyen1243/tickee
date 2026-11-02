@@ -1,7 +1,9 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
+import { AdminModule } from './modules/admin/index.js';
 import { IdentityModule } from './modules/identity/index.js';
 import { OrganizerModule } from './modules/organizer/index.js';
+import { ReportingModule } from './modules/reporting/index.js';
 import { APP_CONFIG, type ApiConfig } from './platform/config/index.js';
 import { DbModule } from './platform/db/index.js';
 import { EmailModule } from './platform/email/index.js';
@@ -11,9 +13,9 @@ import { createLoggerModule, type LoggingOptions } from './platform/logging/inde
 
 /**
  * Gốc DI của vai `api`. Story sau thêm mô-đun miền vào `imports`.
- * Guard toàn cục (session, 2FA rồi đồng ý NĐ 13) do `IdentityModule` đăng ký: route nào không `@Public()` /
- * `@AllowAnonymous()` đều cần đăng nhập, đã qua lớp hai (nếu đã bật 2FA) và đã đồng ý. Guard quyền
- * (`@RequirePermission`) do `OrganizerModule` đăng ký.
+ * Guard toàn cục (session, 2FA, đồng ý NĐ 13, Quản trị Tingee) do `IdentityModule` đăng ký: route nào không
+ * `@Public()` / `@AllowAnonymous()` đều cần đăng nhập, đã qua lớp hai (nếu đã bật 2FA) và đã đồng ý; route
+ * `@RequirePlatformAdmin()` còn cần cờ `platform_admin`. Guard quyền (`@RequirePermission`) do `OrganizerModule` đăng ký.
  */
 @Module({})
 export class ApiModule {
@@ -27,8 +29,11 @@ export class ApiModule {
         // Chỉ enqueue job (cùng `tx` của thay đổi); không bảo trì, không lịch, không handler — việc của vai `worker`.
         JobsModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-api', mode: 'producer' }),
         IdentityModule.forRoot(config),
-        // Sau IdentityModule: PermissionGuard chạy sau SessionGuard, TotpGuard và ConsentGuard.
+        // Sau IdentityModule: PermissionGuard chạy sau SessionGuard, TotpGuard, ConsentGuard và PlatformAdminGuard.
         OrganizerModule.forRoot(config),
+        ReportingModule,
+        // Khu `/v1/admin/*`: guard Quản trị Tingee (cờ `platform_admin`, 2FA, step-up) do IdentityModule đăng ký.
+        AdminModule,
       ],
       controllers: [HealthController],
       providers: [
