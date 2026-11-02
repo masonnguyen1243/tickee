@@ -20,6 +20,12 @@ const MESSAGES: Record<ErrorCode, string> = {
   TOTP_REQUIRED: 'Bạn cần xác thực hai lớp để tiếp tục.',
   TOTP_INVALID: 'Mã chưa đúng.',
   TOTP_LOCKED: 'Bạn đã nhập sai quá nhiều lần. Vui lòng thử lại sau.',
+  ALREADY_A_MEMBER: 'Email này đã là thành viên của BTC.',
+  INVITATION_INVALID: 'Link mời không hợp lệ.',
+  INVITATION_EXPIRED: 'Link mời đã hết hạn.',
+  INVITATION_USED: 'Link mời đã được dùng.',
+  INVITATION_EMAIL_MISMATCH: 'Lời mời này gửi tới một email khác.',
+  INVITATION_LIMIT_REACHED: 'BTC đã gửi quá nhiều lời mời trong 24 giờ. Vui lòng thử lại sau.',
 };
 
 function codeForStatus(status: number): ErrorCode {

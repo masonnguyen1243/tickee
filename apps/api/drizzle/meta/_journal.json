@@ -43,6 +43,13 @@
       "when": 1793343812919,
       "tag": "0005_totp",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793603176469,
+      "tag": "0006_organization_invitations",
+      "breakpoints": true
     }
   ]
 }

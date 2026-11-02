@@ -9,7 +9,7 @@ import { purgeExpired, PURGE_EXPIRED_CRON } from '../../src/modules/identity/ide
 import { Database } from '../../src/platform/db/index.js';
 import { BOSS, PGBOSS_SCHEMA } from '../../src/platform/jobs/index.js';
 import { WorkerModule } from '../../src/worker.module.js';
-import { databaseUrl } from '../helpers.js';
+import { databaseUrl, workerConfig } from '../helpers.js';
 import { createHarness } from './harness.js';
 
 /** Job `identity.purge-expired` (retro Epic 1, AI-2): dọn rác ở vai `worker`, không trong transaction gửi OTP. */
@@ -27,7 +27,7 @@ afterAll(async () => {
 
 const startWorker = async () => {
   const app = await NestFactory.createApplicationContext(
-    WorkerModule.forRoot({ APP_ROLE: 'worker', NODE_ENV: 'test', LOG_LEVEL: 'silent', DATABASE_URL: databaseUrl() }),
+    WorkerModule.forRoot(workerConfig()),
     { logger: false },
   );
   await app.init();

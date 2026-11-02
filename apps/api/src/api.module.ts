@@ -6,6 +6,7 @@ import { APP_CONFIG, type ApiConfig } from './platform/config/index.js';
 import { DbModule } from './platform/db/index.js';
 import { EmailModule } from './platform/email/index.js';
 import { ErrorFilter, HealthController } from './platform/http/index.js';
+import { JobsModule } from './platform/jobs/index.js';
 import { createLoggerModule, type LoggingOptions } from './platform/logging/index.js';
 
 /**
@@ -23,6 +24,8 @@ export class ApiModule {
         createLoggerModule({ level: config.LOG_LEVEL, ...options }),
         DbModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-api' }),
         EmailModule.forRoot({ url: config.SMTP_URL, from: config.EMAIL_FROM }),
+        // Chỉ enqueue job (cùng `tx` của thay đổi); không bảo trì, không lịch, không handler — việc của vai `worker`.
+        JobsModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-api', mode: 'producer' }),
         IdentityModule.forRoot(config),
         // Sau IdentityModule: PermissionGuard chạy sau SessionGuard, TotpGuard và ConsentGuard.
         OrganizerModule.forRoot(config),

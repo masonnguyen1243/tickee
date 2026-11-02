@@ -11,7 +11,15 @@ export type AuditAction =
   /** Step-up bằng mã khôi phục: mã hết hiệu lực và TOTP bị gỡ. */
   | 'totp.recovery_code_used'
   /** Người dùng tự tắt 2FA (bằng TOTP hoặc mã khôi phục): secret và mã khôi phục bị xóa. */
-  | 'totp.disabled';
+  | 'totp.disabled'
+  /** Owner mời một email làm Admin (đối tượng: lời mời; không ghi email). */
+  | 'member.invited'
+  /** Lời mời còn treo bị thu hồi: Owner bấm "Thu hồi" hoặc mời lại cùng email. */
+  | 'member.invitation_revoked'
+  /** Người được mời nhận lời mời và thành Admin (đối tượng: tài khoản). */
+  | 'member.joined'
+  /** Owner xóa một Admin khỏi BTC (đối tượng: tài khoản bị xóa). */
+  | 'member.removed';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

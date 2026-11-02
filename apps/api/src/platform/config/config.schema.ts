@@ -71,6 +71,11 @@ export const workerConfigSchema = z.object({
   APP_ROLE: z.literal('worker'),
   ...common,
   DATABASE_URL: postgresUrl,
+  /** Origin của web: link trong email (vd. lời mời Admin `<WEB_ORIGIN>/loi-moi-btc#…`). */
+  WEB_ORIGIN: httpOrigin,
+  /** Gửi email từ job (lời mời Admin); cùng dạng với vai `api`. */
+  SMTP_URL: smtpUrl,
+  EMAIL_FROM: z.string().min(3),
 });
 
 export const migrateConfigSchema = z.object({

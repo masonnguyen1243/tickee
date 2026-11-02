@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 
 import { expect, test } from './fixtures';
-import { apiError, EMAIL, me, mockIdentityApi, unauthenticated, type Handler } from './identity-mock';
+import { apiError, EMAIL, me, mockIdentityApi, unauthenticated, USER_ID, type Handler } from './identity-mock';
 import { mockOrganizerApi, organization, ORG_ID, OTHER_ORG_ID } from './organizer-mock';
 
 /*
@@ -32,6 +32,22 @@ async function openDashboard(page: Page, { role = 'owner' as Role, path = base, 
   const calls = await mockOrganizerApi(page, {
     [`GET /orgs/${ORG_ID}`]: () => organization({ role, ...orgOverrides }),
     [`GET /orgs/${OTHER_ORG_ID}`]: () => organization({ id: OTHER_ORG_ID, name: OTHER_NAME, role: 'admin' }),
+    [`GET /orgs/${ORG_ID}/members`]: () => ({
+      status: 200,
+      body: {
+        members: [
+          {
+            id: '019a3b2c-0001-7abc-8def-0123456789ab',
+            userId: USER_ID,
+            role: 'owner',
+            email: EMAIL,
+            name: '',
+            joinedAt: '2026-10-29T01:02:03.000Z',
+          },
+        ],
+        invitations: [],
+      },
+    }),
     'GET /me/memberships': () => ({
       status: 200,
       body: [
@@ -383,7 +399,6 @@ test('mục chưa có trang: trang tạm "Sắp có" trong khung, mục đang ch
 
   const pages: [string, string][] = [
     ['Cần xử lý', `${base}/can-xu-ly`],
-    ['Thành viên', `${base}/thanh-vien`],
     ['Tài khoản nhận tiền', `${base}/tai-khoan-nhan-tien`],
     ['Cài đặt', `${base}/cai-dat`],
   ];
@@ -420,9 +435,22 @@ for (const [name, segment] of OWNER_ONLY_PAGES) {
 }
 
 test('Owner mở URL chỉ Owner: trang tạm "Sắp có", không bị chặn', async ({ page }) => {
-  await openDashboard(page, { path: `${base}/thanh-vien` });
+  await openDashboard(page, { path: `${base}/tai-khoan-nhan-tien` });
   await expect(page.getByText('Sắp có', { exact: true })).toBeVisible();
   await expect(page.getByText('Chỉ Owner xem được mục này.')).toHaveCount(0);
+});
+
+test('Owner mở Thành viên từ sidebar: trang Thành viên thật, mục đang chọn có aria-current', async ({ page }) => {
+  await page.setViewportSize(DESKTOP);
+  await openDashboard(page);
+  await sidebar(page).getByRole('link', { name: 'Thành viên', exact: true }).click();
+  await page.waitForURL(`**${base}/thanh-vien`);
+  await expect(page.getByRole('heading', { name: 'Thành viên', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Mời Admin' })).toBeVisible();
+  await expect(page.locator('[data-slot="member-row"]').getByText(EMAIL)).toBeVisible();
+  await expect(page.getByText('Sắp có', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Chỉ Owner xem được mục này.')).toHaveCount(0);
+  await expect(sidebar(page).getByRole('link', { name: 'Thành viên', exact: true })).toHaveAttribute('aria-current', 'page');
 });
 
 test('lỗi tải BTC (5xx): banner "Chưa tải được BTC", không có điều hướng; "Thử lại" thành công thì có khung', async ({

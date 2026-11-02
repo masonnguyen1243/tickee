@@ -111,3 +111,13 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-3-landing-btc.md`
   summary: Đăng nhập tài khoản khác trong cùng tab (không đăng xuất) chỉ invalidate `me`, nên cache memberships của tài khoản trước còn tới 30 giây; `AccountMenu` và CTA landing trỏ "Dashboard BTC"/"Vào dashboard" tới BTC của người khác.
   evidence: `apps/web/app/(public)/dang-nhap/login-form.tsx:164` chỉ gọi `invalidateQueries({ queryKey: ME_QUERY_KEY })`, `staleTime` 30 giây ở `providers.tsx:42`; có từ trước Story 2.3. Server vẫn trả lỗi quyền khi mở BTC không phải của mình. Sửa: xóa cache (như đăng xuất) hoặc invalidate cả `MEMBERSHIPS_QUERY_KEY` khi đăng nhập thành công.
+
+## Deferred from: code review of spec-2-4-moi-va-xoa-admin.md (2026-11-02)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-4-moi-va-xoa-admin.md`
+  summary: Giới hạn 20 lời mời/24 giờ chỉ tính theo BTC, mà một tài khoản tạo được không giới hạn BTC, nên email mời Admin (tiêu đề chứa nguyên tên BTC, gửi từ tên miền Tickee) có thể bị dùng để spam/phishing. Cần thêm giới hạn theo tài khoản mời và/hoặc theo người nhận, hoặc giới hạn số BTC mỗi tài khoản.
+  evidence: Review 02/11 (blind-hunter). `organizer.service.ts` `createOrganization` không có giới hạn (có từ 2.1); `members.service.ts` `invite` chỉ đếm `organization_id`. Nên chốt trước Closed Beta, cùng lúc với giám sát 4.6.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-4-moi-va-xoa-admin.md`
+  summary: `organization_invitations` giữ `email` (PII) mãi mãi: lời mời đã nhận, đã thu hồi hay hết hạn không bao giờ bị xóa, và lời mời hết hạn nằm trong "Lời mời đang chờ" tới khi Owner thu hồi tay. Cần chốt thời hạn giữ rồi thêm job dọn (như `identity.purge-expired`).
+  evidence: Review 02/11 (blind-hunter, edge-case-hunter). Chưa có janitor cho bảng này; thời hạn giữ dữ liệu cho audit/NĐ 13 chưa có trong PRD, liên quan Story 7.6 (xóa tài khoản, rút đồng ý).
