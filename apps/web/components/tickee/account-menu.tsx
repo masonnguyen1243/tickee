@@ -64,7 +64,13 @@ export function AccountMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="max-w-[60vw] font-medium" aria-label={`Tài khoản: ${me.data.email}`}>
+        {/* Co lại được (email cắt bằng `truncate`) để header vừa 320px cùng nút chuyển giao diện. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="max-w-[60vw] min-w-0 shrink font-medium [&>span]:min-w-0"
+          aria-label={`Tài khoản: ${me.data.email}`}
+        >
           <CircleUserRound aria-hidden="true" />
           <span className="truncate">{me.data.email}</span>
         </Button>

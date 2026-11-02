@@ -3,15 +3,19 @@
 
 /*
  * Hệ thống giao diện "Rạp tối" — giá trị lấy đúng DESIGN.md (frontmatter, § Colors, § Elevation & Depth).
- * Light/dark CHỈ theo `prefers-color-scheme` (biến thể `dark:` mặc định của Tailwind 4); không công tắc theme.
+ * Light/dark theo `data-theme` trên <html> (đổi 02/11/2026: có nút chuyển giao diện ở header). Script inline trong
+ * <head> (lib/theme.ts) đặt "light" hoặc "dark" trước lần vẽ đầu: lựa chọn đã lưu, chưa chọn thì theo hệ thống.
+ * Không có JS thì sáng. Biến thể `dark:` của Tailwind cũng theo `data-theme`.
  * Coral `--primary` chỉ đặt trên nền tối (stage, bar, dark mode); chữ thương hiệu trên nền sáng dùng `--brand-text`.
  */
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
 :root {
   --radius: 12px;
 
   /* shadcn — light */
-  --background: #F7F3F2;
+  --background: #F7F3F2; /* = THEME_CONFIG.themeColors.light (lib/theme.ts, meta theme-color) */
   --foreground: #1C1917;
   --card: #FFFFFF;
   --card-foreground: #1C1917;
@@ -67,44 +71,46 @@
   /* Elevation: bóng mềm ấm, không viền (light) */
   --elevation-card: 0 1px 2px rgba(60, 20, 30, 0.06), 0 8px 24px rgba(60, 20, 30, 0.08);
 
-  color-scheme: light dark;
+  /* Thanh cuộn, ô nhập native theo theme đang dùng. */
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0B0809;
-    --foreground: #F5F2F2;
-    --card: #1C1416;
-    --card-foreground: #F5F2F2;
-    --popover: #1C1416;
-    --popover-foreground: #F5F2F2;
-    --secondary: #2A2023;
-    --secondary-foreground: #F5F2F2;
-    --muted: #2A2023;
-    --muted-foreground: #A8A29E;
-    --accent: #2A2023;
-    --accent-foreground: #F5F2F2;
-    --border: #2A2023;
-    --input: #2A2023;
-    --ring: #FF4D6A;
+/* Dark: chỉ khai báo ở đây. */
+[data-theme='dark'] {
+  --background: #0B0809; /* = THEME_CONFIG.themeColors.dark (lib/theme.ts, meta theme-color) */
+  --foreground: #F5F2F2;
+  --card: #1C1416;
+  --card-foreground: #F5F2F2;
+  --popover: #1C1416;
+  --popover-foreground: #F5F2F2;
+  --secondary: #2A2023;
+  --secondary-foreground: #F5F2F2;
+  --muted: #2A2023;
+  --muted-foreground: #A8A29E;
+  --accent: #2A2023;
+  --accent-foreground: #F5F2F2;
+  --border: #2A2023;
+  --input: #2A2023;
+  --ring: #FF4D6A;
 
-    --brand-text: #FF4D6A;
+  --brand-text: #FF4D6A;
 
-    --success-text: #A3C4B2;
-    --success-subtle: #1A2621;
-    --warning-text: #E3C590;
-    --warning-subtle: #2A2318;
-    --danger-text: #E0A3A0;
-    --danger-subtle: #2E1B1B;
-    --neutral-text: #C9BDBF;
-    --neutral-subtle: #2A2023;
+  --success-text: #A3C4B2;
+  --success-subtle: #1A2621;
+  --warning-text: #E3C590;
+  --warning-subtle: #2A2318;
+  --danger-text: #E0A3A0;
+  --danger-subtle: #2E1B1B;
+  --neutral-text: #C9BDBF;
+  --neutral-subtle: #2A2023;
 
-    --btn-on-light-bg: var(--primary);
-    --btn-on-light-fg: var(--primary-foreground);
+  --btn-on-light-bg: var(--primary);
+  --btn-on-light-fg: var(--primary-foreground);
 
-    /* Dark: bỏ bóng, thay bằng vòng 1px stage-line */
-    --elevation-card: 0 0 0 1px var(--stage-line);
-  }
+  /* Dark: bỏ bóng, thay bằng vòng 1px stage-line */
+  --elevation-card: 0 0 0 1px var(--stage-line);
+
+  color-scheme: dark;
 }
 
 @theme inline {

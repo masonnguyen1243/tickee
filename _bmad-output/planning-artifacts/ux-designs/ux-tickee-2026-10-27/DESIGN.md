@@ -8,7 +8,7 @@ sources:
   - ../../prds/prd-tickee-2026-10-27/addendum.md
   - .working/reference-sites.md
 name: Tickee
-description: Bán vé sự kiện nhỏ qua VietQR — hướng "Rạp tối" (Hướng D). shadcn/ui + Tailwind; DESIGN.md này chỉ định lớp thương hiệu (delta) trên nền shadcn, sáng/tối theo hệ thống.
+description: Bán vé sự kiện nhỏ qua VietQR — hướng "Rạp tối" (Hướng D). shadcn/ui + Tailwind; DESIGN.md này chỉ định lớp thương hiệu (delta) trên nền shadcn, sáng/tối theo hệ thống hoặc nút chuyển giao diện (đổi 02/11/2026).
 colors:
   # --- Thương hiệu (dùng chung hai chế độ) ---
   brand: '#FF4D6A'              # coral — CHỈ đặt trên nền tối (stage / bar / page-dark / card-dark)
@@ -384,8 +384,8 @@ Cảm giác chủ đạo là **dễ dùng**; cảm xúc phụ là hồi hộp nh
 Ba bề mặt, cùng một bộ token:
 
 - **Bề mặt Người mua** (trang Sự kiện, Checkout, QR thanh toán, Vé của tôi) và **landing BTC**: đậm chất "Rạp tối" — stage block đầu màn hình, thanh mua vé tối dính đáy, CTA coral.
-- **Dashboard BTC**: **tiết chế hơn** — nền chủ yếu sáng/tối theo hệ thống; stage block chỉ dùng cho sidebar/header hoặc thẻ số liệu nổi bật. Không có stage block trang trí trong bảng Đơn hay form.
-- **Màn quét của CTV**: theo cài đặt hệ thống (không ép tối); chỉ kết quả quét phủ toàn màn hình xanh/đỏ.
+- **Dashboard BTC**: **tiết chế hơn** — nền chủ yếu sáng/tối theo theme đang dùng (mặc định theo hệ thống; đổi 02/11/2026); stage block chỉ dùng cho sidebar/header hoặc thẻ số liệu nổi bật. Không có stage block trang trí trong bảng Đơn hay form.
+- **Màn quét của CTV**: theo theme đang dùng, mặc định theo hệ thống (không ép tối; đổi 02/11/2026); chỉ kết quả quét phủ toàn màn hình xanh/đỏ.
 
 Tickee kế thừa shadcn/ui. DESIGN.md này chỉ định lớp thương hiệu: màu, font, bo góc, đổ bóng, và các component riêng của Tickee. Component shadcn dùng nguyên trạng nhận token qua biến CSS, không tùy biến thêm — danh sách ở § Components.
 
@@ -395,7 +395,7 @@ Tham chiếu hình ảnh: [Hướng D · Rạp tối](mockups/directions-2.html)
 
 ## Colors
 
-Bảng đầy đủ nằm trong frontmatter. Ánh xạ sang biến shadcn (`globals.css`, `:root` và `.dark` theo `prefers-color-scheme`):
+Bảng đầy đủ nằm trong frontmatter. Ánh xạ sang biến shadcn (`globals.css`: `:root` là light, `[data-theme='dark']` là dark; `data-theme` trên `<html>` theo nút chuyển giao diện, chưa chọn thì theo `prefers-color-scheme` — đổi 02/11/2026, xem EXPERIENCE.md § Foundation):
 
 | Biến shadcn | Light | Dark |
 |---|---|---|
@@ -678,7 +678,7 @@ Minh họa: [Màn quét — chờ, mất kết nối, Tra tay](mockups/key-check
 
 #### dashboard-sidebar
 
-Nền `{colors.stage}`, rộng `{spacing.sidebar-width}`. Đầu sidebar: **BTC switcher** (avatar + tên BTC + chevron, mở `DropdownMenu`). Nhóm mục cấp BTC: Sự kiện · Cần xử lý (badge số) · Token · Thành viên · Tài khoản nhận tiền · Cài đặt (các mục chỉ dành cho Owner bị ẩn với Admin). Mục thường `{colors.stage-muted}`, hover nền `{colors.stage-line}`, mục đang chọn chữ `{colors.stage-foreground}` weight 700 + thanh coral 3px bên trái + icon `{colors.brand}`. Vùng nội dung bên phải dùng `page`/`card` sáng–tối theo hệ thống. Tabs cấp Sự kiện (Tổng quan · Đơn · Hạng vé · Form mua · Check-in · Cài đặt) dùng shadcn `Tabs` nguyên trạng; tab đang chọn gạch chân `{colors.text}` 2px (không coral trên nền sáng).
+Nền `{colors.stage}`, rộng `{spacing.sidebar-width}`. Đầu sidebar: **BTC switcher** (avatar + tên BTC + chevron, mở `DropdownMenu`). Nhóm mục cấp BTC: Sự kiện · Cần xử lý (badge số) · Token · Thành viên · Tài khoản nhận tiền · Cài đặt (các mục chỉ dành cho Owner bị ẩn với Admin). Mục thường `{colors.stage-muted}`, hover nền `{colors.stage-line}`, mục đang chọn chữ `{colors.stage-foreground}` weight 700 + thanh coral 3px bên trái + icon `{colors.brand}`. Vùng nội dung bên phải dùng `page`/`card` sáng–tối theo theme đang dùng (mặc định theo hệ thống; đổi 02/11/2026). Tabs cấp Sự kiện (Tổng quan · Đơn · Hạng vé · Form mua · Check-in · Cài đặt) dùng shadcn `Tabs` nguyên trạng; tab đang chọn gạch chân `{colors.text}` 2px (không coral trên nền sáng).
 
 #### bottom-tab-bar
 

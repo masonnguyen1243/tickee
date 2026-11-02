@@ -4,11 +4,14 @@ import { TriangleAlert } from 'lucide-react';
 
 import { EmptyState } from '@/components/tickee/empty-state';
 import { Button } from '@/components/ui/button';
+import { useTheme } from '@/lib/use-theme';
 
 import './globals.css';
 
 /** Lỗi ở chính root layout: thay cả <html>, nên tự khai báo `lang="vi"`. */
 export default function GlobalError({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  // <html> mới không còn `data-theme` của script theme: đăng ký theme để áp lại (lựa chọn đã lưu hoặc theo hệ thống).
+  useTheme();
   return (
     <html lang="vi">
       <body>
