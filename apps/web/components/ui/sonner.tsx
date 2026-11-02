@@ -4,12 +4,15 @@ import { CircleCheckIcon, InfoIcon, Loader2Icon, OctagonXIcon, TriangleAlertIcon
 import type * as React from 'react';
 import { Toaster as Sonner, type ToasterProps } from 'sonner';
 
-// shadcn nguyên trạng, chỉ thay `next-themes` bằng `theme="system"` (light/dark theo hệ thống)
-// và Việt hóa nhãn a11y mặc định của Sonner.
+import { useTheme } from '@/lib/use-theme';
+
+// shadcn nguyên trạng, chỉ thay `next-themes` bằng `useTheme` (theme đang dùng: lựa chọn ở nút chuyển giao diện, chưa
+// chọn thì theo hệ thống; đổi 02/11/2026) và Việt hóa nhãn a11y mặc định của Sonner.
 const Toaster = ({ ...props }: ToasterProps) => {
+  const theme = useTheme();
   return (
     <Sonner
-      theme="system"
+      theme={theme}
       className="toaster group"
       containerAriaLabel="Thông báo"
       toastOptions={{ closeButtonAriaLabel: 'Đóng thông báo' }}

@@ -103,3 +103,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-2-totp-cho-owner.md`
   summary: Nhánh "step-up giữa thao tác rồi gửi lại mutation" của `Providers` mới chỉ test bằng e2e mock `POST /orgs` (API thật không đòi TOTP ở đó). Story đầu tiên có mutation thuộc BTC (2.4 mời/xóa Admin) phải thêm test API + e2e thật cho `TOTP_REQUIRED` → step-up → gửi lại.
   evidence: Review 30/10 (blind-hunter): route `@RequirePermission` duy nhất hiện là `GET /v1/orgs/:orgId`.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-theme-toggle.md`
+  summary: Khi thêm Content Security Policy (vd. cho script Tingee), phải cho phép script theme inline `THEME_SCRIPT` trong `<head>` mà vẫn giữ trang tĩnh prerender.
+  evidence: Review 02/11 (blind-hunter). Hiện chưa có CSP nên chưa lỗi. Dùng nonce sẽ ép render động, trái quy tắc "không đọc theme ở server". Dùng hash thì hash đổi theo output của `applyTheme.toString()` sau mỗi lần đổi compiler hoặc minifier, nên phải tính hash lúc build.

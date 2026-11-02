@@ -4,6 +4,7 @@ import { Suspense, type ReactNode } from 'react';
 
 import { NoticeToast } from '@/components/tickee/notice-toast';
 import { Toaster } from '@/components/ui/sonner';
+import { THEME_SCRIPT } from '@/lib/theme';
 
 import { Providers } from './providers';
 import './globals.css';
@@ -25,16 +26,18 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  colorScheme: 'light dark',
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#F7F3F2' },
-    { media: '(prefers-color-scheme: dark)', color: '#0B0809' },
-  ],
+  // Không khai `colorScheme` và `themeColor` (meta theo hệ thống): `color-scheme` do globals.css đặt theo `data-theme`,
+  // `<meta name="theme-color">` do script theme đặt theo theme đang dùng (lib/theme.ts).
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="vi" className={beVietnamPro.variable}>
+    // `suppressHydrationWarning`: script theme đặt `data-theme` lên <html> trước khi React hydrate.
+    <html lang="vi" className={beVietnamPro.variable} suppressHydrationWarning>
+      <head>
+        {/* Chặn vẽ cho tới khi áp theme (lựa chọn đã lưu hoặc theo hệ thống): không nhấp nháy sai màu. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body>
         <Providers>{children}</Providers>
         <Toaster />
