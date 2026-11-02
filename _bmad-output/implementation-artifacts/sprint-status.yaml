@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 10-30-2026 16:30
+last_updated: 11-02-2026 08:43
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -44,7 +44,7 @@ development_status:
 
   epic-2: in-progress
   2-1-tạo-btc-và-khung-dashboard: done
-  2-2-totp-cho-owner: review  # làm lại theo sprint-change-proposal-2026-10-30 (2FA tự bật)
+  2-2-xác-thực-hai-lớp-tự-bật-totp: done
   2-3-landing-btc: backlog
   2-4-mời-và-xóa-admin: backlog
   2-5-quản-trị-tingee-duyệt-btc-vào-closed-beta: backlog
@@ -116,8 +116,6 @@ development_status:
   8-1-social-ticket-card-để-đăng-story: backlog
   8-2-dòng-giới-thiệu-tickee: backlog
   epic-8-retrospective: optional
-
-# Action items committed during retrospectives (section created by the retrospective workflow)
 action_items:
   - epic: 4
     action: "Chốt với Tingee: API tra trạng thái theo orderId (Story 4.1) và API Token
