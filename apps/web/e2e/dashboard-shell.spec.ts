@@ -1,5 +1,6 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
+import { expect, test } from './fixtures';
 import { apiError, EMAIL, me, mockIdentityApi, unauthenticated, type Handler } from './identity-mock';
 import { mockOrganizerApi, organization, ORG_ID, OTHER_ORG_ID } from './organizer-mock';
 

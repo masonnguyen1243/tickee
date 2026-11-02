@@ -55,6 +55,12 @@ export function Providers({ children }: { children: ReactNode }) {
     routerRef.current = router;
   }, [router]);
 
+  // Effect của cha chạy sau mọi effect con: tới đây cả cây đã hydrate. e2e chờ dấu này rồi mới gõ/bấm
+  // (gõ trước khi hydrate thì React ghi đè ô bằng state rỗng; bấm thì chưa có handler).
+  useEffect(() => {
+    document.documentElement.dataset.hydrated = '';
+  }, []);
+
   const [stepUpOpen, setStepUpOpen] = useState(false);
   /** Mutation bị chặn bởi `TOTP_REQUIRED`, chờ qua lớp hai xong để gọi lại. */
   const pendingRetries = useRef<(() => void)[]>([]);

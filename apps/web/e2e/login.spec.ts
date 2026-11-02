@@ -1,5 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
+import { expect, test } from './fixtures';
 import { apiError, EMAIL, me, mockIdentityApi, unauthenticated, WEB_ORIGIN, type Call, type Reply } from './identity-mock';
 
 /* Màn đăng nhập OTP và đồng ý NĐ 13 với API giả bằng `page.route` (xem `identity-mock.ts`). */
@@ -234,6 +235,34 @@ test('"Không đồng ý" khi session đã hết (sign-out 401) vẫn về retur
   await page.getByRole('button', { name: 'Không đồng ý' }).click();
   await expect(page.getByText('Bạn cần đồng ý để dùng Tickee.')).toBeVisible();
   await expect.poll(() => new URL(page.url()).pathname + new URL(page.url()).search).toBe('/chinh-sach-du-lieu');
+});
+
+test('"Không đồng ý": me tải lại bị 401 trước khi trang returnTo tải xong vẫn về returnTo, không sang đăng nhập', async ({
+  page,
+}) => {
+  let signedIn = true;
+  let meAfterSignOut: () => void = () => undefined;
+  const meRefetched = new Promise<void>((resolve) => (meAfterSignOut = resolve));
+  await mockIdentityApi(page, {
+    'GET /identity/me': () => {
+      if (signedIn) return me(null);
+      meAfterSignOut();
+      return unauthenticated();
+    },
+    'POST /identity/sign-out': () => {
+      signedIn = false;
+      return { status: 204 };
+    },
+  });
+  await page.goto(`/dong-y?returnTo=${encodeURIComponent('/chinh-sach-du-lieu')}`);
+  // Chặn dữ liệu RSC của trang returnTo tới khi `me` đã tải lại và nhận 401: dựng lại thứ tự của máy chậm.
+  await page.route('**/chinh-sach-du-lieu?**', async (route) => {
+    if (route.request().headers()['rsc']) await Promise.race([meRefetched, page.waitForTimeout(3000)]);
+    await route.continue();
+  });
+  await page.getByRole('button', { name: 'Không đồng ý' }).click();
+  await expect(page.getByText('Bạn cần đồng ý để dùng Tickee.')).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe('/chinh-sach-du-lieu');
 });
 
 test('màn đồng ý: ẩn danh → sang đăng nhập kèm returnTo; đã đồng ý → đi thẳng returnTo', async ({ page }) => {
