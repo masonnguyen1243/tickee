@@ -1,14 +1,28 @@
 import 'reflect-metadata';
+import { randomUUID } from 'node:crypto';
 import { Controller, Get, Res, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { ErrorResponse } from '@tickee/contracts';
+import { ErrorCode, ErrorResponse } from '@tickee/contracts';
+import { DrizzleQueryError } from 'drizzle-orm/errors';
 import type { Response } from 'express';
+import pg from 'pg';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ApiModule } from '../src/api.module.js';
-import { Public } from '../src/platform/http/index.js';
+import { AppError, Public } from '../src/platform/http/index.js';
 import { API_APP_OPTIONS, configureApiApp } from '../src/roles/api.js';
 import { apiConfig, LogCapture } from './helpers.js';
+
+/** Dữ liệu người dùng mà lỗi DB mang theo (câu SQL, params, message của `cause`): không bao giờ được vào log. */
+const QUERY_MARKER = `bi_mat_${randomUUID().replaceAll('-', '')}`;
+const DB_LEAK = {
+  email: `ro-ri-${randomUUID()}@vidu.vn`,
+  token: `tok-${randomUUID()}`,
+  query: `insert into "sessions" ("token", "email") values ($1, $2) -- ${QUERY_MARKER}`,
+  causeMessage: `terminating connection bi-mat-${randomUUID()}`,
+};
+/** Dấu không chứa `"` (JSON.stringify thoát `"` thành `\"`, nên so chuỗi có `"` với log text luôn "không chứa"). */
+const DB_LEAK_MARKERS = [DB_LEAK.email, DB_LEAK.token, QUERY_MARKER, DB_LEAK.causeMessage];
 
 @Public()
 @Controller('boom')
@@ -16,6 +30,27 @@ class BoomController {
   @Get()
   boom(): never {
     throw new Error('bí mật nội bộ không được lộ');
+  }
+
+  @Get('db')
+  db(): never {
+    const cause = Object.assign(new Error(DB_LEAK.causeMessage), { code: '57P01' });
+    throw new DrizzleQueryError(DB_LEAK.query, [DB_LEAK.email, DB_LEAK.token], cause);
+  }
+
+  @Get('app-plain')
+  appPlain(): never {
+    throw new AppError(ErrorCode.INTERNAL_ERROR, 'Không gửi được email.', {
+      cause: Object.assign(new Error('nguyên nhân thường'), { code: 'ECONNREFUSED' }),
+    });
+  }
+
+  @Get('app-db')
+  appDb(): never {
+    const cause = Object.assign(new pg.DatabaseError(DB_LEAK.causeMessage, 0, 'error'), { code: '23505' });
+    throw new AppError(ErrorCode.INTERNAL_ERROR, 'Không lưu được phiên.', {
+      cause: new DrizzleQueryError(DB_LEAK.query, [DB_LEAK.email, DB_LEAK.token], cause),
+    });
   }
 
   @Get('pii')
@@ -94,13 +129,82 @@ describe('HTTP khi DB sẵn sàng', () => {
     expect(res.body.error.details).toBeNull();
   });
 
-  it('lỗi không bắt được → 500 INTERNAL_ERROR, không lộ stack hay message gốc', async () => {
-    const res = await request(app.getHttpServer()).get('/v1/boom');
+  it('lỗi không bắt được → 500 INTERNAL_ERROR, không lộ stack hay message gốc; log giữ `err` đầy đủ', async () => {
+    const res = await request(app.getHttpServer()).get('/v1/boom').set('x-request-id', 'req-boom');
     expect(res.status).toBe(500);
     expect(ErrorResponse.parse(res.body).error.code).toBe('INTERNAL_ERROR');
     const raw = JSON.stringify(res.body);
     expect(raw).not.toContain('bí mật');
     expect(raw).not.toContain('at ');
+    // Lỗi không phải lỗi DB: log nguyên để gỡ lỗi (message + stack).
+    const line = logs.lines.find((l) => l.requestId === 'req-boom' && l.msg === 'Lỗi không bắt được');
+    expect(line).toMatchObject({ level: 50, context: 'ErrorFilter', err: { type: 'Error', message: 'bí mật nội bộ không được lộ' } });
+    expect((line?.err as { stack?: unknown }).stack).toEqual(expect.stringContaining('BoomController'));
+  });
+
+  it('lỗi DB không bắt được → 500 INTERNAL_ERROR; log chỉ có tên lớp và SQLSTATE, không SQL/params/message của cause', async () => {
+    const res = await request(app.getHttpServer()).get('/v1/boom/db').set('x-request-id', 'req-boom-db');
+    expect(res.status).toBe(500);
+    expect(ErrorResponse.parse(res.body).error.code).toBe('INTERNAL_ERROR');
+    const line = logs.lines.find((l) => l.requestId === 'req-boom-db' && l.msg === 'Lỗi không bắt được');
+    expect(line).toMatchObject({ level: 50, context: 'ErrorFilter' });
+    expect(line?.err).toEqual({ type: 'DrizzleQueryError', code: '57P01' });
+    for (const v of DB_LEAK_MARKERS) expect(logs.text).not.toContain(v);
+    expect(JSON.stringify(res.body)).not.toContain(DB_LEAK.email);
+  });
+
+  it('AppError 5xx bọc lỗi DB → log `{ err: { type, code: SQLSTATE }, code: INTERNAL_ERROR }`', async () => {
+    const res = await request(app.getHttpServer()).get('/v1/boom/app-db').set('x-request-id', 'req-boom-app-db');
+    expect(res.status).toBe(500);
+    expect(ErrorResponse.parse(res.body).error.code).toBe('INTERNAL_ERROR');
+    const line = logs.lines.find((l) => l.requestId === 'req-boom-app-db' && l.msg === 'Không lưu được phiên.');
+    expect(line).toMatchObject({ level: 50, context: 'ErrorFilter', code: 'INTERNAL_ERROR' });
+    expect(line?.err).toEqual({ type: 'DrizzleQueryError', code: '23505' });
+    for (const v of DB_LEAK_MARKERS) expect(logs.text).not.toContain(v);
+  });
+
+  it('AppError 5xx có `cause` không phải lỗi DB → log giữ `err` đầy đủ (message, code, stack)', async () => {
+    const res = await request(app.getHttpServer()).get('/v1/boom/app-plain').set('x-request-id', 'req-boom-app-plain');
+    expect(res.status).toBe(500);
+    const line = logs.lines.find((l) => l.requestId === 'req-boom-app-plain' && l.msg === 'Không gửi được email.');
+    expect(line).toMatchObject({
+      level: 50,
+      context: 'ErrorFilter',
+      code: 'INTERNAL_ERROR',
+      err: { type: 'Error', message: 'nguyên nhân thường', code: 'ECONNREFUSED' },
+    });
+    expect((line?.err as { stack?: unknown }).stack).toEqual(expect.stringContaining('BoomController'));
+  });
+
+  it('che IP và User-Agent của request; method, url, requestId giữ nguyên', async () => {
+    const userAgent = `TickeeTest/1.0 ua-${randomUUID()}`;
+    const forwardedFor = '198.51.100.77';
+    const realIp = '198.51.100.78';
+    const cdnIp = '198.51.100.79';
+    await request(app.getHttpServer())
+      .get('/v1/boom/pii')
+      .set('x-request-id', 'req-ip-ua')
+      .set('user-agent', userAgent)
+      .set('x-forwarded-for', forwardedFor)
+      .set('x-real-ip', realIp)
+      .set('forwarded', `for=${forwardedFor}`)
+      .set('cf-connecting-ip', cdnIp);
+    const line = logs.lines.find((l) => l.requestId === 'req-ip-ua' && 'res' in l);
+    expect(line).toMatchObject({
+      req: {
+        method: 'GET',
+        url: '/v1/boom/pii',
+        remoteAddress: '[REDACTED]',
+        headers: {
+          'user-agent': '[REDACTED]',
+          'x-forwarded-for': '[REDACTED]',
+          'x-real-ip': '[REDACTED]',
+          forwarded: '[REDACTED]',
+          'cf-connecting-ip': '[REDACTED]',
+        },
+      },
+    });
+    for (const v of [userAgent, forwardedFor, realIp, cdnIp]) expect(logs.text).not.toContain(v);
   });
 
   it('JSON hỏng → 400 VALIDATION_FAILED', async () => {

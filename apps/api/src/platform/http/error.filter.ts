@@ -1,6 +1,7 @@
 import { ArgumentsHost, Catch, HttpException, Logger, type ExceptionFilter } from '@nestjs/common';
 import { ErrorCode, type ErrorResponse } from '@tickee/contracts';
 import type { Response } from 'express';
+import { dbErrorSummary, isDatabaseError } from '../logging/index.js';
 import { AppError } from './app-error.js';
 
 const MESSAGES: Record<ErrorCode, string> = {
@@ -30,6 +31,9 @@ const MESSAGES: Record<ErrorCode, string> = {
   CLOSED_BETA_TRANSITION_INVALID: 'Không chuyển được trạng thái Closed Beta của BTC này.',
 };
 
+/** Lỗi DB chỉ log `{ type, code }` (message/params có thể mang email, token session); lỗi khác log nguyên để giữ stack. */
+const loggableError = (err: unknown): unknown => (isDatabaseError(err) ? dbErrorSummary(err) : err);
+
 function codeForStatus(status: number): ErrorCode {
   if (status === 401) return ErrorCode.UNAUTHENTICATED;
   if (status === 404) return ErrorCode.NOT_FOUND;
@@ -51,7 +55,9 @@ export class ErrorFilter implements ExceptionFilter {
     if (exception instanceof AppError) {
       status = exception.status;
       body = { error: { code: exception.code, message: exception.message, details: exception.details } };
-      if (status >= 500) this.logger.error({ err: exception.cause ?? exception, code: exception.code }, exception.message);
+      if (status >= 500) {
+        this.logger.error({ err: loggableError(exception.cause ?? exception), code: exception.code }, exception.message);
+      }
     } else if (exception instanceof HttpException && exception.getStatus() < 500) {
       status = exception.getStatus();
       const code = codeForStatus(status);
@@ -59,7 +65,7 @@ export class ErrorFilter implements ExceptionFilter {
     } else {
       status = exception instanceof HttpException ? exception.getStatus() : 500;
       const code = codeForStatus(status);
-      this.logger.error({ err: exception }, 'Lỗi không bắt được');
+      this.logger.error({ err: loggableError(exception) }, 'Lỗi không bắt được');
       body = { error: { code, message: MESSAGES[code], details: null } };
     }
 

@@ -142,3 +142,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-5-duyet-btc-vao-closed-beta.md`
   summary: CLI Quản trị Tingee chưa có `admin:list` để xem ai đang có cờ, và README chỉ hướng dẫn chạy local; Story 4.7 cần ghi cách chạy `dist/roles/admin-cli.js` trong image ở staging/production (ai được chạy, cấp `MIGRATION_DATABASE_URL` thế nào).
   evidence: Review 02/11 (blind-hunter), triage #11. Hiện muốn xem danh sách admin phải chạy SQL bằng role migrator.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-1-ai-1-bit-ro-pii-trong-log.md`
+  summary: Worker gửi lời mời Admin (`invitation-jobs.ts:192-194`) log `err.message` và ghi nó vào `output` của job pg-boss; log khởi động `main.ts` (`bootLog.fatal({ err })`) cũng log nguyên lỗi. Cần dùng `isDatabaseError`/`dbErrorSummary` như `ErrorFilter`.
+  evidence: Khi truy vấn Drizzle trong `sendAdminInvitation` lỗi, `DrizzleQueryError.message` là `Failed query: <sql>\nparams: <tokenHash>,<invitationId>` và đi thẳng vào log worker lẫn bảng job. Code có từ Story 2.4/1.1, nằm ngoài bốn đường AI-1. Review AI-1 #3.

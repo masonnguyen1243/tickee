@@ -7,13 +7,41 @@ export const REQUEST_ID_HEADER = 'x-request-id';
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 export const REDACTED = '[REDACTED]';
 
-/** Đường dẫn `redact` của pino sinh từ danh sách khóa PII trong `@tickee/contracts` (tới độ sâu 3). */
+/**
+ * Khóa PII trùng tên trường log thông dụng (`name`: tên logger của pino, tên queue/job của pg-boss, `Error.name`):
+ * che theo khóa trần sẽ che nhầm các trường đó, nên chỉ che dưới đối tượng người dùng (`user.<k>`).
+ * `organization.name` (tên BTC công khai) không bị che.
+ */
+export const GENERIC_PII_KEYS: ReadonlySet<string> = new Set(['name']);
+
+/** IP và User-Agent trong log request của pino-http (`req` đã qua serializer chuẩn), gồm header IP của CDN/LB. */
+const REQUEST_PII_PATHS = [
+  'req.remoteAddress',
+  'req.headers["user-agent"]',
+  'req.headers["x-forwarded-for"]',
+  'req.headers["x-real-ip"]',
+  'req.headers.forwarded',
+  'req.headers["cf-connecting-ip"]',
+  'req.headers["true-client-ip"]',
+  'req.headers["x-client-ip"]',
+  'req.headers["x-cluster-client-ip"]',
+  'req.headers["fastly-client-ip"]',
+  'req.headers["fly-client-ip"]',
+];
+
+/**
+ * Đường dẫn `redact` của pino sinh từ danh sách khóa PII trong `@tickee/contracts` (tới độ sâu 3); khóa chung chung
+ * (`GENERIC_PII_KEYS`) chỉ che dưới `user`.
+ */
 export function buildRedactPaths(keys: readonly string[] = PII_KEYS): string[] {
-  const paths = keys.flatMap((k) => [k, `*.${k}`, `*.*.${k}`]);
+  const paths = keys.flatMap((k) =>
+    GENERIC_PII_KEYS.has(k) ? [`user.${k}`, `*.user.${k}`, `*.*.user.${k}`] : [k, `*.${k}`, `*.*.${k}`],
+  );
   return [
     ...paths,
     'req.headers.authorization',
     'req.headers.cookie',
+    ...REQUEST_PII_PATHS,
     'res.headers["set-cookie"]',
   ];
 }
