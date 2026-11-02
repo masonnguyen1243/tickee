@@ -24,12 +24,6 @@ export function ConsentForm({ returnTo }: { returnTo: string }) {
   const queryClient = useQueryClient();
   const me = useQuery({ queryKey: ME_QUERY_KEY, queryFn: ({ signal }) => fetchMe(signal) });
 
-  // Chưa đăng nhập → về màn đăng nhập; đã đồng ý rồi → đi tiếp.
-  useEffect(() => {
-    if (hasErrorCode(me.error, ErrorCode.UNAUTHENTICATED)) router.replace(withReturnTo(LOGIN_PATH, returnTo));
-    else if (me.data?.consentedAt) router.replace(returnTo);
-  }, [me.error, me.data, returnTo, router]);
-
   const accept = useMutation({
     mutationFn: giveConsent,
     onSuccess: (data) => {
@@ -48,6 +42,14 @@ export function ConsentForm({ returnTo }: { returnTo: string }) {
 
   const failure = accept.error ?? decline.error;
   const busy = accept.isPending || accept.isSuccess || decline.isPending || decline.isSuccess;
+
+  // Chưa đăng nhập → về màn đăng nhập; đã đồng ý rồi → đi tiếp. Bỏ qua khi đã chọn: "Không đồng ý" xóa cache nên
+  // `me` tải lại và nhận 401 trước khi trang returnTo tải xong, không được đè điều hướng về returnTo.
+  useEffect(() => {
+    if (busy) return;
+    if (hasErrorCode(me.error, ErrorCode.UNAUTHENTICATED)) router.replace(withReturnTo(LOGIN_PATH, returnTo));
+    else if (me.data?.consentedAt) router.replace(returnTo);
+  }, [busy, me.error, me.data, returnTo, router]);
 
   return (
     <div className="flex flex-col gap-section pt-2">

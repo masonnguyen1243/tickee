@@ -1,4 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+
+import { expect, test } from './fixtures';
 
 // Bản build có thể viết thường mã hex; so sánh không phân biệt hoa thường.
 const cssVar = (page: Page, name: string) =>

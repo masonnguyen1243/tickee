@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
 
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
+import { expect, test } from './fixtures';
 import { apiError, EMAIL, me, mockIdentityApi, unauthenticated, USER_ID, type Call, type Reply } from './identity-mock';
 import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
 

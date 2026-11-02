@@ -1,6 +1,5 @@
-import { expect, test } from '@playwright/test';
-
 import { PORT_UI_KIT_OFF } from '../playwright.config';
+import { expect, test } from './fixtures';
 
 test('nút loading: spinner, aria-busy, giữ độ rộng, bỏ qua bấm lặp', async ({ page }) => {
   await page.goto('/ui-kit');
