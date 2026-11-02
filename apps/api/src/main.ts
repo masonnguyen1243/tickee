@@ -3,7 +3,8 @@ import { pino } from 'pino';
 import { ConfigError, loadConfig, type AppConfig } from './platform/config/index.js';
 import { basePinoOptions } from './platform/logging/index.js';
 
-// `context` thay cho `name` của pino: `name` là cột PII (users.name) nên khóa `name` bị che trong log.
+// `context` thay cho `name` của pino: trùng khóa mà log Nest dùng (`context: 'ErrorFilter'`…), nên log khởi động đọc
+// cùng kiểu với log của app. (`name` không bị che ở gốc, chỉ `user.name` bị che.)
 const bootLog = pino(basePinoOptions(process.env.LOG_LEVEL === 'silent' ? 'silent' : 'info')).child({
   context: 'Bootstrap',
 });
