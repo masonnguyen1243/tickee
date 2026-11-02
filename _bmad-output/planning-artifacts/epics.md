@@ -181,7 +181,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 
 **Design tokens và nền tảng giao diện**
 
-- UX-DR1: Cài đặt design tokens "Rạp tối" vào `globals.css` + Tailwind 4. Ánh xạ biến shadcn cho light/dark theo `prefers-color-scheme` (bảng Colors của DESIGN.md). Thêm biến riêng `--stage`, `--stage-foreground`, `--stage-muted`, `--bar`, `--brand-text`, các cặp `--success/warning/danger/neutral-(text|subtle)`, `--scan-success`, `--scan-danger`. Không có công tắc theme trong app.
+- UX-DR1: Cài đặt design tokens "Rạp tối" vào `globals.css` + Tailwind 4. Ánh xạ biến shadcn cho light/dark theo theme đang dùng (bảng Colors của DESIGN.md). Thêm biến riêng `--stage`, `--stage-foreground`, `--stage-muted`, `--bar`, `--brand-text`, các cặp `--success/warning/danger/neutral-(text|subtle)`, `--scan-success`, `--scan-danger`. Có nút chuyển giao diện Sáng ↔ Tối ở header; lựa chọn lưu trên trình duyệt, chưa chọn thì theo `prefers-color-scheme` (đổi 02/11/2026; trước đó không có công tắc theme).
 - UX-DR2: Typography Be Vietnam Pro (400/500/700, `font-display: swap`) thay Geist qua `--font-sans`. Có các token display/headline/title/body/input(16px)/label/meta/eyebrow/button/amount/total/scan-result/scan-detail/code. Số tiền, đếm ngược và số Vé dùng `tabular-nums`. Tiền định dạng "300.000đ".
 - UX-DR3: Token bo góc (sm 10, md 12, lg 18, xl 20, full), spacing có tên (gutter-mobile 16, card-padding 14, stack 10, section 24, control-height 50, stepper-button 34, tab-bar-height 64, sidebar-width 256, content-max-buyer 480, icon-button 40). Elevation: light dùng bóng ấm không viền; dark dùng vòng 1px `stage-line`.
 - UX-DR4: Ràng buộc màu bắt buộc: coral `brand` chỉ đặt trên nền tối; chữ trên coral luôn là `on-brand`; chữ thương hiệu trên nền sáng dùng `brand-text`; QR luôn module đen trên tấm trắng; không dùng coral để báo lỗi. Có lint hoặc review checklist theo bảng Do's and Don'ts.
@@ -390,15 +390,15 @@ So that mọi story sau có chung cấu trúc, công cụ và quy ước, không
 ### Story 1.2: Hệ thống giao diện "Rạp tối" và khung web
 
 As a người dùng Tickee,
-I want giao diện nhất quán, dễ đọc trên điện thoại, theo sáng/tối của máy,
+I want giao diện nhất quán, dễ đọc trên điện thoại, theo sáng/tối của máy hoặc tự chọn (đổi 02/11/2026),
 So that mọi màn hình đều quen thuộc và dễ dùng.
 
 **Acceptance Criteria:**
 
 **Given** `apps/web` với shadcn/ui và Tailwind 4
 **When** mở bất kỳ trang nào
-**Then** biến CSS shadcn ánh xạ đúng bảng Colors của DESIGN.md cho light và dark theo `prefers-color-scheme`, kèm biến riêng `--stage`, `--stage-foreground`, `--stage-muted`, `--bar`, `--brand-text`, các cặp `--success/warning/danger/neutral-(text|subtle)`, `--scan-success`, `--scan-danger` (UX-DR1)
-**And** không có công tắc theme trong app
+**Then** biến CSS shadcn ánh xạ đúng bảng Colors của DESIGN.md cho light và dark theo theme đang dùng (chưa chọn thì theo `prefers-color-scheme`), kèm biến riêng `--stage`, `--stage-foreground`, `--stage-muted`, `--bar`, `--brand-text`, các cặp `--success/warning/danger/neutral-(text|subtle)`, `--scan-success`, `--scan-danger` (UX-DR1)
+**And** có nút chuyển giao diện Sáng ↔ Tối ở header; lựa chọn lưu trên trình duyệt, chưa chọn thì theo hệ thống (đổi 02/11/2026; trước đó không có công tắc theme)
 
 **Given** trang đã tải
 **When** kiểm tra font
