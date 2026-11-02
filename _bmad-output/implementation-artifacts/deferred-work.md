@@ -103,3 +103,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-2-totp-cho-owner.md`
   summary: Nhánh "step-up giữa thao tác rồi gửi lại mutation" của `Providers` mới chỉ test bằng e2e mock `POST /orgs` (API thật không đòi TOTP ở đó). Story đầu tiên có mutation thuộc BTC (2.4 mời/xóa Admin) phải thêm test API + e2e thật cho `TOTP_REQUIRED` → step-up → gửi lại.
   evidence: Review 30/10 (blind-hunter): route `@RequirePermission` duy nhất hiện là `GET /v1/orgs/:orgId`.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-landing-btc.md`
+  summary: Đăng nhập tài khoản khác trong cùng tab (không đăng xuất) chỉ invalidate `me`, nên cache memberships của tài khoản trước còn tới 30 giây; `AccountMenu` và CTA landing trỏ "Dashboard BTC"/"Vào dashboard" tới BTC của người khác.
+  evidence: `apps/web/app/(public)/dang-nhap/login-form.tsx:164` chỉ gọi `invalidateQueries({ queryKey: ME_QUERY_KEY })`, `staleTime` 30 giây ở `providers.tsx:42`; có từ trước Story 2.3. Server vẫn trả lỗi quyền khi mở BTC không phải của mình. Sửa: xóa cache (như đăng xuất) hoặc invalidate cả `MEMBERSHIPS_QUERY_KEY` khi đăng nhập thành công.
