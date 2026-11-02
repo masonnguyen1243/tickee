@@ -81,6 +81,23 @@ bị khóa cả gửi lẫn xác minh (`OTP_LOCKED`). Muốn thử lại ngay �
 
 Hai biến này bắt buộc với vai api; test và CI dùng giá trị giả (test chặn lời gọi tới token endpoint của Google).
 
+### Quản trị Tingee (`/admin`)
+
+Cờ `users.platform_admin` chỉ cấp/thu bằng CLI, không có UI hay API nào làm việc này. CLI chạy bằng role
+`tickee_migrator` (`MIGRATION_DATABASE_URL`, như vai migrate) vì `tickee_app` không có quyền UPDATE cột này. Chạy sau
+`pnpm turbo build`; tài khoản phải đã đăng nhập Tickee ít nhất một lần.
+
+```sh
+# --by: email Tài khoản Tickee của người chạy lệnh (audit ghi tài khoản này). Lần đầu thì tự cấp cho chính mình.
+pnpm --filter @tickee/api admin:grant an.nguyen@vidu.vn --by an.nguyen@vidu.vn    # "Đã cấp…", chạy lại: "Không đổi…"
+pnpm --filter @tickee/api admin:revoke binh.tran@vidu.vn --by an.nguyen@vidu.vn
+```
+
+Email không tồn tại hoặc thiếu `--by` thì thoát mã ≠ 0 và không đổi gì. Vào `http://localhost:3000/admin` (màn "Duyệt
+Closed Beta") còn cần đã bật xác thực hai lớp (Bảo mật tài khoản) và nhập mã TOTP trong phiên đăng nhập; thu cờ có hiệu
+lực ngay ở request kế tiếp. Chưa có giới hạn IP `ADMIN_ALLOWED_CIDRS` (phải xong trước khi mở `/admin` trên môi trường
+thật, xem `deferred-work.md`).
+
 ## Kiểm tra
 
 ```sh

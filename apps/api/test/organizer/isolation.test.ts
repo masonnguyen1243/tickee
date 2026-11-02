@@ -52,6 +52,8 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('POST /v1/orgs/:orgId/invitations');
     expect(guarded).toContain('DELETE /v1/orgs/:orgId/invitations/:invitationId');
     expect(guarded).toContain('DELETE /v1/orgs/:orgId/members/:memberId');
+    // Story 2.5: thông báo trạng thái của `reporting`.
+    expect(guarded).toContain('GET /v1/orgs/:orgId/notices');
     expect(guarded).toContain('GET /v1/orgs/:orgId/test-owner-only');
     expect(guarded).toContain('POST /v1/orgs/:orgId/test-owner-only/items/:itemId');
   });

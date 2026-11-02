@@ -23,6 +23,8 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   INVITATION_USED: 409,
   INVITATION_EMAIL_MISMATCH: 403,
   INVITATION_LIMIT_REACHED: 429,
+  TWO_FACTOR_NOT_ENABLED: 403,
+  CLOSED_BETA_TRANSITION_INVALID: 409,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

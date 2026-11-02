@@ -47,6 +47,16 @@ export const ErrorCode = {
   INVITATION_EMAIL_MISMATCH: 'INVITATION_EMAIL_MISMATCH',
   /** BTC đã tạo đủ `ORGANIZATION_INVITATION_DAILY_LIMIT` lời mời trong 24 giờ qua. */
   INVITATION_LIMIT_REACHED: 'INVITATION_LIMIT_REACHED',
+  /**
+   * Tài khoản có cờ Quản trị Tingee (`platform_admin`) nhưng chưa bật 2FA: khu `/v1/admin/*` bắt buộc đã bật 2FA và đã
+   * qua lớp hai trong session (chưa qua lớp hai thì là `TOTP_REQUIRED`).
+   */
+  TWO_FACTOR_NOT_ENABLED: 'TWO_FACTOR_NOT_ENABLED',
+  /**
+   * Chuyển trạng thái Closed Beta không hợp lệ (vd. thu hồi BTC đang chờ duyệt); `details.closedBetaStatus` là trạng
+   * thái hiện tại (`ClosedBetaTransitionInvalidDetails`).
+   */
+  CLOSED_BETA_TRANSITION_INVALID: 'CLOSED_BETA_TRANSITION_INVALID',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

@@ -1,9 +1,13 @@
+import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Database } from '../src/platform/db/index.js';
 import { apiConfig, databaseUrl, migrationDatabaseUrl } from './helpers.js';
 
 /** Env tối thiểu cho vai api, lấy từ cấu hình test (không kế thừa env của tiến trình test). */
@@ -24,6 +28,7 @@ function apiRoleEnv(): Record<string, string> {
 
 // Chạy đúng artefact sẽ vào image: dist/main.js (turbo `test` phụ thuộc `build`).
 const MAIN = fileURLToPath(new URL('../dist/main.js', import.meta.url));
+const ADMIN_CLI = fileURLToPath(new URL('../dist/roles/admin-cli.js', import.meta.url));
 const SECRET = 's3cret-Gi4-tri';
 
 interface Proc {
@@ -32,9 +37,9 @@ interface Proc {
   exit: Promise<number | null>;
 }
 
-/** Chạy main.js với env tối thiểu (không kế thừa DATABASE_URL… của tiến trình test). */
-function start(env: Record<string, string>): Proc {
-  const child = spawn(process.execPath, [MAIN], {
+/** Chạy main.js (hoặc `script` kèm `args`) với env tối thiểu (không kế thừa DATABASE_URL… của tiến trình test). */
+function start(env: Record<string, string>, script = MAIN, args: readonly string[] = []): Proc {
+  const child = spawn(process.execPath, [script, ...args], {
     env: { PATH: process.env.PATH ?? '', LOG_LEVEL: 'info', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -45,8 +50,12 @@ function start(env: Record<string, string>): Proc {
   return { child, output: () => out, exit };
 }
 
-async function run(env: Record<string, string>): Promise<{ code: number | null; output: string }> {
-  const p = start(env);
+async function run(
+  env: Record<string, string>,
+  script = MAIN,
+  args: readonly string[] = [],
+): Promise<{ code: number | null; output: string }> {
+  const p = start(env, script, args);
   const code = await p.exit;
   return { code, output: p.output() };
 }
@@ -144,5 +153,151 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
     } finally {
       if (p.child.exitCode === null && p.child.signalCode === null) p.child.kill('SIGKILL');
     }
+  });
+});
+
+describe('CLI admin:grant / admin:revoke (tiến trình thật, role tickee_migrator)', () => {
+  let db: Database;
+
+  beforeAll(() => {
+    if (!existsSync(ADMIN_CLI)) throw new Error(`Thiếu ${ADMIN_CLI}: chạy build trước (pnpm turbo test tự làm)`);
+    db = new Database({ connectionString: databaseUrl(), max: 1 });
+  });
+  afterAll(async () => {
+    await db.close();
+  });
+
+  const cli = (args: readonly string[], env: Record<string, string> = { MIGRATION_DATABASE_URL: migrationDatabaseUrl() }) =>
+    run(env, ADMIN_CLI, args);
+
+  async function createUser(): Promise<{ id: string; email: string }> {
+    const email = `cli-${randomUUID()}@vidu.vn`;
+    const { rows } = await db.pool.query<{ id: string }>('INSERT INTO users (email) VALUES ($1) RETURNING id', [email]);
+    return { id: rows[0]!.id, email };
+  }
+
+  async function flagOf(userId: string): Promise<boolean> {
+    const { rows } = await db.pool.query<{ platform_admin: boolean }>('SELECT platform_admin FROM users WHERE id = $1', [
+      userId,
+    ]);
+    return rows[0]!.platform_admin;
+  }
+
+  async function audits(targetId: string) {
+    const { rows } = await db.pool.query<{
+      action: string;
+      actor_user_id: string;
+      organization_id: string | null;
+      target_type: string;
+      changed_fields: string[];
+    }>(
+      `SELECT action, actor_user_id, organization_id, target_type, changed_fields FROM audit_events
+       WHERE target_id = $1 AND action LIKE 'platform_admin.%' ORDER BY created_at, id`,
+      [targetId],
+    );
+    return rows;
+  }
+
+  it('lần đầu tự cấp cho chính mình; chạy lại → "không đổi", không audit thêm', async () => {
+    const me = await createUser();
+    const first = await cli(['grant', me.email.toUpperCase(), '--by', me.email]);
+    expect(first.code, first.output).toBe(0);
+    expect(first.output).toMatch(/đã cấp/i);
+    expect(await flagOf(me.id)).toBe(true);
+    expect(await audits(me.id)).toEqual([
+      {
+        action: 'platform_admin.granted',
+        actor_user_id: me.id,
+        organization_id: null,
+        target_type: 'user',
+        changed_fields: ['platform_admin'],
+      },
+    ]);
+
+    // `--` tách tham số (như `pnpm … admin:grant -- <email> --by …`) được bỏ qua.
+    const again = await cli(['grant', '--', me.email, `--by=${me.email}`]);
+    expect(again.code, again.output).toBe(0);
+    expect(again.output).toMatch(/không đổi/i);
+    expect(await audits(me.id)).toHaveLength(1);
+  });
+
+  it('cấp rồi thu cho người khác: actor là tài khoản --by', async () => {
+    const operator = await createUser();
+    const target = await createUser();
+    expect((await cli(['grant', target.email, '--by', operator.email])).code).toBe(0);
+    const revoked = await cli(['revoke', target.email, '--by', operator.email]);
+    expect(revoked.code, revoked.output).toBe(0);
+    expect(revoked.output).toMatch(/đã thu/i);
+    expect(await flagOf(target.id)).toBe(false);
+    expect((await audits(target.id)).map((a) => [a.action, a.actor_user_id])).toEqual([
+      ['platform_admin.granted', operator.id],
+      ['platform_admin.revoked', operator.id],
+    ]);
+
+    const noop = await cli(['revoke', target.email, '--by', operator.email]);
+    expect(noop.code).toBe(0);
+    expect(noop.output).toMatch(/không đổi/i);
+    expect(await audits(target.id)).toHaveLength(2);
+  });
+
+  it.each([
+    ['email không tồn tại', (u: { email: string }) => ['grant', `khong-co-${randomUUID()}@vidu.vn`, '--by', u.email]],
+    ['--by không tồn tại', (u: { email: string }) => ['grant', u.email, '--by', `khong-co-${randomUUID()}@vidu.vn`]],
+    ['thiếu --by', (u: { email: string }) => ['grant', u.email]],
+    ['--by thiếu giá trị', (u: { email: string }) => ['grant', u.email, '--by']],
+    ['thiếu email', (u: { email: string }) => ['grant', '--by', u.email]],
+    ['lệnh lạ', (u: { email: string }) => ['promote', u.email, '--by', u.email]],
+  ])('%s → thoát ≠ 0, không đổi gì', async (_name, argsOf) => {
+    const user = await createUser();
+    const { code, output } = await cli(argsOf(user));
+    expect(code, output).not.toBe(0);
+    expect(output.trim()).not.toBe('');
+    expect(await flagOf(user.id)).toBe(false);
+    expect(await audits(user.id)).toEqual([]);
+  });
+
+  it('thiếu MIGRATION_DATABASE_URL hoặc DB không tới được → thoát ≠ 0, không in mật khẩu', async () => {
+    const user = await createUser();
+    const missing = await cli(['grant', user.email, '--by', user.email], {});
+    expect(missing.code).not.toBe(0);
+    expect(missing.output).toContain('MIGRATION_DATABASE_URL');
+
+    const unreachable = await cli(['grant', user.email, '--by', user.email], {
+      MIGRATION_DATABASE_URL: `postgresql://tickee_migrator:${SECRET}@127.0.0.1:1/tickee_test`,
+    });
+    expect(unreachable.code).not.toBe(0);
+    expect(unreachable.output).not.toContain(SECRET);
+    expect(await flagOf(user.id)).toBe(false);
+  });
+
+  it('gọi qua symlink vẫn chạy (không thoát 0 trong im lặng)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tickee-admin-cli-'));
+    try {
+      const link = join(dir, 'admin-cli.js');
+      symlinkSync(ADMIN_CLI, link);
+      const user = await createUser();
+      const missingBy = await run({ MIGRATION_DATABASE_URL: migrationDatabaseUrl() }, link, ['grant', user.email]);
+      expect(missingBy.code, missingBy.output).toBe(2);
+      expect(missingBy.output).toContain('--by');
+      const granted = await run({ MIGRATION_DATABASE_URL: migrationDatabaseUrl() }, link, [
+        'grant',
+        user.email,
+        '--by',
+        user.email,
+      ]);
+      expect(granted.code, granted.output).toBe(0);
+      expect(await flagOf(user.id)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('chạy bằng DATABASE_URL của tickee_app thì Postgres từ chối (không có UPDATE trên cột)', async () => {
+    const user = await createUser();
+    const { code, output } = await cli(['grant', user.email, '--by', user.email], { MIGRATION_DATABASE_URL: databaseUrl() });
+    expect(code, output).not.toBe(0);
+    expect(output).toContain('42501');
+    expect(await flagOf(user.id)).toBe(false);
+    expect(await audits(user.id)).toEqual([]);
   });
 });

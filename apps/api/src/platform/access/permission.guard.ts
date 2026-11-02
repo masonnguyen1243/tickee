@@ -23,7 +23,8 @@ const toDate = (value: Date | string | null | undefined): Date | null => {
 };
 
 /**
- * Guard toàn cục số 4 (sau `SessionGuard`, `TotpGuard` và `ConsentGuard`): chỉ chạy ở route `@RequirePermission`.
+ * Guard toàn cục số 5 (sau bốn guard của `identity`: `SessionGuard`, `TotpGuard`, `ConsentGuard`, `PlatformAdminGuard`):
+ * chỉ chạy ở route `@RequirePermission`.
  * Không là thành viên (kể cả BTC không tồn tại hay `orgId` sai dạng) → 403 `NOT_A_MEMBER`; vai thiếu quyền →
  * 403 `FORBIDDEN_ROLE`. Qua thì gắn `req.accessContext` (kèm `stepUpAt` của session để story sau dùng). Luật 2FA
  * không nằm ở đây mà ở `TotpGuard` của `identity` (AD-26).

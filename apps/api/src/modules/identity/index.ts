@@ -3,4 +3,4 @@ export { ConsentExempt } from './consent.guard.js';
 export { IdentityJanitorModule } from './identity-janitor.js';
 export { IdentityModule } from './identity.module.js';
 export type { IdentityConfig } from './identity.config.js';
-export { findUserIdByEmail, userContacts, type UserContact } from './user-directory.js';
+export { findUserIdByEmail, setPlatformAdmin, userContacts, type UserContact } from './user-directory.js';

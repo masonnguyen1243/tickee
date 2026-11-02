@@ -26,6 +26,8 @@ const MESSAGES: Record<ErrorCode, string> = {
   INVITATION_USED: 'Link mời đã được dùng.',
   INVITATION_EMAIL_MISMATCH: 'Lời mời này gửi tới một email khác.',
   INVITATION_LIMIT_REACHED: 'BTC đã gửi quá nhiều lời mời trong 24 giờ. Vui lòng thử lại sau.',
+  TWO_FACTOR_NOT_ENABLED: 'Bạn cần bật xác thực hai lớp để tiếp tục.',
+  CLOSED_BETA_TRANSITION_INVALID: 'Không chuyển được trạng thái Closed Beta của BTC này.',
 };
 
 function codeForStatus(status: number): ErrorCode {

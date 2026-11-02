@@ -1,4 +1,4 @@
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import type { DbExecutor } from '../../platform/db/index.js';
 import { users } from './schema.js';
 
@@ -27,4 +27,18 @@ export async function userContacts(db: DbExecutor, ids: readonly string[]): Prom
     .from(users)
     .where(inArray(users.id, [...ids]));
   return new Map(rows.map((r) => [r.id, { email: r.email, name: r.name }]));
+}
+
+/**
+ * Bật/tắt cờ Quản trị Tingee của một tài khoản. Chỉ CLI `admin:grant`/`admin:revoke` gọi, bằng kết nối role
+ * `tickee_migrator`: `tickee_app` không có UPDATE trên cột `platform_admin` nên gọi từ api/worker sẽ lỗi quyền.
+ * @returns `true` khi cờ đổi, `false` khi đã ở trạng thái đích hoặc không có tài khoản `userId`.
+ */
+export async function setPlatformAdmin(db: DbExecutor, userId: string, value: boolean): Promise<boolean> {
+  const changed = await db
+    .update(users)
+    .set({ platformAdmin: value })
+    .where(and(eq(users.id, userId), ne(users.platformAdmin, value)))
+    .returning({ id: users.id });
+  return changed.length > 0;
 }

@@ -10,6 +10,7 @@ import { IDENTITY_CONFIG, type IdentityConfig } from './identity.config.js';
 import { IdentityController } from './identity.controller.js';
 import { IdentityService } from './identity.service.js';
 import { OtpRateLimiter } from './otp-rate-limit.js';
+import { PlatformAdminGuard } from './platform-admin.guard.js';
 import { SessionGuard } from './session.guard.js';
 import { SignInOtpStore } from './sign-in-otp-store.js';
 import { TotpAttemptLimiter } from './totp-attempts.js';
@@ -20,7 +21,8 @@ import { TotpStore } from './totp-store.js';
 
 /**
  * Tài khoản Tickee (AD-19): Better Auth mount ở `/v1/auth/*`, endpoint của web ở `/v1/identity/*`,
- * và ba guard toàn cục — `SessionGuard`, `TotpGuard` rồi `ConsentGuard` (Nest chạy theo đúng thứ tự khai báo ở đây).
+ * và bốn guard toàn cục — `SessionGuard`, `TotpGuard`, `ConsentGuard` rồi `PlatformAdminGuard` (chỉ ở route
+ * `@RequirePlatformAdmin()`); Nest chạy theo đúng thứ tự khai báo ở đây.
  * Cần `DbModule` và `EmailModule` (toàn cục) có mặt ở gốc DI.
  */
 @Module({})
@@ -60,6 +62,7 @@ export class IdentityModule {
         { provide: APP_GUARD, useClass: SessionGuard },
         { provide: APP_GUARD, useClass: TotpGuard },
         { provide: APP_GUARD, useClass: ConsentGuard },
+        { provide: APP_GUARD, useClass: PlatformAdminGuard },
       ],
     };
   }

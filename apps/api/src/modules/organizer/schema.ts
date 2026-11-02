@@ -4,17 +4,33 @@ import { createdAt, id, timestamptz } from '../../platform/db/index.js';
 import { users } from '../identity/schema.js';
 
 /** BTC (Ban tổ chức). Kênh liên hệ là PII (`PII_COLUMNS.organizer`): log tự che, không bao giờ vào audit. */
-export const organizations = pgTable('organizations', {
-  id: id(),
-  name: text('name').notNull(),
-  contactPhone: text('contact_phone'),
-  contactEmail: text('contact_email'),
-  createdAt: createdAt(),
-  updatedAt: timestamptz('updated_at')
-    .notNull()
-    .defaultNow()
-    .$onUpdate(() => new Date()),
-});
+export const organizations = pgTable(
+  'organizations',
+  {
+    id: id(),
+    name: text('name').notNull(),
+    contactPhone: text('contact_phone'),
+    contactEmail: text('contact_email'),
+    /**
+     * Closed Beta (FR-37, `ClosedBetaStatus`): BTC mới `pending`; Quản trị Tingee đổi bằng compare-and-set
+     * (`pending|revoked → approved`, `approved → revoked`). Story 2.10 đọc cột này để chặn bán Vé có phí.
+     */
+    closedBetaStatus: text('closed_beta_status', { enum: ['pending', 'approved', 'revoked'] })
+      .notNull()
+      .default('pending'),
+    /** Lần đổi trạng thái Closed Beta gần nhất; `null` khi chưa từng đổi (vẫn `pending` từ lúc tạo). */
+    closedBetaChangedAt: timestamptz('closed_beta_changed_at'),
+    createdAt: createdAt(),
+    updatedAt: timestamptz('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    check('organizations_closed_beta_status_check', sql`${t.closedBetaStatus} IN ('pending', 'approved', 'revoked')`),
+    index('organizations_closed_beta_status_created_at_idx').on(t.closedBetaStatus, t.createdAt),
+  ],
+);
 
 /**
  * Thành viên BTC (`owner`/`admin`). Unique index một phần chỉ bảo đảm tối đa một Owner mỗi BTC; "đúng một" do luồng

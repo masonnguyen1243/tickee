@@ -30,6 +30,7 @@ import { EmptyState } from "./empty-state";
 import { RemovedFromOrganizationDialog } from "./removed-from-organization-dialog";
 import { SiteHeader } from "./site-header";
 import { StatusBanner } from "./status-banner";
+import { StatusBannerStack } from "./status-banner-stack";
 
 const MAIN_ID = "noi-dung";
 
@@ -47,13 +48,15 @@ function SkipToContent() {
 
 /**
  * Vùng nội dung. Có tab bar (< `md`) thì chừa đáy bằng chiều cao tab bar + safe-area + khoảng `section`, để phần
- * cuối trang không bị tab bar che.
+ * cuối trang không bị tab bar che. `banners` (dải `status-banner`) nằm ở đầu `<main>`, trên nội dung trang.
  */
 function ContentColumn({
   withTabBar,
+  banners,
   children,
 }: {
   withTabBar: boolean;
+  banners?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -70,6 +73,7 @@ function ContentColumn({
               : "pb-section",
           )}
         >
+          {banners}
           {children}
         </main>
       </div>
@@ -128,7 +132,8 @@ function useRemovedMidSession(orgId: string, loaded: boolean): boolean {
 
 /**
  * Khung dashboard của một BTC (UX-DR34). Tải BTC (vai lấy từ `GET /v1/orgs/:orgId`, guard api là nguồn sự thật) và
- * memberships (cho BTC switcher), rồi bọc trang con bằng sidebar (≥ `md`) hoặc `bottom-tab-bar` (< `md`).
+ * memberships (cho BTC switcher), rồi bọc trang con bằng sidebar (≥ `md`) hoặc `bottom-tab-bar` (< `md`), với dải
+ * `status-banner` (thông báo trạng thái của BTC, UX-DR8) ở đầu vùng nội dung.
  * 401 → đăng nhập kèm `returnTo` là trang hiện tại; `NOT_A_MEMBER` khi mở BTC → `empty-state`, không render điều
  * hướng. `NOT_A_MEMBER` sau khi BTC đã tải (bị xóa giữa phiên) → `Dialog` không đóng được, "Đồng ý" chuyển sang BTC
  * đầu tiên còn lại, không còn BTC nào thì về trang chủ.
@@ -281,7 +286,12 @@ export function DashboardShell({
           memberships={membershipsState}
           active={active}
         />
-        <ContentColumn withTabBar>{children}</ContentColumn>
+        <ContentColumn
+          withTabBar
+          banners={<StatusBannerStack orgId={orgId} />}
+        >
+          {children}
+        </ContentColumn>
         <BottomTabBar
           organization={organization}
           memberships={membershipsState}
