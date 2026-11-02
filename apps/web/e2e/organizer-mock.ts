@@ -3,14 +3,14 @@ import type { Page } from '@playwright/test';
 import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
 
 /*
- * API BTC giả bằng `page.route`: `/v1/orgs`, `/v1/orgs/**` và `/v1/me/memberships` (xem `identity-mock.ts`).
- * Mặc định `GET /me/memberships` → `[]`; lời gọi không có handler → 500.
+ * API BTC giả bằng `page.route`: `/v1/orgs`, `/v1/orgs/**`, `/v1/org-invitations/**` và `/v1/me/memberships`
+ * (xem `identity-mock.ts`). Mặc định `GET /me/memberships` → `[]`; lời gọi không có handler → 500.
  */
 
 export const ORG_ID = '019a3b2c-5678-7abc-8def-0123456789ab';
 export const OTHER_ORG_ID = '019a3b2c-9999-7abc-8def-0123456789ab';
 
-const ORGANIZER_PATH = /\/v1\/(orgs(\/|$)|me\/memberships$)/;
+const ORGANIZER_PATH = /\/v1\/(orgs(\/|$)|org-invitations\/|me\/memberships$)/;
 
 export const organization = (overrides: Record<string, unknown> = {}) => ({
   status: 200,
@@ -30,7 +30,7 @@ export async function mockOrganizerApi(page: Page, handlers: Record<string, Hand
   const cors = {
     'access-control-allow-origin': WEB_ORIGIN,
     'access-control-allow-credentials': 'true',
-    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
     'access-control-allow-headers': 'accept, content-type',
   };
   await page.route(

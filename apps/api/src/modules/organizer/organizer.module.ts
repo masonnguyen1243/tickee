@@ -2,6 +2,10 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ACCESS_RESOLVER, PermissionGuard } from '../../platform/access/index.js';
 import { MemberAccessResolver } from './access-resolver.impl.js';
+import { AdminInvitationQueues } from './invitation-jobs.js';
+import { InvitationsController } from './invitations.controller.js';
+import { MembersController } from './members.controller.js';
+import { MembersService } from './members.service.js';
 import { MembershipsController } from './memberships.controller.js';
 import { OrganizationsController } from './organizations.controller.js';
 import { OrganizerService } from './organizer.service.js';
@@ -11,16 +15,19 @@ export type OrganizerConfig = object;
 
 /**
  * BTC và thành viên (FR-4). Cài cổng `AccessResolver` và đăng ký `PermissionGuard` làm guard toàn cục số 3 —
- * phải import sau `IdentityModule` để chạy sau `SessionGuard` và `ConsentGuard`. Cần `DbModule` ở gốc DI.
+ * phải import sau `IdentityModule` để chạy sau `SessionGuard` và `ConsentGuard`. Cần `DbModule` và `JobsModule`
+ * (enqueue email mời Admin, Story 2.4) ở gốc DI.
  */
 @Module({})
 export class OrganizerModule {
   static forRoot(_config: OrganizerConfig = {}): DynamicModule {
     return {
       module: OrganizerModule,
-      controllers: [OrganizationsController, MembershipsController],
+      controllers: [OrganizationsController, MembershipsController, MembersController, InvitationsController],
       providers: [
         OrganizerService,
+        MembersService,
+        AdminInvitationQueues,
         { provide: ACCESS_RESOLVER, useClass: MemberAccessResolver },
         { provide: APP_GUARD, useClass: PermissionGuard },
       ],

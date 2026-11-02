@@ -124,7 +124,14 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
   });
 
   it('vai worker: chạy, không mở HTTP, SIGTERM → stop graceful, exit 0', async () => {
-    const p = start({ APP_ROLE: 'worker', DATABASE_URL: databaseUrl() });
+    const c = apiConfig();
+    const p = start({
+      APP_ROLE: 'worker',
+      DATABASE_URL: databaseUrl(),
+      WEB_ORIGIN: c.WEB_ORIGIN,
+      SMTP_URL: c.SMTP_URL,
+      EMAIL_FROM: c.EMAIL_FROM,
+    });
     try {
       await waitForOutput(p, 'worker đã chạy');
       const out = p.output();

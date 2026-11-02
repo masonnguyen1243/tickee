@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { PII_KEYS } from '../src/pii.js';
+import { ErrorCode } from '../src/errors.js';
+import { JobQueue } from '../src/jobs.js';
+import { PII_COLUMNS, PII_KEYS } from '../src/pii.js';
 import {
+  AcceptedInvitation,
   CreateOrganizationRequest,
+  InvitationTokenRequest,
+  InviteAdminRequest,
+  maskEmail,
+  MemberList,
+  ORGANIZATION_INVITATION_DAILY_LIMIT,
+  ORGANIZATION_INVITATION_PATH,
+  ORGANIZATION_INVITATION_TTL_DAYS,
   ORGANIZATION_SECTION_SEGMENTS,
   OrganizationSection,
   organizationSectionPath,
@@ -119,5 +129,72 @@ describe('organizationSectionPath', () => {
     const segments = Object.values(ORGANIZATION_SECTION_SEGMENTS);
     expect(new Set(segments).size).toBe(segments.length);
     expect(Object.keys(ORGANIZATION_SECTION_SEGMENTS).sort()).toEqual(Object.values(OrganizationSection).sort());
+  });
+});
+
+describe('mời Admin (Story 2.4)', () => {
+  it('email mời được chuẩn hóa; email sai dạng bị từ chối tại đúng trường', () => {
+    expect(InviteAdminRequest.parse({ email: '  An.Nguyen@Vidu.VN ' })).toEqual({ email: 'an.nguyen@vidu.vn' });
+    for (const email of ['', 'khong-phai-email', 'a@', '@b.vn']) {
+      const result = InviteAdminRequest.safeParse({ email });
+      expect(result.success, email).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['email']);
+    }
+    expect(InviteAdminRequest.safeParse({}).success).toBe(false);
+  });
+
+  it('hằng số lời mời: link /loi-moi-btc, hạn 7 ngày, 20 lời mời mỗi 24 giờ', () => {
+    expect(ORGANIZATION_INVITATION_PATH).toBe('/loi-moi-btc');
+    expect(ORGANIZATION_INVITATION_TTL_DAYS).toBe(7);
+    expect(ORGANIZATION_INVITATION_DAILY_LIMIT).toBe(20);
+  });
+
+  it('token đi trong body, không rỗng', () => {
+    expect(InvitationTokenRequest.safeParse({ token: 'abc' }).success).toBe(true);
+    expect(InvitationTokenRequest.safeParse({ token: '' }).success).toBe(false);
+    expect(InvitationTokenRequest.safeParse({}).success).toBe(false);
+  });
+
+  it('kết quả nhận lời mời luôn là Admin', () => {
+    const id = '019a3b2c-5678-7abc-8def-0123456789ab';
+    expect(AcceptedInvitation.safeParse({ organizationId: id, organizationName: 'A', role: 'admin' }).success).toBe(true);
+    expect(AcceptedInvitation.safeParse({ organizationId: id, organizationName: 'A', role: 'owner' }).success).toBe(false);
+  });
+
+  it('danh sách thành viên kèm lời mời đang chờ', () => {
+    const id = '019a3b2c-5678-7abc-8def-0123456789ab';
+    const at = '2026-11-02T01:02:03.000Z';
+    expect(
+      MemberList.parse({
+        members: [{ id, userId: id, role: 'owner', email: 'a@vidu.vn', name: '', joinedAt: at }],
+        invitations: [{ id, email: 'b@vidu.vn', expiresAt: at, expired: false, createdAt: at }],
+      }).invitations,
+    ).toHaveLength(1);
+  });
+
+  it.each([
+    ['an.nguyen@vidu.vn', 'a***@vidu.vn'],
+    ['b@vidu.vn', 'b***@vidu.vn'],
+    ['x@y@vidu.vn', 'x***@vidu.vn'],
+    ['khong-co-a-cong', '***'],
+    ['@vidu.vn', '***'],
+  ])('che email "%s" → "%s"', (email, masked) => {
+    expect(maskEmail(email)).toBe(masked);
+  });
+
+  it('mã lỗi, queue và cột PII của lời mời', () => {
+    for (const code of [
+      'ALREADY_A_MEMBER',
+      'INVITATION_INVALID',
+      'INVITATION_EXPIRED',
+      'INVITATION_USED',
+      'INVITATION_EMAIL_MISMATCH',
+      'INVITATION_LIMIT_REACHED',
+    ]) {
+      expect(Object.values(ErrorCode)).toContain(code);
+    }
+    expect(JobQueue.ORGANIZER_SEND_ADMIN_INVITATION).toBe('organizer.send-admin-invitation');
+    expect(JobQueue.ORGANIZER_SEND_ADMIN_INVITATION_DEAD_LETTER).not.toBe(JobQueue.ORGANIZER_SEND_ADMIN_INVITATION);
+    expect(PII_COLUMNS.organizer).toContain('email');
   });
 });

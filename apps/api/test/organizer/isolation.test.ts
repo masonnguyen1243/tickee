@@ -47,6 +47,11 @@ describe('cách ly BTC', () => {
   it('duyệt được route BTC thật và route test', () => {
     const guarded = routes.filter((r) => r.permission).map((r) => `${r.method} ${r.path}`);
     expect(guarded).toContain('GET /v1/orgs/:orgId');
+    // Story 2.4: route thành viên tự rơi vào bộ cách ly.
+    expect(guarded).toContain('GET /v1/orgs/:orgId/members');
+    expect(guarded).toContain('POST /v1/orgs/:orgId/invitations');
+    expect(guarded).toContain('DELETE /v1/orgs/:orgId/invitations/:invitationId');
+    expect(guarded).toContain('DELETE /v1/orgs/:orgId/members/:memberId');
     expect(guarded).toContain('GET /v1/orgs/:orgId/test-owner-only');
     expect(guarded).toContain('POST /v1/orgs/:orgId/test-owner-only/items/:itemId');
   });

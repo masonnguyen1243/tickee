@@ -38,7 +38,8 @@ pnpm dev
 - web: `next dev`, đọc `apps/web/.env.development` (`NEXT_PUBLIC_API_BASE_URL`, `TICKEE_UI_KIT=1`).
 - contracts: `tsc --watch`.
 
-Worker không chạy trong `pnpm dev`. Muốn chạy từng vai từ bản build thì dùng các lệnh dưới:
+Worker không chạy trong `pnpm dev`: email mời Admin (job `organizer.send-admin-invitation`) chỉ được gửi khi có worker
+chạy. Muốn chạy từng vai từ bản build thì dùng các lệnh dưới:
 
 ```sh
 # API (http://localhost:3001/healthz, /readyz; REST dưới /v1)
@@ -107,9 +108,9 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `TRUST_PROXY_HOPS`       | api         | mặc định `0`; số proxy tin cậy trước api (vd. `1` sau load balancer) để `req.ip` là IP thật — bắt buộc đặt khi có LB, nếu không mọi người dùng chung giới hạn 20 OTP/giờ theo IP của LB |
 | `BETTER_AUTH_SECRET`     | api         | ≥ 32 ký tự; ký session/cookie và khóa gốc HMAC bộ đếm OTP |
 | `API_PUBLIC_URL`         | api         | origin công khai của api; Better Auth ở `/v1/auth` |
-| `WEB_ORIGIN`             | api         | origin duy nhất được CORS kèm cookie |
+| `WEB_ORIGIN`             | api, worker | api: origin duy nhất được CORS kèm cookie; worker: gốc link trong email (lời mời Admin `<WEB_ORIGIN>/loi-moi-btc#…`) |
 | `AUTH_COOKIE_DOMAIN`     | api         | tùy chọn; tên miền cha cho cookie session (vd. `tickee.vn`) |
-| `SMTP_URL`, `EMAIL_FROM` | api         | gửi email OTP; local là Mailpit `smtp://localhost:1025` |
+| `SMTP_URL`, `EMAIL_FROM` | api, worker | api gửi email OTP/2FA; worker gửi email từ job (lời mời Admin); local là Mailpit `smtp://localhost:1025` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | api | bắt buộc; OAuth client Google, redirect URI `<API_PUBLIC_URL>/v1/auth/callback/google` |
 | `NEXT_PUBLIC_API_BASE_URL` | web       | gốc REST của api; client thêm `/v1`; nhúng lúc build |
 | `TICKEE_UI_KIT`          | web         | `1` bật `/ui-kit`; production không đặt (404) |

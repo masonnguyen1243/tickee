@@ -1,10 +1,14 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ErrorCode } from "@tickee/contracts";
+import {
+  DEFAULT_RETURN_TO,
+  ErrorCode,
+  organizationDashboardPath,
+} from "@tickee/contracts";
 import { ShieldX } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api/errors";
@@ -23,6 +27,7 @@ import { BottomTabBar } from "./bottom-tab-bar";
 import { CurrentOrganizationProvider } from "./current-organization";
 import { DashboardSidebar } from "./dashboard-sidebar";
 import { EmptyState } from "./empty-state";
+import { RemovedFromOrganizationDialog } from "./removed-from-organization-dialog";
 import { SiteHeader } from "./site-header";
 import { StatusBanner } from "./status-banner";
 
@@ -93,9 +98,40 @@ function LoadingContent() {
 }
 
 /**
+ * Bị xóa khỏi BTC giữa phiên: BTC `orgId` đã tải xong (`loaded`) mà sau đó một request bất kỳ (query hay mutation)
+ * nhận `NOT_A_MEMBER`. Trong dashboard một BTC, mọi request BTC đều thuộc BTC đó. Mở BTC lần đầu đã không có quyền
+ * thì không tính (giữ `empty-state`).
+ */
+function useRemovedMidSession(orgId: string, loaded: boolean): boolean {
+  const queryClient = useQueryClient();
+  const [removedFrom, setRemovedFrom] = useState<string | null>(null);
+  useEffect(() => {
+    if (!loaded) return;
+    const flag = (error: unknown) => {
+      if (hasErrorCode(error, ErrorCode.NOT_A_MEMBER)) setRemovedFrom(orgId);
+    };
+    const offQueries = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type === "updated" && event.action.type === "error")
+        flag(event.action.error);
+    });
+    const offMutations = queryClient.getMutationCache().subscribe((event) => {
+      if (event.type === "updated" && event.action.type === "error")
+        flag(event.action.error);
+    });
+    return () => {
+      offQueries();
+      offMutations();
+    };
+  }, [loaded, orgId, queryClient]);
+  return removedFrom === orgId;
+}
+
+/**
  * Khung dashboard của một BTC (UX-DR34). Tải BTC (vai lấy từ `GET /v1/orgs/:orgId`, guard api là nguồn sự thật) và
  * memberships (cho BTC switcher), rồi bọc trang con bằng sidebar (≥ `md`) hoặc `bottom-tab-bar` (< `md`).
- * 401 → đăng nhập kèm `returnTo` là trang hiện tại; `NOT_A_MEMBER` → `empty-state`, không render điều hướng.
+ * 401 → đăng nhập kèm `returnTo` là trang hiện tại; `NOT_A_MEMBER` khi mở BTC → `empty-state`, không render điều
+ * hướng. `NOT_A_MEMBER` sau khi BTC đã tải (bị xóa giữa phiên) → `Dialog` không đóng được, "Đồng ý" chuyển sang BTC
+ * đầu tiên còn lại, không còn BTC nào thì về trang chủ.
  */
 export function DashboardShell({
   orgId,
@@ -117,6 +153,44 @@ export function DashboardShell({
     // Tải được BTC nghĩa là đã đăng nhập và đã đồng ý NĐ 13.
     enabled: org.isSuccess,
   });
+
+  const notAMember = hasErrorCode(org.error, ErrorCode.NOT_A_MEMBER);
+  const removedMidSession = useRemovedMidSession(orgId, org.data !== undefined);
+  const removed =
+    removedMidSession || (org.data !== undefined && notAMember);
+  const [leavingFrom, setLeavingFrom] = useState<string | null>(null);
+  const leaving = leavingFrom === orgId;
+
+  useEffect(() => {
+    if (!removed) return;
+    // Rời trang rồi mới bỏ BTC khỏi cache: quay lại BTC này thì tải lại (và thấy `empty-state`) thay vì dữ liệu cũ.
+    return () =>
+      queryClient.removeQueries({
+        queryKey: organizationQueryKey(orgId),
+        exact: true,
+      });
+  }, [removed, orgId, queryClient]);
+
+  /** "Đồng ý": tải lại danh sách BTC (đã không còn BTC này) rồi sang BTC đầu tiên, không còn thì về trang chủ. */
+  const leave = async () => {
+    if (leaving) return;
+    setLeavingFrom(orgId);
+    let target = DEFAULT_RETURN_TO;
+    try {
+      const list = await queryClient.fetchQuery({
+        queryKey: MEMBERSHIPS_QUERY_KEY,
+        queryFn: ({ signal }) => fetchMemberships(signal),
+        staleTime: 0,
+      });
+      const next = list.find(
+        (m) => m.organizationId.toLowerCase() !== orgId.toLowerCase(),
+      );
+      if (next) target = organizationDashboardPath(next.organizationId);
+    } catch {
+      // Không tải được danh sách: về trang chủ.
+    }
+    router.replace(target);
+  };
 
   const unauthenticated = hasErrorCode(org.error, ErrorCode.UNAUTHENTICATED);
   useEffect(() => {
@@ -153,9 +227,8 @@ export function DashboardShell({
     );
   }
 
-  // Lỗi khi tải lại nền (đã có dữ liệu) thì giữ khung; riêng NOT_A_MEMBER luôn bỏ điều hướng.
-  const notAMember = hasErrorCode(org.error, ErrorCode.NOT_A_MEMBER);
-  if (notAMember || !org.data) {
+  // Lỗi khi tải lại nền (đã có dữ liệu) thì giữ khung; NOT_A_MEMBER lúc đó là bị xóa giữa phiên (Dialog bên dưới).
+  if (!org.data) {
     return (
       <ContentColumn withTabBar={false}>
         {notAMember ? (
@@ -215,6 +288,12 @@ export function DashboardShell({
           active={active}
         />
       </div>
+      <RemovedFromOrganizationDialog
+        open={removed}
+        organizationName={organization.name}
+        leaving={leaving}
+        onConfirm={() => void leave()}
+      />
     </CurrentOrganizationProvider>
   );
 }

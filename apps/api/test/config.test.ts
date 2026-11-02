@@ -67,6 +67,25 @@ describe('loadConfig', () => {
     }
   });
 
+  it('vai worker cần WEB_ORIGIN, SMTP_URL, EMAIL_FROM (gửi email lời mời Admin)', () => {
+    const err = issuesOf({ APP_ROLE: 'worker', DATABASE_URL: apiEnv.DATABASE_URL });
+    expect(err.issues).toEqual(
+      expect.arrayContaining([
+        { variable: 'WEB_ORIGIN', reason: 'thiếu' },
+        { variable: 'SMTP_URL', reason: 'thiếu' },
+        { variable: 'EMAIL_FROM', reason: 'thiếu' },
+      ]),
+    );
+    const config = loadConfig({
+      APP_ROLE: 'worker',
+      DATABASE_URL: apiEnv.DATABASE_URL,
+      WEB_ORIGIN: apiEnv.WEB_ORIGIN,
+      SMTP_URL: apiEnv.SMTP_URL,
+      EMAIL_FROM: apiEnv.EMAIL_FROM,
+    });
+    expect(config).toMatchObject({ APP_ROLE: 'worker', WEB_ORIGIN: 'https://tickee.vn' });
+  });
+
   it('thiếu MIGRATION_DATABASE_URL ở vai migrate', () => {
     const err = issuesOf({ APP_ROLE: 'migrate', DATABASE_URL: apiEnv.DATABASE_URL });
     expect(err.issues).toEqual([{ variable: 'MIGRATION_DATABASE_URL', reason: 'thiếu' }]);

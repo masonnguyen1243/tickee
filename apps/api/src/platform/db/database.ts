@@ -7,6 +7,8 @@ const PING_TIMEOUT_MS = 2_000;
 export type Orm = NodePgDatabase<Record<string, never>>;
 /** Transaction Drizzle; service nhận `tx` để tham gia cùng transaction. */
 export type Tx = Parameters<Parameters<Orm['transaction']>[0]>[0];
+/** Nơi chạy truy vấn: ngoài transaction (`db.orm`) hoặc trong `tx` của người gọi (read model dùng chung). */
+export type DbExecutor = Orm | Tx;
 
 export interface DatabaseOptions {
   connectionString: string;

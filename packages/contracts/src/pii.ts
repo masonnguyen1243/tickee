@@ -4,7 +4,8 @@
  */
 export const PII_COLUMNS = {
   identity: ['email', 'name', 'ip_address', 'user_agent'],
-  organizer: ['contact_phone', 'contact_email'],
+  // `email`: email người được mời (`organization_invitations.email`).
+  organizer: ['contact_phone', 'contact_email', 'email'],
 } as const satisfies Record<string, readonly string[]>;
 
 const snakeToCamel = (s: string): string => s.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());

@@ -1,5 +1,5 @@
 import { Writable } from 'node:stream';
-import type { ApiConfig } from '../src/platform/config/index.js';
+import type { ApiConfig, WorkerConfig } from '../src/platform/config/index.js';
 
 export const databaseUrl = (): string => {
   const url = process.env.DATABASE_URL;
@@ -34,6 +34,21 @@ export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
   GOOGLE_CLIENT_SECRET: 'test-only-google-client-secret',
   ...overrides,
 });
+
+/** Cấu hình vai `worker` cho test: cùng DB, cùng origin web và SMTP giả với `apiConfig`. */
+export const workerConfig = (overrides: Partial<WorkerConfig> = {}): WorkerConfig => {
+  const api = apiConfig();
+  return {
+    APP_ROLE: 'worker',
+    NODE_ENV: 'test',
+    LOG_LEVEL: 'silent',
+    DATABASE_URL: api.DATABASE_URL,
+    WEB_ORIGIN: api.WEB_ORIGIN,
+    SMTP_URL: api.SMTP_URL,
+    EMAIL_FROM: api.EMAIL_FROM,
+    ...overrides,
+  };
+};
 
 /** Stream gom dòng log JSON để kiểm. */
 export class LogCapture extends Writable {

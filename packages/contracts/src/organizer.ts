@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { EmailAddress } from './identity.js';
+
 /** Vai trò của thành viên trong một BTC (FR-4). CTV (`checkin`) không phải thành viên BTC. */
 export const Role = {
   OWNER: 'owner',
@@ -148,4 +150,82 @@ export function organizationSectionPath(organizationId: string, section: Organiz
   const segment = ORGANIZATION_SECTION_SEGMENTS[section];
   const base = organizationDashboardPath(organizationId);
   return segment === '' ? base : `${base}/${segment}`;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Thành viên và lời mời Admin (FR-2, FR-4, Story 2.4)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Màn nhận lời mời của web; link trong email là `{WEB_ORIGIN}/loi-moi-btc#{token}` (token sau `#`, không tới server). */
+export const ORGANIZATION_INVITATION_PATH = '/loi-moi-btc';
+/** Lời mời hết hạn sau chừng này ngày kể từ lúc mời (như link CTV, AD-30). */
+export const ORGANIZATION_INVITATION_TTL_DAYS = 7;
+/** Mỗi BTC tạo tối đa chừng này lời mời mới trong 24 giờ trượt (kể cả lời mời đã thu hồi). */
+export const ORGANIZATION_INVITATION_DAILY_LIMIT = 20;
+
+/** `POST /v1/orgs/:orgId/invitations`: mời một email làm Admin. Email chuẩn hóa (trim, chữ thường). */
+export const InviteAdminRequest = z.object({ email: EmailAddress });
+export type InviteAdminRequest = z.input<typeof InviteAdminRequest>;
+
+/**
+ * Lời mời đang chờ (chưa nhận, chưa thu hồi), cũng là kết quả `POST /v1/orgs/:orgId/invitations` (201).
+ * `expired` do api tính theo giờ server: lời mời quá hạn vẫn nằm trong danh sách chờ (hiện "Đã hết hạn") tới khi bị
+ * thu hồi hoặc mời lại.
+ */
+export const OrganizationInvitation = z.object({
+  id: z.uuid(),
+  email: z.string(),
+  expiresAt: z.iso.datetime(),
+  expired: z.boolean(),
+  createdAt: z.iso.datetime(),
+});
+export type OrganizationInvitation = z.infer<typeof OrganizationInvitation>;
+
+/** Một thành viên BTC. `id` là id dòng thành viên (dùng để xóa), không phải id tài khoản. */
+export const OrganizationMember = z.object({
+  id: z.uuid(),
+  userId: z.uuid(),
+  role: roleSchema,
+  email: z.string(),
+  /** Tên hiển thị (Google); rỗng với tài khoản đăng nhập OTP. */
+  name: z.string(),
+  joinedAt: z.iso.datetime(),
+});
+export type OrganizationMember = z.infer<typeof OrganizationMember>;
+
+/** `GET /v1/orgs/:orgId/members` (chỉ Owner): Owner trước, rồi Admin theo thời điểm tham gia; lời mời mới nhất trước. */
+export const MemberList = z.object({
+  members: z.array(OrganizationMember),
+  invitations: z.array(OrganizationInvitation),
+});
+export type MemberList = z.infer<typeof MemberList>;
+
+/**
+ * Body `POST /v1/org-invitations/preview` và `POST /v1/org-invitations/accept`: token lấy từ `#` của link. Token không
+ * bao giờ nằm trong đường dẫn hay query của request.
+ */
+export const InvitationTokenRequest = z.object({ token: z.string().min(1).max(256) });
+export type InvitationTokenRequest = z.input<typeof InvitationTokenRequest>;
+
+/** `POST /v1/org-invitations/preview` (công khai): lời mời còn dùng được thì trả tên BTC. */
+export const InvitationPreview = z.object({ organizationName: z.string() });
+export type InvitationPreview = z.infer<typeof InvitationPreview>;
+
+/** `POST /v1/org-invitations/accept`: tài khoản đang đăng nhập đã là Admin của BTC. Nhận lại lần nữa vẫn trả kết quả này. */
+export const AcceptedInvitation = z.object({
+  organizationId: z.uuid(),
+  organizationName: z.string(),
+  role: z.literal(Role.ADMIN),
+});
+export type AcceptedInvitation = z.infer<typeof AcceptedInvitation>;
+
+/** `details` của lỗi `INVITATION_EMAIL_MISMATCH`: email lời mời đã che (vd. `a***@vidu.vn`). */
+export const InvitationEmailMismatchDetails = z.object({ maskedEmail: z.string() });
+export type InvitationEmailMismatchDetails = z.infer<typeof InvitationEmailMismatchDetails>;
+
+/** Che email để hiện cho người mở link: giữ ký tự đầu của phần trước `@` và nguyên tên miền (`an@vidu.vn` → `a***@vidu.vn`). */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf('@');
+  if (at <= 0) return '***';
+  return `${Array.from(email)[0]}***${email.slice(at)}`;
 }

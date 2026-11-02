@@ -35,6 +35,18 @@ export const ErrorCode = {
   TOTP_INVALID: 'TOTP_INVALID',
   /** Sai `TOTP_MAX_FAILURES` lần liên tiếp: khóa xác minh theo user; `details.retryAfterSeconds`. */
   TOTP_LOCKED: 'TOTP_LOCKED',
+  /** Mời Admin bằng email đã là thành viên của BTC (kể cả Owner); `details.field` là `email`. */
+  ALREADY_A_MEMBER: 'ALREADY_A_MEMBER',
+  /** Link mời sai, không tồn tại hoặc đã bị thu hồi. */
+  INVITATION_INVALID: 'INVITATION_INVALID',
+  /** Link mời đã quá hạn `ORGANIZATION_INVITATION_TTL_DAYS` ngày. */
+  INVITATION_EXPIRED: 'INVITATION_EXPIRED',
+  /** Link mời đã được nhận (bởi tài khoản khác, hoặc tài khoản này nhưng đã bị xóa sau đó). */
+  INVITATION_USED: 'INVITATION_USED',
+  /** Email của session khác email lời mời; `details.maskedEmail` (`InvitationEmailMismatchDetails`). */
+  INVITATION_EMAIL_MISMATCH: 'INVITATION_EMAIL_MISMATCH',
+  /** BTC đã tạo đủ `ORGANIZATION_INVITATION_DAILY_LIMIT` lời mời trong 24 giờ qua. */
+  INVITATION_LIMIT_REACHED: 'INVITATION_LIMIT_REACHED',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

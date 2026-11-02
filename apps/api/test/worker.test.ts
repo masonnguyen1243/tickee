@@ -4,12 +4,12 @@ import type { PgBoss } from 'pg-boss';
 import { describe, expect, it } from 'vitest';
 import { BOSS } from '../src/platform/jobs/index.js';
 import { WorkerModule } from '../src/worker.module.js';
-import { databaseUrl } from './helpers.js';
+import { workerConfig } from './helpers.js';
 
 describe('vai worker', () => {
   it('pg-boss start bằng tickee_app (migrate: false), xử lý job, rồi stop graceful', async () => {
     const app = await NestFactory.createApplicationContext(
-      WorkerModule.forRoot({ APP_ROLE: 'worker', NODE_ENV: 'test', LOG_LEVEL: 'silent', DATABASE_URL: databaseUrl() }),
+      WorkerModule.forRoot(workerConfig()),
       { logger: false },
     );
     try {

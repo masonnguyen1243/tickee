@@ -17,6 +17,12 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   TOTP_REQUIRED: 403,
   TOTP_INVALID: 400,
   TOTP_LOCKED: 429,
+  ALREADY_A_MEMBER: 409,
+  INVITATION_INVALID: 404,
+  INVITATION_EXPIRED: 410,
+  INVITATION_USED: 409,
+  INVITATION_EMAIL_MISMATCH: 403,
+  INVITATION_LIMIT_REACHED: 429,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */
