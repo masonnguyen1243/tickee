@@ -76,6 +76,30 @@ context:
 - Given khách mở `/` với JS tắt, then thấy đủ hero, 4 value-tile, các section và CTA dẫn tới đăng nhập.
 - Given `pnpm turbo build typecheck lint:deps test` và `pnpm --filter @tickee/web test:e2e`, then tất cả pass, kể cả e2e hiện có.
 
+### Review Findings
+
+Code review 02/11/2026 (blind-hunter, edge-case-hunter, verification-gap, acceptance-auditor) trên `main...feat/2-3-landing-btc`.
+
+- [x] [Review][Decision] Commit Story 2.3 viết lại `epic-2-context.md` và làm mất luật cho 2.4–2.14 — Bản rút gọn bỏ các mã lỗi `NOT_A_MEMBER`/`CHECKER_REVOKED`/`EVENT_ENDED`, dead-letter pg-boss, `audit_events` chỉ INSERT, trục khóa `locked_at`, khóa TOTP 15 phút, copy UX "Sao chép link"/"Không có BTC chờ duyệt"… (đếm trên `main`: có, trên nhánh: 0; `epics.md` vẫn còn). Các story sau đọc file context này. Chọn: khôi phục bản trên `main` rồi chỉ sửa phần landing, hay giữ bản rút gọn có chủ đích và tách thành thay đổi riêng. (blind-hunter + acceptance-auditor, medium) → Mason chọn khôi phục bản `main` (commit cd72b1a); bản `main` đã có sẵn dòng landing nên 2.3 không cần sửa file này.
+- [x] [Review][Patch] E2e khẳng định trước khi CTA vào trạng thái ổn định, nên không bắt được lỗi [apps/web/e2e/landing.spec.ts:88] — Khi memberships đang tải, href đã là `/tao-btc`, trùng với href mong đợi của test "memberships rỗng" (dòng 88–89) và "memberships 5xx" (dòng 144–145), nên `toHaveCount(0)`/`expectHrefs` qua ngay ở trạng thái pending. Test "đã thuộc BTC" (dòng 121–122) đếm lời gọi `me`/`memberships` đúng một lần, lời gọi trùng đến muộn không bị bắt. Sửa: giữ assertion qua một khoảng ngắn như test "chưa đồng ý NĐ 13" (dòng 98–101). (blind-hunter + edge-case-hunter, low) → Đã sửa: helper `holdSteady` + `expectJoinOnly`; e2e 258/258 pass trên cả hai project.
+
+**Rejected:**
+- `me` refetch trả 401 vẫn giữ `me.data` cũ nên CTA còn "Vào dashboard" — low: cùng hành vi với `AccountMenu`, dashboard tự đưa về đăng nhập, sửa phải thêm nhánh.
+- Đăng nhập tài khoản khác trong cùng tab dùng cache memberships cũ — đã ghi ở `deferred-work.md` trong chính thay đổi này, có từ trước 2.3.
+- "Sự kiện toàn Hạng vé 0đ trần cứng 200 Vé" đổi luật nghiệp vụ — false: khớp định nghĩa FR-11 ("Sự kiện miễn phí (mọi Hạng vé 0đ)").
+- Spec `done` lệch sprint-status `review` — sửa là sửa spec; trạng thái được đồng bộ ở bước cuối của review này.
+- Bấm CTA lúc memberships đang tải đưa Owner vào `/tao-btc` — low: đã reject ở triage #1, một request, tạo thêm BTC là hợp lệ.
+- OG thiếu `url`/`siteName`/ảnh, thiếu `metadataBase` — low: spec cấm ảnh; `metadataBase` cần domain chốt ở Story 4.7.
+- Nút "Xem cách hoạt động" thiếu focus style trên nền stage — false: quy tắc `:focus-visible` toàn cục trong `globals.css` vẽ ring 2px `--ring`.
+- Không có test layout ở `md`/`lg` — low: kiểm thị giác, thêm test là thêm độ phức tạp.
+- Test JS tắt không kiểm `href="#hanh-trinh"` và nội dung Closed Beta — low: href đã có test JS bật kiểm.
+- Copy Closed Beta không nhắc liên kết tài khoản nhận tiền — copy đúng spec đã chốt, sửa là sửa spec.
+- Mục deferred cross-account chưa gắn story nhận — low.
+- Nhãn value-tile xuống dòng ở 320px — false: "một dòng `text-label`" là một nhãn, không phải ràng buộc không xuống dòng.
+- Câu phụ hero `md:text-title` — false: vẫn có `text-stage-muted` như spec.
+- `md:px-8` viết cứng thay vì token — low.
+- Tiêu đề 56px từ `lg`, khung hero desktop từ `md` — low: đã reject ở triage #14.
+
 ## Implementation Notes
 
 - Build production để chạy e2e cần `NEXT_PUBLIC_API_BASE_URL=http://localhost:3001` (`.env.development` không được nạp khi `next build`); CI đặt sẵn. Thư mục `.next/dev` cũ của dev server còn tham chiếu `(public)/page.tsx` đã xóa, nên phải xóa `.next/dev` và `.next/types` thì typecheck mới qua.

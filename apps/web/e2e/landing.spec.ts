@@ -25,6 +25,25 @@ async function expectHrefs(page: Page, cta: (page: Page) => ReturnType<Page['get
   for (const link of await cta(page).all()) await expect(link).toHaveAttribute('href', href);
 }
 
+/**
+ * Giữ `check` đúng trong ~1,5 s. Lúc memberships đang tải CTA đã trỏ `/tao-btc` nên một assertion đơn lẻ qua ngay
+ * ở trạng thái pending; giữ một khoảng thì bắt được thay đổi hay lời gọi đến trễ. `check` dùng assertion không tự chờ.
+ */
+async function holdSteady(page: Page, check: () => Promise<void> | void) {
+  for (let i = 0; i < 6; i += 1) {
+    await check();
+    await page.waitForTimeout(250);
+  }
+}
+
+/** Không có "Vào dashboard", hai CTA "Đăng ký Closed Beta" đều trỏ `href` (đọc một lần, không tự chờ). */
+async function expectJoinOnly(page: Page, href: string) {
+  expect(await dashboardCtas(page).count()).toBe(0);
+  const links = await joinCtas(page).all();
+  expect(links).toHaveLength(2);
+  for (const link of links) expect(await link.getAttribute('href')).toBe(href);
+}
+
 /** Đếm response đã về của một đường dẫn api (route giả cũng phát sự kiện `response`). */
 function countResponses(page: Page, path: string): () => number {
   let count = 0;
@@ -86,7 +105,7 @@ test('đã đăng nhập, chưa có BTC (memberships rỗng): CTA → /tao-btc',
   await page.goto('/');
   await memberships;
   await expectHrefs(page, joinCtas, '/tao-btc');
-  await expect(dashboardCtas(page)).toHaveCount(0);
+  await holdSteady(page, () => expectJoinOnly(page, '/tao-btc'));
 });
 
 test('chưa đồng ý NĐ 13: không hỏi memberships, CTA → /tao-btc rồi sang /dong-y', async ({ page }) => {
@@ -95,10 +114,7 @@ test('chưa đồng ý NĐ 13: không hỏi memberships, CTA → /tao-btc rồi 
   await page.goto('/');
   await expectHrefs(page, joinCtas, '/tao-btc');
   // Giữ ở 0 trong một khoảng ngắn: bắt cả lời gọi đến trễ sau khi `me` đã về.
-  for (let i = 0; i < 6; i += 1) {
-    expect(membershipCalls(calls)).toHaveLength(0);
-    await page.waitForTimeout(250);
-  }
+  await holdSteady(page, () => expect(membershipCalls(calls)).toHaveLength(0));
   await joinCtas(page).last().click();
   await page.waitForURL('**/dong-y?returnTo=%2Ftao-btc');
 });
@@ -117,9 +133,11 @@ test('đã thuộc BTC: 2 CTA "Vào dashboard" → BTC đầu tiên; dùng chung
   await page.goto('/');
   await expectHrefs(page, dashboardCtas, `/btc/${ORG_ID}`);
   await expect(joinCtas(page)).toHaveCount(0);
-  // Hai CTA và `AccountMenu` cùng khóa query: mỗi API chỉ gọi một lần.
-  expect(membershipCalls(calls)).toHaveLength(1);
-  expect(meCalls(identityCalls)).toHaveLength(1);
+  // Hai CTA và `AccountMenu` cùng khóa query: mỗi API chỉ gọi một lần, kể cả lời gọi trùng đến trễ.
+  await holdSteady(page, () => {
+    expect(membershipCalls(calls)).toHaveLength(1);
+    expect(meCalls(identityCalls)).toHaveLength(1);
+  });
 });
 
 test('me lỗi 5xx: giữ CTA mặc định (đăng nhập), không hiện lỗi trên landing', async ({ page }) => {
@@ -142,7 +160,7 @@ test('memberships lỗi 5xx: CTA → /tao-btc, không hiện lỗi trên landing
   await expect.poll(() => membershipCalls(calls).length, { timeout: RETRY_TIMEOUT }).toBe(RETRY_ATTEMPTS);
   await expect.poll(membershipResponses, { timeout: RETRY_TIMEOUT }).toBe(RETRY_ATTEMPTS);
   await expectHrefs(page, joinCtas, '/tao-btc');
-  await expect(dashboardCtas(page)).toHaveCount(0);
+  await holdSteady(page, () => expectJoinOnly(page, '/tao-btc'));
   await expect(page.getByRole('main').getByRole('alert')).toHaveCount(0);
 });
 
