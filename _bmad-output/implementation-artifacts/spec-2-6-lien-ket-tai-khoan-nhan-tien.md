@@ -3,12 +3,15 @@ title: 'Story 2.6: Liên kết tài khoản nhận tiền'
 type: 'feature'
 created: '2026-11-03'
 status: 'done'
+superseded_by: '{project-root}/_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-03.md'
 route: 'dispatch'
 review_loop_iteration: 0
 baseline_commit: '508c0f75e9f5cea976fba53a5a2b453d47b8d020'
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-2-context.md'
 ---
+
+> **Đã bị thay (03/11/2026):** spec này làm theo mô hình Tickee là Master Merchant (Merchant con, `create-va`/`confirm-va` + OTP). Sprint Change Proposal 03/11/2026 đổi sang mô hình BTC dùng key Tingee của chính mình (`get-va-paging`). Story 2.6 làm lại bằng spec mới; code của spec này (commit `178bd2c`) chỉ dùng lại phần ghi "Giữ" ở §2 của đề xuất.
 
 <frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
 

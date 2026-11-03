@@ -65,7 +65,7 @@ Không có trang khám phá Sự kiện (PRD §10 — không phải chợ vé). 
 | BTC | Cần xử lý (badge số) | Owner, Admin | Hàng việc gộp mọi Sự kiện của BTC (FR-21) |
 | BTC | Token | Owner (Admin chỉ xem) | Số dư, hạn mức, ngưỡng, "mua thêm Token" (FR-34) |
 | BTC | Thành viên | Owner | Mời/xóa Admin (FR-2, FR-4) |
-| BTC | Tài khoản nhận tiền | Owner | Liên kết qua Tingee; QR động hay chỉ QR tĩnh (FR-5) |
+| BTC | Tài khoản nhận tiền | Owner | Kết nối tài khoản Tingee, chọn tài khoản nhận tiền, URL IPN và hướng dẫn cấu hình (FR-5) |
 | BTC | Cài đặt | Owner, Admin | Thông tin BTC, trạng thái Closed Beta (FR-37) |
 | Sự kiện | Tổng quan | Owner, Admin | Doanh thu, check-in, Vé theo Hạng vé, `needs-action-card`, `recent-orders-block`, cảnh báo (FR-31) |
 | Sự kiện | Đơn | Owner, Admin | Danh sách Đơn + câu trả lời form, bộ lọc "Cần xử lý", xuất CSV (FR-21, FR-31) |
@@ -206,20 +206,19 @@ Hành vi. Spec hình ảnh ở `DESIGN.md` › Components (hoặc mặc định 
 
 ### Thứ tự ưu tiên `status-banner`
 
-- **Đóng được hay không**: banner danger và banner chặn bán (Bị khóa, Đã hủy, Closed Beta bị thu hồi, chạm hạn mức Token, chưa liên kết tài khoản nhận tiền) **không đóng được**. Banner warning/neutral mang tính thông tin (Token dưới ngưỡng, Chỉ QR tĩnh, Google Sheets) có nút đóng; đóng rồi thì ẩn tới phiên sau hoặc tới khi trạng thái đổi `[ASSUMPTION]`.
+- **Đóng được hay không**: banner danger và banner chặn bán (Bị khóa, Đã hủy, Closed Beta bị thu hồi, chạm hạn mức Token, key Tingee không còn dùng được, chưa liên kết tài khoản nhận tiền) **không đóng được**. Banner warning/neutral mang tính thông tin (Token dưới ngưỡng, Google Sheets) có nút đóng; đóng rồi thì ẩn tới phiên sau hoặc tới khi trạng thái đổi `[ASSUMPTION]`.
 - **Chồng nhiều banner**: hiện tối đa 2 banner theo thứ tự dưới; còn lại gộp thành dòng "+N thông báo" mở `Sheet` danh sách. `offline-banner` của Màn quét không tính vào giới hạn này.
 - **Thứ tự** `[ASSUMPTION]` (đề xuất, cao → thấp — Open Questions #7):
   1. BTC hoặc Sự kiện Bị khóa
   2. Đã hủy
   3. Closed Beta bị thu hồi
-  4. Token chạm hạn mức (Tạm ngừng bán)
-  5. Chưa liên kết / liên kết thất bại tài khoản nhận tiền
+  4. Token chạm hạn mức (Tạm ngừng bán) / Key Tingee không còn dùng được
+  5. Chưa liên kết tài khoản nhận tiền
   6. "Chờ duyệt Closed Beta"
   7. Ẩn / Tạm ngừng bán
   8. Mất quyền Google Sheets
   9. Token dưới ngưỡng
-  10. Chỉ QR tĩnh
-  11. Đã kết thúc
+  10. Đã kết thúc
 
 ## State Patterns
 
@@ -301,9 +300,11 @@ Ai được mở link, có phải đăng nhập không, và có thấy Mã QR v�
 | "Chờ duyệt Closed Beta" | Mọi trang (banner) | Banner warning + hướng dẫn liên hệ Tingee; vẫn tạo được Sự kiện nháp và Sự kiện miễn phí (FR-37). |
 | Closed Beta bị thu hồi | Banner + Sự kiện | Banner danger; Sự kiện có phí "Tạm ngừng bán" (FR-37). |
 | Chưa liên kết tài khoản nhận tiền | Banner (Owner) / Wizard bước 4 | Owner: "Liên kết tài khoản nhận tiền để bán Vé có phí." Admin: "Nhờ Owner liên kết tài khoản nhận tiền." |
-| Đang liên kết tài khoản nhận tiền | Tài khoản nhận tiền | Sau khi Owner gửi thông tin: nút loading, `status-badge` neutral "Đang liên kết"; nếu Tingee trả kết quả chậm, rời trang được — banner trên dashboard cập nhật khi xong `[ASSUMPTION]`. Không mở bán Sự kiện có phí trong lúc này (FR-5). |
-| Liên kết tài khoản nhận tiền thất bại | Tài khoản nhận tiền + `status-banner` danger | Lỗi tại chỗ nêu lý do có thể hành động (thông tin tài khoản không khớp / Tingee tạm lỗi) + "Thử lại"; dữ liệu đã nhập giữ nguyên. `[ASSUMPTION]` danh sách lý do và copy phụ thuộc mã lỗi Tingee. |
-| Chỉ dùng được QR tĩnh | Tài khoản nhận tiền, Tổng quan | Thông báo + khuyến nghị đổi sang tài khoản hỗ trợ QR động (FR-5). |
+| Chưa kết nối Tingee | Tài khoản nhận tiền | Hướng dẫn 3 bước (đăng ký merchant Tingee, liên kết ngân hàng, lấy API key) + form Client ID, Secret Token, nút "Kết nối" (FR-5). |
+| Đang kiểm tra key | Tài khoản nhận tiền | Nút loading; lỗi tại chỗ: "Client ID hoặc Secret Token không đúng." / "Tingee tạm lỗi, thử lại sau ít phút." + "Thử lại", giữ dữ liệu đã nhập. |
+| Chọn tài khoản | Tài khoản nhận tiền | Danh sách thẻ (ngân hàng, `•••• 1234` `tabular-nums`, tên chủ tài khoản in hoa); VietinBank mờ + "Chưa hỗ trợ VietinBank"; rỗng → `empty-state` + link portal Tingee + "Tải lại". |
+| Đã liên kết | Tài khoản nhận tiền | Thẻ tài khoản + `status-badge` success "Đã liên kết"; khối "Cấu hình trên Tingee": URL IPN + "Sao chép" (toast "Đã sao chép"), checklist hai bước. |
+| Key không còn dùng được | Tài khoản nhận tiền + `status-banner` danger | `status-badge` danger "Key Tingee không còn dùng được" + "Nhập lại key" (qua xác nhận lại, Story 2.13). Banner trên dashboard: Owner "Nhập lại key"; Admin "Nhờ Owner cập nhật key Tingee." (AD-32 `credential_invalid`). |
 | Token dưới ngưỡng / chạm hạn mức | Banner + Token | Dưới ngưỡng: warning "Token khả dụng dưới ngưỡng cảnh báo." + hành động "mua thêm Token" (Owner). Chạm hạn mức: danger "Mọi Sự kiện có phí đang Tạm ngừng bán" (FR-34). |
 | Google Sheets | Cài đặt Sự kiện | Đã kết nối · đang đồng bộ · lỗi/thử lại · mất quyền → banner trên Tổng quan "Kết nối lại Google Sheets" (FR-32). |
 | Cần xử lý trống | Cần xử lý | "Không có gì cần xử lý." |
@@ -466,7 +467,7 @@ Minh họa: [Tổng quan Sự kiện](mockups/key-dashboard-event.html) (bước
 Anh Tuấn, chủ nhiệm CLB ABC, trước đây thu tiền bằng Google Forms rồi dò sao kê; mở Tickee từ link giới thiệu của Tingee, trên laptop buổi tối.
 
 1. Anh đăng ký Tài khoản Tickee bằng email (OTP), đồng ý điều khoản dữ liệu cá nhân, tạo BTC "CLB ABC" — anh là Owner. Dashboard gợi ý bật xác thực hai lớp; anh bật ngay (quét QR bằng Google Authenticator, lưu 10 mã khôi phục). Nếu để sau, anh vẫn làm tiếp được.
-2. Banner trên dashboard dẫn anh tới **Tài khoản nhận tiền**: liên kết tài khoản CLB qua Tingee. Kết quả hiện ngay: dùng được QR động. CLB đã được duyệt Closed Beta nên không có banner "Chờ duyệt Closed Beta".
+2. Banner trên dashboard dẫn anh tới **Tài khoản nhận tiền**: dán Client ID và Secret Token lấy trên Tingee, chọn tài khoản CLB trong danh sách, rồi sao chép URL IPN dán vào portal Tingee. CLB đã được duyệt Closed Beta nên không có banner "Chờ duyệt Closed Beta".
 3. Anh bấm "Tạo Sự kiện" → `wizard-stepper` bước 1 **Thông tin**: tên, thời gian, địa điểm, mô tả, ảnh, chính sách hoàn vé.
 4. Bước 2 **Hạng vé**: "Đơn nam" 300.000đ, 32 suất, giờ mở/đóng bán; thêm "Đôi nam".
 5. Bước 3 **Form mua**: giữ trường mặc định, thêm câu hỏi "Trình độ" (lựa chọn, bắt buộc).
@@ -558,7 +559,7 @@ Nhóm theo người quyết; số thứ tự liên tục để dẫn chiếu ("O
 3. **Tra tay theo tên + số cuối SĐT** vượt phạm vi FR-29 (SĐT/email đầy đủ là bắt buộc, đã có) — PM/Architecture xác nhận (quyền riêng tư: CTV thấy danh sách tên khớp). Đây là nơi theo dõi chính của `[ASSUMPTION]` này.
 4. **Email + liên hệ BTC cho mọi loại Cần xử lý** — PM xác nhận kênh liên hệ BTC. Đây là nơi theo dõi chính của `[ASSUMPTION]` này.
 5. **Hàng "Cần xử lý" gộp cấp BTC** vượt phạm vi FR-31 — PM xác nhận.
-6. **Người mua thấy gì với QR tĩnh khi BTC bị ngắt dịch vụ** (PRD OQ #4).
+6. ~~**Người mua thấy gì với QR tĩnh khi BTC bị ngắt dịch vụ** (PRD OQ #4).~~ Đã chốt 03/11/2026: thanh toán chỉ qua Gateway (AD-6), không dùng QR tĩnh.
 7. **Thứ tự ưu tiên `status-banner`** (đề xuất ở Component Patterns › Thứ tự ưu tiên `status-banner`) và banner nào đóng được — PM xác nhận.
 8. **Xử lý Đơn đang Chờ thanh toán khi Hủy Sự kiện**, đánh dấu "Đã hoàn tay" hàng loạt và bỏ đánh dấu (Flow 4) — PM xác nhận.
 9. **Quyền còn lại của BTC khi bị khóa** (xem Đơn, check-in, xuất CSV) và quy trình Quản trị Tingee (PRD OQ #7).

@@ -15,7 +15,7 @@ inputDocuments:
 
 Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là các yêu cầu trong PRD, UX Design (DESIGN.md + EXPERIENCE.md) và Architecture Spine. Mỗi story phải đủ cụ thể để Dev agent implement được.
 
-**Thứ tự hiệu lực khi các nguồn khác nhau:** Architecture Spine (28/10) được viết sau PRD và UX (27/10), và đã chủ động thay đổi một số điểm. Hai thay đổi chính là chuyển sang **Tingee Payment Gateway (redirect)** thay cho QR động/tĩnh tự render, và **chặn liên kết VietinBank**. Khi PRD hoặc UX mâu thuẫn với Architecture về cơ chế kỹ thuật, story theo Architecture. Hành vi sản phẩm không bị Architecture đổi thì vẫn theo PRD/UX. Các điểm bị thay đổi được ghi ở mục "Điều chỉnh do Architecture" bên dưới.
+**Thứ tự hiệu lực khi các nguồn khác nhau:** Architecture Spine (28/10) được viết sau PRD và UX (27/10), và đã chủ động thay đổi một số điểm. Hai thay đổi chính là chuyển sang **Tingee Payment Gateway (redirect)** thay cho QR động/tĩnh tự render, và **không cho chọn tài khoản VietinBank làm tài khoản nhận tiền**. Khi PRD hoặc UX mâu thuẫn với Architecture về cơ chế kỹ thuật, story theo Architecture. Hành vi sản phẩm không bị Architecture đổi thì vẫn theo PRD/UX. Các điểm bị thay đổi được ghi ở mục "Điều chỉnh do Architecture" bên dưới.
 
 ## Requirements Inventory
 
@@ -31,8 +31,8 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 
 **4.2 Liên kết tài khoản nhận tiền**
 
-- FR-5: Owner liên kết tài khoản nhận tiền của BTC qua Tingee, hệ thống tạo Merchant con. BTC chưa liên kết thì không mở bán được Sự kiện có phí (Sự kiện miễn phí không cần). Tickee không lưu số dư hay tiền của BTC.
-- FR-6: *(Ngoài Closed Beta, trước khi mở công khai)* KYC BTC qua Tingee. Story không làm trong MVP, chỉ ghi để truy vết.
+- FR-5: Owner kết nối tài khoản merchant Tingee của BTC bằng Client ID và Secret Token, rồi chọn một tài khoản đã liên kết trên Tingee để nhận tiền vé. Key sai báo tại chỗ, không lưu; tài khoản VietinBank không chọn được. Sau khi chọn, trang hiện URL IPN riêng của BTC và các bước cấu hình cổng thanh toán trên portal Tingee. BTC chưa có tài khoản nhận tiền thì không mở bán được Sự kiện có phí (Sự kiện miễn phí không cần). Tickee không lưu số dư hay tiền của BTC; Secret Token chỉ lưu dạng mã hóa, không hiển thị lại.
+- FR-6: KYC do BTC làm trực tiếp với Tingee khi mở tài khoản merchant; Tickee không tham gia. Không có story, chỉ ghi để truy vết.
 - FR-37: BTC chỉ bán được Vé có phí sau khi Quản trị Tingee duyệt vào Closed Beta. Khi chưa được duyệt, BTC vẫn đăng ký, liên kết tài khoản và tạo Sự kiện nháp/miễn phí được. Dashboard hiện "Chờ duyệt Closed Beta". Thu hồi trạng thái này làm mọi Sự kiện có phí của BTC chuyển "Tạm ngừng bán". Mọi lần duyệt và thu hồi đều ghi nhật ký.
 
 **4.3 Sự kiện, Hạng vé, form mua vé**
@@ -50,7 +50,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 - FR-14: Giữ chỗ 15 phút có đếm ngược. Hết hạn mà chưa trả tiền thì chỗ được trả lại, Đơn chuyển "Hết hạn", mời Người mua tạo Đơn mới. Nếu tiền về muộn: Hạng vé còn chỗ thì phát Vé, hết chỗ thì Đơn vào "Cần xử lý" loại Thanh toán mồ côi (báo BTC, gửi email cho Người mua). Không bao giờ phát Vé vượt số suất.
 - FR-15: Chỉ tạo thanh toán khi BTC còn đủ Token và dịch vụ chưa bị ngắt. Khi không đủ thì trang Sự kiện hiện "Tạm ngừng bán". Sự kiện miễn phí không bị ảnh hưởng. *(Architecture: phát hiện qua trạng thái dịch vụ thanh toán khi tạo link, xem AD-32.)*
 - FR-16: Người mua thanh toán đúng số tiền của Đơn. Trang thanh toán ghi "Tiền chuyển thẳng cho [tên BTC]" và hiện chính sách hoàn vé. Tạo thanh toán dưới 2 giây. *(Architecture: dùng link Tingee Payment Gateway, redirect toàn trang, xem AD-6.)*
-- FR-17: Thanh toán khi BTC chỉ có QR tĩnh: Giữ chỗ 15 phút, tiền về muộn xử lý như FR-14. *(Architecture: Gateway tự khớp, Tickee không tự đối soát theo nội dung chuyển khoản, xem AD-6.)*
+- FR-17: ~~Thanh toán khi BTC chỉ có QR tĩnh: Giữ chỗ 15 phút, tiền về muộn xử lý như FR-14.~~ *(Đã bị AD-6 thay: mọi thanh toán qua Gateway, Gateway tự khớp; Tickee không tự đối soát theo nội dung chuyển khoản và không phân biệt loại QR.)*
 - FR-18: Khi Đơn được thanh toán, màn của Người mua tự chuyển sang "Thành công" và hiện mọi Vé, không cần reload. Từ lúc nhận IPN đến lúc Vé hiện trên trình duyệt dưới 3 giây.
 
 **4.5 Thanh toán và đối soát**
@@ -79,7 +79,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 - FR-31: Dashboard theo từng Sự kiện: doanh thu (chỉ tính Đơn "Đã thanh toán"), số Vé theo Hạng vé, danh sách Đơn kèm câu trả lời form, xuất CSV có đủ các trường của danh sách.
 - FR-32: Đồng bộ Google Sheets một chiều: mỗi Đơn một dòng, cập nhật trạng thái thanh toán và check-in trong vòng 1 phút. Ghi lỗi thì tự thử lại. Mất quyền thì dashboard báo kết nối lại. Không ghi đè cột do BTC tự thêm.
 - FR-33: *(Should)* Hủy Sự kiện: ngừng bán, vô hiệu mọi Vé, gửi email cho mọi Người mua, xuất danh sách cần hoàn tiền (Người mua, SĐT, email, số tiền đã trả, mã Đơn). BTC hoàn tiền ngoài hệ thống rồi đánh dấu "Đã hoàn tay".
-- FR-34: Owner xem số dư Token và hạn mức (đọc trực tiếp từ Tingee, không lưu), đặt ngưỡng cảnh báo, bấm "mua thêm Token" để sang luồng của Tingee. Admin chỉ xem. Khi Token xuống dưới ngưỡng, Owner nhận cảnh báo qua email và trên dashboard.
+- FR-34: Owner xem số dư Token và hạn mức (đọc trực tiếp từ Tingee bằng credential của BTC, không lưu), đặt ngưỡng cảnh báo, bấm "mua thêm Token" để mở portal Tingee của BTC. Admin chỉ xem. Khi Token xuống dưới ngưỡng, Owner nhận cảnh báo qua email và trên dashboard.
 
 **4.9 Niềm tin và an toàn**
 
@@ -96,7 +96,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 - NFR-3 (Chịu tải): 5.000 người cùng mua một Sự kiện 300 Vé mà không bán quá số suất. Phòng chờ đang hoãn; tạm dựa vào giới hạn tốc độ và cache trang (AD-31, AD-37).
 - NFR-4 (Sẵn sàng): Uptime 99,9%/tháng cho Checkout, IPN và check-in.
 - NFR-5 (Toàn vẹn): Ghi thanh toán, phát Vé và lên lịch email/Sheets diễn ra trọn gói hoặc không diễn ra gì. Có PITR (RPO ≤ 5 phút, RTO ≤ 1 giờ).
-- NFR-6 (Bảo mật): HTTPS toàn bộ. Request tới Tingee và IPN đều có chữ ký được xác thực. Mã QR vé được ký số. Mọi tài khoản tự bật được 2FA; Quản trị Tingee bắt buộc 2FA.
+- NFR-6 (Bảo mật): HTTPS toàn bộ. Request tới Tingee và IPN đều có chữ ký được xác thực. Secret Token Tingee của BTC mã hóa khi lưu (AES-256-GCM, khóa có phiên bản), không trả về trình duyệt, không ghi log. Mã QR vé được ký số. Mọi tài khoản tự bật được 2FA; Quản trị Tingee bắt buộc 2FA.
 - NFR-7 (Cách ly): BTC này không đọc được dữ liệu BTC khác. CTV chỉ đọc dữ liệu check-in của Sự kiện được giao.
 - NFR-8 (Dữ liệu cá nhân): Thu đồng ý theo NĐ 13/2023. Không lưu thông tin ngân hàng của Người mua. Dữ liệu Người mua chỉ dùng cho Sự kiện họ mua. Log che SĐT/email.
 - NFR-9 (Khả dụng): Mobile-first, chạy trên Safari iOS và Chrome Android bản hiện hành, giao diện tiếng Việt.
@@ -133,19 +133,19 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 - AD-2: tồn kho nằm ở `ticket_type_inventory(capacity, sold, held)` có CHECK. Giữ/bán có điều kiện bằng UPDATE. Đơn nhiều Hạng vé cập nhật theo id tăng dần. Có bảng phép tồn kho cho từng chuyển trạng thái. Có job đối chiếu định kỳ (chỉ cảnh báo, không tự sửa).
 - AD-3: Đơn là máy trạng thái compare-and-set gồm `pending`/`paid`/`expired`/`review`/`cancelled`/`refunded`.
 - AD-4: `expires_at` = now + 60 giây; gắn link xong thì bằng hạn link (15 phút). Hết hạn khi gặp điều kiện đầu tiên trong số (a) chưa có link sau 60 giây, (b) Tingee xác nhận chưa trả, (c) quá `expires_at` + 5 phút. Màn người mua: đồng hồ về 0 → "Đang xác nhận thanh toán", chỉ hiện "Hết hạn" khi API trả `expired`.
-- AD-6: Tingee Payment Gateway `create-link` (`merchantId` = Merchant con, `orderId` = mã Đơn, `expireInMinute` = 15, `returnUrl` = `/orders/:code`), mở bằng redirect toàn trang. Giá Hạng vé có phí ≥ 2.000đ. Chặn VietinBank (`BANK_NOT_SUPPORTED`).
-- AD-7: IPN kiểm HMAC-SHA512 trên raw body, lệch timestamp quá 10 phút thì từ chối. `payment_events` có whitelist field và khóa unique. Trả mã `00` trong dưới 5 giây. Bảng xử lý 7 trường hợp. `review_items` có `open`/`resolved` và `resolution`.
+- AD-6: Tingee Payment Gateway `create-link` ký bằng credential của BTC (`vaAccountNumber` = tài khoản nhận tiền hiện hành, không gửi `merchantId`, `orderId` = mã Đơn, `expireInMinute` = 15, `returnUrl` = `/orders/:code`), mở bằng redirect toàn trang. Giá Hạng vé có phí ≥ 2.000đ. Không cho chọn tài khoản VietinBank làm tài khoản nhận tiền (`BANK_NOT_SUPPORTED`).
+- AD-7: IPN nhận ở URL riêng của mỗi BTC (`/v1/payments/tingee/ipn/:ipnKey`), kiểm HMAC-SHA512 bằng Secret Token của BTC đó trên raw body, lệch timestamp quá 10 phút thì từ chối. `payment_events` có whitelist field và khóa unique. Trả mã `00` trong dưới 5 giây. Bảng xử lý 7 trường hợp. `review_items` có `open`/`resolved` và `resolution`.
 - AD-8: Đối soát bù tra trạng thái Gateway theo `orderId` sau 2 phút (backoff) và tại `expires_at`, đi chung đường xử lý với IPN.
-- AD-9: chỉ mô-đun `tingee` gọi Tingee: ký request, đổi mã lỗi Tingee thành lỗi miền, chuyển giờ UTC+7. Có Tingee fake cho test.
+- AD-9: chỉ mô-đun `tingee` gọi Tingee, mỗi lời gọi nhận credential của một BTC làm tham số: ký request, đổi mã lỗi Tingee thành lỗi miền (gồm `TINGEE_CREDENTIAL_INVALID`), chuyển giờ UTC+7. Env chỉ có `TINGEE_BASE_URL` và `TINGEE_CREDENTIAL_KEYS`; Secret Token của BTC mã hóa AES-256-GCM, không trả về web, không ghi log. Có Tingee fake (nhiều cặp key) cho test.
 - AD-15: check-in đúng một lần bằng UPDATE có điều kiện + `scanId`, không có đỏ giả. Schema `ScanResult` gồm các lý do `BAD_SIGNATURE`, `CANCELLED`, `VOIDED`, `OTHER_EVENT`, `EXPIRED`, `CHECKER_REVOKED`, `EVENT_ENDED`.
 - AD-16: Mã QR vé dạng `t<k>.<ticketId>.<sig>` (HMAC-SHA256, khóa có phiên bản).
 - AD-20: mã Đơn = `TK` + 8 ký tự Crockford base32, cũng là `orderId` gửi Gateway.
 - AD-21: `ordering.sellability(eventId)` là nguồn duy nhất cho trạng thái bán.
 - AD-29: link chia sẻ Vé bằng `share_token` 128 bit (DB chỉ lưu hash). `GET /v1/shared-tickets/:token` không cần đăng nhập. Email gửi Vé dùng link này.
 - AD-30: `checker_invites` (mỗi Sự kiện tối đa 1 link đang hoạt động, hạn = min(7 ngày, `effective_end_at`)) và `checkers` (CTV đã bị thu hồi không tự nhận lại được).
-- AD-32: `payment_service_status` (`active`/`suspended`). Job dò mỗi 5 phút khi `suspended`, có nút "Kiểm tra lại". Mở lại dịch vụ → Đối soát bù mọi Đơn còn mở. Token đọc trực tiếp từ Tingee (timeout 3 giây).
+- AD-32: `payment_service_status` (`active`/`suspended`, lý do `token`/`tingee_disabled`/`credential_invalid`). Job dò mỗi 5 phút khi `suspended`, có nút "Kiểm tra lại"; `credential_invalid` tắt khi Owner lưu key mới hợp lệ. Mở lại dịch vụ → Đối soát bù mọi Đơn còn mở. Token đọc trực tiếp từ Tingee bằng credential của BTC (timeout 3 giây).
 - AD-34: `reporting.notices(scope)` là nguồn duy nhất cho `status-banner`. `event.publishReadiness(eventId)` liệt kê điều kiện mở bán.
-- AD-35: bản chụp bất biến trên Đơn/Vé (`unit_price`, `total_amount`, thông tin người mua, câu trả lời form kèm nhãn, `sub_merchant_id`, `seq`, `holder_name`…). Tra tay khớp đầy đủ sau chuẩn hóa.
+- AD-35: bản chụp bất biến trên Đơn/Vé (`unit_price`, `total_amount`, thông tin người mua, câu trả lời form kèm nhãn, `payout_account_id`, `seq`, `holder_name`…). Credential và tài khoản nhận tiền cũ không xóa khi đổi. Tra tay khớp đầy đủ sau chuẩn hóa.
 
 **Thời gian và trạng thái:**
 
@@ -165,14 +165,14 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 
 - CI GitHub Actions: typecheck, dependency-cruiser, Vitest với Postgres thật, bộ test cách ly, Playwright với Tingee fake. Image tag theo SHA. Staging tự deploy từ `main`, production deploy thủ công theo tag. Migration chạy bằng vai `migrate` và luôn tương thích ngược.
 - Topology: ≥ 2 instance api và ≥ 1 worker. `/healthz`, `/readyz`. Graceful shutdown khi nhận SIGTERM.
-- Sao lưu: RPO ≤ 5 phút, RTO ≤ 1 giờ, giữ 14 ngày, diễn tập khôi phục trước Closed Beta. Secret lấy từ secret store, kiểm bằng schema Zod. Hai role DB: `tickee_migrator` và `tickee_app`.
-- Ba môi trường `local` (Tingee fake), `staging` (UAT), `production` (PROD). Test hợp đồng với Tingee UAT chạy ở staging.
+- Sao lưu: RPO ≤ 5 phút, RTO ≤ 1 giờ, giữ 14 ngày, diễn tập khôi phục trước Closed Beta. Secret lấy từ secret store, kiểm bằng schema Zod; env không có credential Tingee. Hai role DB: `tickee_migrator` và `tickee_app`.
+- Ba môi trường `local` (Tingee fake), `staging` (UAT), `production` (PROD), mỗi nơi một `TINGEE_BASE_URL` và một bộ `TINGEE_CREDENTIAL_KEYS` riêng; credential Tingee là của từng BTC. Test hợp đồng với Tingee UAT chạy ở staging bằng một tài khoản merchant UAT để thử.
 - Đo lường sản phẩm: bảng `checkout_funnel_events` không chứa PII (`buy_clicked`, `login_completed`, `order_created`, `paid`).
 - Giám sát: OpenTelemetry và các cảnh báo theo NFR-10.
 
 **Phụ thuộc bên ngoài và rủi ro:**
 
-- Câu hỏi mở với Tingee (API Token, API tra trạng thái theo `orderId`, gọi lại `create-link`, hủy link) không chặn việc chia Epic, nhưng chặn test hợp đồng ở staging.
+- Câu hỏi mở với Tingee (API Token và trạng thái dịch vụ gọi bằng key merchant, API tra trạng thái theo `orderId`, gọi lại `create-link`, hủy link, `create-link` với VA ngoài "Tài khoản cho phép thanh toán", URL IPN qua API) không chặn việc chia Epic, nhưng chặn test hợp đồng ở staging. Riêng câu key merchant có giới hạn quyền được không (không cho Chi hộ) chặn bán Vé có phí ở Closed Beta.
 - Nhà cung cấp hạ tầng/email/giám sát đang hoãn chờ pháp chế (NĐ 53/2022). Phải chốt trước Closed Beta.
 
 ### UX Design Requirements
@@ -190,7 +190,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 **Component dùng chung**
 
 - UX-DR6: `button-primary` / `button-primary-on-light` / `button-secondary` / `button-destructive`. Gọi mạng → spinner trong nút, giữ nguyên độ rộng, chặn bấm lặp. Không disable mà không có lý do hiển thị. `button-primary-on-light` ở dark mode trở thành coral. Hành động phá hủy luôn qua `Dialog` nêu hậu quả cụ thể.
-- UX-DR7: `stage-block`, `event-card`, `status-badge`. Badge luôn có chữ. Ánh xạ tone theo bảng DESIGN.md cho Đơn, loại Cần xử lý, Vé, Sự kiện, BTC và tài khoản nhận tiền.
+- UX-DR7: `stage-block`, `event-card`, `status-badge`. Badge luôn có chữ. Ánh xạ tone theo bảng DESIGN.md cho Đơn, loại Cần xử lý, Vé, Sự kiện, BTC và tài khoản nhận tiền (Đã liên kết → success, Key không còn dùng được → danger).
 - UX-DR8: `status-banner` gồm 4 tone, icon khác hình theo tone, tối đa một hành động. Banner chặn bán hoặc danger không đóng được. Hiện tối đa 2 banner, còn lại gộp "+N thông báo" (mở `Sheet`). Thông báo qua `aria-live="polite"`. Thứ tự ưu tiên 11 mức. Dữ liệu lấy từ `reporting.notices()`, web chỉ ánh xạ `code` sang nội dung.
 - UX-DR9: `empty-state` (một câu + tối đa một hành động). `otp-input` 6 ô, dán mã tự điền, `autocomplete="one-time-code"`, đủ 6 số tự gửi. `google-signin-button`. Toast `Sonner` không dùng cho lỗi chặn luồng.
 
@@ -232,7 +232,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 - UX-DR37: Tab Đơn: bảng (< md là danh sách thẻ), phân trang (không cuộn vô hạn), bộ lọc "Cần xử lý", xuất CSV. Empty-state: "Chưa có Đơn nào. Gửi link Sự kiện để bắt đầu bán." + "Sao chép link".
 - UX-DR38: Hàng Cần xử lý (cấp BTC, có badge số) và `needs-action-row`: badge loại + mã Đơn + Người mua + số nhận/số Đơn (phần chênh tô `danger-text`) + tên Sự kiện. Mở ra `Sheet` chi tiết (giao dịch, Đơn liên quan, nhật ký). Thao tác theo loại; xong thì hàng rời hàng đợi + toast nêu kết quả. Trống → "Không có gì cần xử lý."
 - UX-DR39: Tab Check-in: `checkin-progress` theo từng Hạng vé (realtime), link mời CTV chung ("Sao chép link", tạo link mới), danh sách CTV có "Thu hồi"/"Khôi phục", trạng thái link còn hạn/hết hạn.
-- UX-DR40: Các trạng thái dashboard: Chờ duyệt Closed Beta, Closed Beta bị thu hồi, chưa liên kết tài khoản (Owner thấy "Liên kết ngay", Admin thấy "Nhờ Owner…"), đang liên kết, liên kết thất bại, Token dưới ngưỡng/chạm hạn mức, mất quyền Google Sheets, BTC/Sự kiện bị khóa, Đã hủy kèm "{n} Đơn cần hoàn tiền" + "Xuất danh sách hoàn tiền", đã hoàn tay hết. Admin mở URL dành cho Owner → empty-state "Chỉ Owner xem được mục này." Bị xóa khỏi BTC giữa phiên → `Dialog` rồi chuyển BTC.
+- UX-DR40: Các trạng thái dashboard: Chờ duyệt Closed Beta, Closed Beta bị thu hồi, chưa liên kết tài khoản (Owner thấy "Liên kết ngay", Admin thấy "Nhờ Owner…"), key Tingee sai hoặc không còn dùng được (Owner thấy "Nhập lại key", Admin thấy "Nhờ Owner cập nhật key Tingee."), chưa có tài khoản trên Tingee (hướng dẫn đăng ký; Tingee chưa liên kết ngân hàng nào → `empty-state` + "Tải lại"), Token dưới ngưỡng/chạm hạn mức, mất quyền Google Sheets, BTC/Sự kiện bị khóa, Đã hủy kèm "{n} Đơn cần hoàn tiền" + "Xuất danh sách hoàn tiền", đã hoàn tay hết. Admin mở URL dành cho Owner → empty-state "Chỉ Owner xem được mục này." Bị xóa khỏi BTC giữa phiên → `Dialog` rồi chuyển BTC.
 - UX-DR41: Form Hạng vé có lỗi tại trường "Tối thiểu {n} — đã bán và đang giữ chỗ." và kiểm giá ≥ 2.000đ. Sửa thời gian/địa điểm khi đã phát Vé → `Dialog` báo sẽ gửi email cho Người mua. "Hủy Sự kiện" yêu cầu gõ tên Sự kiện.
 - UX-DR42: Trang "Bảo mật tài khoản" bật/tắt 2FA (QR, khóa nhập tay, mã khôi phục); màn nhập mã TOTP khi API trả `TOTP_REQUIRED`; màn xác nhận lại (TOTP hoặc OTP email) khi API trả `REAUTH_REQUIRED` (bổ sung theo Architecture, sửa theo Sprint Change Proposal 30/10/2026).
 
@@ -254,8 +254,8 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 | FR-2 | E2 | BTC, Owner, Admin, chuyển BTC |
 | FR-3 | E3 | Đăng nhập khi bấm Mua, giữ lựa chọn |
 | FR-4 | E2 | Ma trận quyền; áp dụng xuyên suốt mọi epic |
-| FR-5 | E2 | Liên kết tài khoản nhận tiền, Merchant con |
-| FR-6 | — | Ngoài Closed Beta, không có story |
+| FR-5 | E2 | Kết nối tài khoản Tingee của BTC, chọn tài khoản nhận tiền |
+| FR-6 | — | BTC làm KYC trực tiếp với Tingee, Tickee không tham gia; không có story |
 | FR-7 | E2 | Tạo/sửa/ẩn Sự kiện, kết thúc (hủy ở E7) |
 | FR-8 | E2 | Hạng vé |
 | FR-9 | E2 | Form mua vé |
@@ -266,7 +266,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 | FR-14 | E3 | Giữ chỗ 15 phút, hết hạn, tiền về muộn |
 | FR-15 | E4 | Tạm ngừng bán theo trạng thái dịch vụ (`sellability` dựng ở E2) |
 | FR-16 | E3 | Thanh toán qua Gateway |
-| FR-17 | E3 | QR tĩnh do Gateway tự khớp |
+| FR-17 | E3 | Đã bị AD-6 thay (mọi thanh toán qua Gateway) |
 | FR-18 | E3 | Tự chuyển Thành công |
 | FR-19 | E3 | IPN đủ 7 nhánh AD-7 |
 | FR-20 | E4 | Đối soát bù |
@@ -289,7 +289,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 | FR-37 | E2 | Duyệt Closed Beta (thu hồi → Tạm ngừng bán ở E4) |
 | FR-38 | E7 | Xóa tài khoản, rút đồng ý |
 
-Phủ 37/38 FR (FR-6 ngoài phạm vi MVP).
+Phủ 37/38 FR (FR-6 do Tingee đảm nhận).
 
 **Phụ thuộc giữa các epic:**
 - E1 → E2 → E3 → E4 (tuần tự).
@@ -650,33 +650,39 @@ So that chỉ BTC được tin cậy mới bán được Vé có phí khi chưa 
 ### Story 2.6: Liên kết tài khoản nhận tiền
 
 As a Owner,
-I want liên kết tài khoản ngân hàng của CLB qua Tingee,
+I want kết nối tài khoản Tingee của CLB và chọn tài khoản nhận tiền,
 So that tiền vé chuyển thẳng vào tài khoản của tôi.
 
 **Acceptance Criteria:**
 
 **Given** mô-đun `tingee` là nơi duy nhất gọi Tingee
-**When** gọi API Master Merchant / liên kết tài khoản
-**Then** adapter ký request (thời gian `yyyyMMddHHmmssSSS` UTC+7), đọc secret chỉ từ env, timeout có giới hạn, đổi mã lỗi Tingee thành lỗi miền (gồm `BANK_NOT_SUPPORTED`, `MERCHANT_SUSPENDED`), đổi giờ UTC+7 thành `timestamptz` (AD-9)
-**And** repo có Tingee fake ở `apps/api/test/tingee-fake` giả lập liên kết tài khoản và tạo Merchant con; mọi test tự động (trừ test hợp đồng) dùng fake
+**When** gọi `POST /v1/get-va-paging`
+**Then** adapter nhận credential của BTC làm tham số, ký request (`yyyyMMddHHmmssSSS` UTC+7, HMAC-SHA512), timeout có giới hạn, đổi mã lỗi Tingee thành lỗi miền (`TINGEE_CREDENTIAL_INVALID`, `MERCHANT_SUSPENDED`, `PAYMENT_PROVIDER_UNAVAILABLE`) (AD-9)
+**And** env chỉ có `TINGEE_BASE_URL` và `TINGEE_CREDENTIAL_KEYS`; Tingee fake ở `apps/api/test/tingee-fake` có nhiều cặp key, mỗi cặp một danh sách tài khoản; mọi test tự động (trừ test hợp đồng) dùng fake
 
-**Given** tôi là Owner ở trang Tài khoản nhận tiền
-**When** tôi nhập thông tin tài khoản và gửi
-**Then** lời gọi Tingee chạy ngoài transaction DB (AD-5); trong lúc chờ, `status-badge` "Đang liên kết", tôi rời trang được và banner cập nhật khi xong
-**And** thành công thì `organizer` lưu Merchant con và trạng thái liên kết; dashboard hiện loại QR thanh toán dùng được; chỉ QR tĩnh thì kèm khuyến nghị đổi sang tài khoản hỗ trợ QR động (FR-5, UX-DR40)
+**Given** tôi là Owner ở trang Tài khoản nhận tiền, BTC chưa kết nối Tingee
+**When** tôi nhập Client ID và Secret Token rồi bấm "Kết nối"
+**Then** server gọi Tingee ngoài transaction DB (AD-5); key đúng thì lưu credential (Secret Token mã hóa AES-256-GCM, khóa có phiên bản) và hiện danh sách tài khoản `active` của BTC trên Tingee (ngân hàng, 4 số cuối, tên chủ tài khoản)
+**And** key sai → lỗi tại chỗ "Client ID hoặc Secret Token không đúng." và không lưu gì; Tingee tạm lỗi → "Tingee tạm lỗi, thử lại sau ít phút." + "Thử lại", dữ liệu đã nhập giữ nguyên
+**And** Secret Token không bao giờ trả về trình duyệt hay ghi log; Client ID hiện dạng che
 
-**Given** tài khoản thuộc VietinBank (`970415`)
-**When** gửi liên kết
-**Then** bị từ chối với `BANK_NOT_SUPPORTED` và thông báo rõ tại chỗ (AD-6)
+**Given** danh sách tài khoản đã hiện
+**When** tôi chọn một tài khoản và bấm "Dùng tài khoản này"
+**Then** `organizer` lưu tài khoản nhận tiền (VA, ngân hàng, 4 số cuối, tên chủ tài khoản); dashboard hết banner "Chưa liên kết"; trang hiện thẻ tài khoản đã liên kết; audit ghi lại (không ghi giá trị)
+**And** tài khoản VietinBank (`970415`) hiện mờ kèm "Chưa hỗ trợ VietinBank", không chọn được; API cũng từ chối với `BANK_NOT_SUPPORTED` (AD-6)
+**And** Tingee chưa có tài khoản nào → `empty-state` "Tài khoản Tingee của bạn chưa liên kết tài khoản ngân hàng nào." + link tới portal Tingee + "Tải lại"
 
-**Given** Tingee trả lỗi
-**When** liên kết thất bại
-**Then** lỗi tại chỗ nêu lý do hành động được + "Thử lại", dữ liệu đã nhập giữ nguyên; `status-banner` danger "Chưa liên kết tài khoản nhận tiền" vẫn còn
-**And** Tickee không lưu số dư hay tiền của BTC
+**Given** BTC đã có tài khoản nhận tiền
+**When** Owner mở trang
+**Then** thấy URL IPN riêng của BTC (`/v1/payments/tingee/ipn/{ipnKey}`) với nút "Sao chép" và các bước cấu hình cổng thanh toán trên portal Tingee: dán URL IPN, chọn tài khoản vừa chọn trong "Các tài khoản cho phép thanh toán"
 
-**Given** BTC chưa liên kết
-**When** Owner xem dashboard
-**Then** thấy banner "Liên kết tài khoản nhận tiền để bán Vé có phí." + "Liên kết ngay"; Admin thấy "Nhờ Owner liên kết tài khoản nhận tiền."; Admin mở trang Tài khoản nhận tiền nhận `empty-state` "Chỉ Owner xem được mục này." (FR-4)
+**Given** BTC chưa có tài khoản Tingee
+**When** Owner mở trang
+**Then** thấy hướng dẫn ngắn: đăng ký tài khoản merchant Tingee, liên kết tài khoản ngân hàng, lấy API key, kèm link tới Tingee
+
+**Given** BTC chưa có tài khoản nhận tiền
+**When** Owner hoặc Admin xem dashboard
+**Then** Owner thấy banner danger "Liên kết tài khoản nhận tiền để bán Vé có phí." + "Liên kết ngay"; Admin thấy "Nhờ Owner liên kết tài khoản nhận tiền."; Admin mở trang Tài khoản nhận tiền nhận `empty-state` "Chỉ Owner xem được mục này."; API trả `FORBIDDEN_ROLE` (FR-4)
 
 ### Story 2.7: Tạo Sự kiện nháp
 
@@ -842,31 +848,32 @@ So that tôi kiểm soát được Sự kiện khi kế hoạch thay đổi.
 ### Story 2.13: Đổi tài khoản nhận tiền
 
 As a Owner,
-I want đổi sang tài khoản ngân hàng khác của CLB,
-So that tiền vé về đúng tài khoản khi CLB đổi ngân hàng mà không phải nhờ Tingee sửa tay.
+I want đổi tài khoản nhận tiền hoặc đổi key Tingee của CLB,
+So that tiền vé về đúng tài khoản khi CLB đổi ngân hàng hoặc thay key trên Tingee.
 
 **Acceptance Criteria:**
 
-**Given** BTC đã liên kết tài khoản nhận tiền
-**When** Owner bấm "Đổi tài khoản nhận tiền"
-**Then** yêu cầu xác nhận lại ngay lúc thao tác (`REAUTH_REQUIRED`): nhập mã TOTP nếu đã bật 2FA, nếu chưa thì nhập mã OTP gửi qua email rồi mới hiện form liên kết như Story 2.6; cùng quy tắc chặn VietinBank và lỗi tại chỗ (FR-5, AD-6, AD-26)
+**Given** BTC đã có tài khoản nhận tiền
+**When** Owner bấm "Đổi tài khoản nhận tiền" hoặc "Đổi key Tingee"
+**Then** yêu cầu xác nhận lại ngay lúc thao tác (`REAUTH_REQUIRED`): TOTP nếu đã bật 2FA, chưa bật thì OTP email; rồi hiện danh sách tài khoản (hoặc form key rồi danh sách) như Story 2.6; cùng quy tắc VietinBank và lỗi tại chỗ (FR-5, AD-6, AD-26)
 
-**Given** liên kết tài khoản mới thành công
+**Given** chọn xong tài khoản mới (với key hiện hành hoặc key mới)
 **When** lưu
-**Then** Merchant con mới thành Merchant con hiện hành cho mọi Đơn tạo **sau** thời điểm đổi; Đơn đã có link giữ `orders.sub_merchant_id` cũ, nên IPN và Đối soát bù của các Đơn đó vẫn khớp Merchant con cũ (AD-7)
-**And** Merchant con cũ được lưu lại (không xóa) để tra cứu và để nhận diện BTC cho giao dịch `unmatched` về sau
-**And** audit ghi người đổi, thời điểm, 4 số cuối tài khoản cũ và mới; email cảnh báo gửi cho Owner và mọi Admin của BTC
+**Then** tài khoản mới thành hiện hành cho mọi Đơn tạo **sau** thời điểm đổi; Đơn đã có link giữ `orders.payout_account_id` cũ, nên IPN và Đối soát bù của các Đơn đó vẫn dùng credential cũ (AD-35)
+**And** credential và tài khoản cũ được giữ (secret vẫn mã hóa), không xóa
+**And** audit ghi người đổi, thời điểm, 4 số cuối tài khoản cũ và mới; email cảnh báo gửi Owner và mọi Admin
+**And** `ipnKey` của BTC không đổi khi đổi key (BTC không phải dán lại URL IPN)
 
-**Given** liên kết tài khoản mới thất bại
-**When** Tingee trả lỗi
-**Then** tài khoản cũ vẫn là tài khoản hiện hành, không gián đoạn bán Vé
+**Given** key mới sai hoặc Tingee lỗi
+**When** lưu
+**Then** tài khoản và key cũ vẫn là hiện hành, không gián đoạn bán Vé
 
-**Given** Merchant con cũ bị Tingee vô hiệu trong khi còn Đơn `pending` dùng nó
-**When** IPN hoặc Đối soát bù tới cho các Đơn đó
-**Then** xử lý như bình thường theo Story 3.5–3.6; nếu tra trạng thái trả `MERCHANT_SUSPENDED` thì Đơn đi theo luồng hết hạn và cảnh báo vận hành, không chặn BTC bán bằng tài khoản mới
+**Given** BTC đã thu hồi key cũ trên Tingee mà còn Đơn `pending` dùng nó
+**When** Đối soát bù gọi Tingee bằng key cũ
+**Then** nhận `TINGEE_CREDENTIAL_INVALID` → Đơn đi luồng hết hạn và cảnh báo vận hành; IPN đã ký vẫn kiểm được bằng secret cũ; không chặn BTC bán bằng key mới
 
 **Given** Admin
-**When** mở thao tác đổi tài khoản
+**When** mở thao tác đổi
 **Then** không thấy nút; API trả `FORBIDDEN_ROLE` (FR-4)
 
 ### Story 2.14: Chuyển quyền Owner
@@ -1008,8 +1015,8 @@ So that tôi yên tâm chuyển tiền.
 
 **Given** TX1 đã commit một Đơn có phí
 **When** server tạo link
-**Then** `tingee.createPaymentLink()` gọi `POST /v1/payment-gateway/create-link` ngoài transaction (timeout 5 giây) với `merchantId` = Merchant con của BTC, `orderId` = mã Đơn, `amount` = `orders.total_amount`, `expireInMinute` = 15, `returnUrl` = `/orders/:code`; adapter ký timestamp UNIX ms (FR-16, AD-5, AD-6, AD-9)
-**And** TX2 lưu link bằng `WHERE status='pending' AND payment_link IS NULL`, chụp `orders.sub_merchant_id`, đặt `expires_at` = hạn link do Tingee trả; checkout URL chỉ trả cho trình duyệt sau khi TX2 commit; p95 dưới 2 giây (NFR-1)
+**Then** `tingee.createPaymentLink()` gọi `POST /v1/payment-gateway/create-link` ngoài transaction (timeout 5 giây), ký bằng credential của tài khoản nhận tiền hiện hành, `vaAccountNumber` = VA đã chọn (không gửi `merchantId`), `orderId` = mã Đơn, `amount` = `orders.total_amount`, `expireInMinute` = 15, `returnUrl` = `/orders/:code`; adapter ký timestamp UNIX ms (FR-16, AD-5, AD-6, AD-9)
+**And** TX2 lưu link bằng `WHERE status='pending' AND payment_link IS NULL`, chụp `orders.payout_account_id`, đặt `expires_at` = hạn link do Tingee trả; checkout URL chỉ trả cho trình duyệt sau khi TX2 commit; p95 dưới 2 giây (NFR-1)
 **And** nếu TX2 cập nhật 0 dòng (job hết hạn 60 giây đã thắng) thì không trả checkout URL; API trả `ORDER_EXPIRED` và web hiện màn Hết hạn của Story 3.7; link Tingee đã tạo tự hết hạn sau 15 phút, tiền nếu vẫn về sẽ đi nhánh tiền về muộn của Story 3.6
 
 **Given** Tingee trả lỗi rõ ràng (không phải timeout)
@@ -1026,14 +1033,9 @@ So that tôi yên tâm chuyển tiền.
 **When** quá `expires_at` + 5 phút
 **Then** job hoãn chuyển Đơn → `expired` và nhả chỗ (AD-4 (c))
 
-**Given** tạo link trả `MERCHANT_SUSPENDED`
+**Given** tạo link trả `MERCHANT_SUSPENDED` hoặc `TINGEE_CREDENTIAL_INVALID`
 **When** xử lý
 **Then** Đơn chuyển `expired`, nhả chỗ, Người mua thấy "Sự kiện tạm ngừng bán. Bạn thử lại sau nhé." (FR-15; bật cờ `payment_service_status` làm ở Epic 4)
-
-**Given** BTC chỉ có QR tĩnh (tài khoản cá nhân không có QR động)
-**When** Người mua thanh toán
-**Then** vẫn đi cùng luồng Gateway ở trên, Gateway tự khớp giao dịch theo `orderId`; Tickee không tự đối soát theo nội dung chuyển khoản; Giữ chỗ 15 phút; tiền về sau khi Đơn hết hạn xử lý như FR-14 (FR-17, AD-6)
-**And** test với Tingee fake có kịch bản Merchant con chỉ có QR tĩnh
 
 ### Story 3.5: Nhận IPN và phát Vé đúng một lần
 
@@ -1045,7 +1047,7 @@ So that tôi không phải gửi ảnh chụp chuyển khoản cho BTC.
 
 **Given** endpoint IPN công khai, không qua guard đăng nhập người dùng
 **When** Tingee gửi IPN
-**Then** server đọc raw body, kiểm `x-signature` = `HMAC_SHA512(x-request-timestamp + ':' + rawBody, secret)` bằng `timingSafeEqual`; sai chữ ký hoặc timestamp lệch quá 10 phút thì từ chối và ghi lại (FR-19, NFR-6, AD-7)
+**Then** endpoint `POST /v1/payments/tingee/ipn/:ipnKey` tìm BTC theo `ipnKey` trước khi đọc body (`ipnKey` lạ → 404, log); server đọc raw body, kiểm `x-signature` = `HMAC_SHA512(x-request-timestamp + ':' + rawBody, secret)` bằng `timingSafeEqual`, với `secret` = Secret Token hiện hành của BTC, rồi tới các credential cũ còn giữ; sai chữ ký hoặc timestamp lệch quá 10 phút thì từ chối và ghi lại (FR-19, NFR-6, AD-7)
 
 **Given** IPN hợp lệ
 **When** lưu
@@ -1071,7 +1073,7 @@ So that tôi không phải gửi ảnh chụp chuyển khoản cho BTC.
 
 **Given** Tingee fake trong test
 **When** chạy test tích hợp
-**Then** fake ký IPN bằng secret test, phủ: IPN đúng, sai chữ ký, lệch timestamp, lặp, đồng thời
+**Then** fake ký IPN bằng secret của từng BTC, phủ: IPN đúng, sai chữ ký, lệch timestamp, lặp, đồng thời, IPN ký bằng secret của BTC khác gửi vào URL của BTC này (từ chối)
 
 ### Story 3.6: IPN cho các trường hợp biên
 
@@ -1082,8 +1084,8 @@ So that không có khoản tiền nào về tài khoản mà không ai biết.
 **Acceptance Criteria:**
 
 **Thứ tự kiểm cố định** cho mọi IPN `success` (và kết quả Đối soát bù ở Story 4.1), dừng ở nhánh đầu tiên khớp:
-1. `orderId` không tồn tại → nhánh `unmatched`
-2. `merchantId` khác `orders.sub_merchant_id` → nhánh Merchant lệch
+1. `orderId` không theo định dạng mã Đơn Tickee → lưu event, trả `00`, không tạo `review_item`; `orderId` đúng định dạng nhưng không tồn tại → nhánh `unmatched` gắn BTC sở hữu `ipnKey`
+2. Đơn không thuộc BTC sở hữu `ipnKey`, hoặc `vaAccountNumber` khác tài khoản đã chụp (`orders.payout_account_id`) → nhánh Tài khoản lệch
 3. Sự kiện đã hủy → nhánh `event_cancelled`
 4. Đơn `paid`, `cancelled`, `refunded` hoặc `review` → nhánh `duplicate_payment`
 5. `paidAmount` ≠ `total_amount` → nhánh `amount_mismatch`
@@ -1118,21 +1120,22 @@ So that không có khoản tiền nào về tài khoản mà không ai biết.
 **And** nhánh này được kiểm trước nhánh `duplicate_payment`, nên một khoản tiền về Đơn bị hủy theo Sự kiện chỉ có một mục, và luôn vào danh sách hoàn tiền của Story 7.2
 **And** *Điều chỉnh so với Architecture:* sơ đồ AD-3 không có chuyển `cancelled` → `review`; cần cập nhật bảng AD-7 cho khớp quy tắc "giữ `cancelled`, chỉ tạo `review_item`"
 
-**Given** IPN có `orderId` không tồn tại
+**Given** IPN có `orderId` không theo định dạng mã Đơn Tickee (AD-20)
 **When** xử lý
-**Then** lưu `payment_events` với `order_id` null; nếu `merchantId` ứng với Merchant con của một BTC thì tạo `review_item` loại `unmatched` gắn BTC đó và log cảnh báo
-**And** nếu `merchantId` không ứng với BTC nào thì không tạo `review_item` (vì `organization_id NOT NULL`), mà đẩy cảnh báo vận hành mức cao kèm id của `payment_events` để Quản trị Tingee xử lý (Story 4.6)
+**Then** lưu `payment_events` với `order_id` null, trả `{"code":"00","message":"Success"}`, không tạo `review_item` (BTC dùng tài khoản Tingee cho việc khác ngoài Tickee) (AD-7)
+**And** `orderId` đúng định dạng nhưng không tồn tại thì lưu `payment_events` với `order_id` null, tạo `review_item` loại `unmatched` gắn BTC sở hữu `ipnKey` và log cảnh báo
+**And** mọi IPN đã qua chữ ký đều xác định được BTC theo `ipnKey`, nên `review_item` luôn có `organization_id`
 
-**Given** IPN có `merchantId` khác `orders.sub_merchant_id`
+**Given** IPN cho Đơn không thuộc BTC sở hữu `ipnKey`, hoặc có `vaAccountNumber` khác tài khoản nhận tiền đã chụp ở `orders.payout_account_id`
 **When** xử lý
-**Then** không chạy `markPaid` và không đổi trạng thái Đơn; lưu event; tạo `review_item` loại `unmatched` gắn BTC sở hữu Merchant con đã nhận tiền (nếu xác định được, nếu không thì như nhánh trên); đẩy cảnh báo vận hành (AD-7)
+**Then** nhánh Tài khoản lệch: không chạy `markPaid` và không đổi trạng thái Đơn; lưu event; tạo `review_item` loại `unmatched` gắn BTC sở hữu `ipnKey` (không gắn Đơn của BTC khác); đẩy cảnh báo vận hành (AD-7)
 **And** vẫn trả `{"code":"00","message":"Success"}` để Tingee không gửi lại vô hạn; event đã lưu là bằng chứng để xử lý
 
 **Given** `review_items`
 **When** tạo mục
 **Then** mỗi Đơn tối đa một mục `open` cho mỗi loại, **trừ** `duplicate_payment`: loại này unique theo `(order_id, type, payment_event_id)`, nên mỗi khoản trả trùng là một mục riêng và BTC hoàn đủ từng khoản
 **And** mục `duplicate_payment` và `unmatched` chỉ kết thúc bằng `refunded` hoặc `dismissed`
-**And** test tích hợp với Tingee fake phủ đủ 7 nhánh của bảng AD-7, cộng các trường hợp: trả trùng hai lần, Đơn `review` nhận thêm tiền, tiền về muộn nhiều Hạng vé thiếu chỗ một hạng, tiền về sau `effective_end_at`, Merchant không ứng với BTC nào
+**And** test tích hợp với Tingee fake phủ đủ 7 nhánh của bảng AD-7, cộng các trường hợp: trả trùng hai lần, Đơn `review` nhận thêm tiền, tiền về muộn nhiều Hạng vé thiếu chỗ một hạng, tiền về sau `effective_end_at`, `orderId` không theo định dạng mã Đơn Tickee, Đơn thuộc BTC khác BTC sở hữu `ipnKey`
 
 ### Story 3.7: Trang Đơn tự chuyển "Thành công" theo thời gian thực
 
@@ -1285,7 +1288,7 @@ So that tôi không bao giờ trả tiền mà không có Vé.
 
 **Given** TX2 vừa gắn link cho một Đơn
 **When** commit
-**Then** enqueue job hoãn để tra trạng thái giao dịch trên Gateway theo `orderId` sau 2 phút, lặp theo backoff đến khi Đơn rời `pending`, và thêm một lần tra tại `expires_at` (FR-20, AD-8)
+**Then** enqueue job hoãn để tra trạng thái giao dịch trên Gateway theo `orderId` (gọi Tingee bằng credential chụp trong `orders.payout_account_id`) sau 2 phút, lặp theo backoff đến khi Đơn rời `pending`, và thêm một lần tra tại `expires_at` (FR-20, AD-8)
 **And** Đơn đã từng có link mà chuyển `expired` vẫn được tra tiếp thêm 3 lần (sau 30 phút, 2 giờ, 24 giờ kể từ khi hết hạn), để bắt khoản tiền về muộn mà IPN bị mất
 **And** mỗi Đơn có số lần tra tối đa; khi tra lỗi hoặc kết quả mơ hồ liên tục vượt mức này, job dừng và đẩy cảnh báo vận hành (Story 4.6) kèm mã Đơn, không lặp vô hạn
 
@@ -1310,19 +1313,23 @@ So that không ai trả tiền vào lúc tôi không nhận được thông báo
 
 **Acceptance Criteria:**
 
-**Given** `organizer` sở hữu `payment_service_status` (`active` | `suspended`, `reason` `token` | `tingee_disabled`, `since`, `last_checked_at`)
-**When** tạo link trả `MERCHANT_SUSPENDED`
-**Then** trong transaction bù sau lời gọi, cờ chuyển `suspended`; phát `org_status_changed` (FR-15, AD-32)
+**Given** `organizer` sở hữu `payment_service_status` (`active` | `suspended`, `reason` `token` | `tingee_disabled` | `credential_invalid`, `since`, `last_checked_at`)
+**When** tạo link trả `MERCHANT_SUSPENDED`, hoặc một lời gọi bằng key của BTC trả `TINGEE_CREDENTIAL_INVALID`
+**Then** trong transaction bù sau lời gọi, cờ chuyển `suspended` (lý do `credential_invalid` với trường hợp sau); phát `org_status_changed` (FR-15, AD-32)
 **And** `sellability` trả "Tạm ngừng bán" cho mọi Hạng vé > 0đ của BTC; Hạng vé 0đ vẫn bán; trang Sự kiện hiện banner warning "Tạm ngừng bán", stepper và "Mua" tắt
 
 **Given** cờ `suspended`
-**When** job dò `tingee.getMerchantServiceStatus()` mỗi 5 phút, hoặc Owner bấm "Kiểm tra lại", hoặc Quản trị Tingee tắt cờ
+**When** job dò `tingee.getMerchantServiceStatus(credential)` bằng credential hiện hành của BTC mỗi 5 phút, hoặc Owner bấm "Kiểm tra lại", hoặc Quản trị Tingee tắt cờ, hoặc (với `credential_invalid`) Owner lưu key mới hợp lệ
 **Then** dịch vụ đã mở lại thì cờ chuyển `active` và enqueue Đối soát bù cho mọi Đơn còn mở của BTC (FR-20, AD-32)
 **And** lời gọi Tingee chạy ngoài transaction, có timeout
 
 **Given** cờ `suspended` lý do Token
 **When** Owner/Admin mở dashboard
 **Then** `status-banner` danger không đóng được "Mọi Sự kiện có phí đang Tạm ngừng bán" theo thứ tự ưu tiên của `notices`; Owner có hành động "Mua thêm Token" (FR-34, UX-DR40)
+
+**Given** cờ `suspended` lý do `credential_invalid`
+**When** Owner/Admin mở dashboard
+**Then** `status-banner` danger không đóng được "Key Tingee không còn dùng được"; Owner có hành động "Nhập lại key" (qua xác nhận lại, Story 2.13), Admin thấy "Nhờ Owner cập nhật key Tingee." (FR-5, AD-32, UX-DR40)
 
 **Given** Closed Beta bị thu hồi
 **When** tính trạng thái bán
@@ -1400,7 +1407,7 @@ So that tôi nạp thêm trước khi Sự kiện bị Tạm ngừng bán.
 
 **Given** trang Token
 **When** Owner hoặc Admin mở
-**Then** số dư và hạn mức âm hoặc trả sau đọc trực tiếp từ Tingee mỗi lần xem qua adapter (timeout 3 giây), không lưu; lỗi hiện "Chưa đọc được số dư" (FR-34, AD-32)
+**Then** số dư và hạn mức âm hoặc trả sau đọc trực tiếp từ Tingee mỗi lần xem qua adapter bằng credential của BTC (timeout 3 giây), không lưu; lỗi hiện "Chưa đọc được số dư" (FR-34, AD-32)
 **And** Admin chỉ xem; nút đặt ngưỡng và "mua thêm Token" chỉ hiện với Owner (FR-4)
 
 **Given** tôi là Owner
@@ -1413,7 +1420,7 @@ So that tôi nạp thêm trước khi Sự kiện bị Tạm ngừng bán.
 
 **Given** Owner bấm "Mua thêm Token"
 **When** chuyển hướng
-**Then** sang luồng mua Token của Tingee; Tickee không tự bán Token
+**Then** mở portal Tingee của BTC; Tickee không bán Token
 
 ### Story 4.6: Giám sát và lưới an toàn vận hành
 
@@ -1453,7 +1460,7 @@ So that Checkout, IPN và check-in luôn chạy, và một sự cố DB không l
 
 **Given** ba môi trường `local` (Tingee fake), `staging` (Tingee UAT), `production` (Tingee PROD)
 **When** cấu hình
-**Then** mỗi nơi một bộ credential Tingee riêng; secret tiêm từ secret store của nền tảng, danh sách biến khớp schema Zod của `config`; local không nhận IPN thật (AD-36)
+**Then** mỗi nơi một `TINGEE_BASE_URL` và một bộ `TINGEE_CREDENTIAL_KEYS` riêng; credential Tingee là của từng BTC; secret tiêm từ secret store của nền tảng, danh sách biến khớp schema Zod của `config`; local không nhận IPN thật (AD-36)
 
 **Given** PR được merge vào `main`
 **When** CI xanh (thêm Playwright với Tingee fake và bộ test cách ly vào pipeline của Story 1.1)
@@ -1468,7 +1475,7 @@ So that Checkout, IPN và check-in luôn chạy, và một sự cố DB không l
 **Then** ngừng nhận SSE mới, đóng SSE đang mở để client tự nối lại, `boss.stop({ graceful })`; không mất IPN nào trong lúc deploy, kiểm bằng test gửi IPN liên tục trong một lượt deploy staging (AD-36, NFR-4)
 
 **Given** staging
-**When** chạy bộ test hợp đồng với Tingee UAT (tạo link, IPN ký thật, tra trạng thái theo `orderId`, liên kết tài khoản)
+**When** chạy bộ test hợp đồng với Tingee UAT bằng một tài khoản merchant UAT để thử (tạo link, IPN ký thật, tra trạng thái theo `orderId`, đọc danh sách tài khoản (`get-va-paging`))
 **Then** bộ test chạy được bằng một lệnh và theo lịch; lỗi thì cảnh báo vận hành (AD-36)
 
 **Given** Postgres production có PITR và failover tự động

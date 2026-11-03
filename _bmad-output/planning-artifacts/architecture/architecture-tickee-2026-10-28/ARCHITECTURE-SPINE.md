@@ -7,7 +7,7 @@ paradigm: 'Modular monolith (NestJS) — một codebase, ba vai chạy: api, wor
 scope: 'Toàn bộ Tickee MVP v1: trang mua Vé, dashboard BTC, check-in CTV, Quản trị Tingee, tích hợp Tingee Payment Gateway'
 status: final
 created: '2026-10-28'
-updated: '2026-10-28'
+updated: '2026-11-03'
 binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37, FR-38, NFR-1, NFR-2, NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-8, NFR-9, NFR-10, NFR-11, NFR-12]
 sources:
   - _bmad-output/planning-artifacts/prds/prd-tickee-2026-10-27/prd.md
@@ -15,7 +15,7 @@ sources:
   - _bmad-output/planning-artifacts/ux-designs/ux-tickee-2026-10-27/DESIGN.md (nhánh docs/ux-tickee-mvp, commit 1bec95c, chưa merge vào main)
   - _bmad-output/planning-artifacts/ux-designs/ux-tickee-2026-10-27/EXPERIENCE.md (nhánh docs/ux-tickee-mvp, commit 1bec95c, chưa merge vào main)
   - _bmad-output/planning-artifacts/brd-data-model-notes.md
-  - https://developers.tingee.vn/docs (Payment Gateway, Webhook, Master Merchant, Lưu ý quan trọng — đọc 28/10/2026)
+  - https://developers.tingee.vn/docs (Payment Gateway, Webhook, Tài khoản & Định danh (get-va-paging), Lưu ý quan trọng — đọc 28/10/2026)
 companions:
   - .memlog.md
   - reviews/
@@ -30,7 +30,7 @@ companions:
 | Mô-đun (`apps/api/src/modules/…`) | Sở hữu |
 | --- | --- |
 | `identity` | Tài khoản Tickee, session, OTP, TOTP và step-up, đồng ý NĐ 13, xóa tài khoản |
-| `organizer` | BTC, thành viên và vai trò, Merchant con và trạng thái liên kết tài khoản nhận tiền, Closed Beta, trạng thái dịch vụ thanh toán, ngưỡng cảnh báo Token, khóa BTC, kênh liên hệ BTC |
+| `organizer` | BTC, thành viên và vai trò, `tingee_credentials` (Client ID, Secret Token mã hóa, phiên bản khóa, `ipn_key`) và `payout_accounts` (tài khoản nhận tiền đã chọn: VA, ngân hàng, 4 số cuối, tên chủ tài khoản, credential dùng để chọn), Closed Beta, trạng thái dịch vụ thanh toán, ngưỡng cảnh báo Token, khóa BTC, kênh liên hệ BTC |
 | `event` | Sự kiện, Hạng vé (giá, thời gian bán), giới hạn Vé/Đơn, form mua vé, trạng thái Sự kiện, `effective_end_at`, khóa Sự kiện |
 | `ordering` | Đơn, dòng Đơn, câu trả lời form (kèm nhãn), bản chụp người mua, mã Đơn, link Gateway, tồn kho `ticket_type_inventory`, sự kiện phễu mua |
 | `payment` | `payment_events`, Đối soát bù, hàng Cần xử lý (`review_items`) |
@@ -135,19 +135,19 @@ stateDiagram-v2
 
 - **Binds:** FR-5, FR-12, FR-16, FR-34, NFR-1, NFR-3; mọi mô-đun
 - **Prevents:** Giữ khóa tồn kho trong lúc chờ Tingee; cạn connection pool khi đông; người mua trả tiền cho Đơn sắp bị hủy.
-- **Rule:** Không có HTTP, email hay Google API nào chạy trong `db.transaction`. Tạo Đơn có phí = TX1 (giữ chỗ + Đơn `pending` chưa link) → commit → `tingee.createPaymentLink()` (timeout 5 giây) → TX2 lưu link bằng compare-and-set. Checkout URL chỉ trả cho trình duyệt sau khi TX2 commit. Tingee trả lỗi rõ ràng → người mua được thử lại cùng Đơn (`POST /v1/me/orders/:code/payment-link`) trong cửa sổ 60 giây; timeout hoặc kết quả mơ hồ → không thử lại với cùng `orderId`, chuyển `expired`, người mua tạo Đơn mới. Các lời gọi Tingee đồng bộ được phép: tạo link, liên kết tài khoản và tạo Merchant con, đọc Token, dò trạng thái dịch vụ — luôn ngoài transaction, có timeout, trả mã lỗi miền.
+- **Rule:** Không có HTTP, email hay Google API nào chạy trong `db.transaction`. Tạo Đơn có phí = TX1 (giữ chỗ + Đơn `pending` chưa link) → commit → `tingee.createPaymentLink()` (timeout 5 giây) → TX2 lưu link bằng compare-and-set. Checkout URL chỉ trả cho trình duyệt sau khi TX2 commit. Tingee trả lỗi rõ ràng → người mua được thử lại cùng Đơn (`POST /v1/me/orders/:code/payment-link`) trong cửa sổ 60 giây; timeout hoặc kết quả mơ hồ → không thử lại với cùng `orderId`, chuyển `expired`, người mua tạo Đơn mới. Các lời gọi Tingee đồng bộ được phép: tạo link, đọc danh sách tài khoản của BTC, đọc Token, dò trạng thái dịch vụ — luôn ngoài transaction, có timeout, trả mã lỗi miền.
 
 ### AD-6 — Thanh toán qua Tingee Payment Gateway, mở bằng redirect
 
 - **Binds:** FR-5, FR-15, FR-16, FR-17, FR-18; `ordering`, `organizer`, `tingee`, `apps/web`
 - **Prevents:** Tự khớp QR tĩnh theo nội dung chuyển khoản; hai luồng thanh toán song song; popup bị Safari iOS chặn.
-- **Rule:** Mỗi lần thử của một Đơn có phí tạo link `POST /v1/payment-gateway/create-link` với `merchantId` = Merchant con của BTC, `orderId` = mã Đơn (AD-20), `amount` = `orders.total_amount`, `expireInMinute` = 15, `returnUrl` = `/orders/:code` của Tickee. Web mở link bằng **redirect toàn trang**, không dùng popup `tingee.js`. Trang `/orders/:code` luôn lấy trạng thái qua REST và realtime (AD-17), không tin tham số trên URL. Không gọi API QR động/tĩnh, không tự sinh deep link. Giá Hạng vé có phí ≥ 2.000đ, kiểm khi lưu Hạng vé. Không cho liên kết tài khoản VietinBank (`970415`, mã lỗi `BANK_NOT_SUPPORTED`).
+- **Rule:** Mỗi lần thử của một Đơn có phí tạo link `POST /v1/payment-gateway/create-link` ký bằng credential của BTC (chụp vào Đơn), `vaAccountNumber` = tài khoản nhận tiền hiện hành của BTC (không gửi `merchantId`), `orderId` = mã Đơn (AD-20), `amount` = `orders.total_amount`, `expireInMinute` = 15, `returnUrl` = `/orders/:code` của Tickee. Web mở link bằng **redirect toàn trang**, không dùng popup `tingee.js`. Trang `/orders/:code` luôn lấy trạng thái qua REST và realtime (AD-17), không tin tham số trên URL. Không gọi API QR động/tĩnh, không tự sinh deep link. Giá Hạng vé có phí ≥ 2.000đ, kiểm khi lưu Hạng vé. Không cho chọn tài khoản VietinBank (`970415`) làm tài khoản nhận tiền (`BANK_NOT_SUPPORTED`) cho tới khi Tingee trả lời câu hỏi về VietinBank ở mục Open Questions.
 
 ### AD-7 — IPN: xác thực trên raw body, idempotent, xử lý mọi trường hợp biên
 
 - **Binds:** FR-19, FR-21, NFR-2, NFR-5, NFR-6, NFR-8, NFR-10; `payment`
 - **Prevents:** IPN giả; IPN retry xử lý hai lần; tiền về cho một Đơn không còn chờ mà không ai biết.
-- **Rule:** Endpoint IPN là public đối với guard xác thực người dùng, đọc raw body và kiểm `x-signature` = `HMAC_SHA512(x-request-timestamp + ':' + rawBody, secret)` bằng `timingSafeEqual`; sai chữ ký → từ chối và ghi lại. `x-request-timestamp` lệch quá 10 phút → từ chối. IPN hợp lệ lưu vào `payment_events` (chỉ các field trong whitelist, bỏ dữ liệu ngân hàng của người trả) với khóa unique: `providerTransactionCode` cho sự kiện thanh toán, `(orderId, status)` cho sự kiện trạng thái; trùng khóa → trả thành công, không làm gì. Ghi event và gọi `ordering` trong một transaction, trả `{"code":"00","message":"Success"}` trong dưới 5 giây. Xử lý theo bảng:
+- **Rule:** Endpoint IPN là `POST /v1/payments/tingee/ipn/:ipnKey`, public đối với guard xác thực người dùng. `ipnKey` là chuỗi ngẫu nhiên 128 bit (base64url), mỗi BTC một chuỗi, không phải secret. Server tìm BTC theo `ipnKey` **trước khi** đọc body; `ipnKey` lạ → trả 404 và log. Sau đó đọc raw body và kiểm `x-signature` = `HMAC_SHA512(x-request-timestamp + ':' + rawBody, secret)` bằng `timingSafeEqual`, với `secret` là Secret Token hiện hành của BTC, rồi tới các credential cũ còn giữ (AD-35); sai chữ ký → từ chối và ghi lại. `x-request-timestamp` lệch quá 10 phút → từ chối. IPN hợp lệ lưu vào `payment_events` (chỉ các field trong whitelist, bỏ dữ liệu ngân hàng của người trả) với khóa unique: `providerTransactionCode` cho sự kiện thanh toán, `(orderId, status)` cho sự kiện trạng thái; trùng khóa → trả thành công, không làm gì. Ghi event và gọi `ordering` trong một transaction, trả `{"code":"00","message":"Success"}` trong dưới 5 giây. Xử lý theo bảng:
 
 | Trường hợp | Hành động |
 | --- | --- |
@@ -155,8 +155,8 @@ stateDiagram-v2
 | `success`, `paidAmount` ≠ `total_amount` | Đơn → `review` loại `amount_mismatch`, không phát Vé |
 | `success`, Sự kiện đã hủy | Đơn → `review` loại `event_cancelled`, vào danh sách hoàn tiền |
 | `success`, Đơn đã `paid`/`cancelled`/`refunded` | `review_item` loại `duplicate_payment` gắn Đơn |
-| `orderId` không tồn tại | lưu `payment_events` với `order_id` null, `review_item` loại `unmatched`, cảnh báo |
-| `merchantId` khác `orders.sub_merchant_id` (bản chụp lúc tạo link) | từ chối xử lý, lưu và cảnh báo |
+| `orderId` không tồn tại | không theo định dạng mã Đơn Tickee (AD-20) → lưu `payment_events`, trả `00`, không tạo `review_item` (BTC dùng Tingee cho việc khác); đúng định dạng → lưu `payment_events` với `order_id` null, `review_item` loại `unmatched` gắn BTC sở hữu `ipnKey`, cảnh báo |
+| Đơn của `orderId` không thuộc BTC sở hữu `ipnKey`, hoặc `vaAccountNumber` khác tài khoản nhận tiền chụp ở `orders.payout_account_id` | nhánh Tài khoản lệch: từ chối xử lý, lưu và cảnh báo |
 | `canceled`/`expired` | AD-4 (b) |
 
 `review_items` do `payment` sở hữu, có `status` `open` | `resolved` và `resolution` (`approved`, `rejected`, `refunded`, `dismissed`); mỗi Đơn tối đa một mục `open` cho mỗi loại. Duyệt tay gọi `markPaid(source=manual)`; kết quả khác `paid` thì mục vẫn `open` kèm lý do. Mục `duplicate_payment` và `unmatched` chỉ kết thúc bằng `refunded` hoặc `dismissed`, không phát Vé.
@@ -171,7 +171,14 @@ stateDiagram-v2
 
 - **Binds:** FR-5, FR-15, FR-16, FR-20, FR-34, NFR-6; `tingee`
 - **Prevents:** Ký request sai định dạng ở nhiều nơi; tên field Tingee lan khắp code.
-- **Rule:** Chỉ mô-đun `tingee` gọi HTTP sang Tingee và biết tên field của Tingee. Adapter ký request (Gateway: timestamp UNIX ms; API Master Merchant và liên kết tài khoản: `yyyyMMddHHmmssSSS` UTC+7), gắn `merchantId`, đổi mã lỗi Tingee thành lỗi miền (gồm `MERCHANT_SUSPENDED`, `BANK_NOT_SUPPORTED`), đổi chuỗi thời gian UTC+7 thành `timestamptz`. Server đồng bộ giờ bằng NTP. Secret Tingee chỉ đọc từ env. Repo có một Tingee fake (`apps/api/test/tingee-fake`) ký IPN bằng secret test, giả lập tạo link và tra trạng thái; mọi test tự động trừ test hợp đồng dùng fake.
+- **Rule:**
+  - Chỉ mô-đun `tingee` gọi HTTP sang Tingee và biết tên field của Tingee. Mọi lời gọi nhận credential của một BTC làm tham số (do `organizer` giải mã ngay trước khi gọi, không giữ trong bộ nhớ lâu hơn lời gọi).
+  - Adapter làm các việc:
+    - Ký request. Gateway dùng timestamp UNIX ms; API Tài khoản & Định danh dùng `yyyyMMddHHmmssSSS` UTC+7.
+    - Đổi mã lỗi Tingee thành lỗi miền: `TINGEE_CREDENTIAL_INVALID` (92, 97, 1133), `MERCHANT_SUSPENDED` (1007, 1034), `BANK_NOT_SUPPORTED`.
+    - Đổi chuỗi thời gian UTC+7 thành `timestamptz`.
+  - Server đồng bộ giờ bằng NTP. Env chỉ có `TINGEE_BASE_URL` và `TINGEE_CREDENTIAL_KEYS` (danh sách khóa AES-256-GCM có phiên bản, mẫu AD-23); không có credential Tingee nào trong env. Secret Token không bao giờ trả về web hay ghi log; Client ID hiển thị dạng che.
+  - Repo có Tingee fake (`apps/api/test/tingee-fake`) với nhiều cặp key, mỗi cặp có một danh sách tài khoản. Fake ký IPN bằng secret của từng BTC, giả lập đọc danh sách tài khoản, tạo link và tra trạng thái. Mọi test tự động trừ test hợp đồng dùng fake.
 
 ### AD-10 — Ranh giới mô-đun và quyền sở hữu dữ liệu
 
@@ -328,7 +335,7 @@ Client dùng một hook duy nhất: gọi REST khi kết nối, khi nhận tín 
 
 - **Binds:** FR-15, FR-20, FR-34, FR-37; `organizer`, `tingee`, `payment`
 - **Prevents:** "Tạm ngừng bán" kẹt mãi vì không ai tắt; Đối soát bù sau khi mở lại dịch vụ không bao giờ chạy.
-- **Rule:** `organizer` sở hữu `payment_service_status` của BTC (`active` | `suspended`, `reason` `token` | `tingee_disabled`, `since`, `last_checked_at`) và `token_alert_threshold`. Bật `suspended` khi adapter trả `MERCHANT_SUSPENDED` (trong transaction bù của AD-5). Tắt bằng: job dò `tingee.getMerchantServiceStatus()` mỗi 5 phút khi đang `suspended`, nút "Kiểm tra lại" của Owner, hoặc Quản trị Tingee. Tắt cờ → enqueue Đối soát bù cho mọi Đơn còn mở của BTC (AD-8). Thu hồi Closed Beta là trường riêng (`closed_beta_status`), không dùng cờ này. Số dư và hạn mức Token đọc trực tiếp từ Tingee mỗi lần xem (timeout 3 giây, lỗi → "Chưa đọc được số dư"), không lưu.
+- **Rule:** `organizer` sở hữu `payment_service_status` của BTC (`active` | `suspended`, `reason` `token` | `tingee_disabled` | `credential_invalid`, `since`, `last_checked_at`) và `token_alert_threshold`. Bật `suspended` khi adapter trả `MERCHANT_SUSPENDED` (trong transaction bù của AD-5); bật với `reason` `credential_invalid` khi lời gọi bằng key của BTC trả `TINGEE_CREDENTIAL_INVALID`. Tắt bằng: job dò `tingee.getMerchantServiceStatus(credential)` mỗi 5 phút khi đang `suspended`, nút "Kiểm tra lại" của Owner, hoặc Quản trị Tingee; riêng `credential_invalid` tắt khi Owner lưu credential mới hợp lệ, hoặc bấm "Kiểm tra lại" mà Tingee chấp nhận key. Tắt cờ → enqueue Đối soát bù cho mọi Đơn còn mở của BTC (AD-8). Thu hồi Closed Beta là trường riêng (`closed_beta_status`), không dùng cờ này. Số dư và hạn mức Token đọc trực tiếp từ Tingee bằng credential của BTC mỗi lần xem (timeout 3 giây, lỗi → "Chưa đọc được số dư"), không lưu.
 
 ### AD-33 — Read model cho đọc chéo mô-đun
 
@@ -346,7 +353,7 @@ Client dùng một hook duy nhất: gọi REST khi kết nối, khi nhận tín 
 
 - **Binds:** FR-8, FR-9, FR-12, FR-27, FR-29, FR-31, NFR-8; `ordering`, `ticketing`
 - **Prevents:** Đổi giá làm IPN đúng bị xếp nhầm vào lệch tiền; người dùng sửa hồ sơ làm lệch dữ liệu BTC đã có; tra cứu SĐT trên toàn hệ thống.
-- **Rule:** TX1 ghi bất biến: `order_items.unit_price`, `orders.total_amount`, tên, SĐT (E.164), email người mua, và câu trả lời form kèm nhãn câu hỏi lúc đặt. `orders.sub_merchant_id` chụp lúc tạo link, nên đổi tài khoản nhận tiền không ảnh hưởng Đơn đang mở. `orders.paid_amount` và `paid_at` (thời điểm Tingee báo) ghi khi tiền về. `markPaid` ghi lên mỗi Vé: `seq` (1..N, `UNIQUE (order_id, seq)`), `order_ticket_count`, `holder_name`, `ticket_type_name`, `order_code`, `issued_at`. Màn BTC, CSV, Sheets, kết quả quét và tra tay chỉ đọc bản chụp này, trong `orgScope` và `event_id`. Tra tay khớp **đầy đủ** sau chuẩn hóa (E.164, email chữ thường), trả `{ticketId, holderName, ticketTypeName, seq, count, checkedIn}`, không log giá trị đã tra.
+- **Rule:** TX1 ghi bất biến: `order_items.unit_price`, `orders.total_amount`, tên, SĐT (E.164), email người mua, và câu trả lời form kèm nhãn câu hỏi lúc đặt. `orders.payout_account_id` chụp lúc tạo link (trỏ tới tài khoản nhận tiền và credential đã dùng), nên đổi tài khoản nhận tiền không ảnh hưởng Đơn đang mở. Credential và tài khoản nhận tiền cũ không xóa khi đổi; secret cũ giữ (mã hóa) cho IPN và Đối soát bù của Đơn còn mở. `orders.paid_amount` và `paid_at` (thời điểm Tingee báo) ghi khi tiền về. `markPaid` ghi lên mỗi Vé: `seq` (1..N, `UNIQUE (order_id, seq)`), `order_ticket_count`, `holder_name`, `ticket_type_name`, `order_code`, `issued_at`. Màn BTC, CSV, Sheets, kết quả quét và tra tay chỉ đọc bản chụp này, trong `orgScope` và `event_id`. Tra tay khớp **đầy đủ** sau chuẩn hóa (E.164, email chữ thường), trả `{ticketId, holderName, ticketTypeName, seq, count, checkedIn}`, không log giá trị đã tra.
 
 ### AD-36 — Vận hành: CI/CD, topology, job, sao lưu, secret
 
@@ -357,7 +364,7 @@ Client dùng một hook duy nhất: gọi REST khi kết nối, khi nhận tín 
   - Topology tối thiểu: ≥ 2 instance `api` sau load balancer, ≥ 1 instance `worker`. `/healthz` (liveness), `/readyz` (DB và `LISTEN`). Nhận `SIGTERM`: ngừng nhận SSE mới, đóng SSE đang mở, `boss.stop({ graceful })`.
   - Sao lưu: RPO ≤ 5 phút, RTO ≤ 1 giờ, giữ 14 ngày, diễn tập khôi phục trước Closed Beta.
   - Secret tiêm từ secret store của nền tảng; tên và danh sách biến cố định trong schema Zod của `config`. Hai role DB: `tickee_migrator` (DDL), `tickee_app` (DML). drizzle-kit bỏ qua schema `pgboss`.
-  - Môi trường `local`, `staging`, `production` mỗi nơi một bộ credential Tingee riêng (UAT/UAT/PROD); local không nhận IPN thật, dùng Tingee fake. Test hợp đồng với Tingee UAT chạy ở staging.
+  - Môi trường `local`, `staging`, `production` mỗi nơi một `TINGEE_BASE_URL` (fake/UAT/PROD) và một bộ `TINGEE_CREDENTIAL_KEYS` riêng; credential là của từng BTC. `local` không nhận IPN thật, dùng Tingee fake. Test hợp đồng với Tingee UAT chạy ở staging, dùng một tài khoản merchant UAT để thử (secret trong secret store của CI).
 
 ### AD-37 — Trang Sự kiện công khai khi đông người
 
@@ -369,7 +376,7 @@ Client dùng một hook duy nhất: gọi REST khi kết nối, khi nhận tín 
 
 | Concern | Convention |
 | --- | --- |
-| Thuật ngữ trong code | Tài khoản Tickee = `user`; BTC = `organization`; Owner/Admin = `member.role` `owner`/`admin`; CTV = `checker`; Sự kiện = `event`; Hạng vé = `ticket_type`; Đơn = `order`; dòng Đơn = `order_item`; Vé = `ticket`; Giữ chỗ = `hold`; Cần xử lý = `review_item`; Đối soát bù = `reconciliation`; Merchant con = `sub_merchant`; Quản trị Tingee = `platform_admin` |
+| Thuật ngữ trong code | Tài khoản Tickee = `user`; BTC = `organization`; Owner/Admin = `member.role` `owner`/`admin`; CTV = `checker`; Sự kiện = `event`; Hạng vé = `ticket_type`; Đơn = `order`; dòng Đơn = `order_item`; Vé = `ticket`; Giữ chỗ = `hold`; Cần xử lý = `review_item`; Đối soát bù = `reconciliation`; Quản trị Tingee = `platform_admin` |
 | Loại `review_item` | `amount_mismatch`, `orphan`, `event_cancelled`, `duplicate_payment`, `unmatched` |
 | Đặt tên | Bảng và cột `snake_case`, tên bảng số nhiều; TypeScript `camelCase`; thư mục mô-đun `kebab-case`; mã lỗi miền `UPPER_SNAKE` khai báo trong `packages/contracts`; queue `<module xử lý>.<action>`; topic realtime theo AD-17 |
 | ID | Khóa chính UUIDv7 (`uuidv7()` của PG 18, Better Auth cấu hình sinh UUIDv7); mã Đơn theo AD-20 |
@@ -415,7 +422,7 @@ Client dùng một hook duy nhất: gọi REST khi kết nối, khi nhận tín 
 | dependency-cruiser | 18.7.0 |
 | Vitest | 5.0.5 |
 | Playwright | 1.64.1 |
-| Tingee Open API (Payment Gateway, Master Merchant, Webhook) | v1 |
+| Tingee Open API (Payment Gateway, Tài khoản & Định danh (get-va-paging), Webhook) | v1 |
 
 ## Structural Seed
 
@@ -450,7 +457,7 @@ flowchart LR
   web --> s3
   gateway -->|"IPN"| apiRole
   apiRole --> pg[("PostgreSQL 18")]
-  apiRole -->|"tạo link, liên kết tài khoản, đọc Token"| tingeeApi["Tingee Open API"]
+  apiRole -->|"tạo link, đọc danh sách tài khoản, đọc Token"| tingeeApi["Tingee Open API"]
   apiRole --> google["Google OAuth"]
   worker["worker (NestJS)"] --> pg
   worker -->|"tra trạng thái, dò dịch vụ"| tingeeApi
@@ -473,7 +480,8 @@ Thực thể chính:
 erDiagram
   USER ||--o{ MEMBER : "là"
   ORGANIZATION ||--o{ MEMBER : "có"
-  ORGANIZATION ||--o| SUB_MERCHANT : "liên kết"
+  ORGANIZATION ||--o{ TINGEE_CREDENTIAL : "kết nối"
+  TINGEE_CREDENTIAL ||--o{ PAYOUT_ACCOUNT : "chọn"
   ORGANIZATION ||--o{ EVENT : "tổ chức"
   EVENT ||--o{ TICKET_TYPE : "có"
   TICKET_TYPE ||--|| TICKET_TYPE_INVENTORY : "tồn kho"
@@ -497,7 +505,7 @@ erDiagram
 | --- | --- | --- |
 | Tài khoản, đăng nhập, xóa tài khoản (FR-1, FR-3, FR-38) | `identity`, `flows` | AD-19, AD-24, AD-26 |
 | BTC, thành viên, phân quyền (FR-2, FR-4) | `organizer`, `platform` | AD-13, AD-18, AD-26 |
-| Liên kết tài khoản nhận tiền, Closed Beta, KYC (FR-5, FR-6, FR-37) | `organizer`, `tingee` | AD-5, AD-6, AD-9, AD-34 |
+| Kết nối tài khoản Tingee của BTC (credential mã hóa), chọn tài khoản nhận tiền, Closed Beta (FR-5, FR-6, FR-37) | `organizer`, `tingee` | AD-5, AD-6, AD-9, AD-34 |
 | Sự kiện, Hạng vé, form, trang công khai, miễn phí (FR-7–FR-11) | `event`, `ordering`, `flows`, `apps/web` | AD-2, AD-14, AD-25, AD-27, AD-34, AD-37 |
 | Checkout, Giữ chỗ, hết hạn (FR-12–FR-14) | `ordering` | AD-2, AD-3, AD-4, AD-5, AD-20, AD-31, AD-35 |
 | Token, Tạm ngừng bán (FR-15, FR-34) | `organizer`, `tingee`, `integration` | AD-9, AD-21, AD-32 |
@@ -520,7 +528,6 @@ erDiagram
 | Row Level Security của Postgres | AD-13 + AD-26 đủ cho MVP; RLS là lớp phòng thủ thêm | Bộ test cách ly phát hiện lỗi |
 | Thời hạn lưu dữ liệu người mua | Chờ pháp chế (PRD Câu hỏi mở #8) | Trước Closed Beta |
 | Xem Vé khi mất mạng (UX OQ #13) | Mã QR vé là chuỗi tĩnh nên lưu ở client được; chưa cần cho MVP | Phản hồi từ Closed Beta |
-| KYC BTC (FR-6) | Ngoài Closed Beta | Trước khi mở công khai |
 | Check-in offline, app native, Zalo ZNS, OTP qua SĐT | Ngoài phạm vi MVP | Bản sau MVP |
 
 ## Open Questions
@@ -530,10 +537,13 @@ Câu hỏi cho Tingee (không chặn việc chia Epic; quy tắc hiện tại an
 - Gọi `create-link` lần nữa với cùng `orderId` thì sao (trả link cũ, báo trùng, hay tạo link mới)? Nếu trả link cũ, AD-5 có thể cho thử lại cùng Đơn cả khi timeout.
 - Tên endpoint và field của API tra trạng thái đơn Gateway theo `orderId` (AD-8); `providerTransactionCode` có ổn định giữa các lần retry và trùng với kết quả tra trạng thái không (AD-7)?
 - Có API hủy link Gateway không (dùng khi hủy Sự kiện, AD-28)?
-- Có API đọc trạng thái dịch vụ và Token của Merchant con không, và mã lỗi nào báo bị ngắt vì Token (AD-32)? Tingee có tự gửi cảnh báo Token cho BTC không?
+- Có API đọc trạng thái dịch vụ và Token gọi bằng key của merchant không, và mã lỗi nào báo bị ngắt vì Token (AD-32)? Tingee có tự gửi cảnh báo Token cho BTC không?
 - Trang Gateway hiển thị tên người nhận nào (tên BTC hay tên chủ tài khoản)? Ảnh hưởng `recipient-trust-block` của UX.
 - Với Gateway, còn cần chặn VietinBank không (Gateway tự khớp, nhưng VietinBank không trả nội dung chuyển khoản)?
 - IPN Gateway có gửi JSON đã minify đúng như chuỗi được ký không? Kiểm bằng test hợp đồng ở staging.
+- `create-link` với `vaAccountNumber` không nằm trong "Tài khoản cho phép thanh toán" thì trả lỗi gì?
+- Key merchant có giới hạn quyền được không (không cho Chi hộ)? Câu này chặn bán Vé có phí ở Closed Beta (Sprint Change Proposal 03/11/2026).
+- URL IPN chỉ cấu hình được qua portal hay có API?
 
 Câu hỏi sản phẩm (PM/UX):
 
@@ -545,6 +555,6 @@ Câu hỏi sản phẩm (PM/UX):
 
 Cập nhật tài liệu nguồn:
 
-- **PRD:** §3 (mã Đơn ≠ `billId`; Giữ chỗ và QR thanh toán chuyển sang link Gateway; Token khả dụng do Tingee lo), §6 (QR động/tĩnh, Deep Link → Payment Gateway), FR-5 (chặn VietinBank), FR-14 (nhả chỗ theo xác nhận Tingee hoặc trần cứng), FR-15 (phát hiện tạm ngừng khi tạo link thay vì tính Token trước), FR-16/FR-17 (Gateway), FR-21 (loại `review_item` mới), FR-22 (link chia sẻ có token), NFR-1 ("tạo link" thay cho "tạo QR"), SM-2 (bỏ tách QR động/tĩnh), giá Hạng vé có phí tối thiểu 2.000đ.
+- **PRD:** §3 (mã Đơn ≠ `billId`; Giữ chỗ và QR thanh toán chuyển sang link Gateway; Token khả dụng do Tingee lo), §6 (QR động/tĩnh, Deep Link → Payment Gateway), FR-5 (không cho chọn tài khoản VietinBank), FR-14 (nhả chỗ theo xác nhận Tingee hoặc trần cứng), FR-15 (phát hiện tạm ngừng khi tạo link thay vì tính Token trước), FR-16/FR-17 (Gateway), FR-21 (loại `review_item` mới), FR-22 (link chia sẻ có token), NFR-1 ("tạo link" thay cho "tạo QR"), SM-2 (bỏ tách QR động/tĩnh), giá Hạng vé có phí tối thiểu 2.000đ.
 - **UX:** bỏ `payment-qr-card` và luồng chọn app ngân hàng; thêm màn xác nhận rồi redirect sang Gateway; trạng thái "Đang xác nhận thanh toán"; màn đăng ký và step-up TOTP; trường liên hệ BTC; ví dụ mã Đơn 10 ký tự (`TK8F3Q2AXM`). Danh sách chi tiết ở `reviews/reconcile-ux.md`.
 - Merge nhánh `docs/ux-tickee-mvp` vào `main` trước khi chia Epic.
