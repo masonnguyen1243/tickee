@@ -16,8 +16,8 @@ export const StatusNoticeCode = {
   /** BTC chưa được duyệt Closed Beta (warning, không đóng được). */
   CLOSED_BETA_PENDING: 'CLOSED_BETA_PENDING',
   /**
-   * BTC chưa có tài khoản nhận tiền hiện hành (chưa kết nối Tingee, hoặc đã kết nối nhưng chưa chọn tài khoản): chưa bán
-   * được Vé có phí (danger, chặn bán, không đóng được).
+   * BTC chưa có tài khoản nhận tiền hiện hành (chưa kết nối Tingee, đã kết nối nhưng chưa chọn tài khoản, hoặc đã hủy
+   * liên kết hết): chưa bán được Vé có phí (danger, chặn bán, không đóng được).
    */
   PAYOUT_ACCOUNT_NOT_LINKED: 'PAYOUT_ACCOUNT_NOT_LINKED',
 } as const;

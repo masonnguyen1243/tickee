@@ -367,6 +367,23 @@ test('tab khác đã liên kết đúng tài khoản này: toast "Tài khoản n
   await expect(page.getByText('Chưa dùng được tài khoản này')).toHaveCount(0);
 });
 
+test('tab khác vừa liên kết tài khoản trong lúc tab này nhập key khác: toast, form nhường chỗ cho danh sách đã liên kết', async ({
+  page,
+}) => {
+  const { calls, state } = await openPage(page, { initial: CONNECTED });
+  await chooser(page).getByRole('button', { name: 'Dùng key khác' }).click();
+  await expect(page.locator('[data-slot="tingee-connect-form"]')).toBeVisible();
+  state.accounts = [linkedAccount(MB)];
+  state.everLinked = true;
+  await connectWith(page, EMPTY);
+  await expect(page.getByText('BTC đã liên kết tài khoản nhận tiền nên không đổi key ở đây được.')).toBeVisible();
+  await expect(page.locator('[data-slot="payout-account-card"]')).toBeVisible();
+  await expect(accountRows(page)).toHaveCount(1);
+  await expect(page.locator('[data-slot="tingee-connect-form"]')).toHaveCount(0);
+  await expect(page.getByText('Chưa kết nối được Tingee')).toHaveCount(0);
+  expect(posts(calls, '/credential')).toHaveLength(1);
+});
+
 test('danh sách có tài khoản: "Tải lại" + link portal dưới danh sách đọc lại danh sách', async ({ page }) => {
   const { calls, state } = await openPage(page, { initial: CONNECTED });
   await expect(optionRows(page)).toHaveCount(3);

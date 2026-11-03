@@ -66,7 +66,10 @@ export const ErrorCode = {
   BANK_NOT_SUPPORTED: 'BANK_NOT_SUPPORTED',
   /** Tài khoản đã chọn không còn `active` trên Tingee (hoặc credential đã đổi giữa chừng): tải lại danh sách. */
   PAYOUT_ACCOUNT_UNAVAILABLE: 'PAYOUT_ACCOUNT_UNAVAILABLE',
-  /** BTC đã có tài khoản nhận tiền đang dùng; đổi tài khoản hoặc đổi key là luồng riêng (Story 2.13). */
+  /**
+   * VA này đã là tài khoản nhận tiền hiện hành của BTC; hoặc gửi key Tingee khi BTC đã từng liên kết tài khoản (kể cả
+   * đã hủy hết), vì đổi key là luồng riêng (Story 2.13).
+   */
   PAYOUT_ACCOUNT_ALREADY_LINKED: 'PAYOUT_ACCOUNT_ALREADY_LINKED',
   /** Tài khoản merchant Tingee của BTC đang bị Tingee tạm khóa. */
   MERCHANT_SUSPENDED: 'MERCHANT_SUSPENDED',
