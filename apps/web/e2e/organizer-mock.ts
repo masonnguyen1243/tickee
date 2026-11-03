@@ -26,7 +26,6 @@ const NOTICE_DEFAULTS: Record<string, { severity: string; blocking: boolean }> =
   CLOSED_BETA_REVOKED: { severity: 'danger', blocking: true },
   CLOSED_BETA_PENDING: { severity: 'warning', blocking: false },
   PAYOUT_ACCOUNT_NOT_LINKED: { severity: 'danger', blocking: true },
-  PAYOUT_ACCOUNT_LINKING: { severity: 'neutral', blocking: false },
 };
 
 /** Một thông báo trạng thái (`StatusNotice`) cho `GET /orgs/:id/notices`. */

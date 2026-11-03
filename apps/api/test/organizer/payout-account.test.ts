@@ -1,78 +1,107 @@
 import {
   ErrorResponse,
   PayoutAccount,
+  PayoutAccountOptions,
   PayoutAccountOverview,
   Role,
   StatusNoticeList,
-  type LinkPayoutAccountRequest,
 } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import type { Response } from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { HttpTingeeClient, TINGEE_CLIENT } from '../../src/modules/tingee/index.js';
-import { apiConfig } from '../helpers.js';
+import { payoutAccountSettings } from '../../src/modules/organizer/payout-account.service.js';
+import {
+  HttpTingeeClient,
+  TINGEE_CLIENT,
+  type TingeeClient,
+  type TingeeCredential,
+} from '../../src/modules/tingee/index.js';
+import { parseCredentialKeys, SecretBox } from '../../src/platform/crypto/index.js';
+import { TEST_CREDENTIAL_KEYS, testCredentialKey } from '../helpers.js';
 import { createHarness, signUp, type Harness } from '../identity/harness.js';
-import { startTingeeFake, type TingeeFake } from '../tingee-fake/server.js';
+import { fakeAccount, startTingeeFake, type FakeAccount, type TingeeFake } from '../tingee-fake/server.js';
 
 /*
- * Story 2.6: liên kết tài khoản nhận tiền trên Tingee fake (server HTTP thật) và Postgres thật. Tingee luôn được gọi
- * ngoài transaction; mỗi lần ghi trạng thái là một transaction riêng có audit; tối đa một dòng `linked` mỗi BTC.
- * Không bao giờ gọi Tingee thật.
+ * Story 2.6: BTC kết nối API key Tingee của mình và chọn tài khoản nhận tiền, trên Tingee fake (server HTTP thật, nhiều
+ * merchant) và Postgres thật. Tingee luôn được gọi ngoài transaction; mỗi lần ghi là một transaction riêng có audit; tối
+ * đa một credential và một tài khoản nhận tiền hiện hành mỗi BTC. Không bao giờ gọi Tingee thật.
  */
 
-const { TINGEE_CLIENT_ID, TINGEE_SECRET_TOKEN } = apiConfig();
-const PHONE = '0912345678';
-const CCCD = '079203001234';
+const MAIN: TingeeCredential = { clientId: 'tg-client-main-0a1b2c3d', secretToken: 'tg-secret-main-Zx9Yw8Vu7' };
+const OTHER: TingeeCredential = { clientId: 'tg-client-other-4e5f6a7b', secretToken: 'tg-secret-other-Ts6Rq5Po4' };
+const EMPTY: TingeeCredential = { clientId: 'tg-client-empty-8c9d0e1f', secretToken: 'tg-secret-empty-Nm3Lk2Ji1' };
+const SUSPENDED: TingeeCredential = { clientId: 'tg-client-suspended-01', secretToken: 'tg-secret-suspended-Hg0' };
+const FORBIDDEN: TingeeCredential = { clientId: 'tg-client-forbidden-02', secretToken: 'tg-secret-forbidden-Fe9' };
+const BROKEN: TingeeCredential = { clientId: 'tg-client-broken-03', secretToken: 'tg-secret-broken-Dc8' };
+const HANGING: TingeeCredential = { clientId: 'tg-client-hanging-04', secretToken: 'tg-secret-hanging-Ba7' };
+const SECRETS = [MAIN, OTHER, EMPTY, SUSPENDED, FORBIDDEN, BROKEN, HANGING].map((c) => c.secretToken);
 /** Timeout ngắn để kịch bản "treo" không làm test chậm (mặc định thật là 15 giây). */
 const TIMEOUT_MS = 1_500;
+const IPN_PREFIX = 'http://api.tickee.test/v1/payments/tingee/ipn/';
 
 let fake: TingeeFake;
 let h: Harness;
 let owner: Awaited<ReturnType<typeof signUp>>;
 let admin: Awaited<ReturnType<typeof signUp>>;
 let orgId: string;
-let seq = 0;
-
-/** Số tài khoản duy nhất cho mỗi lần gọi, đuôi chọn kịch bản của fake (`0000`, `1111`, `4343`, `8181`, `5000`). */
-const account = (suffix: string) => `88${String(Date.now() % 1e6).padStart(6, '0')}${String(++seq).padStart(2, '0')}${suffix}`;
-const usedAccounts: string[] = [];
-
-const form = (suffix: string, overrides: Partial<LinkPayoutAccountRequest> = {}): LinkPayoutAccountRequest => {
-  const accountNumber = account(suffix);
-  usedAccounts.push(accountNumber);
-  return {
-    bankBin: '970422',
-    accountNumber,
-    accountName: 'Nguyễn Văn Đạt',
-    identityNumber: CCCD,
-    phone: PHONE,
-    ...overrides,
-  };
+/** Danh sách của MAIN ở test hiện tại: MB (chọn được), VietinBank (mờ), BIDV `inactive` (không hiện). */
+let mb: FakeAccount;
+let vietin: FakeAccount;
+let inactive: FakeAccount;
+/** Mọi số tài khoản đầy đủ đã cho fake trả về (không được xuất hiện trong log, response hay DB). */
+const accountNumbers: string[] = [];
+/** Mọi response body của api trong file này. */
+const responses: string[] = [];
+/** Chữ ký (`x-signature`) của mọi request tới fake trong file này (gom trước mỗi lần `reset`). */
+const signatures: string[] = [];
+const resetFake = () => {
+  signatures.push(...fake.requests.map((r) => r.signature));
+  fake.reset();
 };
 
+/** Chạy một lần sau lời gọi Tingee kế tiếp (trước khi service đi tiếp): chen thao tác của "tab khác" vào giữa. */
+let afterNextList: (() => Promise<void>) | null = null;
+
+function trackedAccount(overrides: FakeAccount = {}): FakeAccount {
+  const account = fakeAccount(overrides);
+  accountNumbers.push(String(account.accountNumber));
+  return account;
+}
+
 beforeAll(async () => {
-  fake = await startTingeeFake({ clientId: TINGEE_CLIENT_ID, secretToken: TINGEE_SECRET_TOKEN });
-  h = await createHarness(
-    { TINGEE_BASE_URL: fake.url },
-    {
-      overrides: [
-        {
-          provide: TINGEE_CLIENT,
-          useValue: new HttpTingeeClient({
-            baseUrl: fake.url,
-            clientId: TINGEE_CLIENT_ID,
-            secretToken: TINGEE_SECRET_TOKEN,
-            timeoutMs: TIMEOUT_MS,
-          }),
-        },
-      ],
+  fake = await startTingeeFake({
+    merchants: [
+      { ...MAIN, accounts: [] },
+      { ...OTHER, accounts: [] },
+      { ...EMPTY, accounts: [] },
+      { ...SUSPENDED, accounts: [], behavior: 'suspended' },
+      { ...FORBIDDEN, accounts: [], behavior: 'forbidden' },
+      { ...BROKEN, accounts: [], behavior: 'error' },
+      { ...HANGING, accounts: [], behavior: 'hang' },
+    ],
+  });
+  const http = new HttpTingeeClient({ baseUrl: fake.url, timeoutMs: TIMEOUT_MS });
+  const client: TingeeClient = {
+    async listAccounts(credential) {
+      const accounts = await http.listAccounts(credential);
+      const hook = afterNextList;
+      afterNextList = null;
+      if (hook) await hook();
+      return accounts;
     },
-  );
+  };
+  h = await createHarness({ TINGEE_BASE_URL: fake.url }, { overrides: [{ provide: TINGEE_CLIENT, useValue: client }] });
   owner = await signUp(h);
   admin = await signUp(h);
 });
 beforeEach(async () => {
-  fake.reset();
+  resetFake();
+  afterNextList = null;
+  mb = trackedAccount({ bankName: 'MB Bank', bankBin: '970422', accountName: 'CLB CO VUA QUAN 3' });
+  vietin = trackedAccount({ bankName: 'VietinBank', bankBin: '970415', accountName: 'NGUYEN VAN AN' });
+  inactive = trackedAccount({ bankName: 'BIDV', bankBin: '970418', status: 'inactive' });
+  fake.merchant(MAIN.clientId).accounts = [mb, vietin, inactive];
+  fake.merchant(OTHER.clientId).accounts = [trackedAccount({ bankName: 'Vietcombank', bankBin: '970436' })];
   orgId = (await h.http.post('/v1/orgs').set('cookie', owner.cookie).send({ name: 'CLB Cờ Vua' }).expect(201)).body
     .id as string;
   await h.db.orm.execute(
@@ -84,15 +113,28 @@ afterAll(async () => {
   await fake.close();
 });
 
-const link = (body: unknown, cookie = owner.cookie, org = orgId) =>
-  h.http.post(`/v1/orgs/${org}/payout-account`).set('cookie', cookie).send(body as object);
-const confirm = (attemptId: string, otp: string, cookie = owner.cookie) =>
-  h.http.post(`/v1/orgs/${orgId}/payout-account/otp`).set('cookie', cookie).send({ attemptId, otp });
-const overview = async () =>
-  PayoutAccountOverview.parse((await h.http.get(`/v1/orgs/${orgId}/payout-account`).set('cookie', owner.cookie).expect(200)).body);
+async function tracked(req: PromiseLike<Response>): Promise<Response> {
+  const res = await req;
+  responses.push(res.text);
+  return res;
+}
+
+const base = (org = orgId) => `/v1/orgs/${org}/payout-account`;
+const connect = (credential: TingeeCredential | Record<string, unknown>, cookie = owner.cookie, harness = h) =>
+  tracked(harness.http.post(`${base()}/credential`).set('cookie', cookie).send(credential));
+const options = (cookie = owner.cookie, harness = h) => tracked(harness.http.get(`${base()}/options`).set('cookie', cookie));
+const select = (vaAccountNumber: unknown, cookie = owner.cookie, harness = h) =>
+  tracked(harness.http.post(base()).set('cookie', cookie).send({ vaAccountNumber }));
+const overview = async (harness = h) =>
+  PayoutAccountOverview.parse((await tracked(harness.http.get(base()).set('cookie', owner.cookie))).body);
+
+function expectOk(res: Response) {
+  expect(res.status, res.text).toBe(200);
+  return res.body as unknown;
+}
 
 function expectError(res: Response, status: number, code: string) {
-  expect(res.status, JSON.stringify(res.body)).toBe(status);
+  expect(res.status, res.text).toBe(status);
   const { error } = ErrorResponse.parse(res.body);
   expect(error.code).toBe(code);
   return error;
@@ -103,265 +145,411 @@ async function noticeCodes(cookie: string): Promise<string[]> {
   return StatusNoticeList.parse(res.body).map((n) => n.code);
 }
 
-async function rows() {
-  const result = await h.db.orm.execute<{ id: string; status: string; failure_code: string | null }>(
-    sql`SELECT id, status, failure_code FROM payout_accounts WHERE organization_id = ${orgId} ORDER BY created_at`,
+async function credentialRows() {
+  const result = await h.db.orm.execute<{
+    id: string;
+    client_id: string;
+    secret_token_ciphertext: string;
+    retired_at: Date | null;
+  }>(
+    sql`SELECT id, client_id, secret_token_ciphertext, retired_at FROM tingee_credentials
+        WHERE organization_id = ${orgId} ORDER BY created_at, id`,
   );
   return result.rows;
 }
 
-async function auditActions(): Promise<string[]> {
-  const result = await h.db.orm.execute<{ action: string }>(
-    sql`SELECT action FROM audit_events WHERE organization_id = ${orgId} AND action LIKE 'payout_account.%' ORDER BY id`,
+async function accountRows() {
+  const result = await h.db.orm.execute(
+    sql`SELECT * FROM payout_accounts WHERE organization_id = ${orgId} ORDER BY linked_at, id`,
   );
-  return result.rows.map((r) => r.action);
+  return result.rows as Record<string, unknown>[];
 }
 
-describe('liên kết tài khoản nhận tiền', () => {
-  it('chưa liên kết: GET trả null; Owner và Admin cùng thấy PAYOUT_ACCOUNT_NOT_LINKED (danger, không đóng được)', async () => {
-    expect(await overview()).toEqual({ current: null });
+async function ipnKey(): Promise<string | null> {
+  const result = await h.db.orm.execute<{ tingee_ipn_key: string | null }>(
+    sql`SELECT tingee_ipn_key FROM organizations WHERE id = ${orgId}`,
+  );
+  return result.rows[0]?.tingee_ipn_key ?? null;
+}
+
+async function audits() {
+  const result = await h.db.orm.execute<{ action: string; target_type: string; changed_fields: string[] }>(
+    sql`SELECT action, target_type, changed_fields FROM audit_events
+        WHERE organization_id = ${orgId} AND action NOT IN ('organization.created') ORDER BY id`,
+  );
+  return result.rows;
+}
+
+const box = new SecretBox(parseCredentialKeys(TEST_CREDENTIAL_KEYS));
+
+describe('chưa kết nối Tingee', () => {
+  it('overview rỗng, chưa có URL IPN; Owner và Admin cùng thấy PAYOUT_ACCOUNT_NOT_LINKED (danger, không đóng được)', async () => {
+    expect(await overview()).toEqual({
+      credential: null,
+      account: null,
+      ipnUrl: null,
+      tingeePortalUrl: 'https://baas.tingee.vn',
+    });
     const res = await h.http.get(`/v1/orgs/${orgId}/notices`).set('cookie', admin.cookie).expect(200);
     const notice = StatusNoticeList.parse(res.body).find((n) => n.code === 'PAYOUT_ACCOUNT_NOT_LINKED');
-    expect(notice).toMatchObject({ severity: 'danger', dismissible: false, audience: ['owner', 'admin'] });
+    expect(notice).toMatchObject({ severity: 'danger', blocking: true, dismissible: false, audience: ['owner', 'admin'] });
     expect(await noticeCodes(owner.cookie)).toContain('PAYOUT_ACCOUNT_NOT_LINKED');
   });
 
-  it('liên kết ngay: 200 linked, chỉ lưu 4 số cuối; Merchant con tạo một lần; banner biến mất; gửi lại → 409', async () => {
-    const body = form('0000');
-    const res = await link(body);
-    expect(res.status, JSON.stringify(res.body)).toBe(200);
-    const linked = PayoutAccount.parse(res.body);
-    expect(linked).toMatchObject({
-      status: 'linked',
-      bankBin: '970422',
-      accountType: 'personal-account',
-      accountLast4: '0000',
-      accountName: 'NGUYEN VAN DAT',
-      failureCode: null,
-    });
-    expect(linked.vaAccountNumber).toMatch(/^\d+$/);
-    expect(linked.linkedAt).not.toBeNull();
-    expect(JSON.stringify(res.body)).not.toContain(body.accountNumber);
-
-    // Tingee: merchant/create rồi create-va với merchantId; mọi request ký đúng.
-    expect(fake.requests.map((r) => r.path)).toEqual(['/v1/merchant/create', '/v1/create-va']);
-    expect(fake.requests.every((r) => r.signatureValid && r.clientId === TINGEE_CLIENT_ID)).toBe(true);
-    const merchantId = (fake.calls('/v1/create-va')[0]?.body as { merchantId: number }).merchantId;
-    const org = await h.db.orm.execute<{ tingee_merchant_id: string }>(
-      sql`SELECT tingee_merchant_id FROM organizations WHERE id = ${orgId}`,
-    );
-    expect(Number(org.rows[0]?.tingee_merchant_id)).toBe(merchantId);
-
-    // DB không có số tài khoản đầy đủ hay CCCD ở bất kỳ cột nào.
-    const stored = await h.db.orm.execute(sql`SELECT * FROM payout_accounts WHERE organization_id = ${orgId}`);
-    expect(JSON.stringify(stored.rows)).not.toContain(body.accountNumber);
-    expect(JSON.stringify(stored.rows)).not.toContain(CCCD);
-
-    expect((await overview()).current).toMatchObject({ id: linked.id, status: 'linked' });
-    expect(await noticeCodes(owner.cookie)).not.toContain('PAYOUT_ACCOUNT_NOT_LINKED');
-    expect(await noticeCodes(admin.cookie)).not.toContain('PAYOUT_ACCOUNT_NOT_LINKED');
-    expect(await auditActions()).toEqual(['payout_account.link_started', 'payout_account.linked']);
-
-    fake.reset();
-    expectError(await link(form('0000')), 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
+  it('đọc danh sách hay chọn tài khoản khi chưa có credential → 404 NOT_FOUND, không gọi Tingee', async () => {
+    expectError(await options(), 404, 'NOT_FOUND');
+    expectError(await select(String(mb.vaAccountNumber)), 404, 'NOT_FOUND');
     expect(fake.requests).toHaveLength(0);
   });
+});
 
-  it('cần OTP: awaiting_otp + banner "Đang liên kết"; OTP sai → BANK_OTP_INVALID, vẫn chờ; OTP đúng → linked', async () => {
-    const started = PayoutAccount.parse((await link(form('1111')).expect(200)).body);
-    expect(started.status).toBe('awaiting_otp');
-    expect((await overview()).current).toMatchObject({ id: started.id, status: 'awaiting_otp' });
-    const codes = await noticeCodes(admin.cookie);
-    expect(codes).toContain('PAYOUT_ACCOUNT_LINKING');
-    expect(codes).not.toContain('PAYOUT_ACCOUNT_NOT_LINKED');
-
-    const wrong = expectError(await confirm(started.id, '999999'), 422, 'BANK_OTP_INVALID');
-    expect(wrong.details).toEqual({ field: 'otp' });
-    expect((await overview()).current?.status).toBe('awaiting_otp');
-
-    const done = PayoutAccount.parse((await confirm(started.id, '123456').expect(200)).body);
-    expect(done).toMatchObject({ id: started.id, status: 'linked', accountLast4: '1111' });
-    expect(fake.calls('/v1/confirm-va').every((r) => r.signatureValid)).toBe(true);
-    expect(await noticeCodes(owner.cookie)).not.toContain('PAYOUT_ACCOUNT_LINKING');
-    // Bấm xác nhận lần nữa: trả lại kết quả, không gọi Tingee.
-    const before = fake.calls('/v1/confirm-va').length;
-    expect(PayoutAccount.parse((await confirm(started.id, '123456').expect(200)).body).status).toBe('linked');
-    expect(fake.calls('/v1/confirm-va')).toHaveLength(before);
-    expect(await auditActions()).toEqual([
-      'payout_account.link_started',
-      'payout_account.otp_requested',
-      'payout_account.linked',
+describe('kết nối bằng key', () => {
+  it('key đúng (3 tài khoản: 1 VietinBank, 1 inactive) → 200, 2 dòng, VietinBank không chọn được; secret lưu dạng ciphertext', async () => {
+    const res = await connect({ clientId: `  ${MAIN.clientId} `, secretToken: MAIN.secretToken });
+    const result = PayoutAccountOptions.parse(expectOk(res));
+    expect(result.credential.clientIdMasked).toBe('••••2c3d');
+    expect(result.accounts).toEqual([
+      {
+        vaAccountNumber: mb.vaAccountNumber,
+        bankBin: '970422',
+        bankName: 'MB Bank',
+        accountType: 'personal-account',
+        accountLast4: String(mb.accountNumber).slice(-4),
+        accountName: 'CLB CO VUA QUAN 3',
+        selectable: true,
+      },
+      expect.objectContaining({ vaAccountNumber: vietin.vaAccountNumber, bankBin: '970415', selectable: false }),
     ]);
-  });
+    expect(res.text).not.toContain(MAIN.secretToken);
+    expect(res.text).not.toContain(MAIN.clientId);
 
-  it('OTP hết hạn (1065): failed, xác nhận lại → BANK_OTP_EXPIRED; "Gửi lại" tạo lần thử mới, không tạo Merchant con lần nữa', async () => {
-    const started = PayoutAccount.parse((await link(form('1111')).expect(200)).body);
-    expectError(await confirm(started.id, '000000'), 409, 'BANK_OTP_EXPIRED');
-    expect((await overview()).current).toMatchObject({ id: started.id, status: 'failed', failureCode: 'BANK_OTP_EXPIRED' });
-    expectError(await confirm(started.id, '123456'), 409, 'BANK_OTP_EXPIRED');
+    // Tingee: get-va-paging ký bằng key của BTC, không có merchantId.
+    const [req] = fake.calls('/v1/get-va-paging');
+    expect(req).toMatchObject({ clientId: MAIN.clientId, signatureValid: true });
+    expect(req?.body).toEqual({ skipCount: 0, maxResultCount: 200 });
+
+    // DB: Client ID đã bỏ khoảng trắng, Secret Token chỉ có dạng ciphertext `v1:` giải mã ra đúng secret.
+    const [row] = await credentialRows();
+    expect(row).toMatchObject({ client_id: MAIN.clientId, retired_at: null });
+    expect(row?.secret_token_ciphertext).toMatch(/^v1:/);
+    expect(row?.secret_token_ciphertext).not.toContain(MAIN.secretToken);
+    expect(box.open(row!.secret_token_ciphertext)).toBe(MAIN.secretToken);
+
+    // `ipnKey` 128 bit base64url; overview có credential và URL IPN, chưa có tài khoản; banner vẫn còn.
+    const key = await ipnKey();
+    expect(key).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(await overview()).toEqual({
+      credential: result.credential,
+      account: null,
+      ipnUrl: `${IPN_PREFIX}${key}`,
+      tingeePortalUrl: 'https://baas.tingee.vn',
+    });
     expect(await noticeCodes(owner.cookie)).toContain('PAYOUT_ACCOUNT_NOT_LINKED');
-
-    const again = PayoutAccount.parse((await link(form('1111')).expect(200)).body);
-    expect(again.id).not.toBe(started.id);
-    expect(fake.calls('/v1/merchant/create')).toHaveLength(1);
-    await confirm(again.id, '123456').expect(200);
-    expect(await auditActions()).toEqual([
-      'payout_account.link_started',
-      'payout_account.otp_requested',
-      'payout_account.failed',
-      'payout_account.link_started',
-      'payout_account.otp_requested',
-      'payout_account.linked',
+    expect(await audits()).toEqual([
+      {
+        action: 'tingee_credential.connected',
+        target_type: 'tingee_credential',
+        changed_fields: ['client_id', 'secret_token_ciphertext', 'tingee_ipn_key'],
+      },
     ]);
+    expect(await accountRows()).toEqual([]);
   });
 
-  it('Tingee lỗi lúc xác nhận OTP: lần thử vẫn chờ OTP (giữ confirm_id, không audit failed); mã đúng sau đó → linked', async () => {
-    const started = PayoutAccount.parse((await link(form('1111')).expect(200)).body);
-    expectError(await confirm(started.id, '555555'), 503, 'PAYMENT_PROVIDER_UNAVAILABLE');
-    const pending = await h.db.orm.execute<{ status: string; confirm_id: string | null }>(
-      sql`SELECT status, confirm_id FROM payout_accounts WHERE id = ${started.id}`,
-    );
-    expect(pending.rows[0]?.status).toBe('awaiting_otp');
-    expect(pending.rows[0]?.confirm_id).toEqual(expect.any(String));
-    expect(await auditActions()).not.toContain('payout_account.failed');
-
-    await confirm(started.id, '123456').expect(200);
-    expect((await rows()).map((r) => r.status)).toEqual(['linked']);
+  it('GET options đọc lại danh sách bằng credential đã lưu (giải mã đúng secret)', async () => {
+    expectOk(await connect(MAIN));
+    resetFake();
+    const result = PayoutAccountOptions.parse(expectOk(await options()));
+    expect(result.accounts.map((a) => a.vaAccountNumber)).toEqual([mb.vaAccountNumber, vietin.vaAccountNumber]);
+    expect(fake.calls('/v1/get-va-paging')).toEqual([expect.objectContaining({ clientId: MAIN.clientId, signatureValid: true })]);
   });
 
-  it('chờ OTP quá 15 phút: đọc là failed (BANK_OTP_EXPIRED), banner về NOT_LINKED, xác nhận không gọi Tingee, lần thử mới thay thế', async () => {
-    const started = PayoutAccount.parse((await link(form('1111')).expect(200)).body);
-    await h.db.orm.execute(
-      sql`UPDATE payout_accounts SET updated_at = now() - interval '16 minutes' WHERE id = ${started.id}`,
-    );
-    expect((await overview()).current).toMatchObject({
-      id: started.id,
-      status: 'failed',
-      failureCode: 'BANK_OTP_EXPIRED',
-    });
-    const codes = await noticeCodes(owner.cookie);
-    expect(codes).toContain('PAYOUT_ACCOUNT_NOT_LINKED');
-    expect(codes).not.toContain('PAYOUT_ACCOUNT_LINKING');
-
-    const confirmCalls = fake.calls('/v1/confirm-va').length;
-    expectError(await confirm(started.id, '123456'), 409, 'BANK_OTP_EXPIRED');
-    expect(fake.calls('/v1/confirm-va')).toHaveLength(confirmCalls);
-
-    await link(form('0000')).expect(200);
-    expect((await rows()).map((r) => r.status)).toEqual(['failed', 'linked']);
+  it.each([
+    ['Client ID lạ (92)', { clientId: 'tg-client-khong-co', secretToken: MAIN.secretToken }],
+    ['Secret Token sai (97)', { clientId: MAIN.clientId, secretToken: 'tg-secret-sai' }],
+    ['key thiếu quyền (1133)', FORBIDDEN],
+  ])('key sai: %s → 422 TINGEE_CREDENTIAL_INVALID, không ghi gì', async (_name, credential) => {
+    const error = expectError(await connect(credential), 422, 'TINGEE_CREDENTIAL_INVALID');
+    expect(error.message).toBe('Client ID hoặc Secret Token không đúng.');
+    expect(await credentialRows()).toEqual([]);
+    expect(await ipnKey()).toBeNull();
+    expect(await audits()).toEqual([]);
   });
 
-  it('lần thử mới thay lần thử đang chờ OTP: lần cũ failed, xác nhận lần cũ → BANK_OTP_EXPIRED', async () => {
-    const first = PayoutAccount.parse((await link(form('1111')).expect(200)).body);
-    const second = PayoutAccount.parse((await link(form('1111')).expect(200)).body);
-    expect((await rows()).map((r) => r.status)).toEqual(['failed', 'awaiting_otp']);
-    expectError(await confirm(first.id, '123456'), 409, 'BANK_OTP_EXPIRED');
-    await confirm(second.id, '123456').expect(200);
+  it('merchant bị khóa (1007) → 409 MERCHANT_SUSPENDED; Tingee lỗi HTTP 500 → 503; không ghi gì', async () => {
+    expectError(await connect(SUSPENDED), 409, 'MERCHANT_SUSPENDED');
+    const error = expectError(await connect(BROKEN), 503, 'PAYMENT_PROVIDER_UNAVAILABLE');
+    expect(error.message).toBe('Tingee tạm lỗi, thử lại sau ít phút.');
+    expect(await credentialRows()).toEqual([]);
+    expect(await audits()).toEqual([]);
   });
 
-  it('VietinBank 970415 và BIN không hỗ trợ → 422 BANK_NOT_SUPPORTED tại ô ngân hàng, không gọi Tingee, không có dòng', async () => {
-    for (const bankBin of ['970415', '970436']) {
-      const error = expectError(await link(form('0000', { bankBin })), 422, 'BANK_NOT_SUPPORTED');
-      expect(error.details).toEqual({ field: 'bankBin' });
-    }
-    expect(fake.requests).toHaveLength(0);
-    expect(await rows()).toEqual([]);
-  });
-
-  it('Tingee từ chối: 1043 → 422 PAYOUT_ACCOUNT_INVALID, 1081 → 409 PAYOUT_ACCOUNT_IN_USE; dòng failed kèm mã', async () => {
-    expectError(await link(form('4343')), 422, 'PAYOUT_ACCOUNT_INVALID');
-    expectError(await link(form('8181')), 409, 'PAYOUT_ACCOUNT_IN_USE');
-    expect(await rows()).toEqual([
-      expect.objectContaining({ status: 'failed', failure_code: 'PAYOUT_ACCOUNT_INVALID' }),
-      expect.objectContaining({ status: 'failed', failure_code: 'PAYOUT_ACCOUNT_IN_USE' }),
-    ]);
-    // Merchant con lưu từ lần đầu, lần sau không tạo lại.
-    expect(fake.calls('/v1/merchant/create')).toHaveLength(1);
-    expect(await auditActions()).toEqual([
-      'payout_account.link_started',
-      'payout_account.failed',
-      'payout_account.link_started',
-      'payout_account.failed',
-    ]);
-  });
-
-  it('Tingee treo: gọi ngoài transaction (dòng linking đã commit, DB vẫn ghi được) → 503 PAYMENT_PROVIDER_UNAVAILABLE, failed', async () => {
-    // Merchant con có sẵn để request treo ngay ở create-va.
-    await h.db.orm.execute(sql`UPDATE organizations SET tingee_merchant_id = 424242 WHERE id = ${orgId}`);
-    const pending = link(form('5000')).then((r) => r);
-    await fake.waitFor('/v1/create-va');
-
-    // Trong lúc Tingee treo: dòng `linking` và audit đã commit (thấy từ kết nối khác); dòng BTC và bảng payout không bị
-    // khóa (UPDATE với lock_timeout ngắn vẫn chạy).
-    expect((await rows()).map((r) => r.status)).toEqual(['linking']);
-    expect(await auditActions()).toEqual(['payout_account.link_started']);
+  it('Tingee treo: gọi ngoài transaction (dòng BTC không bị khóa trong lúc chờ) → 503, không ghi gì', async () => {
+    const pending = connect(HANGING);
+    await fake.waitFor('/v1/get-va-paging');
     const client = await h.db.pool.connect();
     try {
       await client.query('BEGIN');
       await client.query(`SET LOCAL lock_timeout = '500ms'`);
-      await client.query('UPDATE organizations SET name = name WHERE id = $1', [orgId]);
-      await client.query('UPDATE payout_accounts SET updated_at = updated_at WHERE organization_id = $1', [orgId]);
+      await client.query('SELECT id FROM organizations WHERE id = $1 FOR UPDATE', [orgId]);
       await client.query('ROLLBACK');
     } finally {
       client.release();
     }
+    expectError(await pending, 503, 'PAYMENT_PROVIDER_UNAVAILABLE');
+    expect(await credentialRows()).toEqual([]);
+  });
 
-    const res = await pending;
-    const error = expectError(res, 503, 'PAYMENT_PROVIDER_UNAVAILABLE');
-    expect(error.message).toBe('Tingee tạm lỗi, thử lại sau ít phút.');
-    expect(await rows()).toEqual([
-      expect.objectContaining({ status: 'failed', failure_code: 'PAYMENT_PROVIDER_UNAVAILABLE' }),
+  it('danh sách rỗng → 200, credential vẫn lưu, accounts []', async () => {
+    const result = PayoutAccountOptions.parse(expectOk(await connect(EMPTY)));
+    expect(result.accounts).toEqual([]);
+    expect(await credentialRows()).toHaveLength(1);
+    // BTC liên kết ngân hàng trên Tingee rồi bấm "Tải lại".
+    const added = trackedAccount();
+    fake.merchant(EMPTY.clientId).accounts = [added];
+    const reloaded = PayoutAccountOptions.parse(expectOk(await options()));
+    expect(reloaded.accounts.map((a) => a.vaAccountNumber)).toEqual([added.vaAccountNumber]);
+    fake.merchant(EMPTY.clientId).accounts = [];
+  });
+
+  it('"Dùng key khác": credential cũ chuyển retired_at, ipnKey giữ nguyên; key mới sai thì credential cũ vẫn hiện hành', async () => {
+    expectOk(await connect(MAIN));
+    const key = await ipnKey();
+
+    expectError(await connect({ clientId: OTHER.clientId, secretToken: 'sai' }), 422, 'TINGEE_CREDENTIAL_INVALID');
+    expect((await credentialRows()).map((r) => [r.client_id, r.retired_at])).toEqual([[MAIN.clientId, null]]);
+
+    const switched = PayoutAccountOptions.parse(expectOk(await connect(OTHER)));
+    expect(switched.credential.clientIdMasked).toBe('••••6a7b');
+    const rows = await credentialRows();
+    expect(rows.map((r) => r.client_id)).toEqual([MAIN.clientId, OTHER.clientId]);
+    expect(rows[0]?.retired_at).not.toBeNull();
+    expect(rows[1]?.retired_at).toBeNull();
+    expect(await ipnKey()).toBe(key);
+    expect((await overview()).credential?.id).toBe(switched.credential.id);
+    expect((await audits()).map((a) => a.changed_fields)).toEqual([
+      ['client_id', 'secret_token_ciphertext', 'tingee_ipn_key'],
+      ['client_id', 'secret_token_ciphertext', 'retired_at'],
     ]);
+
+    // Tài khoản của key cũ không còn chọn được; tài khoản của key mới thì được.
+    expectError(await select(String(mb.vaAccountNumber)), 409, 'PAYOUT_ACCOUNT_UNAVAILABLE');
+    expectOk(await select(switched.accounts[0]!.vaAccountNumber));
   });
 
-  it('dòng linking mồ côi quá 5 phút được đọc là failed', async () => {
-    await h.db.orm.execute(sql`
-      INSERT INTO payout_accounts (organization_id, status, bank_bin, account_type, account_last4, account_name, created_by, updated_at)
-      VALUES (${orgId}, 'linking', '970422', 'personal-account', '0000', 'NGUYEN VAN A', ${owner.userId}, now() - interval '10 minutes')`);
-    expect((await overview()).current).toMatchObject({ status: 'failed', failureCode: 'PAYMENT_PROVIDER_UNAVAILABLE' });
-    // Lần thử mới vẫn chạy và đóng dòng mồ côi.
-    await link(form('0000')).expect(200);
-    expect((await rows()).map((r) => r.status)).toEqual(['failed', 'linked']);
-  });
-
-  it('hai tab gửi cùng lúc: tối đa một dòng linked, lần còn lại 409', async () => {
-    const results = await Promise.all([link(form('0000')), link(form('0000')), link(form('0000'))]);
-    const statuses = results.map((r) => r.status).sort();
-    expect(statuses.filter((s) => s === 200)).toHaveLength(1);
-    for (const res of results.filter((r) => r.status !== 200)) {
-      expectError(res, 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
-    }
-    const all = await rows();
-    expect(all.filter((r) => r.status === 'linked')).toHaveLength(1);
-    // Không dòng nào bị bỏ lại `linking`: lần thua đều `failed`.
-    expect(all.filter((r) => r.status !== 'linked').every((r) => r.status === 'failed')).toBe(true);
-    // Mọi create-va dùng cùng một Merchant con, đúng id đã lưu.
-    const stored = await h.db.orm.execute<{ tingee_merchant_id: string }>(
-      sql`SELECT tingee_merchant_id FROM organizations WHERE id = ${orgId}`,
-    );
-    const merchantIds = fake.calls('/v1/create-va').map((r) => (r.body as { merchantId: number }).merchantId);
-    expect(merchantIds.length).toBeGreaterThan(0);
-    expect(new Set(merchantIds)).toEqual(new Set([Number(stored.rows[0]?.tingee_merchant_id)]));
-  });
-
-  it('Admin gọi API → 403 FORBIDDEN_ROLE; body sai → 400 VALIDATION_FAILED', async () => {
-    expectError(await h.http.get(`/v1/orgs/${orgId}/payout-account`).set('cookie', admin.cookie), 403, 'FORBIDDEN_ROLE');
-    expectError(await link(form('0000'), admin.cookie), 403, 'FORBIDDEN_ROLE');
-    expectError(await confirm('019a3b2c-5678-7abc-8def-0123456789ab', '123456', admin.cookie), 403, 'FORBIDDEN_ROLE');
-    expectError(await link({ ...form('0000'), identityNumber: '123' }), 400, 'VALIDATION_FAILED');
-    expectError(await confirm('khong-phai-uuid', '123456'), 400, 'VALIDATION_FAILED');
-    expectError(await confirm('019a3b2c-5678-7abc-8def-0123456789ab', '123456'), 404, 'NOT_FOUND');
+  it('body sai → 400 VALIDATION_FAILED, không gọi Tingee', async () => {
+    expectError(await connect({ clientId: '  ', secretToken: MAIN.secretToken }), 400, 'VALIDATION_FAILED');
+    expectError(await connect({ clientId: MAIN.clientId }), 400, 'VALIDATION_FAILED');
+    expectError(await select(''), 400, 'VALIDATION_FAILED');
     expect(fake.requests).toHaveLength(0);
   });
+});
 
-  it('log api không có số tài khoản đầy đủ, CCCD, SĐT hay secret Tingee', () => {
-    const text = h.logs.text;
-    expect(usedAccounts.length).toBeGreaterThan(5);
-    for (const accountNumber of usedAccounts) expect(text).not.toContain(accountNumber);
-    expect(text).not.toContain(CCCD);
-    expect(text).not.toContain(PHONE);
-    expect(text).not.toContain(TINGEE_SECRET_TOKEN);
-    // Tingee từ chối thì log có mã Tingee.
-    expect(text).toContain('"tingeeCode":"1043"');
+describe('chọn tài khoản nhận tiền', () => {
+  beforeEach(async () => {
+    expectOk(await connect(MAIN));
+    resetFake();
+  });
+
+  it('VA active, không phải VietinBank → 200; overview có tài khoản và URL IPN; banner NOT_LINKED mất', async () => {
+    const res = await select(String(mb.vaAccountNumber));
+    const account = PayoutAccount.parse(expectOk(res));
+    expect(account).toMatchObject({
+      vaAccountNumber: mb.vaAccountNumber,
+      bankBin: '970422',
+      bankName: 'MB Bank',
+      accountType: 'personal-account',
+      accountLast4: String(mb.accountNumber).slice(-4),
+      accountName: 'CLB CO VUA QUAN 3',
+    });
+    // Server đọc lại danh sách bằng credential hiện hành trước khi lưu.
+    expect(fake.calls('/v1/get-va-paging')).toEqual([expect.objectContaining({ clientId: MAIN.clientId, signatureValid: true })]);
+
+    const view = await overview();
+    expect(view.account).toEqual(account);
+    expect(view.ipnUrl).toBe(`${IPN_PREFIX}${await ipnKey()}`);
+    expect(await noticeCodes(owner.cookie)).not.toContain('PAYOUT_ACCOUNT_NOT_LINKED');
+    expect(await noticeCodes(admin.cookie)).not.toContain('PAYOUT_ACCOUNT_NOT_LINKED');
+
+    const [row] = await accountRows();
+    expect(row).toMatchObject({
+      tingee_credential_id: view.credential?.id,
+      va_account_number: mb.vaAccountNumber,
+      tingee_shop_id: String(mb.shopId),
+      created_by: owner.userId,
+      retired_at: null,
+    });
+    expect((await audits()).at(-1)).toEqual({
+      action: 'payout_account.linked',
+      target_type: 'payout_account',
+      changed_fields: [
+        'tingee_credential_id',
+        'va_account_number',
+        'bank_bin',
+        'bank_name',
+        'account_type',
+        'account_last4',
+        'account_name',
+        'tingee_shop_id',
+        'linked_at',
+      ],
+    });
+  });
+
+  it('VietinBank → 422 BANK_NOT_SUPPORTED, không lưu', async () => {
+    const error = expectError(await select(String(vietin.vaAccountNumber)), 422, 'BANK_NOT_SUPPORTED');
+    expect(error.message).toContain('VietinBank');
+    expect(await accountRows()).toEqual([]);
+  });
+
+  it('VA không còn active hoặc không có trong danh sách → 409 PAYOUT_ACCOUNT_UNAVAILABLE, không lưu', async () => {
+    expectError(await select(String(inactive.vaAccountNumber)), 409, 'PAYOUT_ACCOUNT_UNAVAILABLE');
+    mb.status = 'inactive';
+    expectError(await select(String(mb.vaAccountNumber)), 409, 'PAYOUT_ACCOUNT_UNAVAILABLE');
+    expectError(await select('9600000000'), 409, 'PAYOUT_ACCOUNT_UNAVAILABLE');
+    expect(await accountRows()).toEqual([]);
+    expect((await audits()).map((a) => a.action)).toEqual(['tingee_credential.connected']);
+  });
+
+  it('key bị thu hồi trên Tingee sau khi kết nối → 422 TINGEE_CREDENTIAL_INVALID; Tingee lỗi → 503; không lưu', async () => {
+    const merchant = fake.merchant(MAIN.clientId);
+    merchant.behavior = 'forbidden';
+    try {
+      expectError(await select(String(mb.vaAccountNumber)), 422, 'TINGEE_CREDENTIAL_INVALID');
+      expectError(await options(), 422, 'TINGEE_CREDENTIAL_INVALID');
+      merchant.behavior = 'error';
+      expectError(await select(String(mb.vaAccountNumber)), 503, 'PAYMENT_PROVIDER_UNAVAILABLE');
+    } finally {
+      delete merchant.behavior;
+    }
+    expect(await accountRows()).toEqual([]);
+  });
+
+  it('đã liên kết: gửi key hoặc chọn lại → 409 PAYOUT_ACCOUNT_ALREADY_LINKED, không gọi Tingee', async () => {
+    expectOk(await select(String(mb.vaAccountNumber)));
+    resetFake();
+    expectError(await connect(OTHER), 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
+    expectError(await select(String(mb.vaAccountNumber)), 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
+    expect(fake.requests).toHaveLength(0);
+    expect(await accountRows()).toHaveLength(1);
+    expect((await credentialRows()).filter((r) => r.retired_at === null)).toHaveLength(1);
+  });
+
+  it('hai tab chọn cùng lúc: đúng một tài khoản hiện hành, tab còn lại 409', async () => {
+    const second = trackedAccount();
+    fake.merchant(MAIN.clientId).accounts.push(second);
+    const results = await Promise.all([
+      select(String(mb.vaAccountNumber)),
+      select(String(second.vaAccountNumber)),
+      select(String(mb.vaAccountNumber)),
+    ]);
+    expect(results.filter((r) => r.status === 200)).toHaveLength(1);
+    for (const res of results.filter((r) => r.status !== 200)) expectError(res, 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
+    expect(await accountRows()).toHaveLength(1);
+    expect((await audits()).filter((a) => a.action === 'payout_account.linked')).toHaveLength(1);
+  });
+
+  it('tab khác chọn xong trong lúc tab này chờ Tingee → tab này 409 ALREADY_LINKED', async () => {
+    afterNextList = async () => {
+      expectOk(await select(String(mb.vaAccountNumber)));
+    };
+    expectError(await select(String(mb.vaAccountNumber)), 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
+    expect(await accountRows()).toHaveLength(1);
+  });
+
+  it('tab khác chọn tài khoản trong lúc tab này kết nối key khác → 409 ALREADY_LINKED, credential cũ vẫn hiện hành', async () => {
+    afterNextList = async () => {
+      expectOk(await select(String(mb.vaAccountNumber)));
+    };
+    expectError(await connect(OTHER), 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
+    expect((await credentialRows()).map((r) => [r.client_id, r.retired_at])).toEqual([[MAIN.clientId, null]]);
+    expect((await audits()).filter((a) => a.action === 'tingee_credential.connected')).toHaveLength(1);
+    expect(await accountRows()).toHaveLength(1);
+  });
+
+  it('tab khác đổi key trong lúc tab này chờ Tingee → 409 PAYOUT_ACCOUNT_UNAVAILABLE, không lưu', async () => {
+    afterNextList = async () => {
+      expectOk(await connect(OTHER));
+    };
+    expectError(await select(String(mb.vaAccountNumber)), 409, 'PAYOUT_ACCOUNT_UNAVAILABLE');
+    expect(await accountRows()).toEqual([]);
+  });
+});
+
+describe('quyền', () => {
+  it('Admin gọi mọi route → 403 FORBIDDEN_ROLE, không gọi Tingee', async () => {
+    expectError(await tracked(h.http.get(base()).set('cookie', admin.cookie)), 403, 'FORBIDDEN_ROLE');
+    expectError(await connect(MAIN, admin.cookie), 403, 'FORBIDDEN_ROLE');
+    expectError(await options(admin.cookie), 403, 'FORBIDDEN_ROLE');
+    expectError(await select(String(mb.vaAccountNumber), admin.cookie), 403, 'FORBIDDEN_ROLE');
+    expect(fake.requests).toHaveLength(0);
+  });
+});
+
+describe('cấu hình từ env (payoutAccountSettings)', () => {
+  it('TINGEE_BASE_URL UAT → link portal UAT; khóa từ TINGEE_CREDENTIAL_KEYS', () => {
+    const settings = payoutAccountSettings({
+      API_PUBLIC_URL: 'https://api.tickee.vn',
+      TINGEE_BASE_URL: 'https://uat-open-api.tingee.vn',
+      TINGEE_CREDENTIAL_KEYS: TEST_CREDENTIAL_KEYS,
+    });
+    expect(settings.tingeePortalUrl).toBe('https://uat-baas-portal.tingee.vn');
+    expect(settings.apiPublicUrl).toBe('https://api.tickee.vn');
+    expect(box.open(settings.secretBox.seal(MAIN.secretToken))).toBe(MAIN.secretToken);
+  });
+});
+
+describe('xoay khóa mã hóa (TINGEE_CREDENTIAL_KEYS)', () => {
+  it('credential lưu bằng v1 vẫn giải mã được khi env thêm v2; credential mới lưu bằng v2', async () => {
+    expectOk(await connect(MAIN));
+    expect((await credentialRows())[0]?.secret_token_ciphertext).toMatch(/^v1:/);
+
+    const keys = `${TEST_CREDENTIAL_KEYS},${testCredentialKey(2, 9)}`;
+    const http = new HttpTingeeClient({ baseUrl: fake.url, timeoutMs: TIMEOUT_MS });
+    const rotated = await createHarness(
+      { TINGEE_BASE_URL: fake.url, TINGEE_CREDENTIAL_KEYS: keys },
+      { overrides: [{ provide: TINGEE_CLIENT, useValue: http }] },
+    );
+    try {
+      // Credential cũ (v1) vẫn dùng được: đọc danh sách ký đúng bằng secret cũ.
+      resetFake();
+      PayoutAccountOptions.parse(expectOk(await options(owner.cookie, rotated)));
+      expect(fake.calls('/v1/get-va-paging')).toEqual([expect.objectContaining({ clientId: MAIN.clientId, signatureValid: true })]);
+
+      expectOk(await connect(OTHER, owner.cookie, rotated));
+      const current = (await credentialRows()).find((r) => r.retired_at === null)!;
+      expect(current.secret_token_ciphertext).toMatch(/^v2:/);
+      expect(new SecretBox(parseCredentialKeys(keys)).open(current.secret_token_ciphertext)).toBe(OTHER.secretToken);
+      expectOk(await select(String(fake.merchant(OTHER.clientId).accounts[0]!.vaAccountNumber), owner.cookie, rotated));
+    } finally {
+      await rotated.close();
+    }
+  });
+});
+
+describe('không lộ bí mật', () => {
+  it('log api, response và audit không có Secret Token, chữ ký hay số tài khoản đầy đủ', async () => {
+    expectError(await connect({ clientId: MAIN.clientId, secretToken: 'tg-secret-sai' }), 422, 'TINGEE_CREDENTIAL_INVALID');
+    expectOk(await connect(MAIN));
+    expectOk(await select(String(mb.vaAccountNumber)));
+    resetFake();
+    expect(signatures.length).toBeGreaterThan(10);
+
+    const logs = h.logs.text;
+    const all = responses.join('\n');
+    const audit = JSON.stringify(
+      (await h.db.orm.execute(sql`SELECT * FROM audit_events WHERE action LIKE 'tingee_credential.%' OR action LIKE 'payout_account.%'`)).rows,
+    );
+    expect(accountNumbers.length).toBeGreaterThan(5);
+    for (const text of [logs, all, audit]) {
+      for (const secret of SECRETS) expect(text).not.toContain(secret);
+      for (const signature of signatures) expect(text).not.toContain(signature);
+      for (const accountNumber of accountNumbers) expect(text).not.toContain(accountNumber);
+    }
+    expect(audit).not.toContain(MAIN.clientId);
+    // DB không có số tài khoản đầy đủ ở bất kỳ cột nào.
+    const stored = JSON.stringify(await accountRows());
+    for (const accountNumber of accountNumbers) expect(stored).not.toContain(accountNumber);
+    // Tingee từ chối thì log có mã Tingee (không có message của Tingee).
+    expect(logs).toContain('"tingeeCode":"97"');
   });
 });

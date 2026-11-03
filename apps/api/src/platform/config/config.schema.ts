@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CredentialKeysError, parseCredentialKeys } from '../crypto/index.js';
 
 export const APP_ROLES = ['api', 'worker', 'migrate'] as const;
 export type AppRole = (typeof APP_ROLES)[number];
@@ -33,6 +34,15 @@ const cookieDomain = z
   .regex(/^\.?[a-z0-9-]+(\.[a-z0-9-]+)+$/i, { message: 'phải là tên miền, vd. tickee.vn' })
   .optional();
 
+/** Danh sách khóa có phiên bản (`parseCredentialKeys`); lỗi chỉ nêu sai gì, không có giá trị. */
+const credentialKeys = z.string().superRefine((value, ctx) => {
+  try {
+    parseCredentialKeys(value);
+  } catch (err) {
+    ctx.addIssue({ code: 'custom', message: err instanceof CredentialKeysError ? err.message : 'sai định dạng' });
+  }
+});
+
 const smtpUrl = z
   .string()
   .refine((v) => /^smtps?:\/\//.test(v), { message: 'phải là URL smtp:// hoặc smtps://' });
@@ -66,14 +76,17 @@ export const apiConfigSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
   /**
-   * Open API của Tingee (liên kết tài khoản nhận tiền, Story 2.6): origin thuần, vd. `https://uat-open-api.tingee.vn`.
-   * Local không có credential UAT thì chạy `pnpm --filter @tickee/api tingee:fake` và trỏ vào fake.
+   * Open API của Tingee (AD-9, Story 2.6): origin thuần, vd. `https://uat-open-api.tingee.vn`. Mọi lời gọi ký bằng API
+   * key của từng BTC (lưu mã hóa trong DB); env không có credential Tingee nào. Local chạy
+   * `pnpm --filter @tickee/api tingee:fake` và trỏ vào fake.
    */
   TINGEE_BASE_URL: httpOrigin,
-  /** `x-client-id` của Master Merchant. */
-  TINGEE_CLIENT_ID: z.string().min(1),
-  /** Khóa ký HMAC-SHA512 (`x-signature`). Không bao giờ log. */
-  TINGEE_SECRET_TOKEN: z.string().min(1),
+  /**
+   * Khóa AES-256-GCM mã hóa Secret Token Tingee của BTC (AD-9, AD-23): `v<k>:<base64 của 32 byte>`, nhiều khóa cách
+   * nhau bằng dấu phẩy, không trùng `k`. Mã hóa bằng khóa có `k` lớn nhất; giữ khóa cũ tới khi không còn dòng nào dùng.
+   * Sinh khóa: `openssl rand -base64 32`. Không bao giờ log.
+   */
+  TINGEE_CREDENTIAL_KEYS: credentialKeys,
 });
 
 export const workerConfigSchema = z.object({

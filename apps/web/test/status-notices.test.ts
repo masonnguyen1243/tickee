@@ -33,7 +33,6 @@ describe('chưa liên kết tài khoản nhận tiền: câu theo vai (Story 2.6
     const admin = statusNoticeContent('PAYOUT_ACCOUNT_NOT_LINKED', 'admin');
     expect(admin.description).toBe('Nhờ Owner liên kết tài khoản nhận tiền.');
     expect(admin.action).toBeUndefined();
-    expect(statusNoticeContent('PAYOUT_ACCOUNT_LINKING', 'admin').action).toBeUndefined();
     // Mã không theo vai: cùng nội dung cho mọi vai.
     expect(statusNoticeContent('CLOSED_BETA_PENDING', 'admin')).toBe(statusNoticeContent('CLOSED_BETA_PENDING', 'owner'));
   });

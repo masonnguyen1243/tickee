@@ -29,12 +29,8 @@ export class ApiModule {
         EmailModule.forRoot({ url: config.SMTP_URL, from: config.EMAIL_FROM }),
         // Chỉ enqueue job (cùng `tx` của thay đổi); không bảo trì, không lịch, không handler — việc của vai `worker`.
         JobsModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-api', mode: 'producer' }),
-        // Adapter Tingee (`TINGEE_CLIENT`, toàn cục): liên kết tài khoản nhận tiền của `organizer`.
-        TingeeModule.forRoot({
-          baseUrl: config.TINGEE_BASE_URL,
-          clientId: config.TINGEE_CLIENT_ID,
-          secretToken: config.TINGEE_SECRET_TOKEN,
-        }),
+        // Adapter Tingee (`TINGEE_CLIENT`, toàn cục): mọi lời gọi ký bằng credential của từng BTC (`organizer` giải mã).
+        TingeeModule.forRoot({ baseUrl: config.TINGEE_BASE_URL }),
         IdentityModule.forRoot(config),
         // Sau IdentityModule: PermissionGuard chạy sau SessionGuard, TotpGuard, ConsentGuard và PlatformAdminGuard.
         OrganizerModule.forRoot(config),

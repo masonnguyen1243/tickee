@@ -7,11 +7,12 @@ import {
   Organization,
   OrganizationInvitation,
   PayoutAccount,
+  PayoutAccountOptions,
   PayoutAccountOverview,
-  type ConfirmPayoutOtpRequest,
+  type ConnectTingeeRequest,
   type CreateOrganizationRequest,
   type InviteAdminRequest,
-  type LinkPayoutAccountRequest,
+  type SelectPayoutAccountRequest,
 } from '@tickee/contracts';
 import { z } from 'zod';
 
@@ -22,8 +23,14 @@ export const MEMBERSHIPS_QUERY_KEY = ['organizer', 'memberships'] as const;
 export const organizationQueryKey = (orgId: string) => ['organizer', 'organization', orgId] as const;
 /** Thành viên + lời mời đang chờ của một BTC (chỉ Owner). */
 export const membersQueryKey = (orgId: string) => ['organizer', 'members', orgId] as const;
-/** Tài khoản nhận tiền (hoặc lần thử liên kết gần nhất) của một BTC (chỉ Owner). */
+/** Credential Tingee, tài khoản nhận tiền hiện hành và URL IPN của một BTC (chỉ Owner; không gọi Tingee). */
 export const payoutAccountQueryKey = (orgId: string) => ['organizer', 'payout-account', orgId] as const;
+/**
+ * Danh sách tài khoản đọc từ Tingee bằng credential `credentialId` (mỗi lần tải là một lời gọi Tingee). Nằm dưới
+ * `payoutAccountQueryKey`: invalidate không `exact` ở khóa đó cũng làm mới danh sách.
+ */
+export const payoutAccountOptionsQueryKey = (orgId: string, credentialId: string) =>
+  ['organizer', 'payout-account', orgId, 'options', credentialId] as const;
 
 const json = (method: 'POST', body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 const orgPath = (orgId: string) => `/orgs/${encodeURIComponent(orgId)}`;
@@ -67,9 +74,13 @@ export const acceptInvitation = (token: string) =>
 export const fetchPayoutAccount = (orgId: string, signal?: AbortSignal) =>
   apiRequest(`${orgPath(orgId)}/payout-account`, { schema: PayoutAccountOverview, init: { signal } });
 
-/** Liên kết tài khoản nhận tiền: `linked` ngay hoặc `awaiting_otp` (nhập OTP ngân hàng). */
-export const linkPayoutAccount = (orgId: string, body: LinkPayoutAccountRequest) =>
-  apiRequest(`${orgPath(orgId)}/payout-account`, { schema: PayoutAccount, init: json('POST', body) });
+/** Kết nối API key Tingee của BTC: key đúng thì api lưu credential và trả danh sách tài khoản. */
+export const connectTingee = (orgId: string, body: ConnectTingeeRequest) =>
+  apiRequest(`${orgPath(orgId)}/payout-account/credential`, { schema: PayoutAccountOptions, init: json('POST', body) });
 
-export const confirmPayoutOtp = (orgId: string, body: ConfirmPayoutOtpRequest) =>
-  apiRequest(`${orgPath(orgId)}/payout-account/otp`, { schema: PayoutAccount, init: json('POST', body) });
+export const fetchPayoutAccountOptions = (orgId: string, signal?: AbortSignal) =>
+  apiRequest(`${orgPath(orgId)}/payout-account/options`, { schema: PayoutAccountOptions, init: { signal } });
+
+/** Chọn một tài khoản trong danh sách làm tài khoản nhận tiền. */
+export const selectPayoutAccount = (orgId: string, body: SelectPayoutAccountRequest) =>
+  apiRequest(`${orgPath(orgId)}/payout-account`, { schema: PayoutAccount, init: json('POST', body) });

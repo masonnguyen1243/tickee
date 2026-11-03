@@ -1,9 +1,10 @@
 import { Body, Controller, Get, HttpCode, Inject, Post } from '@nestjs/common';
 import {
-  ConfirmPayoutOtpRequest,
-  LinkPayoutAccountRequest,
+  ConnectTingeeRequest,
   Permission,
+  SelectPayoutAccountRequest,
   type PayoutAccount,
+  type PayoutAccountOptions,
   type PayoutAccountOverview,
 } from '@tickee/contracts';
 import { Access, RequirePermission, type AccessContext } from '../../platform/access/index.js';
@@ -18,25 +19,33 @@ import { PayoutAccountService } from './payout-account.service.js';
 export class PayoutAccountController {
   constructor(@Inject(PayoutAccountService) private readonly payout: PayoutAccountService) {}
 
+  /** Credential, tài khoản nhận tiền hiện hành, URL IPN; không gọi Tingee. */
   @Get()
   @RequirePermission(Permission.PAYOUT_ACCOUNT_MANAGE)
   get(@Access() ctx: AccessContext): Promise<PayoutAccountOverview> {
     return this.payout.overview(ctx);
   }
 
-  /** Liên kết tài khoản cá nhân: 200 `linked` hoặc `awaiting_otp` (nhập OTP ngân hàng ở `…/otp`). */
+  /** Kết nối API key Tingee của BTC; key đúng thì lưu (Secret Token mã hóa) và trả danh sách tài khoản. */
+  @Post('credential')
+  @HttpCode(200)
+  @RequirePermission(Permission.PAYOUT_ACCOUNT_MANAGE)
+  connect(@Access() ctx: AccessContext, @Body() body: unknown): Promise<PayoutAccountOptions> {
+    return this.payout.connect(ctx, parseRequest(ConnectTingeeRequest, body));
+  }
+
+  /** Đọc lại danh sách tài khoản bằng credential hiện hành; chưa kết nối → 404. */
+  @Get('options')
+  @RequirePermission(Permission.PAYOUT_ACCOUNT_MANAGE)
+  options(@Access() ctx: AccessContext): Promise<PayoutAccountOptions> {
+    return this.payout.options(ctx);
+  }
+
+  /** Chọn một tài khoản trong danh sách làm tài khoản nhận tiền. */
   @Post()
   @HttpCode(200)
   @RequirePermission(Permission.PAYOUT_ACCOUNT_MANAGE)
-  link(@Access() ctx: AccessContext, @Body() body: unknown): Promise<PayoutAccount> {
-    return this.payout.link(ctx, parseRequest(LinkPayoutAccountRequest, body));
-  }
-
-  @Post('otp')
-  @HttpCode(200)
-  @RequirePermission(Permission.PAYOUT_ACCOUNT_MANAGE)
-  confirmOtp(@Access() ctx: AccessContext, @Body() body: unknown): Promise<PayoutAccount> {
-    const { attemptId, otp } = parseRequest(ConfirmPayoutOtpRequest, body);
-    return this.payout.confirmOtp(ctx, attemptId, otp);
+  select(@Access() ctx: AccessContext, @Body() body: unknown): Promise<PayoutAccount> {
+    return this.payout.select(ctx, parseRequest(SelectPayoutAccountRequest, body));
   }
 }

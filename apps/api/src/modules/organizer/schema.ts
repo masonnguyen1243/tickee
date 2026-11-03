@@ -21,10 +21,11 @@ export const organizations = pgTable(
     /** Lần đổi trạng thái Closed Beta gần nhất; `null` khi chưa từng đổi (vẫn `pending` từ lúc tạo). */
     closedBetaChangedAt: timestamptz('closed_beta_changed_at'),
     /**
-     * Id Merchant con của BTC ở Tingee (`POST /v1/merchant/create`, Story 2.6). Tạo lười ở lần liên kết tài khoản nhận
-     * tiền đầu tiên và lưu ngay (transaction riêng), nên lần thử sau không tạo Merchant con lần nữa.
+     * Khóa định tuyến IPN của BTC (AD-7): URL IPN là `{API_PUBLIC_URL}/v1/payments/tingee/ipn/{ipnKey}`. Chuỗi ngẫu
+     * nhiên 128 bit (base64url), không phải secret. Sinh khi BTC lưu credential Tingee lần đầu và không đổi khi đổi key
+     * (BTC không phải dán lại URL IPN). Đặt ở BTC, không ở credential: "mỗi BTC một chuỗi" (Story 2.6 › Design Notes).
      */
-    tingeeMerchantId: bigint('tingee_merchant_id', { mode: 'number' }),
+    tingeeIpnKey: text('tingee_ipn_key'),
     createdAt: createdAt(),
     updatedAt: timestamptz('updated_at')
       .notNull()
@@ -34,6 +35,7 @@ export const organizations = pgTable(
   (t) => [
     check('organizations_closed_beta_status_check', sql`${t.closedBetaStatus} IN ('pending', 'approved', 'revoked')`),
     index('organizations_closed_beta_status_created_at_idx').on(t.closedBetaStatus, t.createdAt),
+    uniqueIndex('organizations_tingee_ipn_key_key').on(t.tingeeIpnKey),
   ],
 );
 
@@ -102,10 +104,41 @@ export const organizationInvitations = pgTable(
 );
 
 /**
- * Lần thử liên kết tài khoản nhận tiền (Story 2.6): `linking → awaiting_otp → linked` hoặc `failed`, đổi bằng
- * compare-and-set. Mỗi BTC có tối đa một dòng `linked` (tài khoản nhận tiền hiện hành). Không bao giờ lưu số tài khoản
- * đầy đủ, CCCD hay số dư: chỉ 4 số cuối. `account_name`, `account_last4` là PII (`PII_COLUMNS.organizer`).
- * `failure_code` là mã lỗi miền (`ErrorCode`).
+ * API key Tingee của BTC (Story 2.6, AD-9, AD-10): mỗi BTC dùng tài khoản merchant Tingee của chính mình. Secret Token chỉ
+ * lưu dạng ciphertext AES-256-GCM có phiên bản (`v<k>:…`, `platform/crypto`), không bao giờ trả về web hay ghi log.
+ * Mỗi BTC có tối đa một credential hiện hành (`retired_at IS NULL`); credential cũ không xóa (IPN và Đối soát bù của Đơn
+ * đã tạo bằng nó, AD-35).
+ */
+export const tingeeCredentials = pgTable(
+  'tingee_credentials',
+  {
+    id: id(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    /** `x-client-id`; web chỉ thấy dạng che (`maskTingeeClientId`). */
+    clientId: text('client_id').notNull(),
+    secretTokenCiphertext: text('secret_token_ciphertext').notNull(),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: createdAt(),
+    retiredAt: timestamptz('retired_at'),
+  },
+  (t) => [
+    uniqueIndex('tingee_credentials_one_current_per_organization_key')
+      .on(t.organizationId)
+      .where(sql`${t.retiredAt} IS NULL`),
+    index('tingee_credentials_organization_id_created_at_idx').on(t.organizationId, t.createdAt),
+    // Lưới an toàn: không bao giờ lưu plaintext (ciphertext luôn có tiền tố phiên bản khóa).
+    check('tingee_credentials_secret_token_ciphertext_check', sql`${t.secretTokenCiphertext} ~ '^v[1-9][0-9]*:'`),
+  ],
+);
+
+/**
+ * Tài khoản nhận tiền đã chọn (Story 2.6): một VA trong tài khoản Tingee của BTC, đọc bằng credential `tingee_credential_id`.
+ * Mỗi BTC có tối đa một tài khoản hiện hành (`retired_at IS NULL`). Không bao giờ lưu số tài khoản đầy đủ hay số dư: chỉ
+ * 4 số cuối. `account_name`, `account_last4` là PII (`PII_COLUMNS.organizer`).
  */
 export const payoutAccounts = pgTable(
   'payout_accounts',
@@ -114,37 +147,29 @@ export const payoutAccounts = pgTable(
     organizationId: uuid('organization_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    status: text('status', { enum: ['linking', 'awaiting_otp', 'linked', 'failed'] }).notNull(),
+    tingeeCredentialId: uuid('tingee_credential_id')
+      .notNull()
+      .references(() => tingeeCredentials.id),
+    /** Số VA Tingee dùng để nhận tiền (`create-link` truyền số này, AD-6). */
+    vaAccountNumber: text('va_account_number').notNull(),
     bankBin: text('bank_bin').notNull(),
-    accountType: text('account_type', { enum: ['personal-account'] }).notNull(),
+    bankName: text('bank_name').notNull(),
+    /** Loại tài khoản theo Tingee (vd. `personal-account`). */
+    accountType: text('account_type').notNull(),
     accountLast4: text('account_last4').notNull(),
     accountName: text('account_name').notNull(),
-    /** Số VA nhận tiền Tingee cấp khi `linked`. */
-    vaAccountNumber: text('va_account_number'),
     tingeeShopId: bigint('tingee_shop_id', { mode: 'number' }),
-    /** `confirmId` của Tingee khi chờ OTP ngân hàng. */
-    confirmId: text('confirm_id'),
-    failureCode: text('failure_code'),
     createdBy: uuid('created_by')
       .notNull()
       .references(() => users.id),
-    linkedAt: timestamptz('linked_at'),
-    createdAt: createdAt(),
-    updatedAt: timestamptz('updated_at')
-      .notNull()
-      .defaultNow()
-      .$onUpdate(() => new Date()),
+    linkedAt: timestamptz('linked_at').notNull().defaultNow(),
+    retiredAt: timestamptz('retired_at'),
   },
   (t) => [
-    uniqueIndex('payout_accounts_one_linked_per_organization_key')
+    uniqueIndex('payout_accounts_one_current_per_organization_key')
       .on(t.organizationId)
-      .where(sql`${t.status} = 'linked'`),
-    index('payout_accounts_organization_id_created_at_idx').on(t.organizationId, t.createdAt),
-    check('payout_accounts_status_check', sql`${t.status} IN ('linking', 'awaiting_otp', 'linked', 'failed')`),
-    check('payout_accounts_account_type_check', sql`${t.accountType} IN ('personal-account')`),
-    check(
-      'payout_accounts_linked_check',
-      sql`(${t.status} = 'linked') = (${t.linkedAt} IS NOT NULL AND ${t.vaAccountNumber} IS NOT NULL)`,
-    ),
+      .where(sql`${t.retiredAt} IS NULL`),
+    index('payout_accounts_organization_id_linked_at_idx').on(t.organizationId, t.linkedAt),
+    index('payout_accounts_tingee_credential_id_idx').on(t.tingeeCredentialId),
   ],
 );

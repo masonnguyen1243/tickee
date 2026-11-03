@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import { ErrorCode } from '@tickee/contracts';
 import { z } from 'zod';
 import { AppError } from '../../platform/http/index.js';
-import { DOMAIN_ERROR_INFO, domainErrorOf, type TingeeDomainError } from './errors.js';
+import { DOMAIN_ERROR_MESSAGES, domainErrorOf, TINGEE_ERROR_CODES, type TingeeDomainError } from './errors.js';
 import { sign, tingeeTimestamp } from './signing.js';
 
 /** Token DI của `TingeeClient`; test thay bằng client trỏ vào Tingee fake. */
@@ -11,81 +11,79 @@ export const TINGEE_CLIENT = Symbol('TINGEE_CLIENT');
 /** Timeout mỗi lời gọi Tingee. */
 export const TINGEE_TIMEOUT_MS = 15_000;
 
-export interface CreateMerchantInput {
-  /** Tên BTC. */
-  name: string;
-  /** SĐT đăng ký Merchant con (10 số, bắt đầu bằng 0). */
-  phone: string;
-}
+/** Số dòng tối đa đọc trong một lần `get-va-paging` (Tingee cho tối đa 2000; một BTC nhiều hơn chừng này là bất thường). */
+export const TINGEE_ACCOUNT_PAGE_SIZE = 200;
 
-export interface CreateVaInput {
-  merchantId: number;
-  bankBin: string;
-  accountType: 'personal-account';
-  accountNumber: string;
-  /** In hoa, không dấu. */
-  accountName: string;
-  identityNumber: string;
-  phone: string;
-}
-
-/** Tài khoản đã liên kết: số VA nhận tiền Tingee cấp. */
-export interface LinkedVa {
-  vaAccountNumber: string;
-  shopId: number | null;
-}
-
-export type CreateVaResult = ({ kind: 'linked' } & LinkedVa) | { kind: 'otp_required'; confirmId: string };
-
-export interface ConfirmVaInput {
-  merchantId: number;
-  bankBin: string;
-  confirmId: string;
-  otp: string;
+/**
+ * API key của một BTC trên Tingee (`organizer` giải mã ngay trước khi gọi). Không bao giờ log, không giữ lâu hơn lời gọi.
+ */
+export interface TingeeCredential {
+  clientId: string;
+  secretToken: string;
 }
 
 /**
- * Cổng gọi Tingee (AD-5, AD-9): chỉ mô-đun `tingee` biết tên trường, host và mã lỗi Tingee. Lỗi luôn là `AppError` với
- * mã miền (`PAYOUT_ACCOUNT_INVALID`, `BANK_NOT_SUPPORTED`, … `PAYMENT_PROVIDER_UNAVAILABLE`). Không bao giờ gọi bên trong
- * transaction DB.
+ * Một tài khoản (VA) `active`, nhận được tiền, của BTC trên Tingee. Không có số tài khoản đầy đủ: chỉ 4 số cuối.
+ * `vaAccountNumber` là số Tingee dùng để nhận tiền (`create-link` truyền số này, AD-6).
+ */
+export interface TingeeAccount {
+  vaAccountNumber: string;
+  bankBin: string;
+  bankName: string;
+  accountType: string;
+  accountLast4: string;
+  accountName: string;
+  shopId: number | null;
+}
+
+/**
+ * Cổng gọi Tingee (AD-5, AD-9): chỉ mô-đun `tingee` biết tên trường, host và mã lỗi Tingee. Mọi lời gọi nhận credential
+ * của một BTC làm tham số và không gửi `merchantId`. Lỗi luôn là `AppError` với mã miền (`TINGEE_CREDENTIAL_INVALID`,
+ * `MERCHANT_SUSPENDED`, `PAYMENT_PROVIDER_UNAVAILABLE`). Không bao giờ gọi bên trong transaction DB.
  */
 export interface TingeeClient {
-  /** `POST /v1/merchant/create`: tạo Merchant con cho một BTC. */
-  createMerchant(input: CreateMerchantInput): Promise<{ merchantId: number }>;
-  /** `POST /v1/create-va`: liên kết ngay hoặc cần OTP ngân hàng (`confirmId`). */
-  createVa(input: CreateVaInput): Promise<CreateVaResult>;
-  /** `POST /v1/confirm-va`: xác nhận OTP ngân hàng. */
-  confirmVa(input: ConfirmVaInput): Promise<LinkedVa>;
+  /**
+   * `POST /v1/get-va-paging`: các tài khoản `status: active` của BTC, bỏ tài khoản chỉ chi (`transactionType: debit`).
+   * Cũng là cách kiểm key: key sai → `TINGEE_CREDENTIAL_INVALID`.
+   */
+  listAccounts(credential: TingeeCredential): Promise<TingeeAccount[]>;
 }
 
 export interface TingeeClientOptions {
   /** Origin, vd. `https://uat-open-api.tingee.vn`. */
   baseUrl: string;
-  clientId: string;
-  /** Không bao giờ log. */
-  secretToken: string;
   timeoutMs?: number;
   now?: () => Date;
 }
 
 const Envelope = z.object({ code: z.coerce.string(), message: z.string().nullish(), data: z.unknown().optional() });
-const Id = z.coerce.number().int().positive();
-const MerchantData = z.object({ merchantId: Id });
-// `create-va` liên kết ngay trả thêm `merchantAccountNumberId`; `confirm-va` thì không — chỉ dựa vào hai trường chung.
-// Không dùng `z.coerce.string()`: `null` sẽ thành chuỗi "null". Số VA dạng số thì đổi sang chuỗi.
-const LinkedData = z.object({
-  vaAccountNumber: z.union([z.string().min(1), z.number().int().nonnegative().transform(String)]),
-  shopId: Id.nullish(),
+const Page = z.object({ items: z.array(z.unknown()), totalCount: z.unknown().optional() });
+/** Chuỗi không rỗng; số (vd. `bankBin` dạng số) đổi sang chuỗi. Không dùng `z.coerce.string()`: `null` sẽ thành "null". */
+const Text = z.union([z.string().trim().min(1), z.number().int().nonnegative().transform(String)]);
+/** `shopId` không bắt buộc: giá trị lạ thì coi như không có, không bỏ cả dòng. */
+const OptionalId = z.unknown().transform((v): number | null => {
+  if (typeof v === 'number' && Number.isSafeInteger(v) && v > 0) return v;
+  if (typeof v === 'string' && /^[1-9]\d{0,15}$/.test(v)) return Number(v);
+  return null;
 });
-const ConfirmData = z.object({ confirmId: z.string().min(1) });
+const AccountItem = z.object({
+  vaAccountNumber: Text,
+  accountNumber: Text,
+  bankBin: Text,
+  bankName: Text,
+  accountType: Text,
+  accountName: Text,
+  status: Text,
+  transactionType: z.string().nullish(),
+  shopId: OptionalId,
+});
 
-/** Lỗi miền kèm thông điệp hành động được; `details.field` là trường nghi sai nếu biết. */
+/** Lỗi miền kèm thông điệp hành động được. */
 export function tingeeError(code: TingeeDomainError, cause?: unknown): AppError {
-  const info = DOMAIN_ERROR_INFO[code];
-  return new AppError(code, info.message, { details: info.field ? { field: info.field } : null, cause });
+  return new AppError(code, DOMAIN_ERROR_MESSAGES[code], { cause });
 }
 
-/** Lỗi không mang dữ liệu request (body có số tài khoản, CCCD): an toàn để log làm `cause`. */
+/** Lỗi không mang dữ liệu request (header có Client ID, chữ ký): an toàn để log làm `cause`. */
 class TingeeTransportError extends Error {
   override readonly name = 'TingeeTransportError';
 }
@@ -101,54 +99,47 @@ export class HttpTingeeClient implements TingeeClient {
     this.now = options.now ?? (() => new Date());
   }
 
-  async createMerchant(input: CreateMerchantInput): Promise<{ merchantId: number }> {
-    // SĐT đã có trên Tingee thì Tingee gắn Merchant sẵn có vào Master thay vì tạo mới (vẫn trả `merchantId`).
-    const data = await this.post('/v1/merchant/create', { name: input.name, phoneNumber: input.phone });
-    return this.parse('/v1/merchant/create', MerchantData, data);
+  async listAccounts(credential: TingeeCredential): Promise<TingeeAccount[]> {
+    const path = '/v1/get-va-paging';
+    // Gọi một lần, không phân trang; không lọc qua body (lọc ở dưới), không truyền chuỗi rỗng, không gửi `merchantId`.
+    const data = await this.post(credential, path, { skipCount: 0, maxResultCount: TINGEE_ACCOUNT_PAGE_SIZE });
+    const page = Page.safeParse(data);
+    if (!page.success) {
+      this.logger.warn({ path }, 'Tingee trả dữ liệu không đúng dạng');
+      throw tingeeError(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE, new TingeeTransportError(`${path}: dữ liệu sai dạng`));
+    }
+
+    const accounts: TingeeAccount[] = [];
+    let skipped = 0;
+    for (const raw of page.data.items) {
+      const item = AccountItem.safeParse(raw);
+      if (!item.success) {
+        skipped += 1;
+        continue;
+      }
+      const row = item.data;
+      if (row.status.toLowerCase() !== 'active' || row.transactionType?.trim().toLowerCase() === 'debit') continue;
+      accounts.push({
+        vaAccountNumber: row.vaAccountNumber,
+        bankBin: row.bankBin,
+        bankName: row.bankName,
+        accountType: row.accountType,
+        accountLast4: row.accountNumber.slice(-4),
+        accountName: row.accountName,
+        shopId: row.shopId,
+      });
+    }
+    // Chỉ log số dòng, không bao giờ log nội dung dòng (có số tài khoản).
+    if (skipped > 0) this.logger.warn({ path, skipped }, 'Bỏ dòng tài khoản Tingee sai dạng');
+    const total = Number(page.data.totalCount);
+    if (Number.isFinite(total) && total > page.data.items.length) {
+      this.logger.warn({ path, totalCount: total, received: page.data.items.length }, 'Danh sách tài khoản Tingee bị cắt');
+    }
+    return accounts;
   }
 
-  async createVa(input: CreateVaInput): Promise<CreateVaResult> {
-    const data = await this.post('/v1/create-va', {
-      merchantId: input.merchantId,
-      accountType: input.accountType,
-      bankBin: input.bankBin,
-      accountNumber: input.accountNumber,
-      accountName: input.accountName,
-      identity: input.identityNumber,
-      mobile: input.phone,
-      // VA là đường mọi ngân hàng hỗ trợ; Gateway truyền `vaAccountNumber` để nhận tiền đúng chỗ.
-      isNotifyAccountNumber: false,
-      appType: 'baas',
-    });
-    const otp = ConfirmData.safeParse(data);
-    if (otp.success) return { kind: 'otp_required', confirmId: otp.data.confirmId };
-    return { kind: 'linked', ...this.linked('/v1/create-va', data) };
-  }
-
-  async confirmVa(input: ConfirmVaInput): Promise<LinkedVa> {
-    const data = await this.post('/v1/confirm-va', {
-      merchantId: input.merchantId,
-      bankBin: input.bankBin,
-      confirmId: input.confirmId,
-      otpNumber: input.otp,
-    });
-    return this.linked('/v1/confirm-va', data);
-  }
-
-  private linked(path: string, data: unknown): LinkedVa {
-    const parsed = this.parse(path, LinkedData, data);
-    return { vaAccountNumber: parsed.vaAccountNumber, shopId: parsed.shopId ?? null };
-  }
-
-  private parse<S extends z.ZodType>(path: string, schema: S, data: unknown): z.output<S> {
-    const parsed = schema.safeParse(data);
-    if (parsed.success) return parsed.data;
-    this.logger.warn({ path }, 'Tingee trả dữ liệu không đúng dạng');
-    throw tingeeError(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE, new TingeeTransportError(`${path}: dữ liệu sai dạng`));
-  }
-
-  /** Gửi một request đã ký; trả `data` khi `code === '00'`, không thì ném lỗi miền. */
-  private async post(path: string, payload: Record<string, unknown>): Promise<unknown> {
+  /** Gửi một request ký bằng credential của BTC; trả `data` khi `code === '00'`, không thì ném lỗi miền. */
+  private async post(credential: TingeeCredential, path: string, payload: Record<string, unknown>): Promise<unknown> {
     const body = JSON.stringify(payload);
     const timestamp = tingeeTimestamp(this.now());
     let response: Response;
@@ -157,9 +148,9 @@ export class HttpTingeeClient implements TingeeClient {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-client-id': this.options.clientId,
+          'x-client-id': credential.clientId,
           'x-request-timestamp': timestamp,
-          'x-signature': sign(timestamp, body, this.options.secretToken),
+          'x-signature': sign(timestamp, body, credential.secretToken),
         },
         body,
         signal: AbortSignal.timeout(this.timeoutMs),
@@ -179,7 +170,9 @@ export class HttpTingeeClient implements TingeeClient {
       throw tingeeError(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE, new TingeeTransportError(`${path}: ${reason}`));
     }
     const envelope = Envelope.safeParse(json);
-    if (!response.ok || !envelope.success) {
+    // Mã đã biết (key sai, merchant bị khóa) vẫn là lỗi miền dù Tingee kèm HTTP 4xx; còn lại HTTP lỗi là Tingee tạm lỗi.
+    const known = envelope.success && TINGEE_ERROR_CODES.has(envelope.data.code);
+    if (!envelope.success || (!response.ok && !known)) {
       this.logger.warn({ path, httpStatus: response.status }, 'Tingee trả lỗi HTTP');
       throw tingeeError(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE, new TingeeTransportError(`${path}: HTTP ${response.status}`));
     }

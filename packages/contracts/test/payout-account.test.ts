@@ -3,96 +3,106 @@ import { ErrorCode } from '../src/errors.js';
 import { PII_KEYS } from '../src/pii.js';
 import {
   BLOCKED_BANK_BINS,
-  ConfirmPayoutOtpRequest,
-  isSupportedPayoutBank,
-  LinkPayoutAccountRequest,
+  ConnectTingeeRequest,
+  isBlockedBankBin,
+  maskTingeeClientId,
   PayoutAccount,
-  payoutBankName,
-  SUPPORTED_PAYOUT_BANKS,
+  PayoutAccountOption,
+  PayoutAccountOverview,
+  SelectPayoutAccountRequest,
+  TINGEE_IPN_PATH,
+  TINGEE_KEY_MAX_LENGTH,
+  TingeeCredentialSummary,
+  tingeeIpnUrl,
 } from '../src/organizer.js';
 import { STATUS_NOTICE_PRIORITY, StatusNoticeCode } from '../src/reporting.js';
 
-const ID = '019a3b2c-5678-7abc-8def-0123456789ab';
-
-const valid = {
-  bankBin: '970422',
-  accountNumber: '0123 4567 890',
-  accountName: '  Nguyễn  Văn Đạt ',
-  identityNumber: '0792 0300 1234',
-  phone: '+84 901 234 567',
-};
-
-describe('liên kết tài khoản nhận tiền (Story 2.6)', () => {
-  it('5 ngân hàng luồng form + OTP; VietinBank bị chặn', () => {
-    expect(SUPPORTED_PAYOUT_BANKS.map((b) => b.bin)).toEqual(['970418', '970422', '970416', '970432', '970448']);
+describe('tài khoản nhận tiền: BTC dùng key Tingee của mình (Story 2.6)', () => {
+  it('VietinBank không chọn được', () => {
     expect(BLOCKED_BANK_BINS).toEqual(['970415']);
-    expect(isSupportedPayoutBank('970415')).toBe(false);
-    expect(isSupportedPayoutBank('970436')).toBe(false);
-    expect(isSupportedPayoutBank('970422')).toBe(true);
-    expect(payoutBankName('970418')).toBe('BIDV');
-    expect(payoutBankName('999999')).toBe('999999');
+    expect(isBlockedBankBin('970415')).toBe(true);
+    expect(isBlockedBankBin('970422')).toBe(false);
   });
 
-  it('chuẩn hóa form: số tài khoản, tên in hoa không dấu, CCCD, SĐT', () => {
-    expect(LinkPayoutAccountRequest.parse(valid)).toEqual({
-      bankBin: '970422',
-      accountNumber: '01234567890',
-      accountName: 'NGUYEN VAN DAT',
-      identityNumber: '079203001234',
-      phone: '0901234567',
+  it('form kết nối: bỏ khoảng trắng hai đầu; thiếu hoặc quá dài bị từ chối tại đúng trường', () => {
+    expect(ConnectTingeeRequest.parse({ clientId: '  abc-123 ', secretToken: '\tsecret\n' })).toEqual({
+      clientId: 'abc-123',
+      secretToken: 'secret',
     });
+    for (const [field, value] of [
+      ['clientId', '   '],
+      ['secretToken', ''],
+      ['secretToken', 'x'.repeat(TINGEE_KEY_MAX_LENGTH + 1)],
+    ] as const) {
+      const result = ConnectTingeeRequest.safeParse({ clientId: 'abc', secretToken: 'def', [field]: value });
+      expect(result.success, `${field}`).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual([field]);
+    }
   });
 
-  it('BIN không hỗ trợ vẫn qua schema (server trả BANK_NOT_SUPPORTED), BIN sai dạng thì không', () => {
-    expect(LinkPayoutAccountRequest.safeParse({ ...valid, bankBin: '970415' }).success).toBe(true);
-    expect(LinkPayoutAccountRequest.safeParse({ ...valid, bankBin: 'abc' }).success).toBe(false);
+  it('chọn tài khoản: cần vaAccountNumber', () => {
+    expect(SelectPayoutAccountRequest.parse({ vaAccountNumber: ' 9600000001 ' })).toEqual({ vaAccountNumber: '9600000001' });
+    expect(SelectPayoutAccountRequest.safeParse({ vaAccountNumber: '' }).success).toBe(false);
+    expect(SelectPayoutAccountRequest.safeParse({}).success).toBe(false);
   });
 
-  it.each([
-    ['accountNumber', '12345'],
-    ['accountNumber', '12a4567890'],
-    ['accountName', ''],
-    ['accountName', 'NGUYEN VAN 2'],
-    ['identityNumber', '12345678901'],
-    ['phone', '123'],
-  ])('%s "%s" bị từ chối tại đúng trường', (field, value) => {
-    const result = LinkPayoutAccountRequest.safeParse({ ...valid, [field]: value });
-    expect(result.success).toBe(false);
-    expect(result.error?.issues[0]?.path).toEqual([field]);
+  it('Client ID che còn 4 ký tự cuối; Client ID quá ngắn không lộ ký tự nào', () => {
+    expect(maskTingeeClientId('tg-client-0a1b2c3d')).toBe('••••2c3d');
+    expect(maskTingeeClientId('abc')).toBe('••••');
+    expect(maskTingeeClientId('abcdefg')).toBe('••••');
   });
 
-  it('OTP 4–8 chữ số, có id lần thử', () => {
-    expect(ConfirmPayoutOtpRequest.parse({ attemptId: ID, otp: ' 123 456 ' })).toEqual({ attemptId: ID, otp: '123456' });
-    expect(ConfirmPayoutOtpRequest.safeParse({ attemptId: ID, otp: '12' }).success).toBe(false);
-    expect(ConfirmPayoutOtpRequest.safeParse({ attemptId: 'x', otp: '123456' }).success).toBe(false);
+  it('URL IPN riêng của BTC', () => {
+    expect(TINGEE_IPN_PATH).toBe('/v1/payments/tingee/ipn');
+    expect(tingeeIpnUrl('https://api.tickee.vn', 'AbC_-123')).toBe('https://api.tickee.vn/v1/payments/tingee/ipn/AbC_-123');
   });
 
-  it('DTO không có số tài khoản đầy đủ hay CCCD', () => {
-    const keys = Object.keys(PayoutAccount.shape);
-    expect(keys).not.toContain('accountNumber');
-    expect(keys).not.toContain('identityNumber');
-    expect(keys).toContain('accountLast4');
+  it('DTO không có Secret Token, Client ID đầy đủ hay số tài khoản đầy đủ', () => {
+    for (const shape of [TingeeCredentialSummary.shape, PayoutAccountOption.shape, PayoutAccount.shape]) {
+      const keys = Object.keys(shape);
+      expect(keys).not.toContain('secretToken');
+      expect(keys).not.toContain('clientId');
+      expect(keys).not.toContain('accountNumber');
+    }
+    expect(Object.keys(PayoutAccount.shape)).toContain('accountLast4');
+    expect(Object.keys(PayoutAccountOverview.shape).sort()).toEqual(['account', 'credential', 'ipnUrl', 'tingeePortalUrl']);
   });
 
   it('mã lỗi, notice và khóa che log', () => {
     for (const code of [
-      'PAYOUT_ACCOUNT_INVALID',
+      'TINGEE_CREDENTIAL_INVALID',
       'BANK_NOT_SUPPORTED',
-      'PAYOUT_ACCOUNT_IN_USE',
+      'PAYOUT_ACCOUNT_UNAVAILABLE',
       'PAYOUT_ACCOUNT_ALREADY_LINKED',
-      'BANK_OTP_INVALID',
-      'BANK_OTP_EXPIRED',
       'MERCHANT_SUSPENDED',
       'PAYMENT_PROVIDER_UNAVAILABLE',
     ]) {
       expect(Object.values(ErrorCode)).toContain(code);
     }
+    for (const gone of ['PAYOUT_ACCOUNT_INVALID', 'PAYOUT_ACCOUNT_IN_USE', 'BANK_OTP_INVALID', 'BANK_OTP_EXPIRED']) {
+      expect(Object.values(ErrorCode)).not.toContain(gone);
+    }
+    // Không còn trạng thái "đang liên kết": trục tài khoản nhận tiền chỉ có một mã.
+    expect(Object.values(StatusNoticeCode).filter((code) => code.startsWith('PAYOUT_ACCOUNT_'))).toEqual([
+      'PAYOUT_ACCOUNT_NOT_LINKED',
+    ]);
     // Ưu tiên: thu hồi Closed Beta (#3) > chưa liên kết (#5) > chờ duyệt Closed Beta (#6).
     const rank = (code: StatusNoticeCode) => STATUS_NOTICE_PRIORITY.indexOf(code);
     expect(rank('CLOSED_BETA_REVOKED')).toBeLessThan(rank('PAYOUT_ACCOUNT_NOT_LINKED'));
-    expect(rank('PAYOUT_ACCOUNT_NOT_LINKED')).toBeLessThan(rank('PAYOUT_ACCOUNT_LINKING'));
-    expect(rank('PAYOUT_ACCOUNT_LINKING')).toBeLessThan(rank('CLOSED_BETA_PENDING'));
-    for (const key of ['account_name', 'accountName', 'account_last4', 'accountLast4', 'accountNumber', 'identityNumber']) {
+    expect(rank('PAYOUT_ACCOUNT_NOT_LINKED')).toBeLessThan(rank('CLOSED_BETA_PENDING'));
+    for (const key of [
+      'account_name',
+      'accountName',
+      'account_last4',
+      'accountLast4',
+      'accountNumber',
+      'va_account_number',
+      'vaAccountNumber',
+      'secret_token',
+      'secretToken',
+      'client_id',
+      'clientId',
+    ]) {
       expect(PII_KEYS).toContain(key);
     }
   });

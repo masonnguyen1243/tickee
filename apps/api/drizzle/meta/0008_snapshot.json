@@ -1,5 +1,5 @@
 {
-  "id": "a96fd5ab-56fa-411d-bdf2-023898724020",
+  "id": "ad2e4f1c-7662-4bec-9556-3245cc3e849c",
   "prevId": "d61d7b1d-8a0f-45ae-b36d-50abdbd7a6c6",
   "version": "7",
   "dialect": "postgresql",
@@ -1176,9 +1176,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "tingee_merchant_id": {
-          "name": "tingee_merchant_id",
-          "type": "bigint",
+        "tingee_ipn_key": {
+          "name": "tingee_ipn_key",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -1218,6 +1218,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "organizations_tingee_ipn_key_key": {
+          "name": "organizations_tingee_ipn_key_key",
+          "columns": [
+            {
+              "expression": "tingee_ipn_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -1249,14 +1264,26 @@
           "primaryKey": false,
           "notNull": true
         },
-        "status": {
-          "name": "status",
+        "tingee_credential_id": {
+          "name": "tingee_credential_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "va_account_number": {
+          "name": "va_account_number",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
         "bank_bin": {
           "name": "bank_bin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bank_name": {
+          "name": "bank_name",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1279,27 +1306,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "va_account_number": {
-          "name": "va_account_number",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "tingee_shop_id": {
           "name": "tingee_shop_id",
           "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "confirm_id": {
-          "name": "confirm_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "failure_code": {
-          "name": "failure_code",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -1313,26 +1322,19 @@
           "name": "linked_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
           "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
         }
       },
       "indexes": {
-        "payout_accounts_one_linked_per_organization_key": {
-          "name": "payout_accounts_one_linked_per_organization_key",
+        "payout_accounts_one_current_per_organization_key": {
+          "name": "payout_accounts_one_current_per_organization_key",
           "columns": [
             {
               "expression": "organization_id",
@@ -1342,13 +1344,13 @@
             }
           ],
           "isUnique": true,
-          "where": "\"payout_accounts\".\"status\" = 'linked'",
+          "where": "\"payout_accounts\".\"retired_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "payout_accounts_organization_id_created_at_idx": {
-          "name": "payout_accounts_organization_id_created_at_idx",
+        "payout_accounts_organization_id_linked_at_idx": {
+          "name": "payout_accounts_organization_id_linked_at_idx",
           "columns": [
             {
               "expression": "organization_id",
@@ -1357,7 +1359,22 @@
               "nulls": "last"
             },
             {
-              "expression": "created_at",
+              "expression": "linked_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payout_accounts_tingee_credential_id_idx": {
+          "name": "payout_accounts_tingee_credential_id_idx",
+          "columns": [
+            {
+              "expression": "tingee_credential_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1383,6 +1400,19 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+        "payout_accounts_tingee_credential_id_tingee_credentials_id_fk": {
+          "name": "payout_accounts_tingee_credential_id_tingee_credentials_id_fk",
+          "tableFrom": "payout_accounts",
+          "tableTo": "tingee_credentials",
+          "columnsFrom": [
+            "tingee_credential_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "payout_accounts_created_by_users_id_fk": {
           "name": "payout_accounts_created_by_users_id_fk",
           "tableFrom": "payout_accounts",
@@ -1400,18 +1430,132 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tingee_credentials": {
+      "name": "tingee_credentials",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "secret_token_ciphertext": {
+          "name": "secret_token_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "tingee_credentials_one_current_per_organization_key": {
+          "name": "tingee_credentials_one_current_per_organization_key",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"tingee_credentials\".\"retired_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tingee_credentials_organization_id_created_at_idx": {
+          "name": "tingee_credentials_organization_id_created_at_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tingee_credentials_organization_id_organizations_id_fk": {
+          "name": "tingee_credentials_organization_id_organizations_id_fk",
+          "tableFrom": "tingee_credentials",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "tingee_credentials_created_by_users_id_fk": {
+          "name": "tingee_credentials_created_by_users_id_fk",
+          "tableFrom": "tingee_credentials",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
       "checkConstraints": {
-        "payout_accounts_status_check": {
-          "name": "payout_accounts_status_check",
-          "value": "\"payout_accounts\".\"status\" IN ('linking', 'awaiting_otp', 'linked', 'failed')"
-        },
-        "payout_accounts_account_type_check": {
-          "name": "payout_accounts_account_type_check",
-          "value": "\"payout_accounts\".\"account_type\" IN ('personal-account')"
-        },
-        "payout_accounts_linked_check": {
-          "name": "payout_accounts_linked_check",
-          "value": "(\"payout_accounts\".\"status\" = 'linked') = (\"payout_accounts\".\"linked_at\" IS NOT NULL AND \"payout_accounts\".\"va_account_number\" IS NOT NULL)"
+        "tingee_credentials_secret_token_ciphertext_check": {
+          "name": "tingee_credentials_secret_token_ciphertext_check",
+          "value": "\"tingee_credentials\".\"secret_token_ciphertext\" ~ '^v[1-9][0-9]*:'"
         }
       },
       "isRLSEnabled": false

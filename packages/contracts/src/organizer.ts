@@ -231,128 +231,116 @@ export function maskEmail(email: string): string {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Tài khoản nhận tiền (FR-5, AD-5, AD-6, Story 2.6)
+// Tài khoản nhận tiền (FR-5, AD-6, AD-7, AD-9, Story 2.6): BTC dùng tài khoản merchant Tingee của chính mình
 // ---------------------------------------------------------------------------------------------------------------
 
 /**
- * Ngân hàng nhận liên kết tài khoản nhận tiền ở MVP (quyết định 03/11/2026): chỉ tài khoản cá nhân, chỉ 5 ngân hàng
- * dùng luồng form + OTP của Tingee. `bin` là mã BIN Napas 6 số; `name` là tên hiển thị trên dashboard.
+ * Ngân hàng không được chọn làm tài khoản nhận tiền (AD-6): VietinBank không trả nội dung chuyển khoản. Tài khoản của
+ * các ngân hàng này vẫn hiện trong danh sách (mờ, "Chưa hỗ trợ VietinBank"); server từ chối với `BANK_NOT_SUPPORTED`.
  */
-export const SUPPORTED_PAYOUT_BANKS = [
-  { bin: '970418', name: 'BIDV' },
-  { bin: '970422', name: 'MB' },
-  { bin: '970416', name: 'ACB' },
-  { bin: '970432', name: 'VPBank' },
-  { bin: '970448', name: 'OCB' },
-] as const satisfies readonly { bin: string; name: string }[];
-export type PayoutBankBin = (typeof SUPPORTED_PAYOUT_BANKS)[number]['bin'];
-
-/** Ngân hàng bị chặn ngay ở server (không gọi Tingee): VietinBank không trả nội dung chuyển khoản. */
 export const BLOCKED_BANK_BINS = ['970415'] as const;
 
-/** Ngân hàng của tài khoản nhận tiền được hỗ trợ (không bị chặn, có trong `SUPPORTED_PAYOUT_BANKS`). */
-export function isSupportedPayoutBank(bin: string): bin is PayoutBankBin {
-  return (
-    !(BLOCKED_BANK_BINS as readonly string[]).includes(bin) && SUPPORTED_PAYOUT_BANKS.some((bank) => bank.bin === bin)
-  );
+export function isBlockedBankBin(bin: string): boolean {
+  return (BLOCKED_BANK_BINS as readonly string[]).includes(bin);
 }
 
-/** Tên ngân hàng theo BIN; BIN lạ thì trả lại chính BIN. */
-export function payoutBankName(bin: string): string {
-  return SUPPORTED_PAYOUT_BANKS.find((bank) => bank.bin === bin)?.name ?? bin;
+/**
+ * Đường dẫn nhận IPN của Tingee trên api (AD-7, Story 3.5). URL IPN của một BTC là
+ * `{API_PUBLIC_URL}{TINGEE_IPN_PATH}/{ipnKey}`; `ipnKey` ngẫu nhiên 128 bit (base64url), không phải secret.
+ */
+export const TINGEE_IPN_PATH = '/v1/payments/tingee/ipn';
+
+/** URL IPN riêng của BTC để dán vào "Đường dẫn IPN" trên portal Tingee. */
+export function tingeeIpnUrl(apiPublicUrl: string, ipnKey: string): string {
+  return `${apiPublicUrl}${TINGEE_IPN_PATH}/${encodeURIComponent(ipnKey)}`;
 }
 
-/** Loại tài khoản nhận tiền. MVP chỉ nhận tài khoản cá nhân. */
-export const PayoutAccountType = { PERSONAL: 'personal-account' } as const;
-export type PayoutAccountType = (typeof PayoutAccountType)[keyof typeof PayoutAccountType];
+/** Client ID ngắn hơn chừng này ký tự thì không lộ ký tự nào. */
+const CLIENT_ID_MASK_MIN_LENGTH = 8;
+
+/** Client ID hiển thị dạng che: `••••` + 4 ký tự cuối (`••••` khi Client ID quá ngắn để che). */
+export function maskTingeeClientId(clientId: string): string {
+  const chars = Array.from(clientId);
+  return chars.length >= CLIENT_ID_MASK_MIN_LENGTH ? `••••${chars.slice(-4).join('')}` : '••••';
+}
+
+/** Độ dài tối đa của Client ID và Secret Token nhận từ form (sau khi bỏ khoảng trắng hai đầu). */
+export const TINGEE_KEY_MAX_LENGTH = 512;
 
 /**
- * Trạng thái một lần thử liên kết: `linking → awaiting_otp → linked` hoặc `failed`. Mỗi BTC có tối đa một dòng
- * `linked`. Dòng `linking` quá 5 phút (api dừng giữa chừng) được đọc như `failed`.
+ * `POST /v1/orgs/:orgId/payout-account/credential` (chỉ Owner): kết nối tài khoản merchant Tingee của BTC bằng API key
+ * lấy trên portal Tingee. Bỏ khoảng trắng hai đầu (hay dính khi dán).
  */
-export const PayoutAccountStatus = {
-  LINKING: 'linking',
-  AWAITING_OTP: 'awaiting_otp',
-  LINKED: 'linked',
-  FAILED: 'failed',
-} as const;
-export type PayoutAccountStatus = (typeof PayoutAccountStatus)[keyof typeof PayoutAccountStatus];
-
-/** Số tài khoản: bỏ khoảng trắng, dấu chấm, gạch ngang; 6–20 chữ số. */
-export const PayoutAccountNumber = z
-  .string()
-  .transform((s) => s.replace(/[\s.-]+/g, ''))
-  .pipe(z.string().regex(/^\d{6,20}$/));
-
-/**
- * Tên chủ tài khoản: in hoa, không dấu, như ngân hàng in. Bỏ dấu tiếng Việt (`Đ` → `D`), viết hoa, gộp khoảng trắng;
- * sau đó chỉ còn chữ A–Z và khoảng trắng, tối đa 100 ký tự. `Nguyễn Văn An` → `NGUYEN VAN AN`.
- */
-export const PayoutAccountName = z
-  .string()
-  .transform((s) =>
-    s
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .replace(/[đĐ]/g, 'D')
-      .toUpperCase()
-      .replace(/\s+/g, ' ')
-      .trim(),
-  )
-  .pipe(z.string().regex(/^[A-Z]+( [A-Z]+)*$/).max(100));
-
-/** Số CCCD: 12 chữ số (bỏ khoảng trắng). Chỉ gửi Tingee, không bao giờ lưu. */
-export const IdentityCardNumber = z
-  .string()
-  .transform((s) => s.replace(/\s+/g, ''))
-  .pipe(z.string().regex(/^\d{12}$/));
-
-/** `POST /v1/orgs/:orgId/payout-account` (chỉ Owner): liên kết tài khoản cá nhân. */
-export const LinkPayoutAccountRequest = z.object({
-  /** BIN 6 số; BIN bị chặn hoặc không hỗ trợ → `BANK_NOT_SUPPORTED` (không phải `VALIDATION_FAILED`). */
-  bankBin: z.string().regex(/^\d{6}$/),
-  accountNumber: PayoutAccountNumber,
-  accountName: PayoutAccountName,
-  identityNumber: IdentityCardNumber,
-  /** SĐT đăng ký Merchant con với Tingee: 10 số, bắt đầu bằng 0 (cùng chuẩn hóa với SĐT liên hệ BTC). */
-  phone: ContactPhone,
+export const ConnectTingeeRequest = z.object({
+  clientId: z.string().trim().min(1).max(TINGEE_KEY_MAX_LENGTH),
+  secretToken: z.string().trim().min(1).max(TINGEE_KEY_MAX_LENGTH),
 });
-export type LinkPayoutAccountRequest = z.input<typeof LinkPayoutAccountRequest>;
+export type ConnectTingeeRequest = z.input<typeof ConnectTingeeRequest>;
 
-/** Mã OTP ngân hàng gửi qua SMS: 4–8 chữ số. */
-export const BANK_OTP_PATTERN = /^\d{4,8}$/;
-
-/** `POST /v1/orgs/:orgId/payout-account/otp` (chỉ Owner): xác nhận lần thử đang chờ OTP. */
-export const ConfirmPayoutOtpRequest = z.object({
-  attemptId: z.uuid(),
-  otp: z
-    .string()
-    .transform((s) => s.replace(/\s+/g, ''))
-    .pipe(z.string().regex(BANK_OTP_PATTERN)),
+/** `POST /v1/orgs/:orgId/payout-account` (chỉ Owner): chọn một tài khoản trong danh sách làm tài khoản nhận tiền. */
+export const SelectPayoutAccountRequest = z.object({
+  vaAccountNumber: z.string().trim().min(1).max(64),
 });
-export type ConfirmPayoutOtpRequest = z.input<typeof ConfirmPayoutOtpRequest>;
+export type SelectPayoutAccountRequest = z.input<typeof SelectPayoutAccountRequest>;
 
-/**
- * Một lần thử liên kết (hoặc tài khoản đang dùng khi `linked`). Không bao giờ có số tài khoản đầy đủ hay CCCD:
- * chỉ 4 số cuối. `vaAccountNumber` là số VA nhận tiền Tingee cấp khi đã liên kết. `failureCode` là mã lỗi miền.
- */
-export const PayoutAccount = z.object({
+/** Credential Tingee hiện hành của BTC. Không bao giờ có Client ID đầy đủ hay Secret Token. */
+export const TingeeCredentialSummary = z.object({
   id: z.uuid(),
-  status: z.enum(PayoutAccountStatus),
+  /** `maskTingeeClientId(clientId)`. */
+  clientIdMasked: z.string(),
+  connectedAt: z.iso.datetime(),
+});
+export type TingeeCredentialSummary = z.infer<typeof TingeeCredentialSummary>;
+
+/**
+ * Một tài khoản `active` (không phải chỉ-chi) của BTC trên Tingee. Không có số tài khoản đầy đủ: chỉ 4 số cuối.
+ * `vaAccountNumber` là số Tingee dùng để nhận tiền (gửi lại khi chọn).
+ */
+export const PayoutAccountOption = z.object({
+  vaAccountNumber: z.string(),
   bankBin: z.string(),
-  accountType: z.enum(PayoutAccountType),
+  bankName: z.string(),
+  accountType: z.string(),
   accountLast4: z.string(),
   accountName: z.string(),
-  vaAccountNumber: z.string().nullable(),
-  failureCode: z.string().nullable(),
-  createdAt: z.iso.datetime(),
-  linkedAt: z.iso.datetime().nullable(),
+  /** `false` với ngân hàng trong `BLOCKED_BANK_BINS` (hiện mờ, không chọn được). */
+  selectable: z.boolean(),
+});
+export type PayoutAccountOption = z.infer<typeof PayoutAccountOption>;
+
+/**
+ * Kết quả `POST …/payout-account/credential` và `GET …/payout-account/options`: danh sách tài khoản đọc từ Tingee bằng
+ * credential hiện hành (rỗng khi BTC chưa liên kết tài khoản ngân hàng nào trên Tingee).
+ */
+export const PayoutAccountOptions = z.object({
+  credential: TingeeCredentialSummary,
+  accounts: z.array(PayoutAccountOption),
+});
+export type PayoutAccountOptions = z.infer<typeof PayoutAccountOptions>;
+
+/** Tài khoản nhận tiền hiện hành của BTC (một VA trong tài khoản Tingee của BTC). Chỉ 4 số cuối số tài khoản. */
+export const PayoutAccount = z.object({
+  id: z.uuid(),
+  vaAccountNumber: z.string(),
+  bankBin: z.string(),
+  bankName: z.string(),
+  accountType: z.string(),
+  accountLast4: z.string(),
+  accountName: z.string(),
+  linkedAt: z.iso.datetime(),
 });
 export type PayoutAccount = z.infer<typeof PayoutAccount>;
 
 /**
- * `GET /v1/orgs/:orgId/payout-account` (chỉ Owner): tài khoản đang dùng nếu đã liên kết; chưa thì lần thử gần nhất
- * (đang chờ OTP, đang liên kết hoặc thất bại); chưa thử lần nào thì `null`.
+ * `GET /v1/orgs/:orgId/payout-account` (chỉ Owner, không gọi Tingee). Chưa kết nối → `credential` `null`; đã kết nối
+ * chưa chọn → `account` `null`; đã liên kết → cả hai.
  */
-export const PayoutAccountOverview = z.object({ current: PayoutAccount.nullable() });
+export const PayoutAccountOverview = z.object({
+  credential: TingeeCredentialSummary.nullable(),
+  account: PayoutAccount.nullable(),
+  /** URL IPN riêng của BTC (`tingeeIpnUrl`); `null` khi BTC chưa từng kết nối Tingee. */
+  ipnUrl: z.string().nullable(),
+  /** Portal Tingee ứng với môi trường Tingee mà api đang gọi (UAT hoặc thật). */
+  tingeePortalUrl: z.string(),
+});
 export type PayoutAccountOverview = z.infer<typeof PayoutAccountOverview>;

@@ -12,9 +12,19 @@ export const PII_COLUMNS = {
 const snakeToCamel = (s: string): string => s.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
 
 /**
- * Khóa luôn che trong log dù chưa có cột nào dùng: email, SĐT, số tài khoản đầy đủ và CCCD (gửi Tingee, không lưu).
+ * Khóa luôn che trong log dù chưa có cột nào dùng: email, SĐT, số tài khoản đầy đủ, CCCD; số VA nhận tiền và API key
+ * Tingee của BTC (`client_id`, `secret_token`; Secret Token chỉ lưu dạng mã hóa, không bao giờ được log).
  */
-const ALWAYS_REDACTED = ['email', 'phone', 'phone_number', 'account_number', 'identity_number'] as const;
+const ALWAYS_REDACTED = [
+  'email',
+  'phone',
+  'phone_number',
+  'account_number',
+  'identity_number',
+  'va_account_number',
+  'secret_token',
+  'client_id',
+] as const;
 
 /** Khóa cần che trong log: dạng snake_case và camelCase của mọi cột PII. */
 export const PII_KEYS: readonly string[] = Array.from(

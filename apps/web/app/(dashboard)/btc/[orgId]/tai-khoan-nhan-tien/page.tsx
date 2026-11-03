@@ -10,8 +10,8 @@ const { label } = navSection('payout-account');
 export const metadata: Metadata = { title: `${label} · Tickee`, robots: { index: false, follow: false } };
 
 /**
- * Tài khoản nhận tiền (Story 2.6): liên kết tài khoản ngân hàng cá nhân qua Tingee (form + OTP ngân hàng). Chỉ Owner;
- * Admin thấy `empty-state` của `OwnerOnly`.
+ * Tài khoản nhận tiền (Story 2.6): kết nối tài khoản merchant Tingee của BTC bằng API key, chọn tài khoản nhận tiền,
+ * rồi lấy URL IPN để cấu hình portal Tingee. Chỉ Owner; Admin thấy `empty-state` của `OwnerOnly`.
  */
 export default function PayoutAccountPage() {
   return (

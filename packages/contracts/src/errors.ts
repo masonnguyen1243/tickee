@@ -58,21 +58,17 @@ export const ErrorCode = {
    */
   CLOSED_BETA_TRANSITION_INVALID: 'CLOSED_BETA_TRANSITION_INVALID',
   /**
-   * Tingee/ngân hàng từ chối thông tin tài khoản nhận tiền (số tài khoản, tên chủ tài khoản, CCCD hoặc SĐT không khớp);
-   * `details.field` là trường nghi sai nếu biết (`PayoutFieldErrorDetails`).
+   * Tingee từ chối API key của BTC: Client ID không tồn tại hoặc bị khóa, Secret Token sai, hoặc key chưa được cấp quyền
+   * nhóm dịch vụ cần dùng. Không lưu gì.
    */
-  PAYOUT_ACCOUNT_INVALID: 'PAYOUT_ACCOUNT_INVALID',
-  /** Ngân hàng không được hỗ trợ (VietinBank bị chặn ngay ở server); `details.field` là `bankBin`. */
+  TINGEE_CREDENTIAL_INVALID: 'TINGEE_CREDENTIAL_INVALID',
+  /** Ngân hàng của tài khoản chưa được hỗ trợ làm tài khoản nhận tiền (VietinBank, `BLOCKED_BANK_BINS`). */
   BANK_NOT_SUPPORTED: 'BANK_NOT_SUPPORTED',
-  /** Tài khoản ngân hàng đã được liên kết ở nơi khác (Merchant khác của Tingee). */
-  PAYOUT_ACCOUNT_IN_USE: 'PAYOUT_ACCOUNT_IN_USE',
-  /** BTC đã có tài khoản nhận tiền đang dùng; đổi tài khoản là luồng riêng (Story 2.13). */
+  /** Tài khoản đã chọn không còn `active` trên Tingee (hoặc credential đã đổi giữa chừng): tải lại danh sách. */
+  PAYOUT_ACCOUNT_UNAVAILABLE: 'PAYOUT_ACCOUNT_UNAVAILABLE',
+  /** BTC đã có tài khoản nhận tiền đang dùng; đổi tài khoản hoặc đổi key là luồng riêng (Story 2.13). */
   PAYOUT_ACCOUNT_ALREADY_LINKED: 'PAYOUT_ACCOUNT_ALREADY_LINKED',
-  /** Mã OTP ngân hàng sai; lần thử vẫn chờ OTP, nhập lại được. */
-  BANK_OTP_INVALID: 'BANK_OTP_INVALID',
-  /** Mã OTP ngân hàng hết hạn (hoặc lần thử không còn chờ OTP): phải gửi lại để tạo lần thử mới. */
-  BANK_OTP_EXPIRED: 'BANK_OTP_EXPIRED',
-  /** Merchant con của BTC đang bị Tingee tạm khóa. */
+  /** Tài khoản merchant Tingee của BTC đang bị Tingee tạm khóa. */
   MERCHANT_SUSPENDED: 'MERCHANT_SUSPENDED',
   /** Tingee tạm lỗi (timeout, lỗi mạng, lỗi hệ thống hoặc mã lỗi không lường trước): thử lại sau ít phút. */
   PAYMENT_PROVIDER_UNAVAILABLE: 'PAYMENT_PROVIDER_UNAVAILABLE',
@@ -81,10 +77,6 @@ export const ErrorCode = {
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 
 export const errorCodeSchema = z.enum(ErrorCode);
-
-/** `details` của lỗi gắn với một trường của form (vd. `BANK_NOT_SUPPORTED` → `bankBin`). */
-export const PayoutFieldErrorDetails = z.object({ field: z.string() });
-export type PayoutFieldErrorDetails = z.infer<typeof PayoutFieldErrorDetails>;
 
 /** Dạng lỗi HTTP duy nhất: `{ "error": { "code", "message", "details" } }`. */
 export const ErrorResponse = z.object({

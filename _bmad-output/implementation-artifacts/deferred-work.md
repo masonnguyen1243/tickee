@@ -158,3 +158,15 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-6-lien-ket-tai-khoan-nhan-tien.md`
   summary: Script dev `pnpm --filter @tickee/api tingee:fake` (biên dịch riêng `test/tingee-fake/tsconfig.json`) chưa có bước CI nào chạy thử.
   evidence: Review 03/11 #24 (verification-gap). Sai `outDir`/`rootDir` sẽ làm hỏng cách chạy local ghi trong `.env.example`/README mà mọi test vẫn qua.
+
+## Deferred from: code review of spec-2-6-lien-ket-tai-khoan-nhan-tien-2.md (2026-11-03)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-lien-ket-tai-khoan-nhan-tien-2.md`
+  summary: Hai BTC kết nối cùng một tài khoản merchant Tingee (cùng Client ID, hoặc cùng VA). Portal chỉ có một "Đường dẫn IPN" cho mỗi merchant, nên IPN của một BTC đổ về URL `ipnKey` của BTC kia; theo AD-7, IPN đó rơi vào nhánh "Tài khoản lệch".
+  evidence: Review 03/11 pass 1 #1 (maybe-false; nếu đúng là medium). Cần biết hai điều: (a) Tingee có cho cấu hình IPN Cổng thanh toán theo shop hoặc VA không, hay chỉ một URL cho mỗi merchant; (b) Mason chọn chặn trùng Client ID giữa các BTC ở bước kết nối (Story 2.6/2.13), hay để Story 3.5 định tuyến theo credential đã chụp vào Đơn thay vì đòi Đơn thuộc BTC sở hữu `ipnKey`. Phải chốt trước khi làm Story 3.5.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-lien-ket-tai-khoan-nhan-tien-2.md`
+  summary: Bước kết nối chỉ chứng minh key có quyền "Tài khoản & Định danh" (`get-va-paging`). Key thiếu quyền "Cổng thanh toán" vẫn kết nối và chọn tài khoản được, tới `create-link` (Epic 3) mới lỗi 1133.
+  evidence: Review 03/11 pass 1 #3 (medium). Không có API kiểm quyền Cổng thanh toán mà không tạo link. Đề xuất 03/11 đã đặt nút "Kiểm tra kết nối" (tạo link thử 2.000đ rồi hủy) ở Epic 3. Story 3.4 cần báo `TINGEE_CREDENTIAL_INVALID` kèm câu nhắc cấp quyền "Cổng thanh toán".
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-lien-ket-tai-khoan-nhan-tien-2.md`
+  summary: Chưa biết `get-va-paging` trả gì cho merchant chưa liên kết tài khoản nào (`items: []`, `items: null` hay `data: null`). Adapter chỉ nhận mảng; nếu Tingee trả null thì bước kết nối thành 503 và không bao giờ tới được `empty-state`.
+  evidence: Review 03/11 pass 1 #16 (maybe-false; nếu đúng là medium). Tài liệu và OpenAPI của Tingee chỉ có ví dụ có phần tử, và schema của `data` để trống. Cách chốt: gọi UAT bằng một merchant mới chưa liên kết ngân hàng (test hợp đồng, Story 4.7, hoặc thử tay bằng key UAT trong `.env` local).

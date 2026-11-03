@@ -43,14 +43,23 @@ async function noticesOf(cookie: string, org = orgId): Promise<StatusNotice[]> {
   return (await allNoticesOf(cookie, org)).filter((n) => n.code.startsWith('CLOSED_BETA_'));
 }
 
-/** Một lần thử liên kết ở trạng thái `status` (Story 2.6), ghi thẳng DB. */
-async function insertPayoutAccount(status: 'awaiting_otp' | 'linked' | 'failed'): Promise<void> {
-  const linked = status === 'linked';
+/** Credential Tingee hiện hành (Story 2.6), ghi thẳng DB: đã kết nối nhưng chưa chọn tài khoản. */
+async function insertCredential(): Promise<string> {
+  const result = await h.db.orm.execute<{ id: string }>(sql`
+    INSERT INTO tingee_credentials (organization_id, client_id, secret_token_ciphertext, created_by)
+    VALUES (${orgId}, 'tg-client-test', 'v1:AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA.AAAA', ${owner.userId})
+    RETURNING id`);
+  return result.rows[0]!.id;
+}
+
+/** Tài khoản nhận tiền hiện hành (Story 2.6), ghi thẳng DB. */
+async function insertPayoutAccount(credentialId: string): Promise<void> {
   await h.db.orm.execute(sql`
     INSERT INTO payout_accounts
-      (organization_id, status, bank_bin, account_type, account_last4, account_name, created_by, va_account_number, linked_at)
-    VALUES (${orgId}, ${status}, '970422', 'personal-account', '0000', 'NGUYEN VAN A', ${owner.userId},
-      ${linked ? '9600000001' : null}, ${linked ? sql`now()` : null})`);
+      (organization_id, tingee_credential_id, va_account_number, bank_bin, bank_name, account_type, account_last4,
+       account_name, created_by)
+    VALUES (${orgId}, ${credentialId}, '9600000001', '970422', 'MB Bank', 'personal-account', '0000', 'NGUYEN VAN A',
+      ${owner.userId})`);
 }
 
 const closedBeta = (action: 'approve' | 'revoke') =>
@@ -99,7 +108,7 @@ describe('GET /v1/orgs/:orgId/notices', () => {
     expect(again?.version).not.toBe(revoked?.version);
   });
 
-  it('tài khoản nhận tiền (Story 2.6): chưa liên kết → NOT_LINKED (danger, chặn bán) xếp trên Chờ duyệt; chờ OTP → LINKING; đã liên kết → hết', async () => {
+  it('tài khoản nhận tiền (Story 2.6): chưa có → NOT_LINKED (danger, chặn bán) xếp trên Chờ duyệt; kết nối key chưa chọn → vẫn NOT_LINKED; đã chọn → hết', async () => {
     for (const cookie of [owner.cookie, admin.cookie]) {
       const notices = await allNoticesOf(cookie);
       expect(notices.map((n) => n.code)).toEqual(['PAYOUT_ACCOUNT_NOT_LINKED', 'CLOSED_BETA_PENDING']);
@@ -114,20 +123,21 @@ describe('GET /v1/orgs/:orgId/notices', () => {
     }
     const [notLinked] = await allNoticesOf(owner.cookie);
 
-    await insertPayoutAccount('failed');
-    const [afterFailure] = await allNoticesOf(owner.cookie);
-    expect(afterFailure?.code).toBe('PAYOUT_ACCOUNT_NOT_LINKED');
-    expect(afterFailure?.version).not.toBe(notLinked?.version);
+    const credentialId = await insertCredential();
+    const [connected] = await allNoticesOf(owner.cookie);
+    expect(connected).toEqual(notLinked);
 
-    await insertPayoutAccount('awaiting_otp');
-    const linking = await allNoticesOf(admin.cookie);
-    expect(linking.map((n) => n.code)).toEqual(['PAYOUT_ACCOUNT_LINKING', 'CLOSED_BETA_PENDING']);
-    expect(linking[0]).toMatchObject({ severity: 'neutral', blocking: false, dismissible: false });
-
-    await insertPayoutAccount('linked');
+    await insertPayoutAccount(credentialId);
     expect((await allNoticesOf(owner.cookie)).map((n) => n.code)).toEqual(['CLOSED_BETA_PENDING']);
+    expect((await allNoticesOf(admin.cookie)).map((n) => n.code)).toEqual(['CLOSED_BETA_PENDING']);
     await closedBeta('approve');
     expect(await allNoticesOf(admin.cookie)).toEqual([]);
+
+    // Tài khoản hiện hành bị thay (Story 2.13) mà chưa có tài khoản mới: NOT_LINKED quay lại với version mới.
+    await h.db.orm.execute(sql`UPDATE payout_accounts SET retired_at = now() WHERE organization_id = ${orgId}`);
+    const [again] = await allNoticesOf(owner.cookie);
+    expect(again?.code).toBe('PAYOUT_ACCOUNT_NOT_LINKED');
+    expect(again?.version).not.toBe(notLinked?.version);
   });
 
   it('không là thành viên → 403 NOT_A_MEMBER', async () => {

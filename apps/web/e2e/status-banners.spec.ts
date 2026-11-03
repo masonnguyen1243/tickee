@@ -164,11 +164,3 @@ test('chưa liên kết tài khoản nhận tiền: Admin chỉ thấy lời nh�
   await expect(banner.getByRole('link')).toHaveCount(0);
   await expect(banner.getByRole('button')).toHaveCount(0);
 });
-
-test('đang liên kết (chờ OTP): banner neutral "Đang liên kết", Owner có nút nhập mã', async ({ page }) => {
-  await openDashboard(page, () => [statusNotice('PAYOUT_ACCOUNT_LINKING')]);
-  const banner = banners(page).first();
-  await expect(banner).toHaveAttribute('data-tone', 'neutral');
-  await expect(banner).toContainText('Đang liên kết tài khoản nhận tiền');
-  await expect(banner.getByRole('link', { name: 'Nhập mã OTP' })).toHaveAttribute('href', `${base}/tai-khoan-nhan-tien`);
-});

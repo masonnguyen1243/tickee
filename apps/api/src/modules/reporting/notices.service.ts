@@ -60,42 +60,24 @@ function closedBetaNotices(state: ClosedBetaState): StatusNotice[] {
 }
 
 /**
- * Thông báo của trục tài khoản nhận tiền: chưa liên kết → `PAYOUT_ACCOUNT_NOT_LINKED` (danger, chặn bán Vé có phí);
- * đang chờ OTP ngân hàng → `PAYOUT_ACCOUNT_LINKING` (neutral) thay thế; đã liên kết → không có. `version` là mốc đổi
- * gần nhất của lần thử (chưa thử lần nào thì là lúc tạo BTC). Web chọn câu theo vai (Owner có nút "Liên kết ngay").
+ * Thông báo của trục tài khoản nhận tiền: BTC chưa có tài khoản nhận tiền hiện hành (chưa kết nối Tingee, hoặc kết nối
+ * rồi nhưng chưa chọn tài khoản) → `PAYOUT_ACCOUNT_NOT_LINKED` (danger, chặn bán Vé có phí); có rồi → không có. `version`
+ * là mốc đổi gần nhất (chưa từng có tài khoản thì là lúc tạo BTC). Web chọn câu theo vai (Owner có nút "Liên kết ngay").
  */
 function payoutNotices(state: PayoutAccountState, organizationCreatedAt: Date): StatusNotice[] {
-  const version = (state.changedAt ?? organizationCreatedAt).toISOString();
-  switch (state.status) {
-    case 'not_linked':
-      return [
-        {
-          code: StatusNoticeCode.PAYOUT_ACCOUNT_NOT_LINKED,
-          severity: StatusNoticeSeverity.DANGER,
-          blocking: true,
-          dismissible: false,
-          scope: StatusNoticeScope.ORGANIZATION,
-          audience: MEMBERS,
-          data: {},
-          version,
-        },
-      ];
-    case 'awaiting_otp':
-      return [
-        {
-          code: StatusNoticeCode.PAYOUT_ACCOUNT_LINKING,
-          severity: StatusNoticeSeverity.NEUTRAL,
-          blocking: false,
-          dismissible: false,
-          scope: StatusNoticeScope.ORGANIZATION,
-          audience: MEMBERS,
-          data: {},
-          version,
-        },
-      ];
-    case 'linked':
-      return [];
-  }
+  if (state.status === 'linked') return [];
+  return [
+    {
+      code: StatusNoticeCode.PAYOUT_ACCOUNT_NOT_LINKED,
+      severity: StatusNoticeSeverity.DANGER,
+      blocking: true,
+      dismissible: false,
+      scope: StatusNoticeScope.ORGANIZATION,
+      audience: MEMBERS,
+      data: {},
+      version: (state.changedAt ?? organizationCreatedAt).toISOString(),
+    },
+  ];
 }
 
 /**

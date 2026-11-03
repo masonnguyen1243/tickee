@@ -14,7 +14,6 @@ export type StatusNoticeContent = { title: string; description?: string; action?
 export type StatusNoticeContentByRole = Readonly<Record<Role, StatusNoticeContent>>;
 
 const NOT_LINKED_TITLE = 'Chưa liên kết tài khoản nhận tiền';
-const LINKING_TITLE = 'Đang liên kết tài khoản nhận tiền';
 
 /** Mỗi mã trong `StatusNoticeCode` bắt buộc có nội dung (thiếu thì lỗi typecheck). */
 export const STATUS_NOTICE_CONTENT: Readonly<Record<StatusNoticeCode, StatusNoticeContent | StatusNoticeContentByRole>> = {
@@ -34,14 +33,6 @@ export const STATUS_NOTICE_CONTENT: Readonly<Record<StatusNoticeCode, StatusNoti
       action: { label: 'Liên kết ngay', section: 'payout-account' },
     },
     admin: { title: NOT_LINKED_TITLE, description: 'Nhờ Owner liên kết tài khoản nhận tiền.' },
-  },
-  PAYOUT_ACCOUNT_LINKING: {
-    owner: {
-      title: LINKING_TITLE,
-      description: 'Nhập mã OTP ngân hàng để hoàn tất.',
-      action: { label: 'Nhập mã OTP', section: 'payout-account' },
-    },
-    admin: { title: LINKING_TITLE, description: 'Owner đang hoàn tất liên kết tài khoản nhận tiền.' },
   },
 };
 
