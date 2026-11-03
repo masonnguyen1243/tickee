@@ -64,6 +64,13 @@
       "when": 1793677890340,
       "tag": "0008_tingee_credentials",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793681316379,
+      "tag": "0009_payout_accounts_multi",
+      "breakpoints": true
     }
   ]
 }

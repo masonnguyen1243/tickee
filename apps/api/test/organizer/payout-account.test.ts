@@ -22,9 +22,10 @@ import { createHarness, signUp, type Harness } from '../identity/harness.js';
 import { fakeAccount, startTingeeFake, type FakeAccount, type TingeeFake } from '../tingee-fake/server.js';
 
 /*
- * Story 2.6: BTC kết nối API key Tingee của mình và chọn tài khoản nhận tiền, trên Tingee fake (server HTTP thật, nhiều
- * merchant) và Postgres thật. Tingee luôn được gọi ngoài transaction; mỗi lần ghi là một transaction riêng có audit; tối
- * đa một credential và một tài khoản nhận tiền hiện hành mỗi BTC. Không bao giờ gọi Tingee thật.
+ * Story 2.6: BTC kết nối API key Tingee của mình, thêm một hay nhiều tài khoản nhận tiền, đặt mặc định và hủy liên
+ * kết, trên Tingee fake (server HTTP thật, nhiều merchant) và Postgres thật. Tingee luôn được gọi ngoài transaction;
+ * mỗi lần ghi là một transaction riêng có audit; tối đa một credential hiện hành mỗi BTC, mỗi VA hiện hành tối đa một
+ * lần mỗi BTC, còn tài khoản thì đúng một tài khoản mặc định. Không bao giờ gọi Tingee thật.
  */
 
 const MAIN: TingeeCredential = { clientId: 'tg-client-main-0a1b2c3d', secretToken: 'tg-secret-main-Zx9Yw8Vu7' };
@@ -125,6 +126,13 @@ const connect = (credential: TingeeCredential | Record<string, unknown>, cookie 
 const options = (cookie = owner.cookie, harness = h) => tracked(harness.http.get(`${base()}/options`).set('cookie', cookie));
 const select = (vaAccountNumber: unknown, cookie = owner.cookie, harness = h) =>
   tracked(harness.http.post(base()).set('cookie', cookie).send({ vaAccountNumber }));
+const unlink = (accountId: string, cookie = owner.cookie) =>
+  tracked(h.http.delete(`${base()}/${accountId}`).set('cookie', cookie));
+const setDefault = (accountId: string, cookie = owner.cookie) =>
+  tracked(h.http.post(`${base()}/${accountId}/default`).set('cookie', cookie));
+/** Thêm tài khoản `account` (fake) và trả tài khoản đã lưu. */
+const link = async (account: FakeAccount) =>
+  PayoutAccount.parse(expectOk(await select(String(account.vaAccountNumber))));
 const overview = async (harness = h) =>
   PayoutAccountOverview.parse((await tracked(harness.http.get(base()).set('cookie', owner.cookie))).body);
 
@@ -165,6 +173,18 @@ async function accountRows() {
   return result.rows as Record<string, unknown>[];
 }
 
+/** Mỗi BTC: còn tài khoản hiện hành thì đúng một tài khoản mặc định; dòng đã hủy không bao giờ là mặc định. */
+async function expectOneDefault() {
+  const rows = await accountRows();
+  const current = rows.filter((r) => r.retired_at === null);
+  expect(current.filter((r) => r.is_default === true)).toHaveLength(current.length > 0 ? 1 : 0);
+  expect(rows.filter((r) => r.retired_at !== null && r.is_default === true)).toEqual([]);
+}
+
+/** `[VA, isDefault]` của các tài khoản trong tổng quan, theo thứ tự trả về. */
+const summary = (view: { accounts: { vaAccountNumber: string; isDefault: boolean }[] }) =>
+  view.accounts.map((a) => [a.vaAccountNumber, a.isDefault]);
+
 async function ipnKey(): Promise<string | null> {
   const result = await h.db.orm.execute<{ tingee_ipn_key: string | null }>(
     sql`SELECT tingee_ipn_key FROM organizations WHERE id = ${orgId}`,
@@ -186,7 +206,8 @@ describe('chưa kết nối Tingee', () => {
   it('overview rỗng, chưa có URL IPN; Owner và Admin cùng thấy PAYOUT_ACCOUNT_NOT_LINKED (danger, không đóng được)', async () => {
     expect(await overview()).toEqual({
       credential: null,
-      account: null,
+      accounts: [],
+      canReplaceKey: true,
       ipnUrl: null,
       tingeePortalUrl: 'https://baas.tingee.vn',
     });
@@ -217,8 +238,14 @@ describe('kết nối bằng key', () => {
         accountLast4: String(mb.accountNumber).slice(-4),
         accountName: 'CLB CO VUA QUAN 3',
         selectable: true,
+        linked: false,
       },
-      expect.objectContaining({ vaAccountNumber: vietin.vaAccountNumber, bankBin: '970415', selectable: false }),
+      expect.objectContaining({
+        vaAccountNumber: vietin.vaAccountNumber,
+        bankBin: '970415',
+        selectable: false,
+        linked: false,
+      }),
     ]);
     expect(res.text).not.toContain(MAIN.secretToken);
     expect(res.text).not.toContain(MAIN.clientId);
@@ -240,7 +267,8 @@ describe('kết nối bằng key', () => {
     expect(key).toMatch(/^[A-Za-z0-9_-]{22}$/);
     expect(await overview()).toEqual({
       credential: result.credential,
-      account: null,
+      accounts: [],
+      canReplaceKey: true,
       ipnUrl: `${IPN_PREFIX}${key}`,
       tingeePortalUrl: 'https://baas.tingee.vn',
     });
@@ -350,7 +378,7 @@ describe('chọn tài khoản nhận tiền', () => {
     resetFake();
   });
 
-  it('VA active, không phải VietinBank → 200; overview có tài khoản và URL IPN; banner NOT_LINKED mất', async () => {
+  it('VA active, không phải VietinBank → 200, tài khoản đầu tiên thành mặc định; overview có URL IPN; banner NOT_LINKED mất', async () => {
     const res = await select(String(mb.vaAccountNumber));
     const account = PayoutAccount.parse(expectOk(res));
     expect(account).toMatchObject({
@@ -360,12 +388,14 @@ describe('chọn tài khoản nhận tiền', () => {
       accountType: 'personal-account',
       accountLast4: String(mb.accountNumber).slice(-4),
       accountName: 'CLB CO VUA QUAN 3',
+      isDefault: true,
     });
     // Server đọc lại danh sách bằng credential hiện hành trước khi lưu.
     expect(fake.calls('/v1/get-va-paging')).toEqual([expect.objectContaining({ clientId: MAIN.clientId, signatureValid: true })]);
 
     const view = await overview();
-    expect(view.account).toEqual(account);
+    expect(view.accounts).toEqual([account]);
+    expect(view.canReplaceKey).toBe(false);
     expect(view.ipnUrl).toBe(`${IPN_PREFIX}${await ipnKey()}`);
     expect(await noticeCodes(owner.cookie)).not.toContain('PAYOUT_ACCOUNT_NOT_LINKED');
     expect(await noticeCodes(admin.cookie)).not.toContain('PAYOUT_ACCOUNT_NOT_LINKED');
@@ -376,6 +406,7 @@ describe('chọn tài khoản nhận tiền', () => {
       va_account_number: mb.vaAccountNumber,
       tingee_shop_id: String(mb.shopId),
       created_by: owner.userId,
+      is_default: true,
       retired_at: null,
     });
     expect((await audits()).at(-1)).toEqual({
@@ -390,6 +421,7 @@ describe('chọn tài khoản nhận tiền', () => {
         'account_last4',
         'account_name',
         'tingee_shop_id',
+        'is_default',
         'linked_at',
       ],
     });
@@ -424,28 +456,37 @@ describe('chọn tài khoản nhận tiền', () => {
     expect(await accountRows()).toEqual([]);
   });
 
-  it('đã liên kết: gửi key hoặc chọn lại → 409 PAYOUT_ACCOUNT_ALREADY_LINKED, không gọi Tingee', async () => {
+  it('đã liên kết: chọn lại cùng VA → 409 "Tài khoản này đã được liên kết."; gửi key → 409; không gọi Tingee', async () => {
     expectOk(await select(String(mb.vaAccountNumber)));
     resetFake();
+    const duplicate = expectError(await select(String(mb.vaAccountNumber)), 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
+    expect(duplicate.message).toBe('Tài khoản này đã được liên kết.');
     expectError(await connect(OTHER), 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
-    expectError(await select(String(mb.vaAccountNumber)), 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
     expect(fake.requests).toHaveLength(0);
     expect(await accountRows()).toHaveLength(1);
     expect((await credentialRows()).filter((r) => r.retired_at === null)).toHaveLength(1);
   });
 
-  it('hai tab chọn cùng lúc: đúng một tài khoản hiện hành, tab còn lại 409', async () => {
-    const second = trackedAccount();
-    fake.merchant(MAIN.clientId).accounts.push(second);
+  it('hai tab thêm cùng một VA cùng lúc: đúng một dòng, các tab còn lại 409', async () => {
     const results = await Promise.all([
       select(String(mb.vaAccountNumber)),
-      select(String(second.vaAccountNumber)),
+      select(String(mb.vaAccountNumber)),
       select(String(mb.vaAccountNumber)),
     ]);
     expect(results.filter((r) => r.status === 200)).toHaveLength(1);
     for (const res of results.filter((r) => r.status !== 200)) expectError(res, 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
     expect(await accountRows()).toHaveLength(1);
     expect((await audits()).filter((a) => a.action === 'payout_account.linked')).toHaveLength(1);
+    await expectOneDefault();
+  });
+
+  it('hai tab thêm hai VA khác nhau cùng lúc: cả hai được, đúng một tài khoản mặc định', async () => {
+    const second = trackedAccount({ bankName: 'ACB', bankBin: '970416' });
+    fake.merchant(MAIN.clientId).accounts.push(second);
+    const results = await Promise.all([select(String(mb.vaAccountNumber)), select(String(second.vaAccountNumber))]);
+    for (const res of results) expectOk(res);
+    expect((await overview()).accounts).toHaveLength(2);
+    await expectOneDefault();
   });
 
   it('tab khác chọn xong trong lúc tab này chờ Tingee → tab này 409 ALREADY_LINKED', async () => {
@@ -473,6 +514,293 @@ describe('chọn tài khoản nhận tiền', () => {
     expectError(await select(String(mb.vaAccountNumber)), 409, 'PAYOUT_ACCOUNT_UNAVAILABLE');
     expect(await accountRows()).toEqual([]);
   });
+
+  it('tab khác liên kết rồi hủy liên kết trong lúc tab này kết nối key khác → 409 ALREADY_LINKED, credential cũ vẫn hiện hành', async () => {
+    afterNextList = async () => {
+      const account = await link(mb);
+      expectOk(await unlink(account.id));
+    };
+    // BTC không còn tài khoản hiện hành nhưng đã từng liên kết (Q2): không nhận key nữa.
+    expectError(await connect(OTHER), 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
+    expect((await credentialRows()).map((r) => [r.client_id, r.retired_at])).toEqual([[MAIN.clientId, null]]);
+    expect((await audits()).filter((a) => a.action === 'tingee_credential.connected')).toHaveLength(1);
+    expect((await overview()).accounts).toEqual([]);
+  });
+});
+
+describe('nhiều tài khoản: thêm, hủy liên kết, đặt mặc định', () => {
+  /** Tài khoản thứ hai, thứ ba của MAIN (chọn được). */
+  let acb: FakeAccount;
+  let vcb: FakeAccount;
+  /** MB đã liên kết (mặc định) ở đầu mỗi test. */
+  let mbLinked: PayoutAccount;
+
+  beforeEach(async () => {
+    acb = trackedAccount({ bankName: 'ACB', bankBin: '970416', accountName: 'CLB CO VUA QUAN 3' });
+    vcb = trackedAccount({ bankName: 'Vietcombank', bankBin: '970436', accountName: 'CLB CO VUA QUAN 3' });
+    fake.merchant(MAIN.clientId).accounts.push(acb, vcb);
+    expectOk(await connect(MAIN));
+    mbLinked = await link(mb);
+    resetFake();
+  });
+
+  it('thêm tài khoản thứ hai → 200, không phải mặc định; overview có 2 tài khoản theo thứ tự liên kết; danh sách đánh dấu linked', async () => {
+    const added = await link(acb);
+    expect(added).toMatchObject({ vaAccountNumber: acb.vaAccountNumber, bankName: 'ACB', isDefault: false });
+
+    const view = await overview();
+    expect(summary(view)).toEqual([
+      [mb.vaAccountNumber, true],
+      [acb.vaAccountNumber, false],
+    ]);
+    expect(view.accounts[1]).toEqual(added);
+    expect(view.canReplaceKey).toBe(false);
+    expect(await noticeCodes(owner.cookie)).not.toContain('PAYOUT_ACCOUNT_NOT_LINKED');
+
+    const listed = PayoutAccountOptions.parse(expectOk(await options()));
+    expect(listed.accounts.map((a) => [a.vaAccountNumber, a.linked])).toEqual([
+      [mb.vaAccountNumber, true],
+      [vietin.vaAccountNumber, false],
+      [acb.vaAccountNumber, true],
+      [vcb.vaAccountNumber, false],
+    ]);
+
+    const linked = (await audits()).filter((a) => a.action === 'payout_account.linked');
+    expect(linked).toHaveLength(2);
+    expect(linked[0]?.changed_fields).toContain('is_default');
+    expect(linked[1]?.changed_fields).not.toContain('is_default');
+    await expectOneDefault();
+  });
+
+  it('thêm trùng: chọn lại VA MB đang liên kết → 409 "Tài khoản này đã được liên kết.", không gọi Tingee, không lưu', async () => {
+    const error = expectError(await select(String(mb.vaAccountNumber)), 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
+    expect(error.message).toBe('Tài khoản này đã được liên kết.');
+    expect(fake.requests).toHaveLength(0);
+    expect(await accountRows()).toHaveLength(1);
+  });
+
+  it('tab khác thêm cùng VA trong lúc tab này chờ Tingee → 409, đúng một dòng', async () => {
+    afterNextList = async () => {
+      expectOk(await select(String(acb.vaAccountNumber)));
+    };
+    expectError(await select(String(acb.vaAccountNumber)), 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
+    expect((await accountRows()).filter((r) => r.va_account_number === acb.vaAccountNumber)).toHaveLength(1);
+  });
+
+  it('hủy một trong hai (không phải mặc định) → 200, còn MB; banner vẫn không có; dòng giữ lại với retired_at', async () => {
+    const added = await link(acb);
+    resetFake();
+    const view = PayoutAccountOverview.parse(expectOk(await unlink(added.id)));
+    expect(view.accounts).toEqual([mbLinked]);
+    expect(view.canReplaceKey).toBe(false);
+    expect(await overview()).toEqual(view);
+    expect(await noticeCodes(owner.cookie)).not.toContain('PAYOUT_ACCOUNT_NOT_LINKED');
+
+    const rows = await accountRows();
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.id === added.id)).toMatchObject({ is_default: false, retired_at: expect.anything() });
+    expect((await audits()).at(-1)).toEqual({
+      action: 'payout_account.unlinked',
+      target_type: 'payout_account',
+      changed_fields: ['retired_at'],
+    });
+    // Không gọi Tingee để hủy hay xóa VA.
+    expect(fake.requests).toHaveLength(0);
+    await expectOneDefault();
+  });
+
+  it('hủy tài khoản mặc định → tài khoản liên kết sớm nhất còn lại thành mặc định', async () => {
+    const acbLinked = await link(acb);
+    const vcbLinked = await link(vcb);
+    // VCB (liên kết sau cùng) thành mặc định rồi bị hủy: MB (sớm nhất) thành mặc định, không phải ACB.
+    expectOk(await setDefault(vcbLinked.id));
+    let view = PayoutAccountOverview.parse(expectOk(await unlink(vcbLinked.id)));
+    expect(summary(view)).toEqual([
+      [mb.vaAccountNumber, true],
+      [acb.vaAccountNumber, false],
+    ]);
+    await expectOneDefault();
+
+    view = PayoutAccountOverview.parse(expectOk(await unlink(mbLinked.id)));
+    expect(summary(view)).toEqual([[acb.vaAccountNumber, true]]);
+    expect(view.accounts[0]?.id).toBe(acbLinked.id);
+    await expectOneDefault();
+
+    const tail = (await audits()).slice(-2);
+    expect(tail).toEqual([
+      {
+        action: 'payout_account.unlinked',
+        target_type: 'payout_account',
+        changed_fields: ['retired_at', 'is_default'],
+      },
+      { action: 'payout_account.default_changed', target_type: 'payout_account', changed_fields: ['is_default'] },
+    ]);
+  });
+
+  it('hủy cả hai → accounts [], NOT_LINKED hiện lại cho Owner và Admin, audit có hai dòng payout_account.unlinked', async () => {
+    const added = await link(acb);
+    expectOk(await unlink(mbLinked.id));
+    const view = PayoutAccountOverview.parse(expectOk(await unlink(added.id)));
+    expect(view).toMatchObject({ accounts: [], canReplaceKey: false });
+    expect(view.credential).not.toBeNull();
+    expect(view.ipnUrl).toBe(`${IPN_PREFIX}${await ipnKey()}`);
+    expect(await noticeCodes(owner.cookie)).toContain('PAYOUT_ACCOUNT_NOT_LINKED');
+    expect(await noticeCodes(admin.cookie)).toContain('PAYOUT_ACCOUNT_NOT_LINKED');
+    expect((await audits()).filter((a) => a.action === 'payout_account.unlinked')).toHaveLength(2);
+    expect(await accountRows()).toHaveLength(2);
+    await expectOneDefault();
+
+    // Danh sách không còn VA nào `linked`.
+    const listed = PayoutAccountOptions.parse(expectOk(await options()));
+    expect(listed.accounts.some((a) => a.linked)).toBe(false);
+  });
+
+  it('hủy lại: id đã hủy, id lạ, id không phải UUID, id của BTC khác → 404 NOT_FOUND (cả đặt mặc định)', async () => {
+    expectOk(await unlink(mbLinked.id));
+    const auditCount = (await audits()).length;
+    for (const id of [mbLinked.id, '019a3b2c-0000-7abc-8def-0123456789ab', 'khong-phai-uuid']) {
+      expectError(await unlink(id), 404, 'NOT_FOUND');
+      expectError(await setDefault(id), 404, 'NOT_FOUND');
+    }
+
+    // Tài khoản của một BTC khác (cùng Owner): không hủy, không đặt mặc định được qua BTC này.
+    const otherOrg = (await h.http.post('/v1/orgs').set('cookie', owner.cookie).send({ name: 'CLB Khác' }).expect(201))
+      .body.id as string;
+    expectOk(await tracked(h.http.post(`${base(otherOrg)}/credential`).set('cookie', owner.cookie).send(OTHER)));
+    const otherVa = String(fake.merchant(OTHER.clientId).accounts[0]!.vaAccountNumber);
+    const otherAccount = PayoutAccount.parse(
+      expectOk(
+        await tracked(h.http.post(base(otherOrg)).set('cookie', owner.cookie).send({ vaAccountNumber: otherVa })),
+      ),
+    );
+    expectError(await unlink(otherAccount.id), 404, 'NOT_FOUND');
+    expectError(await setDefault(otherAccount.id), 404, 'NOT_FOUND');
+    const otherView = PayoutAccountOverview.parse(
+      expectOk(await tracked(h.http.get(base(otherOrg)).set('cookie', owner.cookie))),
+    );
+    expect(otherView.accounts).toEqual([otherAccount]);
+    expect((await audits()).length).toBe(auditCount);
+  });
+
+  it('liên kết lại VA đã hủy → 200, tạo dòng mới (dòng cũ giữ nguyên)', async () => {
+    expectOk(await unlink(mbLinked.id));
+    const relinked = await link(mb);
+    expect(relinked.id).not.toBe(mbLinked.id);
+    expect(relinked.isDefault).toBe(true);
+    const rows = (await accountRows()).filter((r) => r.va_account_number === mb.vaAccountNumber);
+    expect(rows.map((r) => [r.id, r.retired_at === null])).toEqual([
+      [mbLinked.id, false],
+      [relinked.id, true],
+    ]);
+    expect(await noticeCodes(owner.cookie)).not.toContain('PAYOUT_ACCOUNT_NOT_LINKED');
+    await expectOneDefault();
+  });
+
+  it('đặt mặc định: ACB khi MB đang là mặc định → ACB mặc định, MB không còn; đặt lại tài khoản đang mặc định → không đổi', async () => {
+    const added = await link(acb);
+    resetFake();
+    const view = PayoutAccountOverview.parse(expectOk(await setDefault(added.id)));
+    expect(summary(view)).toEqual([
+      [mb.vaAccountNumber, false],
+      [acb.vaAccountNumber, true],
+    ]);
+    expect(await overview()).toEqual(view);
+    expect((await audits()).at(-1)).toEqual({
+      action: 'payout_account.default_changed',
+      target_type: 'payout_account',
+      changed_fields: ['is_default'],
+    });
+    await expectOneDefault();
+
+    const auditCount = (await audits()).length;
+    expect(PayoutAccountOverview.parse(expectOk(await setDefault(added.id)))).toEqual(view);
+    expect((await audits()).length).toBe(auditCount);
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('đổi key sau khi từng liên kết: hủy hết rồi gửi key mới → 409 ALREADY_LINKED, không gọi Tingee; canReplaceKey false', async () => {
+    expectOk(await unlink(mbLinked.id));
+    expect((await overview()).canReplaceKey).toBe(false);
+    const credentialsBefore = await credentialRows();
+    resetFake();
+    expectError(await connect(OTHER), 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
+    expectError(await connect(MAIN), 409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
+    expect(fake.requests).toHaveLength(0);
+    expect(await credentialRows()).toEqual(credentialsBefore);
+  });
+
+  it('hủy song song: cùng một tài khoản → một 200, một 404; hai tài khoản khác nhau → cả hai 200, không còn tài khoản', async () => {
+    const added = await link(acb);
+    const same = await Promise.all([unlink(added.id), unlink(added.id)]);
+    expect(same.map((r) => r.status).sort()).toEqual([200, 404]);
+    await expectOneDefault();
+
+    const again = await link(vcb);
+    const both = await Promise.all([unlink(mbLinked.id), unlink(again.id)]);
+    for (const res of both) expectOk(res);
+    expect((await overview()).accounts).toEqual([]);
+    expect((await audits()).filter((a) => a.action === 'payout_account.unlinked')).toHaveLength(3);
+    expect(await noticeCodes(owner.cookie)).toContain('PAYOUT_ACCOUNT_NOT_LINKED');
+    await expectOneDefault();
+  });
+
+  it('đặt mặc định và hủy song song: luôn đúng một tài khoản mặc định', async () => {
+    const acbLinked = await link(acb);
+    const vcbLinked = await link(vcb);
+    const results = await Promise.all([setDefault(acbLinked.id), setDefault(vcbLinked.id), unlink(mbLinked.id)]);
+    for (const res of results) expectOk(res);
+    await expectOneDefault();
+    expect((await overview()).accounts).toHaveLength(2);
+
+    const next = await Promise.all([unlink(acbLinked.id), setDefault(vcbLinked.id), setDefault(acbLinked.id)]);
+    expect(next[0]?.status).toBe(200);
+    await expectOneDefault();
+    expect(summary(await overview())).toEqual([[vcb.vaAccountNumber, true]]);
+  });
+});
+
+describe('ràng buộc DB', () => {
+  const violation = (err: unknown) => {
+    const { code, constraint } = err as { code?: string; constraint?: string };
+    return { code, constraint };
+  };
+  let credentialId: string;
+
+  beforeEach(async () => {
+    expectOk(await connect(MAIN));
+    credentialId = (await credentialRows())[0]!.id;
+  });
+
+  /** Chèn thẳng một dòng `payout_accounts` (bỏ qua service và khóa dòng BTC). */
+  const insert = (va: string, { isDefault = false, retired = false } = {}) =>
+    h.db.pool.query(
+      `INSERT INTO payout_accounts (organization_id, tingee_credential_id, va_account_number, bank_bin, bank_name,
+         account_type, account_last4, account_name, created_by, is_default, retired_at)
+       VALUES ($1, $2, $3, '970422', 'MB Bank', 'personal-account', '1234', 'CLB', $4, $5,
+         CASE WHEN $6::boolean THEN now() END)`,
+      [orgId, credentialId, va, owner.userId, isDefault, retired],
+    );
+
+  it('mỗi VA hiện hành một lần và tối đa một tài khoản mặc định hiện hành mỗi BTC; dòng đã hủy không tính', async () => {
+    await insert('9600000101', { isDefault: true });
+    // Cùng VA hiện hành lần hai → unique index của VA.
+    await expect(insert('9600000101')).rejects.toSatisfy(
+      (err) =>
+        violation(err).code === '23505' &&
+        violation(err).constraint === 'payout_accounts_current_va_per_organization_key',
+    );
+    // Mặc định hiện hành thứ hai → unique index của mặc định.
+    await expect(insert('9600000102', { isDefault: true })).rejects.toSatisfy(
+      (err) =>
+        violation(err).code === '23505' &&
+        violation(err).constraint === 'payout_accounts_one_default_per_organization_key',
+    );
+    // Cùng VA nhưng dòng đã hủy, và dòng mặc định đã hủy: được nhận.
+    await insert('9600000101', { retired: true });
+    await insert('9600000103', { isDefault: true, retired: true });
+    await insert('9600000102');
+    expect(await accountRows()).toHaveLength(4);
+  });
 });
 
 describe('quyền', () => {
@@ -482,6 +810,14 @@ describe('quyền', () => {
     expectError(await options(admin.cookie), 403, 'FORBIDDEN_ROLE');
     expectError(await select(String(mb.vaAccountNumber), admin.cookie), 403, 'FORBIDDEN_ROLE');
     expect(fake.requests).toHaveLength(0);
+    // Hủy liên kết và đặt mặc định trên tài khoản có thật.
+    expectOk(await connect(MAIN));
+    const account = PayoutAccount.parse(expectOk(await select(String(mb.vaAccountNumber))));
+    resetFake();
+    expectError(await unlink(account.id, admin.cookie), 403, 'FORBIDDEN_ROLE');
+    expectError(await setDefault(account.id, admin.cookie), 403, 'FORBIDDEN_ROLE');
+    expect(fake.requests).toHaveLength(0);
+    expect((await overview()).accounts).toEqual([account]);
   });
 });
 

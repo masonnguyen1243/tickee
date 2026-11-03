@@ -34,7 +34,13 @@ async function openDashboard(page: Page, { role = 'owner' as Role, path = base, 
     [`GET /orgs/${OTHER_ORG_ID}`]: () => organization({ id: OTHER_ORG_ID, name: OTHER_NAME, role: 'admin' }),
     [`GET /orgs/${ORG_ID}/payout-account`]: () => ({
       status: 200,
-      body: { credential: null, account: null, ipnUrl: null, tingeePortalUrl: 'https://baas.tingee.vn' },
+      body: {
+        credential: null,
+        accounts: [],
+        canReplaceKey: true,
+        ipnUrl: null,
+        tingeePortalUrl: 'https://baas.tingee.vn',
+      },
     }),
     [`GET /orgs/${ORG_ID}/members`]: () => ({
       status: 200,

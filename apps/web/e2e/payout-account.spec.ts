@@ -1,13 +1,14 @@
 import type { Page } from '@playwright/test';
 
 import { expect, test } from './fixtures';
-import { apiError, me, mockIdentityApi, type Call } from './identity-mock';
+import { apiError, me, mockIdentityApi, type Call, type Handler } from './identity-mock';
 import { mockOrganizerApi, organization, ORG_ID, statusNotice } from './organizer-mock';
 
 /*
- * Trang Tài khoản nhận tiền (Story 2.6): BTC dùng tài khoản merchant Tingee của chính mình. API giả có trạng thái, "Tingee"
- * giả theo cặp key như Tingee fake của api: MAIN có MB (chọn được) và VietinBank (mờ) · EMPTY chưa có tài khoản ·
- * FLAKY lần đầu Tingee tạm lỗi. Key khác hoặc secret sai → `TINGEE_CREDENTIAL_INVALID`.
+ * Trang Tài khoản nhận tiền (Story 2.6): BTC dùng tài khoản merchant Tingee của chính mình, liên kết một hay nhiều tài
+ * khoản, đặt mặc định và hủy liên kết. API giả có trạng thái như api thật, "Tingee" giả theo cặp key như Tingee fake của
+ * api: MAIN có MB (chọn được), VietinBank (mờ) và ACB (chọn được) · EMPTY chưa có tài khoản · FLAKY lần đầu Tingee tạm
+ * lỗi. Key khác hoặc secret sai → `TINGEE_CREDENTIAL_INVALID`.
  */
 
 const CONSENTED = '2026-10-29T01:02:03.000Z';
@@ -29,7 +30,7 @@ type Option = {
   selectable: boolean;
 };
 type Credential = { id: string; clientIdMasked: string; connectedAt: string };
-type Account = Omit<Option, 'selectable'> & { id: string; linkedAt: string };
+type Account = Omit<Option, 'selectable'> & { id: string; isDefault: boolean; linkedAt: string };
 
 const MB: Option = {
   vaAccountNumber: '9600004321',
@@ -50,6 +51,7 @@ const VIETIN: Option = {
   selectable: false,
 };
 const VCB: Option = { ...MB, vaAccountNumber: '9600001111', bankBin: '970436', bankName: 'Vietcombank', accountLast4: '1111' };
+const ACB: Option = { ...MB, vaAccountNumber: '9600002222', bankBin: '970416', bankName: 'ACB', accountLast4: '2222' };
 
 const MAIN = { clientId: 'tg-client-main-0a1b2c3d', secretToken: 'tg-secret-main-Zx9Yw8Vu7' };
 const EMPTY = { clientId: 'tg-client-empty-8c9d0e1f', secretToken: 'tg-secret-empty-Nm3Lk2Ji1' };
@@ -61,16 +63,23 @@ const credentialOf = (clientId: string, n: number): Credential => ({
   connectedAt: '2026-11-03T03:00:00.000Z',
 });
 
-const linkedAccount = (option: Option): Account => {
+/** Id của tài khoản liên kết thứ `n` (mock đăng ký sẵn route hủy liên kết / đặt mặc định cho các id này). */
+const accountId = (n: number) => `019a3b2c-03${String(n).padStart(2, '0')}-7abc-8def-0123456789ab`;
+const ACCOUNT_IDS = Array.from({ length: 8 }, (_, n) => accountId(n));
+
+const linkedAccount = (option: Option, n = 0, isDefault = n === 0): Account => {
   const { selectable: _selectable, ...rest } = option;
-  return { ...rest, id: '019a3b2c-0300-7abc-8def-0123456789ab', linkedAt: '2026-11-03T03:05:00.000Z' };
+  return { ...rest, id: accountId(n), isDefault, linkedAt: `2026-11-03T03:${String(5 + n).padStart(2, '0')}:00.000Z` };
 };
 
 type State = {
   credential: Credential | null;
   /** Client ID của credential hiện hành (api biết, web không biết). */
   clientId: string | null;
-  account: Account | null;
+  /** Tài khoản nhận tiền hiện hành, theo thứ tự liên kết. */
+  accounts: Account[];
+  /** BTC đã từng liên kết tài khoản (kể cả đã hủy hết): api không nhận key nữa (`canReplaceKey: false`). */
+  everLinked: boolean;
   /** Tài khoản "Tingee" của từng key; sửa được giữa chừng (BTC liên kết thêm trên portal). */
   tingee: Record<string, { secretToken: string; accounts: Option[] }>;
   /** VA đã bị tắt trên Tingee sau khi danh sách hiện. */
@@ -78,25 +87,58 @@ type State = {
   flakyFailures: number;
   /** `GET …/options` lỗi: key bị thu hồi trên Tingee (422) hoặc Tingee tạm lỗi (503). */
   optionsError: 'invalid' | 'down' | null;
+  /** `POST …/payout-account` lỗi: key bị thu hồi trên Tingee (422). */
+  selectError: 'invalid' | null;
 };
 
 async function openPage(page: Page, { role = 'owner', initial = {} }: { role?: string; initial?: Partial<State> } = {}) {
   const state: State = {
     credential: null,
     clientId: null,
-    account: null,
+    accounts: [],
+    everLinked: (initial.accounts?.length ?? 0) > 0,
     tingee: {
-      [MAIN.clientId]: { secretToken: MAIN.secretToken, accounts: [MB, VIETIN] },
+      [MAIN.clientId]: { secretToken: MAIN.secretToken, accounts: [MB, VIETIN, ACB] },
       [EMPTY.clientId]: { secretToken: EMPTY.secretToken, accounts: [] },
       [FLAKY.clientId]: { secretToken: FLAKY.secretToken, accounts: [VCB] },
     },
     unavailable: new Set(),
     flakyFailures: 1,
     optionsError: null,
+    selectError: null,
     ...initial,
   };
   let connections = 0;
-  const optionsOf = () => ({ credential: state.credential, accounts: state.tingee[state.clientId!]!.accounts });
+  let linkedCount = state.accounts.length;
+  const isLinked = (vaAccountNumber: string) => state.accounts.some((a) => a.vaAccountNumber === vaAccountNumber);
+  const optionsOf = () => ({
+    credential: state.credential,
+    accounts: state.tingee[state.clientId!]!.accounts.map((a) => ({ ...a, linked: isLinked(a.vaAccountNumber) })),
+  });
+  const overviewOf = () => ({
+    credential: state.credential,
+    accounts: state.accounts,
+    canReplaceKey: !state.everLinked,
+    ipnUrl: state.credential ? IPN_URL : null,
+    tingeePortalUrl: PORTAL,
+  });
+  // Hủy liên kết và đặt mặc định như api: id lạ hoặc đã hủy → 404; hủy tài khoản mặc định thì tài khoản liên kết sớm
+  // nhất còn lại thành mặc định.
+  const accountRoutes: Record<string, Handler> = {};
+  for (const id of ACCOUNT_IDS) {
+    accountRoutes[`DELETE /orgs/${ORG_ID}/payout-account/${id}`] = () => {
+      const target = state.accounts.find((a) => a.id === id);
+      if (!target) return apiError(404, 'NOT_FOUND');
+      state.accounts = state.accounts.filter((a) => a.id !== id);
+      if (target.isDefault && state.accounts[0]) state.accounts[0] = { ...state.accounts[0], isDefault: true };
+      return { status: 200, body: overviewOf() };
+    };
+    accountRoutes[`POST /orgs/${ORG_ID}/payout-account/${id}/default`] = () => {
+      if (!state.accounts.some((a) => a.id === id)) return apiError(404, 'NOT_FOUND');
+      state.accounts = state.accounts.map((a) => ({ ...a, isDefault: a.id === id }));
+      return { status: 200, body: overviewOf() };
+    };
+  }
 
   await mockIdentityApi(page, { 'GET /identity/me': () => me(CONSENTED) });
   const calls = await mockOrganizerApi(page, {
@@ -104,20 +146,12 @@ async function openPage(page: Page, { role = 'owner', initial = {} }: { role?: s
     'GET /me/memberships': () => ({ status: 200, body: [{ organizationId: ORG_ID, name: ORG_NAME, role }] }),
     [`GET /orgs/${ORG_ID}/notices`]: () => ({
       status: 200,
-      body: state.account ? [] : [statusNotice('PAYOUT_ACCOUNT_NOT_LINKED')],
+      body: state.accounts.length > 0 ? [] : [statusNotice('PAYOUT_ACCOUNT_NOT_LINKED')],
     }),
-    [`GET /orgs/${ORG_ID}/payout-account`]: () => ({
-      status: 200,
-      body: {
-        credential: state.credential,
-        account: state.account,
-        ipnUrl: state.credential ? IPN_URL : null,
-        tingeePortalUrl: PORTAL,
-      },
-    }),
+    [`GET /orgs/${ORG_ID}/payout-account`]: () => ({ status: 200, body: overviewOf() }),
     [`POST /orgs/${ORG_ID}/payout-account/credential`]: (request) => {
       const { clientId, secretToken } = request.postDataJSON() as { clientId: string; secretToken: string };
-      if (state.account) return apiError(409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
+      if (state.everLinked) return apiError(409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
       const key = state.tingee[clientId];
       if (!key || key.secretToken !== secretToken) return apiError(422, 'TINGEE_CREDENTIAL_INVALID');
       if (clientId === FLAKY.clientId && state.flakyFailures > 0) {
@@ -137,14 +171,19 @@ async function openPage(page: Page, { role = 'owner', initial = {} }: { role?: s
     },
     [`POST /orgs/${ORG_ID}/payout-account`]: (request) => {
       const { vaAccountNumber } = request.postDataJSON() as { vaAccountNumber: string };
-      if (state.account) return apiError(409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
       if (!state.credential) return apiError(404, 'NOT_FOUND');
-      const option = optionsOf().accounts.find((a) => a.vaAccountNumber === vaAccountNumber);
+      if (isLinked(vaAccountNumber)) return apiError(409, 'PAYOUT_ACCOUNT_ALREADY_LINKED');
+      if (state.selectError === 'invalid') return apiError(422, 'TINGEE_CREDENTIAL_INVALID');
+      const option = state.tingee[state.clientId!]!.accounts.find((a) => a.vaAccountNumber === vaAccountNumber);
       if (!option || state.unavailable.has(vaAccountNumber)) return apiError(409, 'PAYOUT_ACCOUNT_UNAVAILABLE');
       if (!option.selectable) return apiError(422, 'BANK_NOT_SUPPORTED');
-      state.account = linkedAccount(option);
-      return { status: 200, body: state.account };
+      const account = linkedAccount(option, linkedCount, state.accounts.length === 0);
+      linkedCount += 1;
+      state.accounts = [...state.accounts, account];
+      state.everLinked = true;
+      return { status: 200, body: account };
     },
+    ...accountRoutes,
   });
   await page.goto(PAGE_PATH);
   await expect(page.getByRole('heading', { name: 'Tài khoản nhận tiền', level: 1 })).toBeVisible();
@@ -161,6 +200,9 @@ const chooser = (page: Page) => page.locator('[data-slot="payout-account-chooser
 const optionRows = (page: Page) => page.locator('[data-slot="payout-account-option"]');
 const optionRow = (page: Page, bankName: string) => optionRows(page).filter({ hasText: bankName });
 const chooserBanner = (page: Page) => chooser(page).locator('[data-slot="status-banner"]');
+const accountRows = (page: Page) => page.locator('[data-slot="payout-account-row"]');
+const accountRow = (page: Page, bankName: string) => accountRows(page).filter({ hasText: bankName });
+const unlinkDialog = (page: Page) => page.getByRole('dialog', { name: 'Hủy liên kết tài khoản này?' });
 const CONNECTED = { credential: credentialOf(MAIN.clientId, 1), clientId: MAIN.clientId };
 const horizontalOverflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -213,7 +255,7 @@ test('chưa kết nối: hướng dẫn + form; key sai → lỗi tại form, gi
   await expect(chooser(page)).toBeVisible();
   expect(posts(calls, '/credential').at(-1)?.body).toEqual({ clientId: MAIN.clientId, secretToken: MAIN.secretToken });
   await expect(chooser(page)).toContainText('Client ID ••••2c3d');
-  await expect(optionRows(page)).toHaveCount(2);
+  await expect(optionRows(page)).toHaveCount(3);
   const mb = optionRow(page, 'MB Bank');
   await expect(mb).toContainText('•••• 4321');
   await expect(mb).toContainText('CLB CO VUA QUAN 3');
@@ -229,11 +271,15 @@ test('chưa kết nối: hướng dẫn + form; key sai → lỗi tại form, gi
   await mb.getByRole('button', { name: 'Dùng tài khoản này' }).click();
   const card = page.locator('[data-slot="payout-account-card"]');
   await expect(card).toBeVisible();
-  await expect(card.locator('[data-slot="status-badge"]')).toHaveText('Đã liên kết');
-  await expect(card.locator('[data-slot="status-badge"]')).toHaveAttribute('data-tone', 'success');
-  await expect(card).toContainText('MB Bank');
-  await expect(card).toContainText('•••• 4321');
-  await expect(card).toContainText('CLB CO VUA QUAN 3');
+  await expect(card.locator('[data-slot="status-badge"][data-tone="success"]')).toHaveText('Đã liên kết');
+  // Tài khoản đầu tiên tự thành mặc định.
+  await expect(accountRows(page)).toHaveCount(1);
+  const row = accountRow(page, 'MB Bank');
+  await expect(row).toContainText('•••• 4321');
+  await expect(row).toContainText('CLB CO VUA QUAN 3');
+  await expect(row.locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
+  await expect(row.getByRole('button', { name: 'Đặt làm mặc định' })).toHaveCount(0);
+  await expect(row.getByRole('button', { name: 'Hủy liên kết' })).toBeVisible();
   expect(posts(calls).map((c) => c.body)).toEqual([{ vaAccountNumber: MB.vaAccountNumber }]);
   await expect(page.getByText('Đã liên kết tài khoản nhận tiền.')).toBeVisible();
   await expect(field(page, 'URL IPN')).toHaveValue(IPN_URL);
@@ -272,14 +318,14 @@ test('đã kết nối, chưa chọn: mở trang đọc lại danh sách; "Dùng
   const { calls } = await openPage(page, {
     initial: { credential: credentialOf(MAIN.clientId, 1), clientId: MAIN.clientId },
   });
-  await expect(optionRows(page)).toHaveCount(2);
+  await expect(optionRows(page)).toHaveCount(3);
   expect(optionLoads(calls)).toHaveLength(1);
   await expect(page.locator('[data-slot="tingee-connect-form"]')).toHaveCount(0);
 
   await chooser(page).getByRole('button', { name: 'Dùng key khác' }).click();
   await expect(page.getByRole('heading', { name: 'Nhập key Tingee khác' })).toBeVisible();
   await page.getByRole('button', { name: 'Hủy' }).click();
-  await expect(optionRows(page)).toHaveCount(2);
+  await expect(optionRows(page)).toHaveCount(3);
 
   await chooser(page).getByRole('button', { name: 'Dùng key khác' }).click();
   // Key mới sai: vẫn ở form, key cũ không bị thay.
@@ -307,26 +353,28 @@ test('tài khoản không còn active trên Tingee: báo tại chỗ + "Tải l�
   expect(optionLoads(calls)).toHaveLength(2);
 });
 
-test('tab khác đã liên kết: chọn tài khoản → toast "BTC đã có tài khoản nhận tiền.", trang chuyển sang thẻ đã liên kết', async ({
+test('tab khác đã liên kết đúng tài khoản này: toast "Tài khoản này đã được liên kết.", trang chuyển sang danh sách đã liên kết', async ({
   page,
 }) => {
   const { state } = await openPage(page, { initial: CONNECTED });
-  await expect(optionRows(page)).toHaveCount(2);
-  state.account = linkedAccount(MB);
+  await expect(optionRows(page)).toHaveCount(3);
+  state.accounts = [linkedAccount(MB)];
+  state.everLinked = true;
   await optionRow(page, 'MB Bank').getByRole('button', { name: 'Dùng tài khoản này' }).click();
-  await expect(page.getByText('BTC đã có tài khoản nhận tiền.')).toBeVisible();
+  await expect(page.getByText('Tài khoản này đã được liên kết.')).toBeVisible();
   await expect(page.locator('[data-slot="payout-account-card"]')).toBeVisible();
+  await expect(accountRows(page)).toHaveCount(1);
   await expect(page.getByText('Chưa dùng được tài khoản này')).toHaveCount(0);
 });
 
 test('danh sách có tài khoản: "Tải lại" + link portal dưới danh sách đọc lại danh sách', async ({ page }) => {
   const { calls, state } = await openPage(page, { initial: CONNECTED });
-  await expect(optionRows(page)).toHaveCount(2);
+  await expect(optionRows(page)).toHaveCount(3);
   const footer = chooser(page).locator('[data-slot="payout-account-options-footer"]');
   await expect(footer.getByRole('link', { name: 'Mở portal Tingee' })).toHaveAttribute('href', PORTAL);
-  state.tingee[MAIN.clientId]!.accounts = [VIETIN, MB, VCB];
+  state.tingee[MAIN.clientId]!.accounts = [VIETIN, MB, ACB, VCB];
   await footer.getByRole('button', { name: 'Tải lại' }).click();
-  await expect(optionRows(page)).toHaveCount(3);
+  await expect(optionRows(page)).toHaveCount(4);
   expect(optionLoads(calls)).toHaveLength(2);
 });
 
@@ -349,14 +397,14 @@ test('đọc danh sách: Tingee tạm lỗi (503) → "Thử lại" hiện danh 
   expect(optionLoads(calls)).toHaveLength(1);
   state.optionsError = null;
   await chooserBanner(page).getByRole('button', { name: 'Thử lại' }).click();
-  await expect(optionRows(page)).toHaveCount(2);
+  await expect(optionRows(page)).toHaveCount(3);
   await expect(chooserBanner(page)).toHaveCount(0);
 
   state.optionsError = 'down';
   await chooser(page).locator('[data-slot="payout-account-options-footer"]').getByRole('button', { name: 'Tải lại' }).click();
   await expect(chooserBanner(page)).toContainText('Chưa tải được danh sách tài khoản');
   await expect(chooserBanner(page)).toContainText(PROVIDER_DOWN);
-  await expect(optionRows(page)).toHaveCount(2);
+  await expect(optionRows(page)).toHaveCount(3);
 });
 
 test('đã liên kết: thẻ tài khoản, URL IPN + "Sao chép" (toast), checklist hai bước; không có form hay danh sách', async ({
@@ -365,9 +413,7 @@ test('đã liên kết: thẻ tài khoản, URL IPN + "Sao chép" (toast), check
 }) => {
   // Chromium headless chặn clipboard nếu không cấp quyền; WebKit cho phép sau thao tác người dùng.
   if (browserName === 'chromium') await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-  const { calls } = await openPage(page, {
-    initial: { credential: credentialOf(MAIN.clientId, 1), clientId: MAIN.clientId, account: linkedAccount(MB) },
-  });
+  const { calls } = await openPage(page, { initial: { ...CONNECTED, accounts: [linkedAccount(MB)] } });
   const card = page.locator('[data-slot="payout-account-card"]');
   await expect(card).toContainText('Đã liên kết');
   await expect(card).toContainText('•••• 4321');
@@ -383,13 +429,174 @@ test('đã liên kết: thẻ tài khoản, URL IPN + "Sao chép" (toast), check
   await expect(steps.nth(0)).toContainText('Đường dẫn IPN');
   await expect(steps.nth(0).getByRole('link', { name: 'portal Tingee' })).toHaveAttribute('href', PORTAL);
   await expect(steps.nth(1)).toContainText('Các Tài khoản cho phép thanh toán');
-  await expect(steps.nth(1)).toContainText('MB Bank •••• 4321');
+  await expect(steps.nth(1)).toContainText('chọn tài khoản MB Bank •••• 4321 rồi lưu.');
 
   await setup.getByRole('button', { name: 'Sao chép' }).click();
   await expect(page.getByText('Đã sao chép')).toBeVisible();
   const copied = await page.evaluate(() => navigator.clipboard.readText().catch(() => null));
   if (copied !== null) expect(copied).toBe(IPN_URL);
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+});
+
+test('nhiều tài khoản: thêm tài khoản thứ hai, đặt mặc định, hủy liên kết (kể cả tài khoản cuối) → quay về chọn tài khoản, banner hiện lại', async ({
+  page,
+}) => {
+  const { calls, state } = await openPage(page, { initial: { ...CONNECTED, accounts: [linkedAccount(MB)] } });
+  await expect(accountRows(page)).toHaveCount(1);
+  await expect(banners(page)).toHaveCount(0);
+  await expect(chooser(page)).toHaveCount(0);
+
+  // Thêm tài khoản: danh sách đọc lại từ Tingee; MB hiện "Đã liên kết" thay cho nút; không có "Dùng key khác".
+  await page.getByRole('button', { name: 'Thêm tài khoản' }).click();
+  await expect(chooser(page).getByRole('heading', { name: 'Thêm tài khoản nhận tiền' })).toBeVisible();
+  await expect(optionRows(page)).toHaveCount(3);
+  expect(optionLoads(calls)).toHaveLength(1);
+  const mbOption = optionRow(page, 'MB Bank');
+  await expect(mbOption).toHaveAttribute('data-linked', 'true');
+  await expect(mbOption.locator('[data-slot="status-badge"]')).toHaveText('Đã liên kết');
+  await expect(mbOption.getByRole('button')).toHaveCount(0);
+  await expect(chooser(page).getByRole('button', { name: 'Dùng key khác' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Thêm tài khoản' })).toHaveCount(0);
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+
+  // "Đóng" rồi mở lại: danh sách lấy từ cache, không gọi Tingee lần nữa.
+  await chooser(page).getByRole('button', { name: 'Đóng' }).click();
+  await expect(chooser(page)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Thêm tài khoản' }).click();
+  await expect(optionRows(page)).toHaveCount(3);
+  expect(optionLoads(calls)).toHaveLength(1);
+
+  await optionRow(page, 'ACB').getByRole('button', { name: 'Dùng tài khoản này' }).click();
+  await expect(chooser(page)).toHaveCount(0);
+  await expect(accountRows(page)).toHaveCount(2);
+  expect(posts(calls).map((c) => c.body)).toEqual([{ vaAccountNumber: ACB.vaAccountNumber }]);
+  await expect(accountRow(page, 'MB Bank').locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
+  await expect(accountRow(page, 'ACB').locator('[data-slot="status-badge"]')).toHaveCount(0);
+  // Checklist bước 2: chọn mọi tài khoản đã liên kết.
+  const step2 = page.locator('[data-slot="tingee-setup-steps"] li').nth(1);
+  await expect(step2).toContainText('mọi tài khoản đã liên kết');
+  await expect(step2).toContainText('MB Bank •••• 4321');
+  await expect(step2).toContainText('ACB •••• 2222');
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+
+  // Mở lại "Thêm tài khoản": ACB vừa thêm hiện "Đã liên kết" (tính từ tổng quan, không từ cache danh sách), không gọi
+  // Tingee lần nữa.
+  const loadsBefore = optionLoads(calls).length;
+  await page.getByRole('button', { name: 'Thêm tài khoản' }).click();
+  const acbOption = optionRow(page, 'ACB');
+  await expect(acbOption).toHaveAttribute('data-linked', 'true');
+  await expect(acbOption.locator('[data-slot="status-badge"]')).toHaveText('Đã liên kết');
+  await expect(acbOption.getByRole('button')).toHaveCount(0);
+  expect(optionLoads(calls)).toHaveLength(loadsBefore);
+  await chooser(page).getByRole('button', { name: 'Đóng' }).click();
+  await expect(chooser(page)).toHaveCount(0);
+
+  // Đặt ACB làm mặc định: MB không còn là mặc định.
+  await accountRow(page, 'ACB').getByRole('button', { name: 'Đặt làm mặc định' }).click();
+  await expect(accountRow(page, 'ACB').locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
+  await expect(accountRow(page, 'MB Bank').locator('[data-slot="status-badge"]')).toHaveCount(0);
+  await expect(accountRow(page, 'MB Bank').getByRole('button', { name: 'Đặt làm mặc định' })).toBeVisible();
+  expect(posts(calls, `/${state.accounts[1]!.id}/default`)).toHaveLength(1);
+
+  // Hủy ACB (mặc định): Dialog nêu hậu quả; "Giữ tài khoản" không gọi api.
+  await accountRow(page, 'ACB').getByRole('button', { name: 'Hủy liên kết' }).click();
+  const dialog = unlinkDialog(page);
+  await expect(dialog).toContainText('Đơn mới sẽ không nhận tiền vào ACB •••• 2222 nữa.');
+  await expect(dialog).toContainText('MB Bank •••• 4321 sẽ thành tài khoản mặc định.');
+  await expect(dialog).toContainText('Các Tài khoản cho phép thanh toán');
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+  await dialog.getByRole('button', { name: 'Giữ tài khoản' }).click();
+  await expect(dialog).toHaveCount(0);
+  const deletes = () => calls.filter((c) => c.method === 'DELETE');
+  expect(deletes()).toHaveLength(0);
+
+  await accountRow(page, 'ACB').getByRole('button', { name: 'Hủy liên kết' }).click();
+  await unlinkDialog(page).getByRole('button', { name: 'Hủy liên kết' }).click();
+  await expect(unlinkDialog(page)).toHaveCount(0);
+  await expect(page.getByText('Đã hủy liên kết ACB •••• 2222.')).toBeVisible();
+  await expect(accountRows(page)).toHaveCount(1);
+  await expect(accountRow(page, 'MB Bank').locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
+  await expect(banners(page)).toHaveCount(0);
+  expect(deletes().map((c) => c.path)).toEqual([`/orgs/${ORG_ID}/payout-account/${accountId(1)}`]);
+
+  // Hủy tài khoản cuối: Dialog báo BTC hết tài khoản; trang quay về chọn tài khoản, banner NOT_LINKED hiện lại.
+  await accountRow(page, 'MB Bank').getByRole('button', { name: 'Hủy liên kết' }).click();
+  await expect(unlinkDialog(page)).toContainText('BTC sẽ không còn tài khoản nhận tiền nào');
+  await unlinkDialog(page).getByRole('button', { name: 'Hủy liên kết' }).click();
+  await expect(chooser(page).getByRole('heading', { name: 'Chọn tài khoản nhận tiền' })).toBeVisible();
+  await expect(page.locator('[data-slot="payout-account-card"]')).toHaveCount(0);
+  await expect(banners(page).first()).toContainText(NOT_LINKED_TITLE);
+  // Đã từng liên kết: không còn "Dùng key khác"; MB chọn lại được.
+  await expect(chooser(page).getByRole('button', { name: 'Dùng key khác' })).toHaveCount(0);
+  await expect(optionRow(page, 'MB Bank').getByRole('button', { name: 'Dùng tài khoản này' })).toBeVisible();
+  await expect(optionRow(page, 'ACB').getByRole('button', { name: 'Dùng tài khoản này' })).toBeVisible();
+  expect(deletes()).toHaveLength(2);
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+});
+
+test('hủy liên kết tài khoản mà tab khác đã hủy: toast "Tài khoản này đã được hủy liên kết.", danh sách đọc lại', async ({
+  page,
+}) => {
+  const { state } = await openPage(page, {
+    initial: { ...CONNECTED, accounts: [linkedAccount(MB), linkedAccount(ACB, 1)] },
+  });
+  await expect(accountRows(page)).toHaveCount(2);
+  state.accounts = state.accounts.filter((a) => a.vaAccountNumber !== ACB.vaAccountNumber);
+  await accountRow(page, 'ACB').getByRole('button', { name: 'Hủy liên kết' }).click();
+  // ACB không phải mặc định: Đơn mới không bị ảnh hưởng.
+  await expect(unlinkDialog(page)).toContainText(
+    'ACB •••• 2222 không phải tài khoản mặc định nên Đơn mới không bị ảnh hưởng.',
+  );
+  await expect(unlinkDialog(page)).not.toContainText('sẽ thành tài khoản mặc định');
+  await unlinkDialog(page).getByRole('button', { name: 'Hủy liên kết' }).click();
+  await expect(page.getByText('Tài khoản này đã được hủy liên kết.')).toBeVisible();
+  await expect(unlinkDialog(page)).toHaveCount(0);
+  await expect(accountRows(page)).toHaveCount(1);
+});
+
+test('đặt mặc định tài khoản mà tab khác đã hủy: toast "Tài khoản này không còn được liên kết.", danh sách đọc lại', async ({
+  page,
+}) => {
+  const { state } = await openPage(page, {
+    initial: { ...CONNECTED, accounts: [linkedAccount(MB), linkedAccount(ACB, 1)] },
+  });
+  await expect(accountRows(page)).toHaveCount(2);
+  state.accounts = state.accounts.filter((a) => a.vaAccountNumber !== ACB.vaAccountNumber);
+  await accountRow(page, 'ACB').getByRole('button', { name: 'Đặt làm mặc định' }).click();
+  await expect(page.getByText('Tài khoản này không còn được liên kết.')).toBeVisible();
+  await expect(accountRows(page)).toHaveCount(1);
+  await expect(accountRow(page, 'MB Bank').locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
+});
+
+test('thêm tài khoản khi key bị thu hồi trên Tingee: banner chỉ đường sang portal, không có "Dùng key khác"', async ({
+  page,
+}) => {
+  await openPage(page, { initial: { ...CONNECTED, accounts: [linkedAccount(MB)], selectError: 'invalid' } });
+  await page.getByRole('button', { name: 'Thêm tài khoản' }).click();
+  await optionRow(page, 'ACB').getByRole('button', { name: 'Dùng tài khoản này' }).click();
+  const banner = chooserBanner(page);
+  await expect(banner).toContainText('Chưa dùng được tài khoản này');
+  await expect(banner).toContainText('Kiểm tra API key trên portal Tingee.');
+  await expect(banner.getByRole('link', { name: 'Mở portal Tingee' })).toHaveAttribute('href', PORTAL);
+  await expect(page.getByRole('button', { name: 'Dùng key khác' })).toHaveCount(0);
+  await expect(accountRows(page)).toHaveCount(1);
+});
+
+test('đã từng liên kết rồi hủy hết: không có "Dùng key khác", không có form nhập key', async ({ page }) => {
+  await openPage(page, { initial: { ...CONNECTED, everLinked: true } });
+  await expect(optionRows(page)).toHaveCount(3);
+  await expect(chooser(page).getByRole('button', { name: 'Dùng key khác' })).toHaveCount(0);
+  await expect(page.locator('[data-slot="tingee-connect-form"]')).toHaveCount(0);
+});
+
+test('đã từng liên kết, key bị thu hồi trên Tingee: banner chỉ đường sang portal, không có "Dùng key khác"', async ({
+  page,
+}) => {
+  await openPage(page, { initial: { ...CONNECTED, everLinked: true, optionsError: 'invalid' } });
+  await expect(chooserBanner(page)).toContainText('Key Tingee không còn dùng được');
+  await expect(chooserBanner(page)).toContainText('Kiểm tra API key trên portal Tingee.');
+  await expect(chooserBanner(page).getByRole('link', { name: 'Mở portal Tingee' })).toHaveAttribute('href', PORTAL);
+  await expect(page.getByRole('button', { name: 'Dùng key khác' })).toHaveCount(0);
 });
 
 test('Admin mở URL: "Chỉ Owner xem được mục này.", không gọi api tài khoản nhận tiền', async ({ page }) => {

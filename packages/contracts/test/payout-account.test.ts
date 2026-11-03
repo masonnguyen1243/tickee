@@ -65,7 +65,57 @@ describe('tài khoản nhận tiền: BTC dùng key Tingee của mình (Story 2.
       expect(keys).not.toContain('accountNumber');
     }
     expect(Object.keys(PayoutAccount.shape)).toContain('accountLast4');
-    expect(Object.keys(PayoutAccountOverview.shape).sort()).toEqual(['account', 'credential', 'ipnUrl', 'tingeePortalUrl']);
+  });
+
+  it('nhiều tài khoản: overview có danh sách và canReplaceKey; tài khoản có isDefault; dòng danh sách có linked', () => {
+    expect(Object.keys(PayoutAccountOverview.shape).sort()).toEqual([
+      'accounts',
+      'canReplaceKey',
+      'credential',
+      'ipnUrl',
+      'tingeePortalUrl',
+    ]);
+    const account = {
+      id: '019a3b2c-0300-7abc-8def-0123456789ab',
+      vaAccountNumber: '9600004321',
+      bankBin: '970422',
+      bankName: 'MB Bank',
+      accountType: 'personal-account',
+      accountLast4: '4321',
+      accountName: 'CLB CO VUA QUAN 3',
+      isDefault: true,
+      linkedAt: '2026-11-03T03:05:00.000Z',
+    };
+    expect(PayoutAccount.parse(account)).toEqual(account);
+    const { isDefault: _isDefault, ...withoutDefault } = account;
+    expect(PayoutAccount.safeParse(withoutDefault).success).toBe(false);
+
+    const overview = {
+      credential: null,
+      accounts: [account, { ...account, id: '019a3b2c-0301-7abc-8def-0123456789ab', isDefault: false }],
+      ipnUrl: null,
+      tingeePortalUrl: 'https://baas.tingee.vn',
+      canReplaceKey: false,
+    };
+    expect(PayoutAccountOverview.parse(overview)).toEqual(overview);
+    // Dạng một tài khoản cũ (`account`) không còn hợp lệ.
+    expect(
+      PayoutAccountOverview.safeParse({ credential: null, account: null, ipnUrl: null, tingeePortalUrl: 'x' }).success,
+    ).toBe(false);
+
+    const option = {
+      vaAccountNumber: '9600004321',
+      bankBin: '970422',
+      bankName: 'MB Bank',
+      accountType: 'personal-account',
+      accountLast4: '4321',
+      accountName: 'CLB CO VUA QUAN 3',
+      selectable: true,
+      linked: true,
+    };
+    expect(PayoutAccountOption.parse(option)).toEqual(option);
+    const { linked: _linked, ...withoutLinked } = option;
+    expect(PayoutAccountOption.safeParse(withoutLinked).success).toBe(false);
   });
 
   it('mã lỗi, notice và khóa che log', () => {

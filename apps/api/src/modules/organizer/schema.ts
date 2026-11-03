@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { bigint, check, index, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, index, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, id, timestamptz } from '../../platform/db/index.js';
 import { users } from '../identity/schema.js';
 
@@ -137,8 +137,11 @@ export const tingeeCredentials = pgTable(
 
 /**
  * Tài khoản nhận tiền đã chọn (Story 2.6): một VA trong tài khoản Tingee của BTC, đọc bằng credential `tingee_credential_id`.
- * Mỗi BTC có tối đa một tài khoản hiện hành (`retired_at IS NULL`). Không bao giờ lưu số tài khoản đầy đủ hay số dư: chỉ
- * 4 số cuối. `account_name`, `account_last4` là PII (`PII_COLUMNS.organizer`).
+ * Một BTC có nhiều tài khoản hiện hành (`retired_at IS NULL`), mỗi VA tối đa một lần. Hủy liên kết là đặt
+ * `retired_at`, không xóa dòng: Đơn đã chụp `orders.payout_account_id` vẫn tìm được tài khoản và credential (AD-35).
+ * BTC còn tài khoản hiện hành thì có đúng một tài khoản `is_default` (Đơn mới nhận tiền vào VA này, AD-6); index một
+ * phần chỉ chặn "nhiều hơn một", "đúng một" do service giữ (khóa dòng BTC). Không bao giờ lưu số tài khoản đầy đủ hay
+ * số dư: chỉ 4 số cuối. `account_name`, `account_last4` là PII (`PII_COLUMNS.organizer`).
  */
 export const payoutAccounts = pgTable(
   'payout_accounts',
@@ -162,13 +165,18 @@ export const payoutAccounts = pgTable(
     createdBy: uuid('created_by')
       .notNull()
       .references(() => users.id),
+    /** Tài khoản mặc định của BTC. Hủy liên kết thì cột này về `false` (dòng đã hủy không bao giờ là mặc định). */
+    isDefault: boolean('is_default').notNull().default(false),
     linkedAt: timestamptz('linked_at').notNull().defaultNow(),
     retiredAt: timestamptz('retired_at'),
   },
   (t) => [
-    uniqueIndex('payout_accounts_one_current_per_organization_key')
-      .on(t.organizationId)
+    uniqueIndex('payout_accounts_current_va_per_organization_key')
+      .on(t.organizationId, t.vaAccountNumber)
       .where(sql`${t.retiredAt} IS NULL`),
+    uniqueIndex('payout_accounts_one_default_per_organization_key')
+      .on(t.organizationId)
+      .where(sql`${t.isDefault} AND ${t.retiredAt} IS NULL`),
     index('payout_accounts_organization_id_linked_at_idx').on(t.organizationId, t.linkedAt),
     index('payout_accounts_tingee_credential_id_idx').on(t.tingeeCredentialId),
   ],

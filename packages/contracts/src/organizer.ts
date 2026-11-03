@@ -277,7 +277,10 @@ export const ConnectTingeeRequest = z.object({
 });
 export type ConnectTingeeRequest = z.input<typeof ConnectTingeeRequest>;
 
-/** `POST /v1/orgs/:orgId/payout-account` (chỉ Owner): chọn một tài khoản trong danh sách làm tài khoản nhận tiền. */
+/**
+ * `POST /v1/orgs/:orgId/payout-account` (chỉ Owner): thêm một tài khoản trong danh sách làm tài khoản nhận tiền. Tài
+ * khoản đầu tiên của BTC tự thành mặc định. VA đang liên kết rồi → `PAYOUT_ACCOUNT_ALREADY_LINKED`.
+ */
 export const SelectPayoutAccountRequest = z.object({
   vaAccountNumber: z.string().trim().min(1).max(64),
 });
@@ -305,6 +308,8 @@ export const PayoutAccountOption = z.object({
   accountName: z.string(),
   /** `false` với ngân hàng trong `BLOCKED_BANK_BINS` (hiện mờ, không chọn được). */
   selectable: z.boolean(),
+  /** VA này đang là tài khoản nhận tiền hiện hành của BTC (web hiện "Đã liên kết" thay cho nút). */
+  linked: z.boolean(),
 });
 export type PayoutAccountOption = z.infer<typeof PayoutAccountOption>;
 
@@ -318,7 +323,10 @@ export const PayoutAccountOptions = z.object({
 });
 export type PayoutAccountOptions = z.infer<typeof PayoutAccountOptions>;
 
-/** Tài khoản nhận tiền hiện hành của BTC (một VA trong tài khoản Tingee của BTC). Chỉ 4 số cuối số tài khoản. */
+/**
+ * Một tài khoản nhận tiền hiện hành của BTC (một VA trong tài khoản Tingee của BTC). Chỉ 4 số cuối số tài khoản. BTC
+ * còn ít nhất một tài khoản thì có đúng một tài khoản `isDefault`: Đơn mới nhận tiền vào VA của tài khoản này (AD-6).
+ */
 export const PayoutAccount = z.object({
   id: z.uuid(),
   vaAccountNumber: z.string(),
@@ -327,17 +335,24 @@ export const PayoutAccount = z.object({
   accountType: z.string(),
   accountLast4: z.string(),
   accountName: z.string(),
+  isDefault: z.boolean(),
   linkedAt: z.iso.datetime(),
 });
 export type PayoutAccount = z.infer<typeof PayoutAccount>;
 
 /**
- * `GET /v1/orgs/:orgId/payout-account` (chỉ Owner, không gọi Tingee). Chưa kết nối → `credential` `null`; đã kết nối
- * chưa chọn → `account` `null`; đã liên kết → cả hai.
+ * `GET /v1/orgs/:orgId/payout-account` (chỉ Owner, không gọi Tingee); cũng là kết quả của hủy liên kết và đặt mặc định.
+ * Chưa kết nối → `credential` `null`; đã kết nối chưa chọn (hoặc đã hủy hết) → `accounts` rỗng; đã liên kết → cả hai.
  */
 export const PayoutAccountOverview = z.object({
   credential: TingeeCredentialSummary.nullable(),
-  account: PayoutAccount.nullable(),
+  /** Tài khoản nhận tiền hiện hành, theo thứ tự liên kết (sớm nhất trước). */
+  accounts: z.array(PayoutAccount),
+  /**
+   * Gửi key Tingee (lần đầu hoặc "Dùng key khác") còn được nhận: chỉ khi BTC chưa từng liên kết tài khoản nào, kể cả
+   * tài khoản đã hủy. Từ đó về sau đổi key là thao tác riêng (Story 2.13).
+   */
+  canReplaceKey: z.boolean(),
   /** URL IPN riêng của BTC (`tingeeIpnUrl`); `null` khi BTC chưa từng kết nối Tingee. */
   ipnUrl: z.string().nullable(),
   /** Portal Tingee ứng với môi trường Tingee mà api đang gọi (UAT hoặc thật). */

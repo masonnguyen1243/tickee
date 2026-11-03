@@ -170,3 +170,12 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-6-lien-ket-tai-khoan-nhan-tien-2.md`
   summary: Chưa biết `get-va-paging` trả gì cho merchant chưa liên kết tài khoản nào (`items: []`, `items: null` hay `data: null`). Adapter chỉ nhận mảng; nếu Tingee trả null thì bước kết nối thành 503 và không bao giờ tới được `empty-state`.
   evidence: Review 03/11 pass 1 #16 (maybe-false; nếu đúng là medium). Tài liệu và OpenAPI của Tingee chỉ có ví dụ có phần tử, và schema của `data` để trống. Cách chốt: gọi UAT bằng một merchant mới chưa liên kết ngân hàng (test hợp đồng, Story 4.7, hoặc thử tay bằng key UAT trong `.env` local).
+
+## Deferred from: code review of spec-2-6-huy-lien-ket-va-nhieu-tai-khoan-nhan-tien.md (2026-11-03)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-huy-lien-ket-va-nhieu-tai-khoan-nhan-tien.md`
+  summary: Thêm tài khoản và "Đặt làm mặc định" đổi nơi nhận tiền của Đơn mới mà không có xác nhận lại (`REAUTH_REQUIRED`) hay email cảnh báo. Story 2.13 hiện chỉ nói "đổi tài khoản nhận tiền / đổi key" theo mô hình một tài khoản.
+  evidence: Review 03/11 #11. Tiền chỉ vào được các VA trong merchant Tingee của chính BTC, vì đổi key bị khóa từ lần liên kết đầu (quyết định Q2). Khi viết lại Story 2.13, phải chốt xem đặt mặc định có cần xác nhận lại và email cảnh báo không, và audit "4 số cuối cũ và mới" của tài khoản mặc định.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-huy-lien-ket-va-nhieu-tai-khoan-nhan-tien.md`
+  summary: Tài liệu kế hoạch vẫn theo mô hình một tài khoản nhận tiền mỗi BTC, cần chạy `bmad-correct-course`: AC Story 2.6 và 2.13 trong `epics.md`, quy tắc PRD (`prd.md:97`, "một tài khoản nhận tiền hiện hành"), AD-6 (tạo link bằng VA của tài khoản mặc định), AD-35, UX "Tài khoản nhận tiền" (danh sách, mặc định, hủy liên kết).
+  evidence: Review 03/11 #12. Quyết định Q1–Q3 (03/11/2026) nằm trong khối frozen của spec này. Epic 3 (Story 3.4) đọc AD-6, nên phải sửa trước khi làm Epic 3.

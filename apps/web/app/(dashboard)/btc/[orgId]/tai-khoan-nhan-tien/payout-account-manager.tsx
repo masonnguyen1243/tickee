@@ -12,7 +12,7 @@ import {
 } from '@tickee/contracts';
 import { ExternalLink, Landmark, OctagonAlert } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
-import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
 
 import { useCurrentOrganization } from '@/components/tickee/current-organization';
@@ -21,6 +21,7 @@ import { PageHeading } from '@/components/tickee/page-heading';
 import { StatusBadge } from '@/components/tickee/status-badge';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ApiError } from '@/lib/api/errors';
@@ -35,15 +36,19 @@ import {
   payoutAccountOptionsQueryKey,
   payoutAccountQueryKey,
   selectPayoutAccount,
+  setDefaultPayoutAccount,
+  unlinkPayoutAccount,
 } from '@/lib/organizer/api';
 import { statusNoticesQueryKey } from '@/lib/reporting/api';
 import { cn } from '@/lib/utils';
 
 /*
  * Trang Tài khoản nhận tiền (Story 2.6, FR-5, UX-DR40), chỉ Owner. BTC dùng tài khoản merchant Tingee của chính mình:
- * chưa kết nối (hoặc Owner bấm "Dùng key khác") → hướng dẫn 3 bước + form Client ID / Secret Token; đã kết nối chưa chọn
- * → danh sách tài khoản đọc từ Tingee; đã liên kết → thẻ tài khoản + URL IPN để sao chép + checklist cấu hình portal.
- * Lỗi báo tại chỗ, dữ liệu đã nhập được giữ. Secret Token không bao giờ quay lại trình duyệt.
+ * chưa kết nối (hoặc Owner bấm "Dùng key khác", chỉ có khi BTC chưa từng liên kết tài khoản nào) → hướng dẫn 3 bước +
+ * form Client ID / Secret Token; đã kết nối chưa có tài khoản (hoặc đã hủy hết) → danh sách tài khoản đọc từ Tingee; đã
+ * liên kết → danh sách tài khoản (badge "Mặc định", "Đặt làm mặc định", "Hủy liên kết" qua `Dialog`), "Thêm tài khoản",
+ * URL IPN để sao chép và checklist cấu hình portal. Lỗi báo tại chỗ, dữ liệu đã nhập được giữ. Secret Token không bao
+ * giờ quay lại trình duyệt.
  */
 
 type Draft = { clientId: string; secretToken: string };
@@ -53,6 +58,11 @@ type FieldErrors = Partial<Record<Field, string>>;
 const PROVIDER_DOWN = 'Tingee tạm lỗi, thử lại sau ít phút.';
 const CREDENTIAL_INVALID = 'Client ID hoặc Secret Token không đúng.';
 const CREDENTIAL_REVOKED = 'Client ID hoặc Secret Token không còn đúng. Bấm “Dùng key khác” để nhập key mới.';
+/** Key bị thu hồi khi BTC đã từng liên kết tài khoản: không đổi key ở trang này được (Story 2.13). */
+const CREDENTIAL_REVOKED_LOCKED = 'Client ID hoặc Secret Token không còn đúng. Kiểm tra API key trên portal Tingee.';
+const ACCOUNT_ALREADY_LINKED = 'Tài khoản này đã được liên kết.';
+const PORTAL_UNSELECT_HINT =
+  'Không dùng tài khoản này nữa thì bỏ chọn nó trong “Các Tài khoản cho phép thanh toán” trên portal Tingee.';
 const UNAVAILABLE = 'Tài khoản này không còn dùng được trên Tingee. Tải lại danh sách rồi chọn tài khoản khác.';
 const VIETINBANK = 'Chưa hỗ trợ VietinBank';
 
@@ -85,6 +95,19 @@ function refreshOverview(queryClient: QueryClient, orgId: string) {
   void queryClient.invalidateQueries({ queryKey: payoutAccountQueryKey(orgId), exact: true });
   void queryClient.invalidateQueries({ queryKey: statusNoticesQueryKey(orgId) });
 }
+
+/**
+ * Tổng quan mới do api trả (hủy liên kết, đặt mặc định) thay cache; dải banner đọc lại. Hủy lần đọc tổng quan đang chạy
+ * trước: nó có thể về sau và ghi đè bằng dữ liệu cũ.
+ */
+async function applyOverview(queryClient: QueryClient, orgId: string, overview: PayoutAccountOverview) {
+  await queryClient.cancelQueries({ queryKey: payoutAccountQueryKey(orgId), exact: true });
+  queryClient.setQueryData(payoutAccountQueryKey(orgId), overview);
+  void queryClient.invalidateQueries({ queryKey: statusNoticesQueryKey(orgId) });
+}
+
+const accountLabel = (account: { bankName: string; accountLast4: string }) =>
+  `${account.bankName} •••• ${account.accountLast4}`;
 
 const cardClass = 'flex flex-col gap-stack rounded-lg bg-card p-card-padding shadow-card';
 
@@ -161,7 +184,8 @@ function ConnectForm({
     onError: (error) => {
       if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
       else if (hasErrorCode(error, ErrorCode.PAYOUT_ACCOUNT_ALREADY_LINKED)) {
-        toast.info('BTC đã có tài khoản nhận tiền.');
+        // Tab khác vừa liên kết tài khoản: từ đó không nhập key khác ở đây được nữa.
+        toast.info('BTC đã liên kết tài khoản nhận tiền nên không đổi key ở đây được.');
         refreshOverview(queryClient, orgId);
       }
     },
@@ -274,10 +298,13 @@ function ConnectForm({
 
 function OptionRow({
   option,
+  linked,
   pending,
   onSelect,
 }: {
   option: PayoutAccountOption;
+  /** VA đang là tài khoản nhận tiền hiện hành (theo tổng quan, không theo cờ trong cache danh sách). */
+  linked: boolean;
   pending: boolean;
   onSelect: () => void;
 }) {
@@ -287,13 +314,16 @@ function OptionRow({
       className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3"
       data-slot="payout-account-option"
       data-selectable={option.selectable}
+      data-linked={linked}
     >
       <div id={infoId} className={cn('min-w-0 flex-1 basis-40', !option.selectable && 'opacity-50')}>
         <p className="text-label">{option.bankName}</p>
         <p className="text-body tabular-nums">•••• {option.accountLast4}</p>
         <p className="text-meta break-words text-muted-foreground uppercase">{option.accountName}</p>
       </div>
-      {option.selectable ? (
+      {linked ? (
+        <StatusBadge tone="success">Đã liên kết</StatusBadge>
+      ) : option.selectable ? (
         <Button type="button" variant="secondary" size="sm" loading={pending} aria-describedby={infoId} onClick={onSelect}>
           Dùng tài khoản này
         </Button>
@@ -313,17 +343,35 @@ function ListSkeleton() {
   );
 }
 
-/** Đã kết nối Tingee, chưa chọn tài khoản: danh sách đọc từ Tingee bằng credential hiện hành. */
+/**
+ * Danh sách tài khoản đọc từ Tingee bằng credential hiện hành: chọn tài khoản đầu tiên (BTC chưa có tài khoản nào) hoặc
+ * thêm tài khoản (`adding`). Tài khoản đã liên kết hiện "Đã liên kết" thay cho nút.
+ */
 function AccountChooser({
   orgId,
   credential,
   portalUrl,
+  linkedVas,
+  adding,
   onReplaceKey,
+  onLinked,
+  onClose,
 }: {
   orgId: string;
   credential: TingeeCredentialSummary;
   portalUrl: string;
-  onReplaceKey: () => void;
+  /**
+   * VA của các tài khoản hiện hành trong tổng quan. "Đã liên kết" tính từ đây lúc render, không từ cờ `linked` của danh
+   * sách đang cache (cũ đi khi tab khác hủy liên kết).
+   */
+  linkedVas: ReadonlySet<string>;
+  /** BTC đã có tài khoản, Owner đang thêm tài khoản khác. */
+  adding: boolean;
+  /** "Dùng key khác": chỉ có khi BTC chưa từng liên kết tài khoản nào (`canReplaceKey`). */
+  onReplaceKey?: () => void;
+  onLinked: () => void;
+  /** Đóng danh sách khi đang thêm tài khoản. */
+  onClose?: () => void;
 }) {
   const queryClient = useQueryClient();
   const goToLogin = useGoToLogin();
@@ -339,17 +387,23 @@ function AccountChooser({
 
   const select = useMutation({
     mutationFn: (vaAccountNumber: string) => selectPayoutAccount(orgId, { vaAccountNumber }),
-    onSuccess: (account: PayoutAccount) => {
+    onSuccess: async (account: PayoutAccount) => {
+      // Lần đọc tổng quan đang chạy có thể về sau và ghi đè tài khoản vừa thêm.
+      await queryClient.cancelQueries({ queryKey: payoutAccountQueryKey(orgId), exact: true });
       queryClient.setQueryData<PayoutAccountOverview>(payoutAccountQueryKey(orgId), (prev) =>
-        prev ? { ...prev, account } : prev,
+        prev
+          ? { ...prev, accounts: [...prev.accounts.filter((a) => a.id !== account.id), account], canReplaceKey: false }
+          : prev,
       );
       refreshOverview(queryClient, orgId);
       toast.success('Đã liên kết tài khoản nhận tiền.');
+      onLinked();
     },
     onError: (error) => {
       if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
       else if (hasErrorCode(error, ErrorCode.PAYOUT_ACCOUNT_ALREADY_LINKED)) {
-        toast.info('BTC đã có tài khoản nhận tiền.');
+        // Tab khác vừa liên kết đúng tài khoản này: tổng quan đọc lại sẽ có nó.
+        toast.info(ACCOUNT_ALREADY_LINKED);
         refreshOverview(queryClient, orgId);
       }
     },
@@ -359,11 +413,14 @@ function AccountChooser({
     select.reset();
     void options.refetch();
   };
-  const otherKeyAction = (
+  const otherKeyAction = onReplaceKey ? (
     <Button type="button" variant="link" size="sm" onClick={onReplaceKey}>
       Dùng key khác
     </Button>
-  );
+  ) : null;
+  // Key bị thu hồi trên Tingee: đổi key được thì mở form, không thì chỉ đường sang portal.
+  const revokedDescription = onReplaceKey ? CREDENTIAL_REVOKED : CREDENTIAL_REVOKED_LOCKED;
+  const revokedAction = otherKeyAction ?? <TingeeLink href={portalUrl}>Mở portal Tingee</TingeeLink>;
 
   const selectFailure =
     select.error &&
@@ -388,7 +445,7 @@ function AccountChooser({
       : hasErrorCode(selectFailure, ErrorCode.BANK_NOT_SUPPORTED)
         ? [`${VIETINBANK}. Chọn tài khoản ở ngân hàng khác.`, reloadAction]
         : hasErrorCode(selectFailure, ErrorCode.TINGEE_CREDENTIAL_INVALID)
-          ? [CREDENTIAL_REVOKED, otherKeyAction]
+          ? [revokedDescription, revokedAction]
           : hasErrorCode(selectFailure, ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE)
             ? [PROVIDER_DOWN, retry]
             : [messageOf(selectFailure), retry];
@@ -405,8 +462,8 @@ function AccountChooser({
       <StatusBanner
         tone="danger"
         title="Key Tingee không còn dùng được"
-        description={CREDENTIAL_REVOKED}
-        action={otherKeyAction}
+        description={revokedDescription}
+        action={revokedAction}
       />
     ) : (
       <StatusBanner
@@ -451,6 +508,7 @@ function AccountChooser({
             <OptionRow
               key={option.vaAccountNumber}
               option={option}
+              linked={linkedVas.has(option.vaAccountNumber)}
               pending={select.isPending && select.variables === option.vaAccountNumber}
               onSelect={() => {
                 if (!select.isPending) select.mutate(option.vaAccountNumber);
@@ -472,7 +530,14 @@ function AccountChooser({
   return (
     <section className={cardClass} data-slot="payout-account-chooser">
       <div className="flex flex-col gap-1">
-        <h2 className="text-title">Chọn tài khoản nhận tiền</h2>
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <h2 className="text-title">{adding ? 'Thêm tài khoản nhận tiền' : 'Chọn tài khoản nhận tiền'}</h2>
+          {onClose ? (
+            <Button type="button" variant="link" size="sm" onClick={onClose}>
+              Đóng
+            </Button>
+          ) : null}
+        </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-muted-foreground">
           <span>
             Đã kết nối Tingee · Client ID <span className="tabular-nums">{credential.clientIdMasked}</span>
@@ -487,9 +552,199 @@ function AccountChooser({
   );
 }
 
-/** Đã liên kết: thẻ tài khoản + URL IPN để dán vào portal Tingee + checklist hai bước. */
-function LinkedView({ account, ipnUrl, portalUrl }: { account: PayoutAccount; ipnUrl: string | null; portalUrl: string }) {
+function AccountRow({
+  account,
+  settingDefault,
+  onSetDefault,
+  onUnlink,
+}: {
+  account: PayoutAccount;
+  settingDefault: boolean;
+  onSetDefault: () => void;
+  onUnlink: () => void;
+}) {
+  const infoId = useId();
+  return (
+    <li className="flex flex-col gap-3 py-3" data-slot="payout-account-row" data-default={account.isDefault}>
+      <div id={infoId} className="flex min-w-0 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <p className="text-label">{account.bankName}</p>
+          {account.isDefault ? <StatusBadge tone="neutral">Mặc định</StatusBadge> : null}
+        </div>
+        <p className="text-body tabular-nums">•••• {account.accountLast4}</p>
+        <p className="text-meta break-words text-muted-foreground uppercase">{account.accountName}</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        {account.isDefault ? null : (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            loading={settingDefault}
+            aria-describedby={infoId}
+            onClick={onSetDefault}
+          >
+            Đặt làm mặc định
+          </Button>
+        )}
+        <Button type="button" variant="secondary" size="sm" aria-describedby={infoId} onClick={onUnlink}>
+          Hủy liên kết
+        </Button>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * Xác nhận hủy liên kết, nêu hậu quả. Không xác nhận lại danh tính (Story 2.13). Chỉ giữ id: tài khoản và hậu quả đọc
+ * từ tổng quan hiện tại, nên đổi mặc định ở tab khác thì câu chữ đổi theo.
+ */
+function UnlinkDialog({
+  orgId,
+  accountId,
+  accounts,
+  onClose,
+}: {
+  orgId: string;
+  accountId: string | null;
+  /** Các tài khoản hiện hành, theo thứ tự liên kết. */
+  accounts: PayoutAccount[];
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const goToLogin = useGoToLogin();
+  const account = accounts.find((a) => a.id === accountId) ?? null;
+  const unlink = useMutation({
+    mutationFn: (target: PayoutAccount) => unlinkPayoutAccount(orgId, target.id),
+    onSuccess: async (overview, target) => {
+      onClose();
+      await applyOverview(queryClient, orgId, overview);
+      toast.success(`Đã hủy liên kết ${accountLabel(target)}.`, { description: PORTAL_UNSELECT_HINT });
+    },
+    onError: (error) => {
+      if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
+      else if (hasErrorCode(error, ErrorCode.NOT_FOUND)) {
+        onClose();
+        toast.info('Tài khoản này đã được hủy liên kết.');
+        refreshOverview(queryClient, orgId);
+      }
+    },
+  });
+  const failure =
+    unlink.error && !handledElsewhere(unlink.error) && !hasErrorCode(unlink.error, ErrorCode.NOT_FOUND)
+      ? unlink.error
+      : null;
+
+  const others = account ? accounts.filter((a) => a.id !== account.id) : [];
+  const nextDefault = others[0];
+  let consequence: string | null = null;
+  if (account && others.length === 0) {
+    consequence =
+      'BTC sẽ không còn tài khoản nhận tiền nào và chưa bán được Vé có phí cho tới khi liên kết một tài khoản khác.';
+  } else if (account?.isDefault && nextDefault) {
+    consequence = `${accountLabel(nextDefault)} sẽ thành tài khoản mặc định.`;
+  }
+  // Chỉ tài khoản mặc định nhận tiền của Đơn mới.
+  const orderEffect = account
+    ? account.isDefault
+      ? `Đơn mới sẽ không nhận tiền vào ${accountLabel(account)} nữa.`
+      : `${accountLabel(account)} không phải tài khoản mặc định nên Đơn mới không bị ảnh hưởng.`
+    : null;
+
+  const close = () => {
+    if (unlink.isPending) return;
+    unlink.reset();
+    onClose();
+  };
+
+  return (
+    <Dialog open={account !== null} onOpenChange={(open) => !open && close()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Hủy liên kết tài khoản này?</DialogTitle>
+          <DialogDescription asChild>
+            <div className="flex flex-col gap-2 break-words" data-slot="unlink-consequences">
+              {account ? (
+                <>
+                  <p>{orderEffect} Tickee chỉ ngừng dùng tài khoản này, không xóa gì trên Tingee.</p>
+                  {consequence ? <p>{consequence}</p> : null}
+                  <p>{PORTAL_UNSELECT_HINT}</p>
+                </>
+              ) : null}
+            </div>
+          </DialogDescription>
+        </DialogHeader>
+        {failure ? (
+          <StatusBanner tone="danger" title="Chưa hủy liên kết được" description={messageOf(failure)} />
+        ) : null}
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="destructive"
+            className="w-full"
+            loading={unlink.isPending}
+            onClick={() => account && unlink.mutate(account)}
+          >
+            Hủy liên kết
+          </Button>
+          <Button type="button" variant="secondary" className="w-full" onClick={close}>
+            Giữ tài khoản
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Đã liên kết: danh sách tài khoản (mặc định, đặt mặc định, hủy liên kết), "Thêm tài khoản", URL IPN để dán vào portal
+ * Tingee và checklist hai bước.
+ */
+function LinkedView({
+  orgId,
+  credential,
+  accounts,
+  ipnUrl,
+  portalUrl,
+  adding,
+  onAdd,
+  onAddDone,
+}: {
+  orgId: string;
+  credential: TingeeCredentialSummary | null;
+  accounts: PayoutAccount[];
+  ipnUrl: string | null;
+  portalUrl: string;
+  adding: boolean;
+  onAdd: () => void;
+  onAddDone: () => void;
+}) {
   const ipnInputId = useId();
+  const queryClient = useQueryClient();
+  const goToLogin = useGoToLogin();
+  const [unlinkingId, setUnlinkingId] = useState<string | null>(null);
+  // Tài khoản đang hỏi hủy không còn trong tổng quan (tab khác đã hủy): đóng `Dialog`.
+  useEffect(() => {
+    if (unlinkingId !== null && !accounts.some((a) => a.id === unlinkingId)) setUnlinkingId(null);
+  }, [unlinkingId, accounts]);
+
+  const makeDefault = useMutation({
+    mutationFn: (target: PayoutAccount) => setDefaultPayoutAccount(orgId, target.id),
+    onSuccess: async (overview, target) => {
+      await applyOverview(queryClient, orgId, overview);
+      toast.success(`${accountLabel(target)} là tài khoản mặc định.`);
+    },
+    onError: (error) => {
+      if (handledElsewhere(error)) {
+        if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
+        return;
+      }
+      if (hasErrorCode(error, ErrorCode.NOT_FOUND)) toast.info('Tài khoản này không còn được liên kết.');
+      else toast.error(messageOf(error));
+      refreshOverview(queryClient, orgId);
+    },
+  });
+
   return (
     <>
       <section className={cardClass} data-slot="payout-account-card">
@@ -497,18 +752,40 @@ function LinkedView({ account, ipnUrl, portalUrl }: { account: PayoutAccount; ip
           <h2 className="text-title">Tài khoản nhận tiền</h2>
           <StatusBadge tone="success">Đã liên kết</StatusBadge>
         </div>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-body">
-          <dt className="text-muted-foreground">Ngân hàng</dt>
-          <dd className="min-w-0 break-words">{account.bankName}</dd>
-          <dt className="text-muted-foreground">Số tài khoản</dt>
-          <dd className="tabular-nums">•••• {account.accountLast4}</dd>
-          <dt className="text-muted-foreground">Chủ tài khoản</dt>
-          <dd className="min-w-0 break-words uppercase">{account.accountName}</dd>
-        </dl>
         <p className="text-meta text-muted-foreground">
-          Tiền bán vé chuyển thẳng vào tài khoản này qua Tingee. Tickee không giữ tiền của BTC.
+          Đơn mới nhận tiền vào tài khoản mặc định, chuyển thẳng qua Tingee. Tickee không giữ tiền của BTC.
         </p>
+        <ul className="flex flex-col divide-y divide-border" data-slot="payout-account-list">
+          {accounts.map((account) => (
+            <AccountRow
+              key={account.id}
+              account={account}
+              settingDefault={makeDefault.isPending && makeDefault.variables?.id === account.id}
+              onSetDefault={() => {
+                if (!makeDefault.isPending) makeDefault.mutate(account);
+              }}
+              onUnlink={() => setUnlinkingId(account.id)}
+            />
+          ))}
+        </ul>
+        {credential && !adding ? (
+          <Button type="button" variant="secondary" className="self-start" onClick={onAdd}>
+            Thêm tài khoản
+          </Button>
+        ) : null}
       </section>
+      {credential && adding ? (
+        <AccountChooser
+          key={credential.id}
+          orgId={orgId}
+          credential={credential}
+          portalUrl={portalUrl}
+          linkedVas={new Set(accounts.map((a) => a.vaAccountNumber))}
+          adding
+          onLinked={onAddDone}
+          onClose={onAddDone}
+        />
+      ) : null}
       <section className={cardClass} data-slot="tingee-setup">
         <div className="flex flex-col gap-1">
           <h2 className="text-title">Cấu hình trên Tingee</h2>
@@ -540,11 +817,22 @@ function LinkedView({ account, ipnUrl, portalUrl }: { account: PayoutAccount; ip
             dán URL IPN vào ô “Đường dẫn IPN”.
           </li>
           <li>
-            Ở “Các Tài khoản cho phép thanh toán”, chọn tài khoản {account.bankName}{' '}
-            <span className="tabular-nums">•••• {account.accountLast4}</span> rồi lưu.
+            Ở “Các Tài khoản cho phép thanh toán”, chọn{' '}
+            {accounts.length > 1 ? 'mọi tài khoản đã liên kết' : 'tài khoản'}{' '}
+            {accounts.map((account, index) => (
+              <span key={account.id}>
+                {index > 0 ? ', ' : null}
+                <span className="tabular-nums whitespace-nowrap">{accountLabel(account)}</span>
+              </span>
+            ))}{' '}
+            rồi lưu.
           </li>
         </ol>
+        <p className="text-meta text-muted-foreground">
+          Hủy liên kết tài khoản nào mà không dùng nữa thì bỏ chọn tài khoản đó ở “Các Tài khoản cho phép thanh toán”.
+        </p>
       </section>
+      <UnlinkDialog orgId={orgId} accountId={unlinkingId} accounts={accounts} onClose={() => setUnlinkingId(null)} />
     </>
   );
 }
@@ -562,13 +850,20 @@ export function PayoutAccountManager() {
   const organization = useCurrentOrganization();
   const orgId = organization.id;
   const queryClient = useQueryClient();
-  /** Owner bấm "Dùng key khác" khi đã kết nối nhưng chưa chọn tài khoản. */
+  /** Owner bấm "Dùng key khác" khi đã kết nối nhưng BTC chưa từng liên kết tài khoản nào. */
   const [replacingKey, setReplacingKey] = useState(false);
+  /** Owner bấm "Thêm tài khoản" khi BTC đã có tài khoản nhận tiền. */
+  const [adding, setAdding] = useState(false);
 
   const overview = useQuery({
     queryKey: payoutAccountQueryKey(orgId),
     queryFn: ({ signal }) => fetchPayoutAccount(orgId, signal),
   });
+  // Hết tài khoản (hủy hết, kể cả ở tab khác): lần sau có tài khoản thì không tự mở danh sách thêm tài khoản.
+  const noAccounts = overview.data?.accounts.length === 0;
+  useEffect(() => {
+    if (noAccounts) setAdding(false);
+  }, [noAccounts]);
 
   const onConnected = (options: PayoutAccountOptions) => {
     // Danh sách vừa đọc từ Tingee dùng luôn, không gọi Tingee lần nữa; tổng quan đọc lại để có URL IPN.
@@ -599,17 +894,32 @@ export function PayoutAccountManager() {
   } else if (!overview.data) {
     body = <PageSkeleton />;
   } else {
-    const { credential, account, ipnUrl, tingeePortalUrl } = overview.data;
-    if (account) {
-      body = <LinkedView account={account} ipnUrl={ipnUrl} portalUrl={tingeePortalUrl} />;
-    } else if (credential && !replacingKey) {
+    const { credential, accounts, ipnUrl, tingeePortalUrl, canReplaceKey } = overview.data;
+    if (accounts.length > 0) {
+      body = (
+        <LinkedView
+          orgId={orgId}
+          credential={credential}
+          accounts={accounts}
+          ipnUrl={ipnUrl}
+          portalUrl={tingeePortalUrl}
+          adding={adding}
+          onAdd={() => setAdding(true)}
+          onAddDone={() => setAdding(false)}
+        />
+      );
+    } else if (credential && !(replacingKey && canReplaceKey)) {
+      // Chưa có tài khoản (hoặc đã hủy hết): chọn tài khoản. "Dùng key khác" chỉ khi BTC chưa từng liên kết tài khoản.
       body = (
         <AccountChooser
           key={credential.id}
           orgId={orgId}
           credential={credential}
           portalUrl={tingeePortalUrl}
-          onReplaceKey={() => setReplacingKey(true)}
+          linkedVas={new Set()}
+          adding={false}
+          onReplaceKey={canReplaceKey ? () => setReplacingKey(true) : undefined}
+          onLinked={() => setAdding(false)}
         />
       );
     } else {

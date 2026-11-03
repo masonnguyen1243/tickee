@@ -60,9 +60,10 @@ function closedBetaNotices(state: ClosedBetaState): StatusNotice[] {
 }
 
 /**
- * Thông báo của trục tài khoản nhận tiền: BTC chưa có tài khoản nhận tiền hiện hành (chưa kết nối Tingee, hoặc kết nối
- * rồi nhưng chưa chọn tài khoản) → `PAYOUT_ACCOUNT_NOT_LINKED` (danger, chặn bán Vé có phí); có rồi → không có. `version`
- * là mốc đổi gần nhất (chưa từng có tài khoản thì là lúc tạo BTC). Web chọn câu theo vai (Owner có nút "Liên kết ngay").
+ * Thông báo của trục tài khoản nhận tiền: BTC không có tài khoản nhận tiền hiện hành nào (chưa kết nối Tingee, kết nối
+ * rồi nhưng chưa chọn tài khoản, hoặc đã hủy liên kết hết) → `PAYOUT_ACCOUNT_NOT_LINKED` (danger, chặn bán Vé có phí);
+ * có ít nhất một → không có. `version` là lúc tài khoản cuối cùng bị hủy (chưa từng có tài khoản thì là lúc tạo BTC).
+ * Web chọn câu theo vai (Owner có nút "Liên kết ngay").
  */
 function payoutNotices(state: PayoutAccountState, organizationCreatedAt: Date): StatusNotice[] {
   if (state.status === 'linked') return [];

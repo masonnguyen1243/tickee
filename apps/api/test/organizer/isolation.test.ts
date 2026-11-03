@@ -59,6 +59,8 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/credential');
     expect(guarded).toContain('GET /v1/orgs/:orgId/payout-account/options');
     expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account');
+    expect(guarded).toContain('DELETE /v1/orgs/:orgId/payout-account/:accountId');
+    expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/:accountId/default');
     expect(guarded).toContain('GET /v1/orgs/:orgId/test-owner-only');
     expect(guarded).toContain('POST /v1/orgs/:orgId/test-owner-only/items/:itemId');
   });

@@ -23,7 +23,7 @@ export const MEMBERSHIPS_QUERY_KEY = ['organizer', 'memberships'] as const;
 export const organizationQueryKey = (orgId: string) => ['organizer', 'organization', orgId] as const;
 /** Thành viên + lời mời đang chờ của một BTC (chỉ Owner). */
 export const membersQueryKey = (orgId: string) => ['organizer', 'members', orgId] as const;
-/** Credential Tingee, tài khoản nhận tiền hiện hành và URL IPN của một BTC (chỉ Owner; không gọi Tingee). */
+/** Credential Tingee, các tài khoản nhận tiền hiện hành và URL IPN của một BTC (chỉ Owner; không gọi Tingee). */
 export const payoutAccountQueryKey = (orgId: string) => ['organizer', 'payout-account', orgId] as const;
 /**
  * Danh sách tài khoản đọc từ Tingee bằng credential `credentialId` (mỗi lần tải là một lời gọi Tingee). Nằm dưới
@@ -81,6 +81,20 @@ export const connectTingee = (orgId: string, body: ConnectTingeeRequest) =>
 export const fetchPayoutAccountOptions = (orgId: string, signal?: AbortSignal) =>
   apiRequest(`${orgPath(orgId)}/payout-account/options`, { schema: PayoutAccountOptions, init: { signal } });
 
-/** Chọn một tài khoản trong danh sách làm tài khoản nhận tiền. */
+/** Thêm một tài khoản trong danh sách làm tài khoản nhận tiền (tài khoản đầu tiên tự thành mặc định). */
 export const selectPayoutAccount = (orgId: string, body: SelectPayoutAccountRequest) =>
   apiRequest(`${orgPath(orgId)}/payout-account`, { schema: PayoutAccount, init: json('POST', body) });
+
+/** Hủy liên kết một tài khoản nhận tiền (Tickee ngừng dùng, không gọi Tingee); trả tổng quan mới. */
+export const unlinkPayoutAccount = (orgId: string, accountId: string) =>
+  apiRequest(`${orgPath(orgId)}/payout-account/${encodeURIComponent(accountId)}`, {
+    schema: PayoutAccountOverview,
+    init: { method: 'DELETE' },
+  });
+
+/** Đặt một tài khoản nhận tiền làm mặc định; trả tổng quan mới. */
+export const setDefaultPayoutAccount = (orgId: string, accountId: string) =>
+  apiRequest(`${orgPath(orgId)}/payout-account/${encodeURIComponent(accountId)}/default`, {
+    schema: PayoutAccountOverview,
+    init: { method: 'POST' },
+  });

@@ -13,7 +13,7 @@ import {
   type PayoutAccountOverview,
   type TingeeCredentialSummary,
 } from '@tickee/contracts';
-import { and, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import pg from 'pg';
 import type { z } from 'zod';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
@@ -33,7 +33,10 @@ import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
 
 /*
  * Tài khoản nhận tiền (FR-5, AD-6, AD-7, AD-9, Story 2.6): BTC dùng tài khoản merchant Tingee của chính mình. Owner kết
- * nối API key (Client ID + Secret Token), Tickee đọc danh sách tài khoản bằng key đó, Owner chọn một tài khoản.
+ * nối API key (Client ID + Secret Token), Tickee đọc danh sách tài khoản bằng key đó, Owner thêm một hay nhiều tài
+ * khoản (mỗi VA một lần), đặt tài khoản mặc định và hủy liên kết từng tài khoản. Hủy liên kết chỉ là Tickee ngừng dùng
+ * tài khoản (`retired_at`, không xóa dòng, không gọi Tingee). Còn tài khoản thì có đúng một tài khoản mặc định. Gửi key
+ * chỉ được nhận khi BTC chưa từng liên kết tài khoản nào; từ đó đổi key là Story 2.13.
  *
  * Tingee luôn được gọi NGOÀI transaction DB. Mỗi lần ghi là một transaction riêng có audit, bắt đầu bằng khóa dòng
  * `organizations FOR UPDATE` của BTC, nên hai tab của cùng BTC ghi lần lượt. Secret Token chỉ lưu dạng ciphertext và
@@ -43,8 +46,9 @@ import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
 const cred = tingeeCredentials;
 const pa = payoutAccounts;
 
-/** Unique index một phần "một tài khoản nhận tiền hiện hành mỗi BTC". */
-const CURRENT_ACCOUNT_KEY = 'payout_accounts_one_current_per_organization_key';
+/** Unique index một phần "mỗi VA hiện hành tối đa một lần mỗi BTC". */
+const CURRENT_VA_KEY = 'payout_accounts_current_va_per_organization_key';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** `ipnKey`: 128 bit ngẫu nhiên, base64url (AD-7). */
 const IPN_KEY_BYTES = 16;
 
@@ -87,6 +91,7 @@ const accountColumns = {
   accountType: pa.accountType,
   accountLast4: pa.accountLast4,
   accountName: pa.accountName,
+  isDefault: pa.isDefault,
   linkedAt: pa.linkedAt,
 };
 type AccountRow = Omit<PayoutAccount, 'linkedAt'> & { linkedAt: Date };
@@ -99,7 +104,8 @@ const credentialSummary = (row: CredentialRow): TingeeCredentialSummary => ({
 
 const accountDto = (row: AccountRow): PayoutAccount => ({ ...row, linkedAt: row.linkedAt.toISOString() });
 
-const optionOf = (account: TingeeAccount): PayoutAccountOption => ({
+/** `linkedVas`: VA của các tài khoản nhận tiền hiện hành của BTC. */
+const optionOf = (account: TingeeAccount, linkedVas: ReadonlySet<string>): PayoutAccountOption => ({
   vaAccountNumber: account.vaAccountNumber,
   bankBin: account.bankBin,
   bankName: account.bankName,
@@ -107,15 +113,19 @@ const optionOf = (account: TingeeAccount): PayoutAccountOption => ({
   accountLast4: account.accountLast4,
   accountName: account.accountName,
   selectable: !isBlockedBankBin(account.bankBin),
+  linked: linkedVas.has(account.vaAccountNumber),
 });
 
 const notAMember = () => new AppError(ErrorCode.NOT_A_MEMBER, 'Bạn không phải thành viên của BTC này.');
 const noCredential = () => new AppError(ErrorCode.NOT_FOUND, 'BTC chưa kết nối tài khoản Tingee.');
-const alreadyLinked = () =>
+/** Gửi key sau khi BTC đã từng liên kết tài khoản (kể cả đã hủy hết): đổi key là Story 2.13. */
+const keyLocked = () =>
   new AppError(
     ErrorCode.PAYOUT_ACCOUNT_ALREADY_LINKED,
-    'BTC đã có tài khoản nhận tiền. Đổi tài khoản nhận tiền là thao tác riêng.',
+    'BTC đã liên kết tài khoản nhận tiền bằng key Tingee này. Đổi key Tingee là thao tác riêng.',
   );
+const alreadyLinked = () => new AppError(ErrorCode.PAYOUT_ACCOUNT_ALREADY_LINKED, 'Tài khoản này đã được liên kết.');
+const accountNotFound = () => new AppError(ErrorCode.NOT_FOUND, 'Không tìm thấy tài khoản nhận tiền này.');
 const unavailable = () =>
   new AppError(
     ErrorCode.PAYOUT_ACCOUNT_UNAVAILABLE,
@@ -142,40 +152,26 @@ export class PayoutAccountService {
     @Inject(PAYOUT_ACCOUNT_SETTINGS) private readonly settings: PayoutAccountSettings,
   ) {}
 
-  /** Credential và tài khoản nhận tiền hiện hành, URL IPN, link portal. Không gọi Tingee. */
-  async overview(ctx: AccessContext): Promise<PayoutAccountOverview> {
-    const [org] = await this.db.orm
-      .select({ ipnKey: organizations.tingeeIpnKey })
-      .from(organizations)
-      .where(orgScope(ctx)({ organizationId: organizations.id }));
-    if (!org) throw notAMember();
-    const credential = await this.currentCredential(this.db.orm, ctx);
-    const [account] = await this.db.orm
-      .select(accountColumns)
-      .from(pa)
-      .where(and(orgScope(ctx)(pa), isNull(pa.retiredAt)));
-    return {
-      credential: credential ? credentialSummary(credential) : null,
-      account: account ? accountDto(account) : null,
-      ipnUrl: org.ipnKey ? tingeeIpnUrl(this.settings.apiPublicUrl, org.ipnKey) : null,
-      tingeePortalUrl: this.settings.tingeePortalUrl,
-    };
+  /** Credential, các tài khoản nhận tiền hiện hành, URL IPN, link portal. Không gọi Tingee. */
+  overview(ctx: AccessContext): Promise<PayoutAccountOverview> {
+    return this.overviewOf(this.db.orm, ctx);
   }
 
   /**
    * Kết nối API key Tingee: đọc danh sách tài khoản bằng key (key sai → `TINGEE_CREDENTIAL_INVALID`, không ghi gì), rồi
    * trong một transaction lưu credential mới làm hiện hành (credential cũ, nếu có, chuyển `retired_at`) và sinh `ipnKey`
-   * nếu BTC chưa có. BTC đã có tài khoản nhận tiền → 409, không gọi Tingee (đổi key là Story 2.13).
+   * nếu BTC chưa có. BTC đã từng liên kết tài khoản nhận tiền (kể cả đã hủy hết) → 409, không gọi Tingee (đổi key là
+   * Story 2.13).
    */
   async connect(ctx: AccessContext, input: z.output<typeof ConnectTingeeRequest>): Promise<PayoutAccountOptions> {
-    if (await this.hasCurrentAccount(this.db.orm, ctx)) throw alreadyLinked();
+    if (await this.hasEverLinked(this.db.orm, ctx)) throw keyLocked();
 
     const accounts = await this.tingee.listAccounts({ clientId: input.clientId, secretToken: input.secretToken });
     const secretTokenCiphertext = this.settings.secretBox.seal(input.secretToken);
 
     const saved = await this.db.transaction(async (tx) => {
       await this.lockOrganization(tx, ctx);
-      if (await this.hasCurrentAccount(tx, ctx)) throw alreadyLinked();
+      if (await this.hasEverLinked(tx, ctx)) throw keyLocked();
       const retired = await tx
         .update(cred)
         .set({ retiredAt: sql`now()` })
@@ -206,27 +202,34 @@ export class PayoutAccountService {
       });
       return created;
     });
-    return { credential: credentialSummary(saved), accounts: accounts.map(optionOf) };
+    // Transaction vừa kiểm BTC chưa từng liên kết tài khoản nào: không dòng nào `linked`.
+    const noneLinked = new Set<string>();
+    return { credential: credentialSummary(saved), accounts: accounts.map((account) => optionOf(account, noneLinked)) };
   }
 
-  /** Đọc lại danh sách tài khoản bằng credential hiện hành. BTC chưa kết nối → 404. */
+  /** Đọc lại danh sách tài khoản bằng credential hiện hành, đánh dấu VA đã liên kết. BTC chưa kết nối → 404. */
   async options(ctx: AccessContext): Promise<PayoutAccountOptions> {
     const credential = await this.currentCredential(this.db.orm, ctx);
     if (!credential) throw noCredential();
     const accounts = await this.tingee.listAccounts(this.tingeeCredentialOf(credential));
-    return { credential: credentialSummary(credential), accounts: accounts.map(optionOf) };
+    const linkedVas = await this.linkedVas(this.db.orm, ctx);
+    return {
+      credential: credentialSummary(credential),
+      accounts: accounts.map((account) => optionOf(account, linkedVas)),
+    };
   }
 
   /**
-   * Chọn tài khoản nhận tiền: đọc lại danh sách từ Tingee bằng credential hiện hành (không tin danh sách web đang giữ).
-   * VA không còn `active` → `PAYOUT_ACCOUNT_UNAVAILABLE`; VietinBank → `BANK_NOT_SUPPORTED`; cả hai không lưu gì. Rồi
-   * trong một transaction: credential vẫn là bản vừa dùng (đổi giữa chừng → `PAYOUT_ACCOUNT_UNAVAILABLE`), BTC chưa có
-   * tài khoản hiện hành (có rồi → 409), chèn tài khoản kèm audit.
+   * Thêm tài khoản nhận tiền: VA đang liên kết rồi → 409, không gọi Tingee. Đọc lại danh sách từ Tingee bằng
+   * credential hiện hành (không tin danh sách web đang giữ): VA không còn `active` → `PAYOUT_ACCOUNT_UNAVAILABLE`;
+   * VietinBank → `BANK_NOT_SUPPORTED`; cả hai không lưu gì. Rồi trong một transaction: credential vẫn là bản vừa dùng
+   * (đổi giữa chừng → `PAYOUT_ACCOUNT_UNAVAILABLE`), VA chưa liên kết (tab khác vừa thêm → 409), chèn tài khoản kèm
+   * audit. Tài khoản đầu tiên của BTC tự thành mặc định.
    */
   async select(ctx: AccessContext, input: z.output<typeof SelectPayoutAccountRequest>): Promise<PayoutAccount> {
-    if (await this.hasCurrentAccount(this.db.orm, ctx)) throw alreadyLinked();
     const credential = await this.currentCredential(this.db.orm, ctx);
     if (!credential) throw noCredential();
+    if ((await this.linkedVas(this.db.orm, ctx)).has(input.vaAccountNumber)) throw alreadyLinked();
 
     const accounts = await this.tingee.listAccounts(this.tingeeCredentialOf(credential));
     const chosen = accounts.find((account) => account.vaAccountNumber === input.vaAccountNumber);
@@ -237,9 +240,11 @@ export class PayoutAccountService {
     try {
       row = await this.db.transaction(async (tx) => {
         await this.lockOrganization(tx, ctx);
-        if (await this.hasCurrentAccount(tx, ctx)) throw alreadyLinked();
         const current = await this.currentCredential(tx, ctx);
         if (current?.id !== credential.id) throw unavailable();
+        const linkedVas = await this.linkedVas(tx, ctx);
+        if (linkedVas.has(chosen.vaAccountNumber)) throw alreadyLinked();
+        const isDefault = linkedVas.size === 0;
         const [created] = await tx
           .insert(pa)
           .values({
@@ -252,6 +257,7 @@ export class PayoutAccountService {
             accountLast4: chosen.accountLast4,
             accountName: chosen.accountName,
             tingeeShopId: chosen.shopId,
+            isDefault,
             createdBy: ctx.userId,
           })
           .returning(accountColumns);
@@ -270,6 +276,7 @@ export class PayoutAccountService {
             'account_last4',
             'account_name',
             'tingee_shop_id',
+            ...(isDefault ? ['is_default'] : []),
             'linked_at',
           ],
         });
@@ -277,10 +284,103 @@ export class PayoutAccountService {
       });
     } catch (err) {
       // Khóa dòng BTC đã xếp hàng hai tab; unique index một phần là lưới an toàn cuối cùng.
-      if (isUniqueViolation(err, CURRENT_ACCOUNT_KEY)) throw alreadyLinked();
+      if (isUniqueViolation(err, CURRENT_VA_KEY)) throw alreadyLinked();
       throw err;
     }
     return accountDto(row);
+  }
+
+  /**
+   * Hủy liên kết một tài khoản nhận tiền: đặt `retired_at` (không xóa dòng, không gọi Tingee). Hủy tài khoản mặc định
+   * thì tài khoản liên kết sớm nhất còn lại thành mặc định. Id lạ, đã hủy hoặc của BTC khác → 404. Trả tổng quan mới.
+   */
+  async unlink(ctx: AccessContext, accountId: string): Promise<PayoutAccountOverview> {
+    if (!UUID.test(accountId)) throw accountNotFound();
+    return this.db.transaction(async (tx) => {
+      await this.lockOrganization(tx, ctx);
+      const target = await this.currentAccount(tx, ctx, accountId);
+      if (!target) throw accountNotFound();
+      // Dòng đã hủy không bao giờ là mặc định: "mặc định" luôn chỉ một tài khoản đang dùng.
+      await tx
+        .update(pa)
+        .set({ retiredAt: sql`now()`, isDefault: false })
+        .where(and(orgScope(ctx)(pa), eq(pa.id, target.id)));
+      await audit.record(tx, {
+        actorUserId: ctx.userId,
+        organizationId: ctx.organizationId,
+        action: 'payout_account.unlinked',
+        target: { type: 'payout_account', id: target.id },
+        changedFields: ['retired_at', ...(target.isDefault ? ['is_default'] : [])],
+      });
+      if (target.isDefault) {
+        const [next] = await tx
+          .select({ id: pa.id })
+          .from(pa)
+          .where(and(orgScope(ctx)(pa), isNull(pa.retiredAt)))
+          .orderBy(asc(pa.linkedAt), asc(pa.id))
+          .limit(1);
+        if (next) await this.makeDefault(tx, ctx, next.id);
+      }
+      return this.overviewOf(tx, ctx);
+    });
+  }
+
+  /**
+   * Đặt một tài khoản hiện hành làm mặc định (tài khoản mặc định cũ thôi là mặc định). Đã là mặc định thì không đổi gì.
+   * Id lạ, đã hủy hoặc của BTC khác → 404. Trả tổng quan mới.
+   */
+  async setDefault(ctx: AccessContext, accountId: string): Promise<PayoutAccountOverview> {
+    if (!UUID.test(accountId)) throw accountNotFound();
+    return this.db.transaction(async (tx) => {
+      await this.lockOrganization(tx, ctx);
+      const target = await this.currentAccount(tx, ctx, accountId);
+      if (!target) throw accountNotFound();
+      if (!target.isDefault) {
+        // Bỏ mặc định cũ trước: unique index một phần chặn hai tài khoản mặc định cùng lúc.
+        await tx
+          .update(pa)
+          .set({ isDefault: false })
+          .where(and(orgScope(ctx)(pa), eq(pa.isDefault, true), isNull(pa.retiredAt)));
+        await this.makeDefault(tx, ctx, target.id);
+      }
+      return this.overviewOf(tx, ctx);
+    });
+  }
+
+  /** `accountId` thành mặc định, kèm audit. BTC không còn tài khoản mặc định nào khác (người gọi đã bỏ). */
+  private async makeDefault(tx: Tx, ctx: AccessContext, accountId: string): Promise<void> {
+    await tx
+      .update(pa)
+      .set({ isDefault: true })
+      .where(and(orgScope(ctx)(pa), eq(pa.id, accountId)));
+    await audit.record(tx, {
+      actorUserId: ctx.userId,
+      organizationId: ctx.organizationId,
+      action: 'payout_account.default_changed',
+      target: { type: 'payout_account', id: accountId },
+      changedFields: ['is_default'],
+    });
+  }
+
+  private async overviewOf(db: DbExecutor, ctx: AccessContext): Promise<PayoutAccountOverview> {
+    const [org] = await db
+      .select({ ipnKey: organizations.tingeeIpnKey })
+      .from(organizations)
+      .where(orgScope(ctx)({ organizationId: organizations.id }));
+    if (!org) throw notAMember();
+    const credential = await this.currentCredential(db, ctx);
+    const accounts = await db
+      .select(accountColumns)
+      .from(pa)
+      .where(and(orgScope(ctx)(pa), isNull(pa.retiredAt)))
+      .orderBy(asc(pa.linkedAt), asc(pa.id));
+    return {
+      credential: credential ? credentialSummary(credential) : null,
+      accounts: accounts.map(accountDto),
+      canReplaceKey: !(await this.hasEverLinked(db, ctx)),
+      ipnUrl: org.ipnKey ? tingeeIpnUrl(this.settings.apiPublicUrl, org.ipnKey) : null,
+      tingeePortalUrl: this.settings.tingeePortalUrl,
+    };
   }
 
   /** Khóa dòng BTC tới hết transaction: mọi lần ghi tài khoản nhận tiền của một BTC chạy lần lượt. */
@@ -301,11 +401,31 @@ export class PayoutAccountService {
     return row;
   }
 
-  private async hasCurrentAccount(db: DbExecutor, ctx: AccessContext): Promise<boolean> {
+  /** Tài khoản hiện hành `accountId` của BTC (đã hủy hoặc của BTC khác → `undefined`). */
+  private async currentAccount(
+    db: DbExecutor,
+    ctx: AccessContext,
+    accountId: string,
+  ): Promise<{ id: string; isDefault: boolean } | undefined> {
     const [row] = await db
-      .select({ id: pa.id })
+      .select({ id: pa.id, isDefault: pa.isDefault })
+      .from(pa)
+      .where(and(orgScope(ctx)(pa), eq(pa.id, accountId), isNull(pa.retiredAt)));
+    return row;
+  }
+
+  /** VA của các tài khoản nhận tiền hiện hành của BTC. */
+  private async linkedVas(db: DbExecutor, ctx: AccessContext): Promise<Set<string>> {
+    const rows = await db
+      .select({ vaAccountNumber: pa.vaAccountNumber })
       .from(pa)
       .where(and(orgScope(ctx)(pa), isNull(pa.retiredAt)));
+    return new Set(rows.map((row) => row.vaAccountNumber));
+  }
+
+  /** BTC đã từng liên kết tài khoản nhận tiền nào chưa, kể cả tài khoản đã hủy (luật đổi key, quyết định Q2). */
+  private async hasEverLinked(db: DbExecutor, ctx: AccessContext): Promise<boolean> {
+    const [row] = await db.select({ id: pa.id }).from(pa).where(orgScope(ctx)(pa)).limit(1);
     return row !== undefined;
   }
 
@@ -317,9 +437,16 @@ export class PayoutAccountService {
 
 /** Trạng thái tài khoản nhận tiền của một BTC cho `reporting` (banner). */
 export interface PayoutAccountState {
-  /** `linked`: có tài khoản nhận tiền hiện hành; `not_linked`: chưa có (kể cả đã kết nối Tingee nhưng chưa chọn). */
+  /**
+   * `linked`: có ít nhất một tài khoản nhận tiền hiện hành; `not_linked`: không có (chưa kết nối Tingee, kết nối rồi
+   * nhưng chưa chọn, hoặc đã hủy hết).
+   */
   status: 'linked' | 'not_linked';
-  /** `linked`: lúc chọn tài khoản; `not_linked`: lúc tài khoản hiện hành gần nhất bị thay (chưa từng có thì `null`). */
+  /**
+   * `linked`: `linked_at` của tài khoản hiện hành liên kết sớm nhất (mốc này dời đi khi tài khoản đó bị hủy, nên không
+   * phải lúc BTC chuyển sang `linked`). `not_linked`: `retired_at` mới nhất, tức lúc tài khoản cuối cùng bị hủy (chưa
+   * từng có tài khoản thì `null`); `reporting` dùng mốc này làm `version` của banner.
+   */
   changedAt: Date | null;
 }
 
@@ -329,10 +456,10 @@ export async function payoutAccountStatusOf(
   scope: Pick<AccessContext, 'organizationId'>,
 ): Promise<PayoutAccountState> {
   const [current] = await db
-    .select({ linkedAt: pa.linkedAt })
+    .select({ linkedAt: sql<Date | null>`min(${pa.linkedAt})`.mapWith(pa.linkedAt) })
     .from(pa)
     .where(and(orgScope(scope)(pa), isNull(pa.retiredAt)));
-  if (current) return { status: 'linked', changedAt: current.linkedAt };
+  if (current?.linkedAt) return { status: 'linked', changedAt: current.linkedAt };
   const [latest] = await db
     .select({ retiredAt: sql<Date | null>`max(${pa.retiredAt})`.mapWith(pa.retiredAt) })
     .from(pa)
