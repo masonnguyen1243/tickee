@@ -29,7 +29,24 @@ export type AuditAction =
   /** Quản trị Tingee duyệt BTC vào Closed Beta (kể cả duyệt lại BTC đã bị thu hồi). */
   | 'organization.closed_beta_approved'
   /** Quản trị Tingee thu hồi Closed Beta của BTC. */
-  | 'organization.closed_beta_revoked';
+  | 'organization.closed_beta_revoked'
+  /**
+   * Owner kết nối API key Tingee của BTC (Tingee đã chấp nhận key): credential mới thành hiện hành; credential cũ (nếu
+   * có, "Dùng key khác") chuyển `retired_at`. Không ghi Client ID hay Secret Token.
+   */
+  | 'tingee_credential.connected'
+  /** Owner thêm một tài khoản nhận tiền từ danh sách tài khoản Tingee (tài khoản đầu tiên tự thành mặc định). */
+  | 'payout_account.linked'
+  /**
+   * Owner hủy liên kết một tài khoản nhận tiền: dòng chuyển `retired_at` (không xóa, không gọi Tingee). Tickee chỉ
+   * ngừng dùng tài khoản; VA trên Tingee giữ nguyên.
+   */
+  | 'payout_account.unlinked'
+  /**
+   * Tài khoản mặc định của BTC đổi (đối tượng: tài khoản thành mặc định): Owner bấm "Đặt làm mặc định", hoặc hủy tài
+   * khoản mặc định khiến tài khoản liên kết sớm nhất còn lại thành mặc định.
+   */
+  | 'payout_account.default_changed';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

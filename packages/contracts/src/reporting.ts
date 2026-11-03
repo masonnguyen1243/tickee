@@ -15,17 +15,24 @@ export const StatusNoticeCode = {
   CLOSED_BETA_REVOKED: 'CLOSED_BETA_REVOKED',
   /** BTC chưa được duyệt Closed Beta (warning, không đóng được). */
   CLOSED_BETA_PENDING: 'CLOSED_BETA_PENDING',
+  /**
+   * BTC chưa có tài khoản nhận tiền hiện hành (chưa kết nối Tingee, hoặc đã kết nối nhưng chưa chọn tài khoản): chưa bán
+   * được Vé có phí (danger, chặn bán, không đóng được).
+   */
+  PAYOUT_ACCOUNT_NOT_LINKED: 'PAYOUT_ACCOUNT_NOT_LINKED',
 } as const;
 export type StatusNoticeCode = (typeof StatusNoticeCode)[keyof typeof StatusNoticeCode];
 export const statusNoticeCodeSchema = z.enum(StatusNoticeCode);
 
 /**
  * Thứ tự ưu tiên (cao → thấp, EXPERIENCE › Thứ tự ưu tiên `status-banner`): 1 Bị khóa · 2 Đã hủy · 3 Closed Beta bị
- * thu hồi · 4 Token chạm hạn mức · 5 Chưa liên kết tài khoản nhận tiền · 6 Chờ duyệt Closed Beta · 7 Ẩn/Tạm ngừng bán ·
- * 8 Mất quyền Google Sheets · 9 Token dưới ngưỡng · 10 Chỉ QR tĩnh · 11 Đã kết thúc. Mã mới chèn đúng vị trí của nó.
+ * thu hồi · 4 Token chạm hạn mức / Key Tingee không còn dùng được · 5 Chưa liên kết tài khoản nhận tiền · 6 Chờ duyệt
+ * Closed Beta · 7 Ẩn/Tạm ngừng bán · 8 Mất quyền Google Sheets · 9 Token dưới ngưỡng · 10 Đã kết thúc. Mã mới chèn đúng
+ * vị trí của nó.
  */
 export const STATUS_NOTICE_PRIORITY: readonly StatusNoticeCode[] = [
   StatusNoticeCode.CLOSED_BETA_REVOKED,
+  StatusNoticeCode.PAYOUT_ACCOUNT_NOT_LINKED,
   StatusNoticeCode.CLOSED_BETA_PENDING,
 ];
 

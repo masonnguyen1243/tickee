@@ -6,7 +6,7 @@ import { createHarness, signUp, type Harness } from '../identity/harness.js';
 
 /*
  * Story 2.5: `reporting.notices(scope)` qua `GET /v1/orgs/:orgId/notices` — banner Closed Beta cho Owner và Admin,
- * đổi theo thao tác của Quản trị Tingee.
+ * đổi theo thao tác của Quản trị Tingee. Story 2.6: banner tài khoản nhận tiền.
  */
 
 let h: Harness;
@@ -32,10 +32,34 @@ afterAll(async () => {
   await h.close();
 });
 
-async function noticesOf(cookie: string, org = orgId): Promise<StatusNotice[]> {
+async function allNoticesOf(cookie: string, org = orgId): Promise<StatusNotice[]> {
   const res = await h.http.get(`/v1/orgs/${org}/notices`).set('cookie', cookie);
   expect(res.status, JSON.stringify(res.body)).toBe(200);
   return StatusNoticeList.parse(res.body);
+}
+
+/** Chỉ thông báo của trục Closed Beta (trục tài khoản nhận tiền kiểm riêng bên dưới). */
+async function noticesOf(cookie: string, org = orgId): Promise<StatusNotice[]> {
+  return (await allNoticesOf(cookie, org)).filter((n) => n.code.startsWith('CLOSED_BETA_'));
+}
+
+/** Credential Tingee hiện hành (Story 2.6), ghi thẳng DB: đã kết nối nhưng chưa chọn tài khoản. */
+async function insertCredential(): Promise<string> {
+  const result = await h.db.orm.execute<{ id: string }>(sql`
+    INSERT INTO tingee_credentials (organization_id, client_id, secret_token_ciphertext, created_by)
+    VALUES (${orgId}, 'tg-client-test', 'v1:AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA.AAAA', ${owner.userId})
+    RETURNING id`);
+  return result.rows[0]!.id;
+}
+
+/** Tài khoản nhận tiền hiện hành (Story 2.6), ghi thẳng DB. */
+async function insertPayoutAccount(credentialId: string): Promise<void> {
+  await h.db.orm.execute(sql`
+    INSERT INTO payout_accounts
+      (organization_id, tingee_credential_id, va_account_number, bank_bin, bank_name, account_type, account_last4,
+       account_name, created_by)
+    VALUES (${orgId}, ${credentialId}, '9600000001', '970422', 'MB Bank', 'personal-account', '0000', 'NGUYEN VAN A',
+      ${owner.userId})`);
 }
 
 const closedBeta = (action: 'approve' | 'revoke') =>
@@ -82,6 +106,38 @@ describe('GET /v1/orgs/:orgId/notices', () => {
     const [again] = await noticesOf(owner.cookie);
     expect(again?.code).toBe('CLOSED_BETA_REVOKED');
     expect(again?.version).not.toBe(revoked?.version);
+  });
+
+  it('tài khoản nhận tiền (Story 2.6): chưa có → NOT_LINKED (danger, chặn bán) xếp trên Chờ duyệt; kết nối key chưa chọn → vẫn NOT_LINKED; đã chọn → hết', async () => {
+    for (const cookie of [owner.cookie, admin.cookie]) {
+      const notices = await allNoticesOf(cookie);
+      expect(notices.map((n) => n.code)).toEqual(['PAYOUT_ACCOUNT_NOT_LINKED', 'CLOSED_BETA_PENDING']);
+      expect(notices[0]).toMatchObject({
+        severity: 'danger',
+        blocking: true,
+        dismissible: false,
+        scope: 'organization',
+        audience: ['owner', 'admin'],
+        data: {},
+      });
+    }
+    const [notLinked] = await allNoticesOf(owner.cookie);
+
+    const credentialId = await insertCredential();
+    const [connected] = await allNoticesOf(owner.cookie);
+    expect(connected).toEqual(notLinked);
+
+    await insertPayoutAccount(credentialId);
+    expect((await allNoticesOf(owner.cookie)).map((n) => n.code)).toEqual(['CLOSED_BETA_PENDING']);
+    expect((await allNoticesOf(admin.cookie)).map((n) => n.code)).toEqual(['CLOSED_BETA_PENDING']);
+    await closedBeta('approve');
+    expect(await allNoticesOf(admin.cookie)).toEqual([]);
+
+    // Tài khoản hiện hành bị thay (Story 2.13) mà chưa có tài khoản mới: NOT_LINKED quay lại với version mới.
+    await h.db.orm.execute(sql`UPDATE payout_accounts SET retired_at = now() WHERE organization_id = ${orgId}`);
+    const [again] = await allNoticesOf(owner.cookie);
+    expect(again?.code).toBe('PAYOUT_ACCOUNT_NOT_LINKED');
+    expect(again?.version).not.toBe(notLinked?.version);
   });
 
   it('không là thành viên → 403 NOT_A_MEMBER', async () => {

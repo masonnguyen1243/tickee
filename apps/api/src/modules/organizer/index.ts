@@ -8,3 +8,4 @@ export {
   type ClosedBetaChange,
   type ClosedBetaState,
 } from './closed-beta.js';
+export { payoutAccountStatusOf, type PayoutAccountState } from './payout-account.service.js';

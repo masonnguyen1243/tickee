@@ -146,3 +146,37 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-1-ai-1-bit-ro-pii-trong-log.md`
   summary: Worker gửi lời mời Admin (`invitation-jobs.ts:192-194`) log `err.message` và ghi nó vào `output` của job pg-boss; log khởi động `main.ts` (`bootLog.fatal({ err })`) cũng log nguyên lỗi. Cần dùng `isDatabaseError`/`dbErrorSummary` như `ErrorFilter`.
   evidence: Khi truy vấn Drizzle trong `sendAdminInvitation` lỗi, `DrizzleQueryError.message` là `Failed query: <sql>\nparams: <tokenHash>,<invitationId>` và đi thẳng vào log worker lẫn bảng job. Code có từ Story 2.4/1.1, nằm ngoài bốn đường AI-1. Review AI-1 #3.
+
+## Deferred from: code review of spec-2-6-lien-ket-tai-khoan-nhan-tien.md (2026-11-03)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-lien-ket-tai-khoan-nhan-tien.md`
+  summary: Trạng thái Tingee có thể lệch DB khi kết quả mơ hồ: `create-va`/`confirm-va` timeout sau khi Tingee đã tạo VA, hoặc lần thử mới thay lần thử đang xác nhận OTP. Lần thử bị `failed`, lần sau có thể nhận `PAYOUT_ACCOUNT_IN_USE` và BTC kẹt. Chưa có cách đối soát hay runbook.
+  evidence: Review 03/11 #1, #2 (maybe-false; nếu đúng là medium). Kiểm trên UAT khi làm test hợp đồng: (a) request timeout có để lại VA không; (b) `create-va` lặp lại cho cùng Merchant con và cùng số tài khoản trả mã gì (1022/1048/1081); (c) có API tra VA của Merchant con không (`/v1/shop/get-paging`?). Nếu (a) và (b) đúng thì đọc `PAYOUT_ACCOUNT_IN_USE` của cùng Merchant con là "đã liên kết", hoặc thêm đối soát.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-lien-ket-tai-khoan-nhan-tien.md`
+  summary: Story 7.6 (xóa tài khoản) phải xử lý `payout_accounts.created_by` (FK `ON DELETE no action`) và PII (`account_name`, `account_last4`) của các lần thử thất bại; hiện giữ mãi.
+  evidence: Review 03/11 #17. Cùng quy ước với `organization_invitations.invited_by` (0006).
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-lien-ket-tai-khoan-nhan-tien.md`
+  summary: Script dev `pnpm --filter @tickee/api tingee:fake` (biên dịch riêng `test/tingee-fake/tsconfig.json`) chưa có bước CI nào chạy thử.
+  evidence: Review 03/11 #24 (verification-gap). Sai `outDir`/`rootDir` sẽ làm hỏng cách chạy local ghi trong `.env.example`/README mà mọi test vẫn qua.
+
+## Deferred from: code review of spec-2-6-lien-ket-tai-khoan-nhan-tien-2.md (2026-11-03)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-lien-ket-tai-khoan-nhan-tien-2.md`
+  summary: Hai BTC kết nối cùng một tài khoản merchant Tingee (cùng Client ID, hoặc cùng VA). Portal chỉ có một "Đường dẫn IPN" cho mỗi merchant, nên IPN của một BTC đổ về URL `ipnKey` của BTC kia; theo AD-7, IPN đó rơi vào nhánh "Tài khoản lệch".
+  evidence: Review 03/11 pass 1 #1 (maybe-false; nếu đúng là medium). Cần biết hai điều: (a) Tingee có cho cấu hình IPN Cổng thanh toán theo shop hoặc VA không, hay chỉ một URL cho mỗi merchant; (b) Mason chọn chặn trùng Client ID giữa các BTC ở bước kết nối (Story 2.6/2.13), hay để Story 3.5 định tuyến theo credential đã chụp vào Đơn thay vì đòi Đơn thuộc BTC sở hữu `ipnKey`. Phải chốt trước khi làm Story 3.5.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-lien-ket-tai-khoan-nhan-tien-2.md`
+  summary: Bước kết nối chỉ chứng minh key có quyền "Tài khoản & Định danh" (`get-va-paging`). Key thiếu quyền "Cổng thanh toán" vẫn kết nối và chọn tài khoản được, tới `create-link` (Epic 3) mới lỗi 1133.
+  evidence: Review 03/11 pass 1 #3 (medium). Không có API kiểm quyền Cổng thanh toán mà không tạo link. Đề xuất 03/11 đã đặt nút "Kiểm tra kết nối" (tạo link thử 2.000đ rồi hủy) ở Epic 3. Story 3.4 cần báo `TINGEE_CREDENTIAL_INVALID` kèm câu nhắc cấp quyền "Cổng thanh toán".
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-lien-ket-tai-khoan-nhan-tien-2.md`
+  summary: Chưa biết `get-va-paging` trả gì cho merchant chưa liên kết tài khoản nào (`items: []`, `items: null` hay `data: null`). Adapter chỉ nhận mảng; nếu Tingee trả null thì bước kết nối thành 503 và không bao giờ tới được `empty-state`.
+  evidence: Review 03/11 pass 1 #16 (maybe-false; nếu đúng là medium). Tài liệu và OpenAPI của Tingee chỉ có ví dụ có phần tử, và schema của `data` để trống. Cách chốt: gọi UAT bằng một merchant mới chưa liên kết ngân hàng (test hợp đồng, Story 4.7, hoặc thử tay bằng key UAT trong `.env` local).
+
+## Deferred from: code review of spec-2-6-huy-lien-ket-va-nhieu-tai-khoan-nhan-tien.md (2026-11-03)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-huy-lien-ket-va-nhieu-tai-khoan-nhan-tien.md`
+  summary: Thêm tài khoản và "Đặt làm mặc định" đổi nơi nhận tiền của Đơn mới mà không có xác nhận lại (`REAUTH_REQUIRED`) hay email cảnh báo. Story 2.13 hiện chỉ nói "đổi tài khoản nhận tiền / đổi key" theo mô hình một tài khoản.
+  evidence: Review 03/11 #11. Tiền chỉ vào được các VA trong merchant Tingee của chính BTC, vì đổi key bị khóa từ lần liên kết đầu (quyết định Q2). Khi viết lại Story 2.13, phải chốt xem đặt mặc định có cần xác nhận lại và email cảnh báo không, và audit "4 số cuối cũ và mới" của tài khoản mặc định.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-huy-lien-ket-va-nhieu-tai-khoan-nhan-tien.md`
+  summary: Tài liệu kế hoạch vẫn theo mô hình một tài khoản nhận tiền mỗi BTC, cần chạy `bmad-correct-course`: AC Story 2.6 và 2.13 trong `epics.md`, quy tắc PRD (`prd.md:97`, "một tài khoản nhận tiền hiện hành"), AD-6 (tạo link bằng VA của tài khoản mặc định), AD-35, UX "Tài khoản nhận tiền" (danh sách, mặc định, hủy liên kết).
+  evidence: Review 03/11 #12. Quyết định Q1–Q3 (03/11/2026) nằm trong khối frozen của spec này. Epic 3 (Story 3.4) đọc AD-6, nên phải sửa trước khi làm Epic 3.
+- Đã xử lý (03/11/2026): hai mục trên (#11 bảo vệ "Đặt làm mặc định" và hủy liên kết; #12 tài liệu kế hoạch theo mô hình một tài khoản) được giải quyết bằng `_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-03-nhieu-tai-khoan-nhan-tien.md` (Mason duyệt). Story 2.13 viết lại thành "Đổi key Tingee và bảo vệ thao tác đổi nơi nhận tiền". Ngoài ra AD-7 và Story 3.5/3.6 bỏ điều kiện kiểm `vaAccountNumber`, vì IPN của Tingee không có trường VA.

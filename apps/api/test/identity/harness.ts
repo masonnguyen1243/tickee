@@ -69,18 +69,21 @@ export interface HarnessOptions {
   controllers?: Type[];
   /** Module thêm vào gốc DI (vd. `DiscoveryModule` cho bộ test cách ly). */
   imports?: Type[];
+  /** Thay provider của gốc DI (vd. `TINGEE_CLIENT` trỏ vào Tingee fake với timeout ngắn). */
+  overrides?: { provide: symbol | string | Type; useValue: unknown }[];
 }
 
 export async function createHarness(overrides: Partial<ApiConfig> = {}, options: HarnessOptions = {}): Promise<Harness> {
   const logs = new LogCapture();
   const email = new FakeEmailTransport();
-  const moduleRef = await Test.createTestingModule({
+  let builder = Test.createTestingModule({
     imports: [ApiModule.forRoot(apiConfig(overrides), { destination: logs }), ...(options.imports ?? [])],
     controllers: [ProtectedController, ...(options.controllers ?? [])],
   })
     .overrideProvider(EMAIL_TRANSPORT)
-    .useValue(email)
-    .compile();
+    .useValue(email);
+  for (const { provide, useValue } of options.overrides ?? []) builder = builder.overrideProvider(provide).useValue(useValue);
+  const moduleRef = await builder.compile();
   const app = configureApiApp(moduleRef.createNestApplication(API_APP_OPTIONS), { shutdownHooks: false });
   await app.init();
   const db = new Database({ connectionString: databaseUrl(), max: 2 });

@@ -13,6 +13,11 @@ export const migrationDatabaseUrl = (): string => {
   return url;
 };
 
+/** Khóa mã hóa Secret Token Tingee chỉ dùng trong test (`v<k>:<base64 của 32 byte>`). */
+export const testCredentialKey = (version: number, fill: number): string =>
+  `v${version}:${Buffer.alloc(32, fill).toString('base64')}`;
+export const TEST_CREDENTIAL_KEYS = testCredentialKey(1, 7);
+
 /** Origin web giả lập trong test: CORS và Better Auth chỉ tin origin này. */
 export const TEST_WEB_ORIGIN = 'http://web.tickee.test';
 
@@ -32,6 +37,9 @@ export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
   // OAuth client giả: test chặn `fetch` tới token endpoint của Google, không gọi Google thật.
   GOOGLE_CLIENT_ID: 'test-client-id.apps.googleusercontent.com',
   GOOGLE_CLIENT_SECRET: 'test-only-google-client-secret',
+  // Không bao giờ gọi Tingee thật: cổng 1 để lỡ gọi thì lỗi ngay; test tài khoản nhận tiền trỏ vào `test/tingee-fake`.
+  TINGEE_BASE_URL: 'http://127.0.0.1:1',
+  TINGEE_CREDENTIAL_KEYS: TEST_CREDENTIAL_KEYS,
   ...overrides,
 });
 

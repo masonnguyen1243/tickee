@@ -57,6 +57,21 @@ export const ErrorCode = {
    * thái hiện tại (`ClosedBetaTransitionInvalidDetails`).
    */
   CLOSED_BETA_TRANSITION_INVALID: 'CLOSED_BETA_TRANSITION_INVALID',
+  /**
+   * Tingee từ chối API key của BTC: Client ID không tồn tại hoặc bị khóa, Secret Token sai, hoặc key chưa được cấp quyền
+   * nhóm dịch vụ cần dùng. Không lưu gì.
+   */
+  TINGEE_CREDENTIAL_INVALID: 'TINGEE_CREDENTIAL_INVALID',
+  /** Ngân hàng của tài khoản chưa được hỗ trợ làm tài khoản nhận tiền (VietinBank, `BLOCKED_BANK_BINS`). */
+  BANK_NOT_SUPPORTED: 'BANK_NOT_SUPPORTED',
+  /** Tài khoản đã chọn không còn `active` trên Tingee (hoặc credential đã đổi giữa chừng): tải lại danh sách. */
+  PAYOUT_ACCOUNT_UNAVAILABLE: 'PAYOUT_ACCOUNT_UNAVAILABLE',
+  /** BTC đã có tài khoản nhận tiền đang dùng; đổi tài khoản hoặc đổi key là luồng riêng (Story 2.13). */
+  PAYOUT_ACCOUNT_ALREADY_LINKED: 'PAYOUT_ACCOUNT_ALREADY_LINKED',
+  /** Tài khoản merchant Tingee của BTC đang bị Tingee tạm khóa. */
+  MERCHANT_SUSPENDED: 'MERCHANT_SUSPENDED',
+  /** Tingee tạm lỗi (timeout, lỗi mạng, lỗi hệ thống hoặc mã lỗi không lường trước): thử lại sau ít phút. */
+  PAYMENT_PROVIDER_UNAVAILABLE: 'PAYMENT_PROVIDER_UNAVAILABLE',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

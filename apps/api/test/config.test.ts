@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { ConfigError, loadConfig } from '../src/platform/config/index.js';
 
 const SECRET = 's3cret-Gi4-tri';
+/** Khóa 32 byte (base64) dùng làm "giá trị bí mật" của `TINGEE_CREDENTIAL_KEYS`. */
+const KEY_1 = Buffer.alloc(32, 0x5a).toString('base64');
+const KEY_2 = Buffer.alloc(32, 0xa5).toString('base64');
 const apiEnv = {
   APP_ROLE: 'api',
   DATABASE_URL: `postgresql://tickee_app:${SECRET}@db:5432/tickee`,
@@ -12,6 +15,8 @@ const apiEnv = {
   EMAIL_FROM: 'Tickee <no-reply@tickee.vn>',
   GOOGLE_CLIENT_ID: '123-abc.apps.googleusercontent.com',
   GOOGLE_CLIENT_SECRET: `GOCSPX-${SECRET}`,
+  TINGEE_BASE_URL: 'https://uat-open-api.tingee.vn',
+  TINGEE_CREDENTIAL_KEYS: `v1:${KEY_1}, v2:${KEY_2}`,
 };
 
 function issuesOf(env: Record<string, string | undefined>): ConfigError {
@@ -126,9 +131,52 @@ describe('loadConfig', () => {
       'GOOGLE_CLIENT_ID',
       'GOOGLE_CLIENT_SECRET',
       'SMTP_URL',
+      'TINGEE_BASE_URL',
+      'TINGEE_CREDENTIAL_KEYS',
       'WEB_ORIGIN',
     ]);
     expect(err.issues.every((i) => i.reason === 'thiếu')).toBe(true);
+  });
+
+  it('vai api: biến Tingee bắt buộc; URL phải là origin; không còn credential Tingee nào trong env', () => {
+    const err = issuesOf({ ...apiEnv, TINGEE_CREDENTIAL_KEYS: '', TINGEE_BASE_URL: 'https://uat-open-api.tingee.vn/v1' });
+    expect(err.issues.map((i) => i.variable)).toEqual(['TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS']);
+    expect(err.issues[1]?.reason).toBe('thiếu');
+    // Key Tingee là của từng BTC (lưu mã hóa trong DB): env Tingee chỉ còn URL và khóa mã hóa.
+    const tingeeKeys = Object.keys(loadConfig(apiEnv)).filter((k) => k.startsWith('TINGEE_'));
+    expect(tingeeKeys.sort()).toEqual(['TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS']);
+    // Vai worker không cần Tingee.
+    const worker = loadConfig({
+      APP_ROLE: 'worker',
+      DATABASE_URL: apiEnv.DATABASE_URL,
+      WEB_ORIGIN: apiEnv.WEB_ORIGIN,
+      SMTP_URL: apiEnv.SMTP_URL,
+      EMAIL_FROM: apiEnv.EMAIL_FROM,
+    });
+    expect(worker.APP_ROLE).toBe('worker');
+  });
+
+  it('TINGEE_CREDENTIAL_KEYS: ít nhất 1 khóa, mỗi khóa đúng 32 byte, không trùng phiên bản; lỗi không in khóa', () => {
+    expect(loadConfig({ ...apiEnv, TINGEE_CREDENTIAL_KEYS: `v1:${KEY_1}` })).toMatchObject({
+      TINGEE_CREDENTIAL_KEYS: `v1:${KEY_1}`,
+    });
+    const short = Buffer.alloc(16, 0x5a).toString('base64');
+    for (const value of [
+      ',',
+      KEY_1,
+      `v0:${KEY_1}`,
+      `x1:${KEY_1}`,
+      `v1:${short}`,
+      `v1:${KEY_1}!`,
+      `v1:${KEY_1},v1:${KEY_2}`,
+      `v1:${KEY_1},v2:${short}`,
+    ]) {
+      const err = issuesOf({ ...apiEnv, TINGEE_CREDENTIAL_KEYS: value });
+      expect(err.issues.map((i) => i.variable), value).toEqual(['TINGEE_CREDENTIAL_KEYS']);
+      expect(err.message).not.toContain(KEY_1);
+      expect(err.message).not.toContain(KEY_2);
+      expect(err.message).not.toContain(short);
+    }
   });
 
   it('vai api: thiếu hoặc rỗng biến Google → dừng, chỉ nêu tên biến, không in giá trị', () => {

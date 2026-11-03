@@ -16,6 +16,7 @@
     "test": "vitest run",
     "lint:deps": "depcruise src --config .dependency-cruiser.cjs",
     "db:generate": "drizzle-kit generate",
+    "tingee:fake": "tsc -p test/tingee-fake/tsconfig.json && node --env-file-if-exists=../../.env node_modules/.cache/tingee-fake/test/tingee-fake/main.js",
     "admin:grant": "node --env-file-if-exists=../../.env dist/roles/admin-cli.js grant",
     "admin:revoke": "node --env-file-if-exists=../../.env dist/roles/admin-cli.js revoke"
   },

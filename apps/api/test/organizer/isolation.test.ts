@@ -54,6 +54,13 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('DELETE /v1/orgs/:orgId/members/:memberId');
     // Story 2.5: thông báo trạng thái của `reporting`.
     expect(guarded).toContain('GET /v1/orgs/:orgId/notices');
+    // Story 2.6: tài khoản nhận tiền (chỉ Owner).
+    expect(guarded).toContain('GET /v1/orgs/:orgId/payout-account');
+    expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/credential');
+    expect(guarded).toContain('GET /v1/orgs/:orgId/payout-account/options');
+    expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account');
+    expect(guarded).toContain('DELETE /v1/orgs/:orgId/payout-account/:accountId');
+    expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/:accountId/default');
     expect(guarded).toContain('GET /v1/orgs/:orgId/test-owner-only');
     expect(guarded).toContain('POST /v1/orgs/:orgId/test-owner-only/items/:itemId');
   });

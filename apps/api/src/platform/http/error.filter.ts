@@ -29,6 +29,12 @@ const MESSAGES: Record<ErrorCode, string> = {
   INVITATION_LIMIT_REACHED: 'BTC đã gửi quá nhiều lời mời trong 24 giờ. Vui lòng thử lại sau.',
   TWO_FACTOR_NOT_ENABLED: 'Bạn cần bật xác thực hai lớp để tiếp tục.',
   CLOSED_BETA_TRANSITION_INVALID: 'Không chuyển được trạng thái Closed Beta của BTC này.',
+  TINGEE_CREDENTIAL_INVALID: 'Client ID hoặc Secret Token không đúng.',
+  BANK_NOT_SUPPORTED: 'Ngân hàng này chưa được hỗ trợ.',
+  PAYOUT_ACCOUNT_UNAVAILABLE: 'Tài khoản này không còn dùng được trên Tingee.',
+  PAYOUT_ACCOUNT_ALREADY_LINKED: 'BTC đã có tài khoản nhận tiền.',
+  MERCHANT_SUSPENDED: 'Tài khoản Tingee của BTC đang tạm khóa.',
+  PAYMENT_PROVIDER_UNAVAILABLE: 'Tingee tạm lỗi, thử lại sau ít phút.',
 };
 
 /** Lỗi DB chỉ log `{ type, code }` (message/params có thể mang email, token session); lỗi khác log nguyên để giữ stack. */

@@ -32,6 +32,16 @@ async function openDashboard(page: Page, { role = 'owner' as Role, path = base, 
   const calls = await mockOrganizerApi(page, {
     [`GET /orgs/${ORG_ID}`]: () => organization({ role, ...orgOverrides }),
     [`GET /orgs/${OTHER_ORG_ID}`]: () => organization({ id: OTHER_ORG_ID, name: OTHER_NAME, role: 'admin' }),
+    [`GET /orgs/${ORG_ID}/payout-account`]: () => ({
+      status: 200,
+      body: {
+        credential: null,
+        accounts: [],
+        canReplaceKey: true,
+        ipnUrl: null,
+        tingeePortalUrl: 'https://baas.tingee.vn',
+      },
+    }),
     [`GET /orgs/${ORG_ID}/members`]: () => ({
       status: 200,
       body: {
@@ -399,7 +409,6 @@ test('mục chưa có trang: trang tạm "Sắp có" trong khung, mục đang ch
 
   const pages: [string, string][] = [
     ['Cần xử lý', `${base}/can-xu-ly`],
-    ['Tài khoản nhận tiền', `${base}/tai-khoan-nhan-tien`],
     ['Cài đặt', `${base}/cai-dat`],
   ];
   for (const [name, path] of pages) {
@@ -434,9 +443,11 @@ for (const [name, segment] of OWNER_ONLY_PAGES) {
   });
 }
 
-test('Owner mở URL chỉ Owner: trang tạm "Sắp có", không bị chặn', async ({ page }) => {
+test('Owner mở URL chỉ Owner (Tài khoản nhận tiền): trang thật, không bị chặn', async ({ page }) => {
   await openDashboard(page, { path: `${base}/tai-khoan-nhan-tien` });
-  await expect(page.getByText('Sắp có', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Tài khoản nhận tiền', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Kết nối tài khoản Tingee' })).toBeVisible();
+  await expect(page.getByText('Sắp có', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Chỉ Owner xem được mục này.')).toHaveCount(0);
 });
 

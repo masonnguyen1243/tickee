@@ -229,3 +229,133 @@ export function maskEmail(email: string): string {
   if (at <= 0) return '***';
   return `${Array.from(email)[0]}***${email.slice(at)}`;
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Tài khoản nhận tiền (FR-5, AD-6, AD-7, AD-9, Story 2.6): BTC dùng tài khoản merchant Tingee của chính mình
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Ngân hàng không được chọn làm tài khoản nhận tiền (AD-6): VietinBank không trả nội dung chuyển khoản. Tài khoản của
+ * các ngân hàng này vẫn hiện trong danh sách (mờ, "Chưa hỗ trợ VietinBank"); server từ chối với `BANK_NOT_SUPPORTED`.
+ */
+export const BLOCKED_BANK_BINS = ['970415'] as const;
+
+export function isBlockedBankBin(bin: string): boolean {
+  return (BLOCKED_BANK_BINS as readonly string[]).includes(bin);
+}
+
+/**
+ * Đường dẫn nhận IPN của Tingee trên api (AD-7, Story 3.5). URL IPN của một BTC là
+ * `{API_PUBLIC_URL}{TINGEE_IPN_PATH}/{ipnKey}`; `ipnKey` ngẫu nhiên 128 bit (base64url), không phải secret.
+ */
+export const TINGEE_IPN_PATH = '/v1/payments/tingee/ipn';
+
+/** URL IPN riêng của BTC để dán vào "Đường dẫn IPN" trên portal Tingee. */
+export function tingeeIpnUrl(apiPublicUrl: string, ipnKey: string): string {
+  return `${apiPublicUrl}${TINGEE_IPN_PATH}/${encodeURIComponent(ipnKey)}`;
+}
+
+/** Client ID ngắn hơn chừng này ký tự thì không lộ ký tự nào. */
+const CLIENT_ID_MASK_MIN_LENGTH = 8;
+
+/** Client ID hiển thị dạng che: `••••` + 4 ký tự cuối (`••••` khi Client ID quá ngắn để che). */
+export function maskTingeeClientId(clientId: string): string {
+  const chars = Array.from(clientId);
+  return chars.length >= CLIENT_ID_MASK_MIN_LENGTH ? `••••${chars.slice(-4).join('')}` : '••••';
+}
+
+/** Độ dài tối đa của Client ID và Secret Token nhận từ form (sau khi bỏ khoảng trắng hai đầu). */
+export const TINGEE_KEY_MAX_LENGTH = 512;
+
+/**
+ * `POST /v1/orgs/:orgId/payout-account/credential` (chỉ Owner): kết nối tài khoản merchant Tingee của BTC bằng API key
+ * lấy trên portal Tingee. Bỏ khoảng trắng hai đầu (hay dính khi dán).
+ */
+export const ConnectTingeeRequest = z.object({
+  clientId: z.string().trim().min(1).max(TINGEE_KEY_MAX_LENGTH),
+  secretToken: z.string().trim().min(1).max(TINGEE_KEY_MAX_LENGTH),
+});
+export type ConnectTingeeRequest = z.input<typeof ConnectTingeeRequest>;
+
+/**
+ * `POST /v1/orgs/:orgId/payout-account` (chỉ Owner): thêm một tài khoản trong danh sách làm tài khoản nhận tiền. Tài
+ * khoản đầu tiên của BTC tự thành mặc định. VA đang liên kết rồi → `PAYOUT_ACCOUNT_ALREADY_LINKED`.
+ */
+export const SelectPayoutAccountRequest = z.object({
+  vaAccountNumber: z.string().trim().min(1).max(64),
+});
+export type SelectPayoutAccountRequest = z.input<typeof SelectPayoutAccountRequest>;
+
+/** Credential Tingee hiện hành của BTC. Không bao giờ có Client ID đầy đủ hay Secret Token. */
+export const TingeeCredentialSummary = z.object({
+  id: z.uuid(),
+  /** `maskTingeeClientId(clientId)`. */
+  clientIdMasked: z.string(),
+  connectedAt: z.iso.datetime(),
+});
+export type TingeeCredentialSummary = z.infer<typeof TingeeCredentialSummary>;
+
+/**
+ * Một tài khoản `active` (không phải chỉ-chi) của BTC trên Tingee. Không có số tài khoản đầy đủ: chỉ 4 số cuối.
+ * `vaAccountNumber` là số Tingee dùng để nhận tiền (gửi lại khi chọn).
+ */
+export const PayoutAccountOption = z.object({
+  vaAccountNumber: z.string(),
+  bankBin: z.string(),
+  bankName: z.string(),
+  accountType: z.string(),
+  accountLast4: z.string(),
+  accountName: z.string(),
+  /** `false` với ngân hàng trong `BLOCKED_BANK_BINS` (hiện mờ, không chọn được). */
+  selectable: z.boolean(),
+  /** VA này đang là tài khoản nhận tiền hiện hành của BTC (web hiện "Đã liên kết" thay cho nút). */
+  linked: z.boolean(),
+});
+export type PayoutAccountOption = z.infer<typeof PayoutAccountOption>;
+
+/**
+ * Kết quả `POST …/payout-account/credential` và `GET …/payout-account/options`: danh sách tài khoản đọc từ Tingee bằng
+ * credential hiện hành (rỗng khi BTC chưa liên kết tài khoản ngân hàng nào trên Tingee).
+ */
+export const PayoutAccountOptions = z.object({
+  credential: TingeeCredentialSummary,
+  accounts: z.array(PayoutAccountOption),
+});
+export type PayoutAccountOptions = z.infer<typeof PayoutAccountOptions>;
+
+/**
+ * Một tài khoản nhận tiền hiện hành của BTC (một VA trong tài khoản Tingee của BTC). Chỉ 4 số cuối số tài khoản. BTC
+ * còn ít nhất một tài khoản thì có đúng một tài khoản `isDefault`: Đơn mới nhận tiền vào VA của tài khoản này (AD-6).
+ */
+export const PayoutAccount = z.object({
+  id: z.uuid(),
+  vaAccountNumber: z.string(),
+  bankBin: z.string(),
+  bankName: z.string(),
+  accountType: z.string(),
+  accountLast4: z.string(),
+  accountName: z.string(),
+  isDefault: z.boolean(),
+  linkedAt: z.iso.datetime(),
+});
+export type PayoutAccount = z.infer<typeof PayoutAccount>;
+
+/**
+ * `GET /v1/orgs/:orgId/payout-account` (chỉ Owner, không gọi Tingee); cũng là kết quả của hủy liên kết và đặt mặc định.
+ * Chưa kết nối → `credential` `null`; đã kết nối chưa chọn (hoặc đã hủy hết) → `accounts` rỗng; đã liên kết → cả hai.
+ */
+export const PayoutAccountOverview = z.object({
+  credential: TingeeCredentialSummary.nullable(),
+  /** Tài khoản nhận tiền hiện hành, theo thứ tự liên kết (sớm nhất trước). */
+  accounts: z.array(PayoutAccount),
+  /**
+   * Gửi key Tingee (lần đầu hoặc "Dùng key khác") còn được nhận: chỉ khi BTC chưa từng liên kết tài khoản nào, kể cả
+   * tài khoản đã hủy. Từ đó về sau đổi key là thao tác riêng (Story 2.13).
+   */
+  canReplaceKey: z.boolean(),
+  /** URL IPN riêng của BTC (`tingeeIpnUrl`); `null` khi BTC chưa từng kết nối Tingee. */
+  ipnUrl: z.string().nullable(),
+  /** Portal Tingee ứng với môi trường Tingee mà api đang gọi (UAT hoặc thật). */
+  tingeePortalUrl: z.string(),
+});
+export type PayoutAccountOverview = z.infer<typeof PayoutAccountOverview>;

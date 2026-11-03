@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-02-2026 17:30
+last_updated: 11-03-2026 11:25
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -48,7 +48,7 @@ development_status:
   2-3-landing-btc: done
   2-4-mời-và-xóa-admin: done
   2-5-quản-trị-tingee-duyệt-btc-vào-closed-beta: done
-  2-6-liên-kết-tài-khoản-nhận-tiền: backlog
+  2-6-liên-kết-tài-khoản-nhận-tiền: review
   2-7-tạo-sự-kiện-nháp: backlog
   2-8-hạng-vé-và-tồn-kho: backlog
   2-9-cấu-hình-form-mua-vé: backlog
@@ -118,11 +118,20 @@ development_status:
   epic-8-retrospective: optional
 action_items:
   - epic: 4
-    action: "Chốt với Tingee: API tra trạng thái theo orderId (Story 4.1) và API Token
-      (Story 4.5); nếu chưa có thì ghi phương án dự phòng vào story trước khi bắt
-      đầu E4"
+    action: "Chốt với Tingee: API tra trạng thái theo orderId (Story 4.1); API đọc Token
+      và trạng thái dịch vụ gọi bằng key merchant (Story 4.2, 4.5); create-link với
+      vaAccountNumber ngoài \"Tài khoản cho phép thanh toán\" trả lỗi gì (Story 3.4);
+      nếu chưa có thì ghi phương án dự phòng vào story trước khi bắt đầu E4"
     owner: "Mason"
     status: open
+    ref: "_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-03.md"
+  - epic: 2
+    action: "Hỏi Tingee: key merchant có gọi được Chi hộ/rút tiền không, có tạo key giới
+      hạn quyền không; nếu không thì ghi rủi ro chấp nhận vào PRD (R lộ Secret Token).
+      Chặn bán Vé có phí ở Closed Beta"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-03.md"
   - epic: 4
     action: "Chốt nhà cung cấp hạ tầng/email/giám sát theo pháp chế NĐ 53/2022 trước
       Story 4.7 và Closed Beta"
