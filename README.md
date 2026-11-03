@@ -129,6 +129,7 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `AUTH_COOKIE_DOMAIN`     | api         | tùy chọn; tên miền cha cho cookie session (vd. `tickee.vn`) |
 | `SMTP_URL`, `EMAIL_FROM` | api, worker | api gửi email OTP/2FA; worker gửi email từ job (lời mời Admin); local là Mailpit `smtp://localhost:1025` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | api | bắt buộc; OAuth client Google, redirect URI `<API_PUBLIC_URL>/v1/auth/callback/google` |
+| `TINGEE_BASE_URL`, `TINGEE_CLIENT_ID`, `TINGEE_SECRET_TOKEN` | api | bắt buộc; Tingee Open API (liên kết tài khoản nhận tiền). Local không có credential UAT thì chạy `pnpm --filter @tickee/api tingee:fake` (cổng 4010, xem `.env.example`) |
 | `NEXT_PUBLIC_API_BASE_URL` | web       | gốc REST của api; client thêm `/v1`; nhúng lúc build |
 | `TICKEE_UI_KIT`          | web         | `1` bật `/ui-kit`; production không đặt (404) |
 

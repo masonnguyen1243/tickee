@@ -4,6 +4,7 @@ import { AdminModule } from './modules/admin/index.js';
 import { IdentityModule } from './modules/identity/index.js';
 import { OrganizerModule } from './modules/organizer/index.js';
 import { ReportingModule } from './modules/reporting/index.js';
+import { TingeeModule } from './modules/tingee/index.js';
 import { APP_CONFIG, type ApiConfig } from './platform/config/index.js';
 import { DbModule } from './platform/db/index.js';
 import { EmailModule } from './platform/email/index.js';
@@ -28,6 +29,12 @@ export class ApiModule {
         EmailModule.forRoot({ url: config.SMTP_URL, from: config.EMAIL_FROM }),
         // Chỉ enqueue job (cùng `tx` của thay đổi); không bảo trì, không lịch, không handler — việc của vai `worker`.
         JobsModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-api', mode: 'producer' }),
+        // Adapter Tingee (`TINGEE_CLIENT`, toàn cục): liên kết tài khoản nhận tiền của `organizer`.
+        TingeeModule.forRoot({
+          baseUrl: config.TINGEE_BASE_URL,
+          clientId: config.TINGEE_CLIENT_ID,
+          secretToken: config.TINGEE_SECRET_TOKEN,
+        }),
         IdentityModule.forRoot(config),
         // Sau IdentityModule: PermissionGuard chạy sau SessionGuard, TotpGuard, ConsentGuard và PlatformAdminGuard.
         OrganizerModule.forRoot(config),

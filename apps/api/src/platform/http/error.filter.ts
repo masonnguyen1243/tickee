@@ -29,6 +29,14 @@ const MESSAGES: Record<ErrorCode, string> = {
   INVITATION_LIMIT_REACHED: 'BTC đã gửi quá nhiều lời mời trong 24 giờ. Vui lòng thử lại sau.',
   TWO_FACTOR_NOT_ENABLED: 'Bạn cần bật xác thực hai lớp để tiếp tục.',
   CLOSED_BETA_TRANSITION_INVALID: 'Không chuyển được trạng thái Closed Beta của BTC này.',
+  PAYOUT_ACCOUNT_INVALID: 'Ngân hàng chưa xác nhận được thông tin tài khoản. Kiểm tra lại rồi thử lại.',
+  BANK_NOT_SUPPORTED: 'Ngân hàng này chưa được hỗ trợ.',
+  PAYOUT_ACCOUNT_IN_USE: 'Tài khoản này đã được liên kết ở nơi khác.',
+  PAYOUT_ACCOUNT_ALREADY_LINKED: 'BTC đã có tài khoản nhận tiền.',
+  BANK_OTP_INVALID: 'Mã OTP chưa đúng.',
+  BANK_OTP_EXPIRED: 'Mã OTP đã hết hạn.',
+  MERCHANT_SUSPENDED: 'Tài khoản Tingee của BTC đang tạm khóa.',
+  PAYMENT_PROVIDER_UNAVAILABLE: 'Tingee tạm lỗi, thử lại sau ít phút.',
 };
 
 /** Lỗi DB chỉ log `{ type, code }` (message/params có thể mang email, token session); lỗi khác log nguyên để giữ stack. */

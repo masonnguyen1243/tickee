@@ -1,7 +1,8 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { STATUS_BANNER_LIMIT, type StatusNotice } from '@tickee/contracts';
+import { organizationSectionPath, STATUS_BANNER_LIMIT, type StatusNotice } from '@tickee/contracts';
+import Link from 'next/link';
 import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -10,19 +11,29 @@ import { fetchStatusNotices, statusNoticesQueryKey } from '@/lib/reporting/api';
 import {
   isStatusNoticeDismissed,
   saveStatusNoticeDismissed,
-  STATUS_NOTICE_CONTENT,
+  statusNoticeContent,
   statusNoticeDismissKey,
 } from '@/lib/reporting/status-notices';
 
+import { useCurrentOrganization } from './current-organization';
 import { StatusBanner } from './status-banner';
 
 function NoticeBanner({ notice, onDismiss }: { notice: StatusNotice; onDismiss: (notice: StatusNotice) => void }) {
-  const content = STATUS_NOTICE_CONTENT[notice.code];
+  const organization = useCurrentOrganization();
+  const content = statusNoticeContent(notice.code, organization.role);
+  const { action } = content;
   return (
     <StatusBanner
       tone={notice.severity}
       title={content.title}
       description={content.description}
+      action={
+        action ? (
+          <Button asChild variant="link" size="sm">
+            <Link href={organizationSectionPath(organization.id, action.section)}>{action.label}</Link>
+          </Button>
+        ) : undefined
+      }
       onDismiss={notice.dismissible ? () => onDismiss(notice) : undefined}
     />
   );
@@ -30,7 +41,7 @@ function NoticeBanner({ notice, onDismiss }: { notice: StatusNotice; onDismiss: 
 
 /**
  * Dải `status-banner` đầu vùng nội dung dashboard một BTC (UX-DR8, AD-34): dữ liệu từ `GET /v1/orgs/:orgId/notices`
- * (đã lọc theo vai và sắp theo ưu tiên ở api), web chỉ ánh xạ `code` sang nội dung. Hiện tối đa
+ * (đã lọc theo vai và sắp theo ưu tiên ở api), web chỉ ánh xạ `code` (+ vai người xem) sang nội dung và nút. Hiện tối đa
  * `STATUS_BANNER_LIMIT` banner, còn lại gộp "+N thông báo" mở `Sheet`. Banner `dismissible` đóng được và ẩn theo
  * `code` + `version` tới hết phiên trình duyệt. Thay đổi được đọc qua `aria-live="polite"` (vùng luôn có trong DOM).
  * Lỗi tải thì không hiện gì: 401, 2FA và bị xóa khỏi BTC do khung dashboard / `Providers` xử lý.

@@ -12,7 +12,12 @@ import {
 import type { AccessContext } from '../../platform/access/index.js';
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
-import { closedBetaStatusOf, type ClosedBetaState } from '../organizer/index.js';
+import {
+  closedBetaStatusOf,
+  payoutAccountStatusOf,
+  type ClosedBetaState,
+  type PayoutAccountState,
+} from '../organizer/index.js';
 
 /** Phạm vi một BTC: thông báo cấp BTC, lọc theo vai của người xem. */
 export type OrganizationNoticeScope = Pick<AccessContext, 'organizationId' | 'role'>;
@@ -55,9 +60,48 @@ function closedBetaNotices(state: ClosedBetaState): StatusNotice[] {
 }
 
 /**
+ * Thông báo của trục tài khoản nhận tiền: chưa liên kết → `PAYOUT_ACCOUNT_NOT_LINKED` (danger, chặn bán Vé có phí);
+ * đang chờ OTP ngân hàng → `PAYOUT_ACCOUNT_LINKING` (neutral) thay thế; đã liên kết → không có. `version` là mốc đổi
+ * gần nhất của lần thử (chưa thử lần nào thì là lúc tạo BTC). Web chọn câu theo vai (Owner có nút "Liên kết ngay").
+ */
+function payoutNotices(state: PayoutAccountState, organizationCreatedAt: Date): StatusNotice[] {
+  const version = (state.changedAt ?? organizationCreatedAt).toISOString();
+  switch (state.status) {
+    case 'not_linked':
+      return [
+        {
+          code: StatusNoticeCode.PAYOUT_ACCOUNT_NOT_LINKED,
+          severity: StatusNoticeSeverity.DANGER,
+          blocking: true,
+          dismissible: false,
+          scope: StatusNoticeScope.ORGANIZATION,
+          audience: MEMBERS,
+          data: {},
+          version,
+        },
+      ];
+    case 'awaiting_otp':
+      return [
+        {
+          code: StatusNoticeCode.PAYOUT_ACCOUNT_LINKING,
+          severity: StatusNoticeSeverity.NEUTRAL,
+          blocking: false,
+          dismissible: false,
+          scope: StatusNoticeScope.ORGANIZATION,
+          audience: MEMBERS,
+          data: {},
+          version,
+        },
+      ];
+    case 'linked':
+      return [];
+  }
+}
+
+/**
  * `reporting.notices(scope)` (AD-34): nguồn duy nhất cho `status-banner` của dashboard. Chỉ đọc qua read model của mô-đun
- * sở hữu (Closed Beta: `organizer`); trả thông báo có vai của người xem trong `audience`, sắp theo
- * `STATUS_NOTICE_PRIORITY`. Story sau (tài khoản nhận tiền, Token, Sheets…) thêm nguồn vào đây.
+ * sở hữu (Closed Beta, tài khoản nhận tiền: `organizer`); trả thông báo có vai của người xem trong `audience`, sắp theo
+ * `STATUS_NOTICE_PRIORITY`. Story sau (Token, Sheets…) thêm nguồn vào đây.
  */
 @Injectable()
 export class NoticesService {
@@ -67,7 +111,8 @@ export class NoticesService {
     const closedBeta = await closedBetaStatusOf(this.db.orm, scope);
     // Guard đã xác nhận thành viên; BTC biến mất giữa chừng thì coi như không còn là thành viên.
     if (!closedBeta) throw new AppError(ErrorCode.NOT_A_MEMBER, 'Bạn không phải thành viên của BTC này.');
-    const all = [...closedBetaNotices(closedBeta)];
+    const payout = await payoutAccountStatusOf(this.db.orm, scope);
+    const all = [...closedBetaNotices(closedBeta), ...payoutNotices(payout, closedBeta.createdAt)];
     return sortStatusNotices(all.filter((n) => n.audience.includes(scope.role)));
   }
 }

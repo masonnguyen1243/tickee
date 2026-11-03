@@ -6,18 +6,36 @@ import {
   isStatusNoticeDismissed,
   saveStatusNoticeDismissed,
   STATUS_NOTICE_CONTENT,
+  statusNoticeContent,
   statusNoticeDismissKey,
 } from '@/lib/reporting/status-notices';
 
 describe('nội dung status-banner theo mã (AD-34)', () => {
   it('mọi mã có tiêu đề; Chờ duyệt Closed Beta đúng copy, không có nút', () => {
     for (const code of Object.values(StatusNoticeCode)) {
-      expect(STATUS_NOTICE_CONTENT[code].title.length, code).toBeGreaterThan(0);
+      for (const role of ['owner', 'admin'] as const) {
+        expect(statusNoticeContent(code, role).title.length, `${code} ${role}`).toBeGreaterThan(0);
+      }
     }
     expect(STATUS_NOTICE_CONTENT.CLOSED_BETA_PENDING).toEqual({
       title: 'Chờ duyệt Closed Beta',
       description: 'Tingee sẽ liên hệ qua SĐT hoặc email liên hệ của BTC để xác minh.',
     });
+  });
+});
+
+describe('chưa liên kết tài khoản nhận tiền: câu theo vai (Story 2.6)', () => {
+  it('Owner có nút "Liên kết ngay" tới Tài khoản nhận tiền; Admin chỉ được nhắc nhờ Owner', () => {
+    expect(statusNoticeContent('PAYOUT_ACCOUNT_NOT_LINKED', 'owner')).toMatchObject({
+      description: 'Liên kết tài khoản nhận tiền để bán Vé có phí.',
+      action: { label: 'Liên kết ngay', section: 'payout-account' },
+    });
+    const admin = statusNoticeContent('PAYOUT_ACCOUNT_NOT_LINKED', 'admin');
+    expect(admin.description).toBe('Nhờ Owner liên kết tài khoản nhận tiền.');
+    expect(admin.action).toBeUndefined();
+    expect(statusNoticeContent('PAYOUT_ACCOUNT_LINKING', 'admin').action).toBeUndefined();
+    // Mã không theo vai: cùng nội dung cho mọi vai.
+    expect(statusNoticeContent('CLOSED_BETA_PENDING', 'admin')).toBe(statusNoticeContent('CLOSED_BETA_PENDING', 'owner'));
   });
 });
 

@@ -12,6 +12,9 @@ const apiEnv = {
   EMAIL_FROM: 'Tickee <no-reply@tickee.vn>',
   GOOGLE_CLIENT_ID: '123-abc.apps.googleusercontent.com',
   GOOGLE_CLIENT_SECRET: `GOCSPX-${SECRET}`,
+  TINGEE_BASE_URL: 'https://uat-open-api.tingee.vn',
+  TINGEE_CLIENT_ID: 'tickee-master',
+  TINGEE_SECRET_TOKEN: `tingee-${SECRET}`,
 };
 
 function issuesOf(env: Record<string, string | undefined>): ConfigError {
@@ -126,9 +129,27 @@ describe('loadConfig', () => {
       'GOOGLE_CLIENT_ID',
       'GOOGLE_CLIENT_SECRET',
       'SMTP_URL',
+      'TINGEE_BASE_URL',
+      'TINGEE_CLIENT_ID',
+      'TINGEE_SECRET_TOKEN',
       'WEB_ORIGIN',
     ]);
     expect(err.issues.every((i) => i.reason === 'thiếu')).toBe(true);
+  });
+
+  it('vai api: biến Tingee bắt buộc; URL phải là origin; không in secret', () => {
+    const err = issuesOf({ ...apiEnv, TINGEE_SECRET_TOKEN: '', TINGEE_BASE_URL: 'https://uat-open-api.tingee.vn/v1' });
+    expect(err.issues.map((i) => i.variable).sort()).toEqual(['TINGEE_BASE_URL', 'TINGEE_SECRET_TOKEN']);
+    expect(err.message).not.toContain(SECRET);
+    // Vai worker không cần Tingee.
+    const worker = loadConfig({
+      APP_ROLE: 'worker',
+      DATABASE_URL: apiEnv.DATABASE_URL,
+      WEB_ORIGIN: apiEnv.WEB_ORIGIN,
+      SMTP_URL: apiEnv.SMTP_URL,
+      EMAIL_FROM: apiEnv.EMAIL_FROM,
+    });
+    expect(worker.APP_ROLE).toBe('worker');
   });
 
   it('vai api: thiếu hoặc rỗng biến Google → dừng, chỉ nêu tên biến, không in giá trị', () => {

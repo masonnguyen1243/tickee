@@ -139,3 +139,36 @@ test('desktop: dải banner nằm trên tiêu đề trong vùng nội dung, cạ
   expect(bannerBox!.y + bannerBox!.height).toBeLessThanOrEqual(headingBox!.y);
   expect(bannerBox!.x).toBeGreaterThanOrEqual(sidebarBox!.x + sidebarBox!.width);
 });
+
+const NOT_LINKED_TITLE = 'Chưa liên kết tài khoản nhận tiền';
+
+test('chưa liên kết tài khoản nhận tiền: Owner thấy câu kêu gọi + "Liên kết ngay" mở trang Tài khoản nhận tiền', async ({
+  page,
+}) => {
+  await openDashboard(page, () => [statusNotice('PAYOUT_ACCOUNT_NOT_LINKED'), statusNotice('CLOSED_BETA_PENDING')]);
+  await expect(banners(page)).toHaveCount(2);
+  const banner = banners(page).first();
+  await expect(banner).toHaveAttribute('data-tone', 'danger');
+  await expect(banner).toContainText(NOT_LINKED_TITLE);
+  await expect(banner).toContainText('Liên kết tài khoản nhận tiền để bán Vé có phí.');
+  await expect(closeButtons(page)).toHaveCount(0);
+  const action = banner.getByRole('link', { name: 'Liên kết ngay' });
+  await expect(action).toHaveAttribute('href', `${base}/tai-khoan-nhan-tien`);
+});
+
+test('chưa liên kết tài khoản nhận tiền: Admin chỉ thấy lời nhắc nhờ Owner, không có nút', async ({ page }) => {
+  await openDashboard(page, () => [statusNotice('PAYOUT_ACCOUNT_NOT_LINKED')], { role: 'admin' });
+  const banner = banners(page).first();
+  await expect(banner).toContainText(NOT_LINKED_TITLE);
+  await expect(banner).toContainText('Nhờ Owner liên kết tài khoản nhận tiền.');
+  await expect(banner.getByRole('link')).toHaveCount(0);
+  await expect(banner.getByRole('button')).toHaveCount(0);
+});
+
+test('đang liên kết (chờ OTP): banner neutral "Đang liên kết", Owner có nút nhập mã', async ({ page }) => {
+  await openDashboard(page, () => [statusNotice('PAYOUT_ACCOUNT_LINKING')]);
+  const banner = banners(page).first();
+  await expect(banner).toHaveAttribute('data-tone', 'neutral');
+  await expect(banner).toContainText('Đang liên kết tài khoản nhận tiền');
+  await expect(banner.getByRole('link', { name: 'Nhập mã OTP' })).toHaveAttribute('href', `${base}/tai-khoan-nhan-tien`);
+});

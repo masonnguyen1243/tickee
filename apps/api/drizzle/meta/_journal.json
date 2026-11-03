@@ -57,6 +57,13 @@
       "when": 1793609194874,
       "tag": "0007_closed_beta",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793670333579,
+      "tag": "0008_payout_accounts",
+      "breakpoints": true
     }
   ]
 }

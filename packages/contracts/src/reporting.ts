@@ -15,6 +15,10 @@ export const StatusNoticeCode = {
   CLOSED_BETA_REVOKED: 'CLOSED_BETA_REVOKED',
   /** BTC chưa được duyệt Closed Beta (warning, không đóng được). */
   CLOSED_BETA_PENDING: 'CLOSED_BETA_PENDING',
+  /** BTC chưa liên kết tài khoản nhận tiền: chưa bán được Vé có phí (danger, chặn bán, không đóng được). */
+  PAYOUT_ACCOUNT_NOT_LINKED: 'PAYOUT_ACCOUNT_NOT_LINKED',
+  /** Owner đang liên kết, chờ nhập OTP ngân hàng (neutral, không đóng được); thay cho `PAYOUT_ACCOUNT_NOT_LINKED`. */
+  PAYOUT_ACCOUNT_LINKING: 'PAYOUT_ACCOUNT_LINKING',
 } as const;
 export type StatusNoticeCode = (typeof StatusNoticeCode)[keyof typeof StatusNoticeCode];
 export const statusNoticeCodeSchema = z.enum(StatusNoticeCode);
@@ -26,6 +30,9 @@ export const statusNoticeCodeSchema = z.enum(StatusNoticeCode);
  */
 export const STATUS_NOTICE_PRIORITY: readonly StatusNoticeCode[] = [
   StatusNoticeCode.CLOSED_BETA_REVOKED,
+  // 5 Chưa liên kết tài khoản nhận tiền (đang liên kết đứng cùng hạng, ngay sau).
+  StatusNoticeCode.PAYOUT_ACCOUNT_NOT_LINKED,
+  StatusNoticeCode.PAYOUT_ACCOUNT_LINKING,
   StatusNoticeCode.CLOSED_BETA_PENDING,
 ];
 

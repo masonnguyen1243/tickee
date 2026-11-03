@@ -32,6 +32,10 @@ export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
   // OAuth client giả: test chặn `fetch` tới token endpoint của Google, không gọi Google thật.
   GOOGLE_CLIENT_ID: 'test-client-id.apps.googleusercontent.com',
   GOOGLE_CLIENT_SECRET: 'test-only-google-client-secret',
+  // Không bao giờ gọi Tingee thật: cổng 1 để lỡ gọi thì lỗi ngay; test liên kết trỏ vào `test/tingee-fake`.
+  TINGEE_BASE_URL: 'http://127.0.0.1:1',
+  TINGEE_CLIENT_ID: 'test-tingee-client-id',
+  TINGEE_SECRET_TOKEN: 'test-only-tingee-secret-token',
   ...overrides,
 });
 

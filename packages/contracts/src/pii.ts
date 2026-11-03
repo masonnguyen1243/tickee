@@ -5,13 +5,16 @@
 export const PII_COLUMNS = {
   identity: ['email', 'name', 'ip_address', 'user_agent'],
   // `email`: email người được mời (`organization_invitations.email`).
-  organizer: ['contact_phone', 'contact_email', 'email'],
+  // `account_name`, `account_last4`: tên chủ và 4 số cuối tài khoản nhận tiền (`payout_accounts`).
+  organizer: ['contact_phone', 'contact_email', 'email', 'account_name', 'account_last4'],
 } as const satisfies Record<string, readonly string[]>;
 
 const snakeToCamel = (s: string): string => s.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
 
-/** Khóa luôn che trong log dù chưa có cột nào dùng: email và SĐT. */
-const ALWAYS_REDACTED = ['email', 'phone', 'phone_number'] as const;
+/**
+ * Khóa luôn che trong log dù chưa có cột nào dùng: email, SĐT, số tài khoản đầy đủ và CCCD (gửi Tingee, không lưu).
+ */
+const ALWAYS_REDACTED = ['email', 'phone', 'phone_number', 'account_number', 'identity_number'] as const;
 
 /** Khóa cần che trong log: dạng snake_case và camelCase của mọi cột PII. */
 export const PII_KEYS: readonly string[] = Array.from(

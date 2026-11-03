@@ -57,11 +57,34 @@ export const ErrorCode = {
    * thái hiện tại (`ClosedBetaTransitionInvalidDetails`).
    */
   CLOSED_BETA_TRANSITION_INVALID: 'CLOSED_BETA_TRANSITION_INVALID',
+  /**
+   * Tingee/ngân hàng từ chối thông tin tài khoản nhận tiền (số tài khoản, tên chủ tài khoản, CCCD hoặc SĐT không khớp);
+   * `details.field` là trường nghi sai nếu biết (`PayoutFieldErrorDetails`).
+   */
+  PAYOUT_ACCOUNT_INVALID: 'PAYOUT_ACCOUNT_INVALID',
+  /** Ngân hàng không được hỗ trợ (VietinBank bị chặn ngay ở server); `details.field` là `bankBin`. */
+  BANK_NOT_SUPPORTED: 'BANK_NOT_SUPPORTED',
+  /** Tài khoản ngân hàng đã được liên kết ở nơi khác (Merchant khác của Tingee). */
+  PAYOUT_ACCOUNT_IN_USE: 'PAYOUT_ACCOUNT_IN_USE',
+  /** BTC đã có tài khoản nhận tiền đang dùng; đổi tài khoản là luồng riêng (Story 2.13). */
+  PAYOUT_ACCOUNT_ALREADY_LINKED: 'PAYOUT_ACCOUNT_ALREADY_LINKED',
+  /** Mã OTP ngân hàng sai; lần thử vẫn chờ OTP, nhập lại được. */
+  BANK_OTP_INVALID: 'BANK_OTP_INVALID',
+  /** Mã OTP ngân hàng hết hạn (hoặc lần thử không còn chờ OTP): phải gửi lại để tạo lần thử mới. */
+  BANK_OTP_EXPIRED: 'BANK_OTP_EXPIRED',
+  /** Merchant con của BTC đang bị Tingee tạm khóa. */
+  MERCHANT_SUSPENDED: 'MERCHANT_SUSPENDED',
+  /** Tingee tạm lỗi (timeout, lỗi mạng, lỗi hệ thống hoặc mã lỗi không lường trước): thử lại sau ít phút. */
+  PAYMENT_PROVIDER_UNAVAILABLE: 'PAYMENT_PROVIDER_UNAVAILABLE',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 
 export const errorCodeSchema = z.enum(ErrorCode);
+
+/** `details` của lỗi gắn với một trường của form (vd. `BANK_NOT_SUPPORTED` → `bankBin`). */
+export const PayoutFieldErrorDetails = z.object({ field: z.string() });
+export type PayoutFieldErrorDetails = z.infer<typeof PayoutFieldErrorDetails>;
 
 /** Dạng lỗi HTTP duy nhất: `{ "error": { "code", "message", "details" } }`. */
 export const ErrorResponse = z.object({

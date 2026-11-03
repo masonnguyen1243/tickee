@@ -65,6 +65,15 @@ export const apiConfigSchema = z.object({
    */
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
+  /**
+   * Open API của Tingee (liên kết tài khoản nhận tiền, Story 2.6): origin thuần, vd. `https://uat-open-api.tingee.vn`.
+   * Local không có credential UAT thì chạy `pnpm --filter @tickee/api tingee:fake` và trỏ vào fake.
+   */
+  TINGEE_BASE_URL: httpOrigin,
+  /** `x-client-id` của Master Merchant. */
+  TINGEE_CLIENT_ID: z.string().min(1),
+  /** Khóa ký HMAC-SHA512 (`x-signature`). Không bao giờ log. */
+  TINGEE_SECRET_TOKEN: z.string().min(1),
 });
 
 export const workerConfigSchema = z.object({

@@ -21,11 +21,19 @@ function defaultHandler(key: string): Handler | undefined {
   return undefined;
 }
 
+/** Mức độ và chặn bán mặc định của từng mã, giống api (`reporting.notices`). */
+const NOTICE_DEFAULTS: Record<string, { severity: string; blocking: boolean }> = {
+  CLOSED_BETA_REVOKED: { severity: 'danger', blocking: true },
+  CLOSED_BETA_PENDING: { severity: 'warning', blocking: false },
+  PAYOUT_ACCOUNT_NOT_LINKED: { severity: 'danger', blocking: true },
+  PAYOUT_ACCOUNT_LINKING: { severity: 'neutral', blocking: false },
+};
+
 /** Một thông báo trạng thái (`StatusNotice`) cho `GET /orgs/:id/notices`. */
 export const statusNotice = (code: string, overrides: Record<string, unknown> = {}) => ({
   code,
-  severity: code === 'CLOSED_BETA_REVOKED' ? 'danger' : 'warning',
-  blocking: code === 'CLOSED_BETA_REVOKED',
+  severity: NOTICE_DEFAULTS[code]?.severity ?? 'warning',
+  blocking: NOTICE_DEFAULTS[code]?.blocking ?? false,
   dismissible: false,
   scope: 'organization',
   audience: ['owner', 'admin'],

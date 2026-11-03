@@ -9,6 +9,8 @@ import { MembersService } from './members.service.js';
 import { MembershipsController } from './memberships.controller.js';
 import { OrganizationsController } from './organizations.controller.js';
 import { OrganizerService } from './organizer.service.js';
+import { PayoutAccountController } from './payout-account.controller.js';
+import { PayoutAccountService } from './payout-account.service.js';
 
 /** Cấu hình của `organizer` (chưa có khóa nào; giữ chữ ký `forRoot(config)` như các mô-đun khác). */
 export type OrganizerConfig = object;
@@ -16,17 +18,24 @@ export type OrganizerConfig = object;
 /**
  * BTC và thành viên (FR-4). Cài cổng `AccessResolver` và đăng ký `PermissionGuard` làm guard toàn cục số 3 —
  * phải import sau `IdentityModule` để chạy sau `SessionGuard` và `ConsentGuard`. Cần `DbModule` và `JobsModule`
- * (enqueue email mời Admin, Story 2.4) ở gốc DI.
+ * (enqueue email mời Admin, Story 2.4) và `TingeeModule` (liên kết tài khoản nhận tiền, Story 2.6) ở gốc DI.
  */
 @Module({})
 export class OrganizerModule {
   static forRoot(_config: OrganizerConfig = {}): DynamicModule {
     return {
       module: OrganizerModule,
-      controllers: [OrganizationsController, MembershipsController, MembersController, InvitationsController],
+      controllers: [
+        OrganizationsController,
+        MembershipsController,
+        MembersController,
+        InvitationsController,
+        PayoutAccountController,
+      ],
       providers: [
         OrganizerService,
         MembersService,
+        PayoutAccountService,
         AdminInvitationQueues,
         { provide: ACCESS_RESOLVER, useClass: MemberAccessResolver },
         { provide: APP_GUARD, useClass: PermissionGuard },

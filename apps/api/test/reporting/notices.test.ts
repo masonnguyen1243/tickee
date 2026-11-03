@@ -6,7 +6,7 @@ import { createHarness, signUp, type Harness } from '../identity/harness.js';
 
 /*
  * Story 2.5: `reporting.notices(scope)` qua `GET /v1/orgs/:orgId/notices` — banner Closed Beta cho Owner và Admin,
- * đổi theo thao tác của Quản trị Tingee.
+ * đổi theo thao tác của Quản trị Tingee. Story 2.6: banner tài khoản nhận tiền.
  */
 
 let h: Harness;
@@ -32,10 +32,25 @@ afterAll(async () => {
   await h.close();
 });
 
-async function noticesOf(cookie: string, org = orgId): Promise<StatusNotice[]> {
+async function allNoticesOf(cookie: string, org = orgId): Promise<StatusNotice[]> {
   const res = await h.http.get(`/v1/orgs/${org}/notices`).set('cookie', cookie);
   expect(res.status, JSON.stringify(res.body)).toBe(200);
   return StatusNoticeList.parse(res.body);
+}
+
+/** Chỉ thông báo của trục Closed Beta (trục tài khoản nhận tiền kiểm riêng bên dưới). */
+async function noticesOf(cookie: string, org = orgId): Promise<StatusNotice[]> {
+  return (await allNoticesOf(cookie, org)).filter((n) => n.code.startsWith('CLOSED_BETA_'));
+}
+
+/** Một lần thử liên kết ở trạng thái `status` (Story 2.6), ghi thẳng DB. */
+async function insertPayoutAccount(status: 'awaiting_otp' | 'linked' | 'failed'): Promise<void> {
+  const linked = status === 'linked';
+  await h.db.orm.execute(sql`
+    INSERT INTO payout_accounts
+      (organization_id, status, bank_bin, account_type, account_last4, account_name, created_by, va_account_number, linked_at)
+    VALUES (${orgId}, ${status}, '970422', 'personal-account', '0000', 'NGUYEN VAN A', ${owner.userId},
+      ${linked ? '9600000001' : null}, ${linked ? sql`now()` : null})`);
 }
 
 const closedBeta = (action: 'approve' | 'revoke') =>
@@ -82,6 +97,37 @@ describe('GET /v1/orgs/:orgId/notices', () => {
     const [again] = await noticesOf(owner.cookie);
     expect(again?.code).toBe('CLOSED_BETA_REVOKED');
     expect(again?.version).not.toBe(revoked?.version);
+  });
+
+  it('tài khoản nhận tiền (Story 2.6): chưa liên kết → NOT_LINKED (danger, chặn bán) xếp trên Chờ duyệt; chờ OTP → LINKING; đã liên kết → hết', async () => {
+    for (const cookie of [owner.cookie, admin.cookie]) {
+      const notices = await allNoticesOf(cookie);
+      expect(notices.map((n) => n.code)).toEqual(['PAYOUT_ACCOUNT_NOT_LINKED', 'CLOSED_BETA_PENDING']);
+      expect(notices[0]).toMatchObject({
+        severity: 'danger',
+        blocking: true,
+        dismissible: false,
+        scope: 'organization',
+        audience: ['owner', 'admin'],
+        data: {},
+      });
+    }
+    const [notLinked] = await allNoticesOf(owner.cookie);
+
+    await insertPayoutAccount('failed');
+    const [afterFailure] = await allNoticesOf(owner.cookie);
+    expect(afterFailure?.code).toBe('PAYOUT_ACCOUNT_NOT_LINKED');
+    expect(afterFailure?.version).not.toBe(notLinked?.version);
+
+    await insertPayoutAccount('awaiting_otp');
+    const linking = await allNoticesOf(admin.cookie);
+    expect(linking.map((n) => n.code)).toEqual(['PAYOUT_ACCOUNT_LINKING', 'CLOSED_BETA_PENDING']);
+    expect(linking[0]).toMatchObject({ severity: 'neutral', blocking: false, dismissible: false });
+
+    await insertPayoutAccount('linked');
+    expect((await allNoticesOf(owner.cookie)).map((n) => n.code)).toEqual(['CLOSED_BETA_PENDING']);
+    await closedBeta('approve');
+    expect(await allNoticesOf(admin.cookie)).toEqual([]);
   });
 
   it('không là thành viên → 403 NOT_A_MEMBER', async () => {

@@ -6,8 +6,12 @@ import {
   MembershipList,
   Organization,
   OrganizationInvitation,
+  PayoutAccount,
+  PayoutAccountOverview,
+  type ConfirmPayoutOtpRequest,
   type CreateOrganizationRequest,
   type InviteAdminRequest,
+  type LinkPayoutAccountRequest,
 } from '@tickee/contracts';
 import { z } from 'zod';
 
@@ -18,6 +22,8 @@ export const MEMBERSHIPS_QUERY_KEY = ['organizer', 'memberships'] as const;
 export const organizationQueryKey = (orgId: string) => ['organizer', 'organization', orgId] as const;
 /** Thành viên + lời mời đang chờ của một BTC (chỉ Owner). */
 export const membersQueryKey = (orgId: string) => ['organizer', 'members', orgId] as const;
+/** Tài khoản nhận tiền (hoặc lần thử liên kết gần nhất) của một BTC (chỉ Owner). */
+export const payoutAccountQueryKey = (orgId: string) => ['organizer', 'payout-account', orgId] as const;
 
 const json = (method: 'POST', body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 const orgPath = (orgId: string) => `/orgs/${encodeURIComponent(orgId)}`;
@@ -57,3 +63,13 @@ export const previewInvitation = (token: string) =>
 
 export const acceptInvitation = (token: string) =>
   apiRequest('/org-invitations/accept', { schema: AcceptedInvitation, init: json('POST', { token }) });
+
+export const fetchPayoutAccount = (orgId: string, signal?: AbortSignal) =>
+  apiRequest(`${orgPath(orgId)}/payout-account`, { schema: PayoutAccountOverview, init: { signal } });
+
+/** Liên kết tài khoản nhận tiền: `linked` ngay hoặc `awaiting_otp` (nhập OTP ngân hàng). */
+export const linkPayoutAccount = (orgId: string, body: LinkPayoutAccountRequest) =>
+  apiRequest(`${orgPath(orgId)}/payout-account`, { schema: PayoutAccount, init: json('POST', body) });
+
+export const confirmPayoutOtp = (orgId: string, body: ConfirmPayoutOtpRequest) =>
+  apiRequest(`${orgPath(orgId)}/payout-account/otp`, { schema: PayoutAccount, init: json('POST', body) });
