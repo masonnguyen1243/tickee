@@ -180,3 +180,12 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
   summary: Tài liệu kế hoạch vẫn theo mô hình một tài khoản nhận tiền mỗi BTC, cần chạy `bmad-correct-course`: AC Story 2.6 và 2.13 trong `epics.md`, quy tắc PRD (`prd.md:97`, "một tài khoản nhận tiền hiện hành"), AD-6 (tạo link bằng VA của tài khoản mặc định), AD-35, UX "Tài khoản nhận tiền" (danh sách, mặc định, hủy liên kết).
   evidence: Review 03/11 #12. Quyết định Q1–Q3 (03/11/2026) nằm trong khối frozen của spec này. Epic 3 (Story 3.4) đọc AD-6, nên phải sửa trước khi làm Epic 3.
 - Đã xử lý (03/11/2026): hai mục trên (#11 bảo vệ "Đặt làm mặc định" và hủy liên kết; #12 tài liệu kế hoạch theo mô hình một tài khoản) được giải quyết bằng `_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-03-nhieu-tai-khoan-nhan-tien.md` (Mason duyệt). Story 2.13 viết lại thành "Đổi key Tingee và bảo vệ thao tác đổi nơi nhận tiền". Ngoài ra AD-7 và Story 3.5/3.6 bỏ điều kiện kiểm `vaAccountNumber`, vì IPN của Tingee không có trường VA.
+
+## Deferred from: code review of spec-2-6-huy-lien-ket-va-nhieu-tai-khoan-nhan-tien.md, cả nhánh (2026-11-03)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-huy-lien-ket-va-nhieu-tai-khoan-nhan-tien.md`
+  summary: `vaAccountNumber` được trả về web và lưu ở `payout_accounts.va_account_number`. Nếu với một số loại tài khoản, VA của Tingee chính là số tài khoản ngân hàng gốc, AC "không lộ số tài khoản gốc" của Story 2.6 sẽ sai trên production.
+  evidence: Review cả nhánh 03/11 (maybe-false; nếu đúng là high). Test "không lộ bí mật" chỉ qua được vì VA trong fake khác `accountNumber`. Cách chốt: so `vaAccountNumber` với `accountNumber` trên UAT cho từng `accountType`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-huy-lien-ket-va-nhieu-tai-khoan-nhan-tien.md`
+  summary: Trang tài khoản nhận tiền đưa URL IPN `/v1/payments/tingee/ipn/{ipnKey}` cho BTC dán lên portal Tingee, trong khi route này chưa có (Story 3.5). Nếu portal gọi thử URL khi lưu, hoặc gửi IPN trước Epic 3, Tingee sẽ nhận 404.
+  evidence: Review cả nhánh 03/11 (maybe-false; nếu đúng là medium). Cách chốt: lưu URL IPN trên portal UAT, xem Tingee có gọi thử không và có chặn lưu khi gọi lỗi không. Nếu có thì thêm route tạm trả thành công, hoặc ghi chú "chưa hoạt động".

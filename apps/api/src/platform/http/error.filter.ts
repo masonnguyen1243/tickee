@@ -32,7 +32,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   TINGEE_CREDENTIAL_INVALID: 'Client ID hoặc Secret Token không đúng.',
   BANK_NOT_SUPPORTED: 'Ngân hàng này chưa được hỗ trợ.',
   PAYOUT_ACCOUNT_UNAVAILABLE: 'Tài khoản này không còn dùng được trên Tingee.',
-  PAYOUT_ACCOUNT_ALREADY_LINKED: 'BTC đã có tài khoản nhận tiền.',
+  PAYOUT_ACCOUNT_ALREADY_LINKED: 'Tài khoản này đã được liên kết.',
   MERCHANT_SUSPENDED: 'Tài khoản Tingee của BTC đang tạm khóa.',
   PAYMENT_PROVIDER_UNAVAILABLE: 'Tingee tạm lỗi, thử lại sau ít phút.',
 };

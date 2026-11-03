@@ -41,7 +41,7 @@ context:
 | Scenario | Input / State | Expected Output / Behavior | Error Handling |
 |---|---|---|---|
 | Thêm tài khoản thứ hai | Đã có MB, chọn ACB `active` | 200; overview có 2 tài khoản | — |
-| Thêm trùng | Chọn lại VA MB đang liên kết | 409 `PAYOUT_ACCOUNT_ALREADY_LINKED`, không lưu | Báo tại chỗ |
+| Thêm trùng | Chọn lại VA MB đang liên kết | 409 `PAYOUT_ACCOUNT_ALREADY_LINKED`, không lưu | Toast "Tài khoản này đã được liên kết." rồi đọc lại tổng quan (chỉ gặp khi hai tab tranh nhau, vì nút thêm của VA đã liên kết bị ẩn) |
 | Hủy một trong hai | Hủy MB | 200; còn ACB; banner vẫn không có | — |
 | Hủy tài khoản cuối | Hủy ACB | 200; `accounts: []`; banner NOT_LINKED hiện lại | — |
 | Hủy lại | Id đã hủy hoặc id của BTC khác | 404 `NOT_FOUND` | — |
@@ -96,6 +96,36 @@ context:
 **Acceptance Criteria:**
 - Given BTC có hai tài khoản, when Owner hủy cả hai, then `GET …/notices` lại có `PAYOUT_ACCOUNT_NOT_LINKED`, và audit có hai dòng `payout_account.unlinked`.
 - Given mọi lúc, then mỗi BTC có tối đa một tài khoản mặc định hiện hành, và có đúng một khi BTC còn ít nhất một tài khoản.
+
+### Review Findings
+
+Code review cả nhánh `feat/2-6-lien-ket-tai-khoan-nhan-tien` so với `main` (2026-11-03). Phạm vi là code và test, không gồm `_bmad-output` và `drizzle/meta`. Bốn lớp review: Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor (đối chiếu spec này và `spec-2-6-lien-ket-tai-khoan-nhan-tien-2.md`).
+
+- [x] [Review][Decision] Thêm trùng VA báo bằng toast, không báo tại chỗ — Matrix dòng "Thêm trùng" ghi "Báo tại chỗ". `AccountChooser` lại bắt `PAYOUT_ACCOUNT_ALREADY_LINKED` thành `toast.info` kèm `refreshOverview`, bỏ nó khỏi `selectFailure`, và e2e đang kiểm toast. Việc này chỉ xảy ra khi hai tab tranh nhau, vì nút thêm của VA đã liên kết bị ẩn. Hai cách: sửa code thành `StatusBanner` trong thẻ, hoặc giữ toast và sửa matrix. Đã chốt (Mason, 03/11): giữ toast, matrix dòng "Thêm trùng" đã sửa theo.
+- [x] [Review][Patch] Thông điệp và JSDoc của mã lỗi vẫn theo mô hình một tài khoản [apps/api/src/platform/http/error.filter.ts:35] — Thông điệp mặc định "BTC đã có tài khoản nhận tiền." và JSDoc ở `packages/contracts/src/errors.ts:69` chưa nói tới hai nghĩa mới: VA đã liên kết, và key bị khóa theo Q2. JSDoc `PAYOUT_ACCOUNT_NOT_LINKED` ở `packages/contracts/src/reporting.ts` thiếu trường hợp "đã hủy hết".
+- [x] [Review][Patch] Chưa có e2e cho form kết nối nhận 409 `PAYOUT_ACCOUNT_ALREADY_LINKED` [apps/web/e2e/payout-account.spec.ts] — Nhánh `onError` riêng của `TingeeConnectForm` (toast "không đổi key ở đây được", `refreshOverview`, không có banner tại chỗ) không có test nào chạy qua. Cần một test mở form, đặt `state.everLinked = true` kèm một tài khoản, gửi key, rồi kiểm toast, kiểm form nhường chỗ cho danh sách đã liên kết, và kiểm không có banner lỗi.
+- [x] [Review][Defer] Số VA có thể trùng số tài khoản ngân hàng gốc [apps/api/src/modules/tingee/tingee.client.ts:123] — deferred: maybe-false, nếu đúng là high. `vaAccountNumber` được trả về web và lưu DB, còn AC "không lộ số tài khoản gốc" chỉ qua được vì VA trong fake khác `accountNumber`. Cách chốt: so `vaAccountNumber` với `accountNumber` trên UAT cho từng `accountType`.
+- [x] [Review][Defer] Đưa URL IPN cho BTC dán trước khi có route IPN (Story 3.5) — deferred: maybe-false, nếu đúng là medium. Nếu portal Tingee gọi thử URL khi lưu thì sẽ nhận 404. Cách chốt: lưu URL IPN trên portal UAT, xem Tingee có gọi thử không và có chặn lưu khi gọi lỗi không.
+
+**Rejected:**
+- Owner kẹt khi key bị thu hồi (`canReplaceKey` false) và không có banner "Key Tingee không còn dùng được": đã có Story 2.13 (đổi key) và Story 4.2 (`credential_invalid`, banner, "Nhập lại key").
+- `POST credential` chưa giới hạn tốc độ: đã reject ở `spec-2-6-lien-ket-tai-khoan-nhan-tien-2.md` #8; chỉ Owner của BTC đã được duyệt mới gọi được.
+- Danh sách tài khoản cắt ở 200 dòng: Design Notes của spec A đã quyết, và lần review trước (#9) đã reject.
+- AES-GCM không có AAD: đã reject ở review trước (#4); phải có quyền ghi DB mới khai thác được.
+- `SecretBoxError` thành 500, chưa có công cụ xoay khóa: low, chỉ xảy ra khi vận hành bỏ khóa khỏi env. Lý do ở review trước (#5) "Owner vẫn bấm được Dùng key khác" không còn đúng sau Q2; giờ lối thoát là Story 2.13.
+- Số > 2^53 trong `Text`, `shopId` dạng chuỗi 16 chữ số, `code` dạng số `0`: low, Tingee trả chuỗi; sửa là thêm guard.
+- VA trùng trong danh sách Tingee, `accountNumber` ngắn hơn 4 ký tự: low, khó xảy ra; sửa là thêm nhánh.
+- `0008` bị viết lại sau `178bd2c`: spec A đã quyết (xóa bản cũ, sinh lại); chỉ ảnh hưởng DB local.
+- Gộp `0008` và `0009`: low; spec này quyết không viết lại `0008` vì DB local đã chạy bản mới.
+- `va_account_number` thiếu trong `PII_COLUMNS.organizer`: false. Danh sách chỉ dùng để che log, và khóa này đã có trong `ALWAYS_REDACTED`.
+- `secretTokenCiphertext` và `tingee_ipn_key` không bị che trong log: low, không có chỗ nào log dòng credential hay organization. `client_id` che luôn Client ID Google: low.
+- Audit chưa ghi credential bị retire và chưa nối "hủy" với "đổi mặc định": low; spec đã định nghĩa các dòng audit như hiện có.
+- `version` banner đổi theo `linked_at` và `retired_at`: low; banner không đóng được.
+- `connect` không idempotent khi gửi lại cùng key: low; chỉ thêm dòng audit và làm mới cache.
+- `select` báo `PAYOUT_ACCOUNT_UNAVAILABLE` khi credential đổi ở tab khác: low; thông điệp vẫn bảo tải lại danh sách, và tải lại là đủ.
+- Đường bắt 23505 trong `select` chưa có test đi qua: low; khóa dòng BTC chặn trước, và kiểm đột biến ở Implementation Notes đã chứng minh đường bắt chạy được.
+- `replacingKey` còn `true` khi `canReplaceKey` thành false: false; form đã được `canReplaceKey` chặn.
+- Client ID ngắn bị che hết, `changedAt` trong Implementation Notes ghi sai nghĩa: muốn sửa thì phải sửa spec.
 
 ## Implementation Notes
 
