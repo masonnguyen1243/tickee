@@ -65,7 +65,7 @@ Không có trang khám phá Sự kiện (PRD §10 — không phải chợ vé). 
 | BTC | Cần xử lý (badge số) | Owner, Admin | Hàng việc gộp mọi Sự kiện của BTC (FR-21) |
 | BTC | Token | Owner (Admin chỉ xem) | Số dư, hạn mức, ngưỡng, "mua thêm Token" (FR-34) |
 | BTC | Thành viên | Owner | Mời/xóa Admin (FR-2, FR-4) |
-| BTC | Tài khoản nhận tiền | Owner | Kết nối tài khoản Tingee, chọn tài khoản nhận tiền, URL IPN và hướng dẫn cấu hình (FR-5) |
+| BTC | Tài khoản nhận tiền | Owner | Kết nối tài khoản Tingee, chọn, đặt mặc định và hủy liên kết tài khoản nhận tiền, URL IPN và hướng dẫn cấu hình (FR-5) |
 | BTC | Cài đặt | Owner, Admin | Thông tin BTC, trạng thái Closed Beta (FR-37) |
 | Sự kiện | Tổng quan | Owner, Admin | Doanh thu, check-in, Vé theo Hạng vé, `needs-action-card`, `recent-orders-block`, cảnh báo (FR-31) |
 | Sự kiện | Đơn | Owner, Admin | Danh sách Đơn + câu trả lời form, bộ lọc "Cần xử lý", xuất CSV (FR-21, FR-31) |
@@ -303,7 +303,8 @@ Ai được mở link, có phải đăng nhập không, và có thấy Mã QR v�
 | Chưa kết nối Tingee | Tài khoản nhận tiền | Hướng dẫn 3 bước (đăng ký merchant Tingee, liên kết ngân hàng, lấy API key) + form Client ID, Secret Token, nút "Kết nối" (FR-5). |
 | Đang kiểm tra key | Tài khoản nhận tiền | Nút loading; lỗi tại chỗ: "Client ID hoặc Secret Token không đúng." / "Tingee tạm lỗi, thử lại sau ít phút." + "Thử lại", giữ dữ liệu đã nhập. |
 | Chọn tài khoản | Tài khoản nhận tiền | Danh sách thẻ (ngân hàng, `•••• 1234` `tabular-nums`, tên chủ tài khoản in hoa); VietinBank mờ + "Chưa hỗ trợ VietinBank"; rỗng → `empty-state` + link portal Tingee + "Tải lại". |
-| Đã liên kết | Tài khoản nhận tiền | Thẻ tài khoản + `status-badge` success "Đã liên kết"; khối "Cấu hình trên Tingee": URL IPN + "Sao chép" (toast "Đã sao chép"), checklist hai bước. |
+| Đã liên kết | Tài khoản nhận tiền | Danh sách tài khoản (ngân hàng, `•••• 1234`, tên chủ tài khoản); tài khoản mặc định có `status-badge` neutral "Mặc định", tài khoản khác có "Đặt làm mặc định"; mỗi tài khoản có "Hủy liên kết"; nút "Thêm tài khoản" mở danh sách Tingee (tài khoản đã liên kết hiện "Đã liên kết"). Khối "Cấu hình trên Tingee": URL IPN + "Sao chép" (toast "Đã sao chép"), checklist hai bước (bước 2: chọn mọi tài khoản đã liên kết). |
+| Hủy liên kết | Tài khoản nhận tiền | `Dialog` "Hủy liên kết tài khoản này?" nêu hậu quả: tài khoản mặc định → tài khoản nào thành mặc định, hoặc hủy tài khoản cuối thì không bán được Vé có phí; nhắc bỏ chọn trên portal Tingee; nút "Hủy liên kết" (danger) và "Giữ tài khoản". |
 | Key không còn dùng được | Tài khoản nhận tiền + `status-banner` danger | `status-badge` danger "Key Tingee không còn dùng được" + "Nhập lại key" (qua xác nhận lại, Story 2.13). Banner trên dashboard: Owner "Nhập lại key"; Admin "Nhờ Owner cập nhật key Tingee." (AD-32 `credential_invalid`). |
 | Token dưới ngưỡng / chạm hạn mức | Banner + Token | Dưới ngưỡng: warning "Token khả dụng dưới ngưỡng cảnh báo." + hành động "mua thêm Token" (Owner). Chạm hạn mức: danger "Mọi Sự kiện có phí đang Tạm ngừng bán" (FR-34). |
 | Google Sheets | Cài đặt Sự kiện | Đã kết nối · đang đồng bộ · lỗi/thử lại · mất quyền → banner trên Tổng quan "Kết nối lại Google Sheets" (FR-32). |
@@ -330,7 +331,7 @@ Ai được mở link, có phải đăng nhập không, và có thấy Mã QR v�
 | Nhập mã sau đăng nhập | Mọi trang | API trả `TOTP_REQUIRED` → `Dialog` "Xác thực hai lớp": mã 6 số, link "Dùng mã khôi phục", nút "Đăng xuất"; đúng → tiếp tục thao tác dở; sai → lỗi tại ô; bị khóa → "Thử lại sau N phút". |
 | Tắt 2FA | Bảo mật tài khoản | `Dialog` nêu hậu quả "Tài khoản chỉ còn được bảo vệ bằng email." + ô mã TOTP hoặc mã khôi phục; xong → toast "Đã tắt xác thực hai lớp", email báo. |
 | Đã dùng mã khôi phục | Bảo mật tài khoản | `status-banner` warning "Xác thực hai lớp cũ đã được gỡ. Bật lại với thiết bị mới." |
-| Xác nhận lại (`REAUTH_REQUIRED`) | Đổi tài khoản nhận tiền, Chuyển quyền Owner | `Dialog` "Xác nhận để tiếp tục": đã bật 2FA → mã TOTP; chưa bật → "Gửi mã tới {email}" + ô OTP; đúng → thực hiện thao tác, giữ dữ liệu đã nhập. |
+| Xác nhận lại (`REAUTH_REQUIRED`) | Đổi key Tingee, Đặt làm mặc định, Hủy liên kết tài khoản nhận tiền, Chuyển quyền Owner (Story 2.13) | `Dialog` "Xác nhận để tiếp tục": đã bật 2FA → mã TOTP; chưa bật → "Gửi mã tới {email}" + ô OTP; đúng → thực hiện thao tác, giữ dữ liệu đã nhập. |
 
 ### Landing BTC
 

@@ -94,7 +94,7 @@ Các phân khúc trong Closed Beta: thể thao phong trào (Pickleball, cầu l�
 - **Tingee** — Hạ tầng thanh toán và đối soát QR mà Tickee chạy trên đó. Tingee là nguồn dữ liệu gốc về tiền và Token, kết nối với 14 ngân hàng.
 - **Quản trị Tingee** — Nhân sự vận hành nội bộ của Tingee: hỗ trợ, xử lý báo cáo vi phạm, khóa Sự kiện hoặc BTC.
 - **Tài khoản Tickee** — Danh tính đăng nhập của một người. Một tài khoản có thể là Người mua, thành viên của một hay nhiều BTC, hoặc CTV của một hay nhiều Sự kiện. `[ASSUMPTION: Người mua, thành viên BTC và CTV dùng chung một loại Tài khoản Tickee; vai trò gắn theo từng BTC hoặc từng Sự kiện]`
-- **BTC (Ban tổ chức)** — Tổ chức bán Vé trên Tickee và là khách hàng trả phí. Mỗi BTC có tối đa một bộ credential Tingee hiện hành và một tài khoản nhận tiền hiện hành (một VA trong tài khoản Tingee của BTC), và có một hoặc nhiều thành viên.
+- **BTC (Ban tổ chức)** — Tổ chức bán Vé trên Tickee và là khách hàng trả phí. Mỗi BTC có tối đa một bộ credential Tingee hiện hành và một hoặc nhiều tài khoản nhận tiền (mỗi tài khoản là một VA trong tài khoản Tingee của BTC), trong đó đúng một tài khoản mặc định nhận tiền của Đơn mới; BTC có một hoặc nhiều thành viên.
 - **Owner** — Thành viên chủ của BTC. Mỗi BTC có đúng một Owner. Chỉ Owner được liên kết tài khoản nhận tiền, quản lý Token và mời hoặc xóa thành viên.
 - **Admin** — Thành viên quản lý của BTC. Admin tạo Sự kiện và xử lý Đơn, nhưng không được quản lý tài khoản nhận tiền hay thành viên.
 - **CTV (Cộng tác viên soát vé)** — Tài khoản Tickee được BTC mời soát vé cho một Sự kiện cụ thể. Quyền CTV tự hết khi Sự kiện kết thúc. CTV không phải thành viên BTC.
@@ -155,7 +155,7 @@ Người dùng đăng ký và đăng nhập Tài khoản Tickee bằng Google ho
 - Mọi Tài khoản Tickee tự bật hoặc tắt xác thực hai lớp (2FA) bằng ứng dụng xác thực (TOTP) ở trang "Bảo mật tài khoản". Owner được khuyến khích bật nhưng không bắt buộc.
 - Tài khoản đã bật 2FA phải nhập mã TOTP sau mỗi lần đăng nhập (Google hoặc OTP email) mới dùng được tài khoản. Có 10 mã khôi phục dùng một lần cho trường hợp mất thiết bị.
 - Tắt 2FA phải nhập mã TOTP (hoặc mã khôi phục) hiện tại; hệ thống gửi email báo.
-- Thao tác nhạy cảm (đổi tài khoản nhận tiền, chuyển quyền Owner) luôn yêu cầu xác nhận lại ngay lúc thao tác: nhập mã TOTP nếu đã bật 2FA, nếu chưa bật thì nhập mã OTP gửi qua email; kèm email cảnh báo.
+- Thao tác nhạy cảm (đổi key Tingee, đổi tài khoản nhận tiền mặc định, hủy liên kết tài khoản nhận tiền, chuyển quyền Owner) luôn yêu cầu xác nhận lại ngay lúc thao tác: nhập mã TOTP nếu đã bật 2FA, nếu chưa bật thì nhập mã OTP gửi qua email; kèm email cảnh báo.
 - Dù đăng nhập bằng cách nào, cùng một email luôn ra cùng một Tài khoản Tickee.
 
 **Ngoài phạm vi:** đăng nhập bằng OTP qua SĐT, SSO tài khoản Tingee `[ASSUMPTION: SSO Tingee để sau MVP]`.
@@ -210,13 +210,16 @@ Quản trị Tingee không thuộc BTC nào. Quản trị Tingee có quyền duy
 **Mô tả:** Owner kết nối tài khoản merchant Tingee của BTC và chọn tài khoản nhận tiền. Trong Closed Beta, BTC đã được Quản trị Tingee duyệt thì liên kết xong là mở bán Vé có phí được. **KYC đầy đủ là điều kiện bắt buộc trước khi mở công khai.** Hiện thực hóa UJ-2.
 
 #### FR-5: Tài khoản nhận tiền
-Owner kết nối tài khoản merchant Tingee của BTC bằng Client ID và Secret Token, rồi chọn một tài khoản đã liên kết trên Tingee để nhận tiền vé.
+Owner kết nối tài khoản merchant Tingee của BTC bằng Client ID và Secret Token, rồi chọn một hoặc nhiều tài khoản đã liên kết trên Tingee để nhận tiền vé.
 
 **Hệ quả:**
 - Tickee kiểm tra credential bằng cách đọc danh sách tài khoản từ Tingee. Credential sai thì báo tại chỗ, không lưu.
 - Danh sách chỉ cho chọn tài khoản đang hoạt động; tài khoản VietinBank hiện nhưng không chọn được ("Chưa hỗ trợ VietinBank").
 - Tingee chưa có tài khoản nào thì trang hướng dẫn liên kết trên Tingee rồi tải lại.
 - Sau khi chọn, trang hiện URL IPN riêng của BTC và các bước cấu hình cổng thanh toán trên portal Tingee.
+- Tài khoản liên kết đầu tiên là tài khoản mặc định; Đơn mới nhận tiền vào tài khoản mặc định. Owner đổi tài khoản mặc định được.
+- Owner hủy liên kết được từng tài khoản; Tickee chỉ ngừng dùng tài khoản đó (không xóa, không đổi gì trên Tingee). Hủy tài khoản mặc định thì tài khoản liên kết sớm nhất còn lại thành mặc định; hủy hết thì BTC quay về "chưa có tài khoản nhận tiền".
+- Đổi key Tingee chỉ làm được trên trang này khi BTC chưa từng liên kết tài khoản nào; sau đó là thao tác nhạy cảm, cần xác nhận lại.
 - Chưa có tài khoản nhận tiền thì không mở bán được Sự kiện có phí; Sự kiện miễn phí vẫn mở bán được.
 - Tickee không lưu số dư hay tiền của BTC; Secret Token chỉ lưu dạng mã hóa, không bao giờ hiển thị lại.
 - BTC chưa có tài khoản Tingee: trang hướng dẫn đăng ký tại Tingee (đăng ký, liên kết ngân hàng, lấy API key).

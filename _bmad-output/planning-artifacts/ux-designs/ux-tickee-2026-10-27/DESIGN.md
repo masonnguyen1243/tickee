@@ -567,7 +567,7 @@ Pill `{rounded.full}`, padding 2px 10px, `{typography.label}`, luôn có chữ (
 | **Sự kiện** | Nháp → neutral · Đang mở bán → success · Đã kết thúc → neutral · Ẩn → warning · Đã hủy → danger · Bị khóa → danger · "Tạm ngừng bán" (thông báo) → warning |
 | **Người mua — Đơn đang chờ** | "BTC đang kiểm tra thanh toán" → warning |
 | **BTC** | "Chờ duyệt Closed Beta" → warning · Bị khóa → danger |
-| **Tài khoản nhận tiền** | Đã liên kết → success · Key không còn dùng được → danger `[ASSUMPTION]` |
+| **Tài khoản nhận tiền** | Đã liên kết → success · Mặc định → neutral · Key không còn dùng được → danger `[ASSUMPTION]` |
 
 Tone dùng cặp `{colors.<tone>-text}` trên `{colors.<tone>-subtle}` (light mode) / `-dark` (dark mode). `[ASSUMPTION]` ánh xạ tone do distill đề xuất.
 

@@ -31,7 +31,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 
 **4.2 Liên kết tài khoản nhận tiền**
 
-- FR-5: Owner kết nối tài khoản merchant Tingee của BTC bằng Client ID và Secret Token, rồi chọn một tài khoản đã liên kết trên Tingee để nhận tiền vé. Key sai báo tại chỗ, không lưu; tài khoản VietinBank không chọn được. Sau khi chọn, trang hiện URL IPN riêng của BTC và các bước cấu hình cổng thanh toán trên portal Tingee. BTC chưa có tài khoản nhận tiền thì không mở bán được Sự kiện có phí (Sự kiện miễn phí không cần). Tickee không lưu số dư hay tiền của BTC; Secret Token chỉ lưu dạng mã hóa, không hiển thị lại.
+- FR-5: Owner kết nối tài khoản merchant Tingee của BTC bằng Client ID và Secret Token, rồi chọn một hoặc nhiều tài khoản đã liên kết trên Tingee để nhận tiền vé. Key sai báo tại chỗ, không lưu; tài khoản VietinBank không chọn được. Tài khoản liên kết đầu tiên là mặc định (Đơn mới nhận tiền vào đây), Owner đổi được; hủy liên kết từng tài khoản (gỡ mềm); đổi key chỉ khi BTC chưa từng liên kết, sau đó qua xác nhận lại. Sau khi chọn, trang hiện URL IPN riêng của BTC và các bước cấu hình cổng thanh toán trên portal Tingee. BTC chưa có tài khoản nhận tiền thì không mở bán được Sự kiện có phí (Sự kiện miễn phí không cần). Tickee không lưu số dư hay tiền của BTC; Secret Token chỉ lưu dạng mã hóa, không hiển thị lại.
 - FR-6: KYC do BTC làm trực tiếp với Tingee khi mở tài khoản merchant; Tickee không tham gia. Không có story, chỉ ghi để truy vết.
 - FR-37: BTC chỉ bán được Vé có phí sau khi Quản trị Tingee duyệt vào Closed Beta. Khi chưa được duyệt, BTC vẫn đăng ký, liên kết tài khoản và tạo Sự kiện nháp/miễn phí được. Dashboard hiện "Chờ duyệt Closed Beta". Thu hồi trạng thái này làm mọi Sự kiện có phí của BTC chuyển "Tạm ngừng bán". Mọi lần duyệt và thu hồi đều ghi nhật ký.
 
@@ -133,7 +133,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 - AD-2: tồn kho nằm ở `ticket_type_inventory(capacity, sold, held)` có CHECK. Giữ/bán có điều kiện bằng UPDATE. Đơn nhiều Hạng vé cập nhật theo id tăng dần. Có bảng phép tồn kho cho từng chuyển trạng thái. Có job đối chiếu định kỳ (chỉ cảnh báo, không tự sửa).
 - AD-3: Đơn là máy trạng thái compare-and-set gồm `pending`/`paid`/`expired`/`review`/`cancelled`/`refunded`.
 - AD-4: `expires_at` = now + 60 giây; gắn link xong thì bằng hạn link (15 phút). Hết hạn khi gặp điều kiện đầu tiên trong số (a) chưa có link sau 60 giây, (b) Tingee xác nhận chưa trả, (c) quá `expires_at` + 5 phút. Màn người mua: đồng hồ về 0 → "Đang xác nhận thanh toán", chỉ hiện "Hết hạn" khi API trả `expired`.
-- AD-6: Tingee Payment Gateway `create-link` ký bằng credential của BTC (`vaAccountNumber` = tài khoản nhận tiền hiện hành, không gửi `merchantId`, `orderId` = mã Đơn, `expireInMinute` = 15, `returnUrl` = `/orders/:code`), mở bằng redirect toàn trang. Giá Hạng vé có phí ≥ 2.000đ. Không cho chọn tài khoản VietinBank làm tài khoản nhận tiền (`BANK_NOT_SUPPORTED`).
+- AD-6: Tingee Payment Gateway `create-link` ký bằng credential của BTC (`vaAccountNumber` = VA của tài khoản nhận tiền mặc định, không gửi `merchantId`, `orderId` = mã Đơn, `expireInMinute` = 15, `returnUrl` = `/orders/:code`), mở bằng redirect toàn trang. Giá Hạng vé có phí ≥ 2.000đ. Không cho chọn tài khoản VietinBank làm tài khoản nhận tiền (`BANK_NOT_SUPPORTED`).
 - AD-7: IPN nhận ở URL riêng của mỗi BTC (`/v1/payments/tingee/ipn/:ipnKey`), kiểm HMAC-SHA512 bằng Secret Token của BTC đó trên raw body, lệch timestamp quá 10 phút thì từ chối. `payment_events` có whitelist field và khóa unique. Trả mã `00` trong dưới 5 giây. Bảng xử lý 7 trường hợp. `review_items` có `open`/`resolved` và `resolution`.
 - AD-8: Đối soát bù tra trạng thái Gateway theo `orderId` sau 2 phút (backoff) và tại `expires_at`, đi chung đường xử lý với IPN.
 - AD-9: chỉ mô-đun `tingee` gọi Tingee, mỗi lời gọi nhận credential của một BTC làm tham số: ký request, đổi mã lỗi Tingee thành lỗi miền (gồm `TINGEE_CREDENTIAL_INVALID`), chuyển giờ UTC+7. Env chỉ có `TINGEE_BASE_URL` và `TINGEE_CREDENTIAL_KEYS`; Secret Token của BTC mã hóa AES-256-GCM, không trả về web, không ghi log. Có Tingee fake (nhiều cặp key) cho test.
@@ -145,7 +145,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 - AD-30: `checker_invites` (mỗi Sự kiện tối đa 1 link đang hoạt động, hạn = min(7 ngày, `effective_end_at`)) và `checkers` (CTV đã bị thu hồi không tự nhận lại được).
 - AD-32: `payment_service_status` (`active`/`suspended`, lý do `token`/`tingee_disabled`/`credential_invalid`). Job dò mỗi 5 phút khi `suspended`, có nút "Kiểm tra lại"; `credential_invalid` tắt khi Owner lưu key mới hợp lệ. Mở lại dịch vụ → Đối soát bù mọi Đơn còn mở. Token đọc trực tiếp từ Tingee bằng credential của BTC (timeout 3 giây).
 - AD-34: `reporting.notices(scope)` là nguồn duy nhất cho `status-banner`. `event.publishReadiness(eventId)` liệt kê điều kiện mở bán.
-- AD-35: bản chụp bất biến trên Đơn/Vé (`unit_price`, `total_amount`, thông tin người mua, câu trả lời form kèm nhãn, `payout_account_id`, `seq`, `holder_name`…). Credential và tài khoản nhận tiền cũ không xóa khi đổi. Tra tay khớp đầy đủ sau chuẩn hóa.
+- AD-35: bản chụp bất biến trên Đơn/Vé (`unit_price`, `total_amount`, thông tin người mua, câu trả lời form kèm nhãn, `payout_account_id`, `seq`, `holder_name`…). Credential và tài khoản nhận tiền cũ không xóa khi đổi hay hủy liên kết (gỡ mềm). Tra tay khớp đầy đủ sau chuẩn hóa.
 
 **Thời gian và trạng thái:**
 
@@ -308,7 +308,7 @@ Người dùng đăng ký/đăng nhập bằng Google hoặc OTP email và đồ
 **UX-DR chính:** UX-DR1–9, UX-DR14, UX-DR43, UX-DR45–46
 
 ### Epic 2: BTC thiết lập và mở bán Sự kiện
-Owner tạo BTC, có thể bật 2FA (kèm mã khôi phục), mời Admin, liên kết và đổi tài khoản nhận tiền, chuyển quyền Owner, được Quản trị Tingee duyệt Closed Beta. Sau đó tạo Sự kiện, Hạng vé, form mua, mở bán và chia sẻ link có OG preview.
+Owner tạo BTC, có thể bật 2FA (kèm mã khôi phục), mời Admin, liên kết, đặt mặc định và hủy liên kết tài khoản nhận tiền, đổi key Tingee, chuyển quyền Owner, được Quản trị Tingee duyệt Closed Beta. Sau đó tạo Sự kiện, Hạng vé, form mua, mở bán và chia sẻ link có OG preview.
 **FRs covered:** FR-2, FR-4, FR-5, FR-7, FR-8, FR-9, FR-10, FR-37
 **UX-DR chính:** UX-DR10–13, UX-DR34, UX-DR36, UX-DR40–42, UX-DR44 (phần duyệt Closed Beta)
 
@@ -668,13 +668,29 @@ So that tiền vé chuyển thẳng vào tài khoản của tôi.
 
 **Given** danh sách tài khoản đã hiện
 **When** tôi chọn một tài khoản và bấm "Dùng tài khoản này"
-**Then** `organizer` lưu tài khoản nhận tiền (VA, ngân hàng, 4 số cuối, tên chủ tài khoản); dashboard hết banner "Chưa liên kết"; trang hiện thẻ tài khoản đã liên kết; audit ghi lại (không ghi giá trị)
+**Then** `organizer` lưu tài khoản nhận tiền (VA, ngân hàng, 4 số cuối, tên chủ tài khoản); tài khoản đầu tiên của BTC thành mặc định; dashboard hết banner "Chưa liên kết"; trang hiện thẻ tài khoản đã liên kết; audit ghi lại (không ghi giá trị)
 **And** tài khoản VietinBank (`970415`) hiện mờ kèm "Chưa hỗ trợ VietinBank", không chọn được; API cũng từ chối với `BANK_NOT_SUPPORTED` (AD-6)
 **And** Tingee chưa có tài khoản nào → `empty-state` "Tài khoản Tingee của bạn chưa liên kết tài khoản ngân hàng nào." + link tới portal Tingee + "Tải lại"
 
 **Given** BTC đã có tài khoản nhận tiền
 **When** Owner mở trang
-**Then** thấy URL IPN riêng của BTC (`/v1/payments/tingee/ipn/{ipnKey}`) với nút "Sao chép" và các bước cấu hình cổng thanh toán trên portal Tingee: dán URL IPN, chọn tài khoản vừa chọn trong "Các tài khoản cho phép thanh toán"
+**Then** thấy URL IPN riêng của BTC (`/v1/payments/tingee/ipn/{ipnKey}`) với nút "Sao chép" và các bước cấu hình cổng thanh toán trên portal Tingee: dán URL IPN, chọn mọi tài khoản đã liên kết trong "Các tài khoản cho phép thanh toán"
+
+**Given** BTC đã có tài khoản nhận tiền
+**When** Owner bấm "Thêm tài khoản" và chọn một tài khoản khác trong danh sách
+**Then** tài khoản được thêm (không phải mặc định); tài khoản đã liên kết hiện "Đã liên kết" thay cho nút; chọn lại VA đang liên kết → `PAYOUT_ACCOUNT_ALREADY_LINKED`
+
+**Given** BTC có nhiều tài khoản
+**When** Owner bấm "Đặt làm mặc định" ở một tài khoản
+**Then** tài khoản đó thành mặc định (badge "Mặc định"), tài khoản cũ thôi là mặc định; Đơn mới nhận tiền vào tài khoản mặc định; audit ghi lại
+
+**Given** BTC đã có tài khoản nhận tiền
+**When** Owner bấm "Hủy liên kết" và xác nhận trong `Dialog` nêu hậu quả
+**Then** Tickee ngừng dùng tài khoản (gỡ mềm, không gọi Tingee); tài khoản mặc định bị hủy thì tài khoản liên kết sớm nhất còn lại thành mặc định; hủy hết thì banner "Chưa liên kết" hiện lại; trang nhắc bỏ chọn tài khoản đó trên portal Tingee
+
+**Given** BTC đã từng liên kết tài khoản (kể cả đã hủy hết)
+**When** Owner mở trang
+**Then** không có "Dùng key khác"; API từ chối gửi key với `PAYOUT_ACCOUNT_ALREADY_LINKED` (đổi key là Story 2.13)
 
 **Given** BTC chưa có tài khoản Tingee
 **When** Owner mở trang
@@ -845,35 +861,38 @@ So that tôi kiểm soát được Sự kiện khi kế hoạch thay đổi.
 **Then** `ended_manually_at` và `effective_end_at` = thời điểm bấm; từ đó `sellability` trả "Đã kết thúc"; sửa giờ về sau không đổi `effective_end_at` (FR-7, AD-14)
 **And** "Đã kết thúc" không lưu thành `status` mà luôn tính từ `effective_end_at` tại thời điểm request (AD-27)
 
-### Story 2.13: Đổi tài khoản nhận tiền
+### Story 2.13: Đổi key Tingee và bảo vệ thao tác đổi nơi nhận tiền
 
 As a Owner,
-I want đổi tài khoản nhận tiền hoặc đổi key Tingee của CLB,
-So that tiền vé về đúng tài khoản khi CLB đổi ngân hàng hoặc thay key trên Tingee.
+I want đổi key Tingee của CLB, và mọi thao tác đổi nơi nhận tiền đều phải xác nhận lại,
+So that tiền vé về đúng tài khoản khi CLB thay key, và phiên đăng nhập bị lộ không tự đổi được nơi nhận tiền.
 
 **Acceptance Criteria:**
 
-**Given** BTC đã có tài khoản nhận tiền
-**When** Owner bấm "Đổi tài khoản nhận tiền" hoặc "Đổi key Tingee"
-**Then** yêu cầu xác nhận lại ngay lúc thao tác (`REAUTH_REQUIRED`): TOTP nếu đã bật 2FA, chưa bật thì OTP email; rồi hiện danh sách tài khoản (hoặc form key rồi danh sách) như Story 2.6; cùng quy tắc VietinBank và lỗi tại chỗ (FR-5, AD-6, AD-26)
+**Given** BTC đã từng liên kết tài khoản nhận tiền
+**When** Owner bấm "Đổi key Tingee"
+**Then** yêu cầu xác nhận lại ngay lúc thao tác (`REAUTH_REQUIRED`): TOTP nếu đã bật 2FA, chưa bật thì OTP email; rồi form key → danh sách tài khoản của key mới như Story 2.6; cùng quy tắc VietinBank và lỗi tại chỗ (FR-5, AD-6, AD-26)
 
-**Given** chọn xong tài khoản mới (với key hiện hành hoặc key mới)
+**Given** key mới đúng và Owner chọn tài khoản (tài khoản đầu tiên thành mặc định)
 **When** lưu
-**Then** tài khoản mới thành hiện hành cho mọi Đơn tạo **sau** thời điểm đổi; Đơn đã có link giữ `orders.payout_account_id` cũ, nên IPN và Đối soát bù của các Đơn đó vẫn dùng credential cũ (AD-35)
-**And** credential và tài khoản cũ được giữ (secret vẫn mã hóa), không xóa
-**And** audit ghi người đổi, thời điểm, 4 số cuối tài khoản cũ và mới; email cảnh báo gửi Owner và mọi Admin
-**And** `ipnKey` của BTC không đổi khi đổi key (BTC không phải dán lại URL IPN)
+**Then** credential mới thành hiện hành; mọi tài khoản của credential cũ bị hủy liên kết (gỡ mềm); Đơn đã có link giữ `orders.payout_account_id` cũ, nên IPN và Đối soát bù của các Đơn đó vẫn dùng credential cũ (AD-35)
+**And** credential cũ được giữ (secret vẫn mã hóa), không xóa; `ipnKey` của BTC không đổi (BTC không phải dán lại URL IPN)
+**And** audit ghi người đổi, thời điểm, 4 số cuối tài khoản mặc định cũ và mới; email cảnh báo gửi Owner và mọi Admin
 
 **Given** key mới sai hoặc Tingee lỗi
 **When** lưu
-**Then** tài khoản và key cũ vẫn là hiện hành, không gián đoạn bán Vé
+**Then** key và các tài khoản cũ vẫn là hiện hành, không gián đoạn bán Vé
+
+**Given** BTC có tài khoản nhận tiền
+**When** Owner bấm "Đặt làm mặc định" hoặc "Hủy liên kết" (Story 2.6)
+**Then** yêu cầu xác nhận lại như trên trước khi thực hiện; đổi tài khoản mặc định (kể cả do hủy tài khoản mặc định) gửi email cảnh báo Owner và mọi Admin kèm 4 số cuối cũ và mới
 
 **Given** BTC đã thu hồi key cũ trên Tingee mà còn Đơn `pending` dùng nó
 **When** Đối soát bù gọi Tingee bằng key cũ
 **Then** nhận `TINGEE_CREDENTIAL_INVALID` → Đơn đi luồng hết hạn và cảnh báo vận hành; IPN đã ký vẫn kiểm được bằng secret cũ; không chặn BTC bán bằng key mới
 
 **Given** Admin
-**When** mở thao tác đổi
+**When** mở các thao tác trên
 **Then** không thấy nút; API trả `FORBIDDEN_ROLE` (FR-4)
 
 ### Story 2.14: Chuyển quyền Owner
@@ -1015,7 +1034,8 @@ So that tôi yên tâm chuyển tiền.
 
 **Given** TX1 đã commit một Đơn có phí
 **When** server tạo link
-**Then** `tingee.createPaymentLink()` gọi `POST /v1/payment-gateway/create-link` ngoài transaction (timeout 5 giây), ký bằng credential của tài khoản nhận tiền hiện hành, `vaAccountNumber` = VA đã chọn (không gửi `merchantId`), `orderId` = mã Đơn, `amount` = `orders.total_amount`, `expireInMinute` = 15, `returnUrl` = `/orders/:code`; adapter ký timestamp UNIX ms (FR-16, AD-5, AD-6, AD-9)
+**Then** `tingee.createPaymentLink()` gọi `POST /v1/payment-gateway/create-link` ngoài transaction (timeout 5 giây), ký bằng credential của tài khoản nhận tiền mặc định, `vaAccountNumber` = VA của tài khoản mặc định (không gửi `merchantId`), `orderId` = mã Đơn, `amount` = `orders.total_amount`, `expireInMinute` = 15, `returnUrl` = `/orders/:code`; adapter ký timestamp UNIX ms (FR-16, AD-5, AD-6, AD-9)
+**And** BTC không còn tài khoản nhận tiền nào → không tạo link, Hạng vé có phí "Tạm ngừng bán" (FR-5)
 **And** TX2 lưu link bằng `WHERE status='pending' AND payment_link IS NULL`, chụp `orders.payout_account_id`, đặt `expires_at` = hạn link do Tingee trả; checkout URL chỉ trả cho trình duyệt sau khi TX2 commit; p95 dưới 2 giây (NFR-1)
 **And** nếu TX2 cập nhật 0 dòng (job hết hạn 60 giây đã thắng) thì không trả checkout URL; API trả `ORDER_EXPIRED` và web hiện màn Hết hạn của Story 3.7; link Tingee đã tạo tự hết hạn sau 15 phút, tiền nếu vẫn về sẽ đi nhánh tiền về muộn của Story 3.6
 
@@ -1085,7 +1105,7 @@ So that không có khoản tiền nào về tài khoản mà không ai biết.
 
 **Thứ tự kiểm cố định** cho mọi IPN `success` (và kết quả Đối soát bù ở Story 4.1), dừng ở nhánh đầu tiên khớp:
 1. `orderId` không theo định dạng mã Đơn Tickee → lưu event, trả `00`, không tạo `review_item`; `orderId` đúng định dạng nhưng không tồn tại → nhánh `unmatched` gắn BTC sở hữu `ipnKey`
-2. Đơn không thuộc BTC sở hữu `ipnKey`, hoặc `vaAccountNumber` khác tài khoản đã chụp (`orders.payout_account_id`) → nhánh Tài khoản lệch
+2. Đơn không thuộc BTC sở hữu `ipnKey` → nhánh Tài khoản lệch (IPN không có trường VA, AD-7)
 3. Sự kiện đã hủy → nhánh `event_cancelled`
 4. Đơn `paid`, `cancelled`, `refunded` hoặc `review` → nhánh `duplicate_payment`
 5. `paidAmount` ≠ `total_amount` → nhánh `amount_mismatch`
@@ -1126,7 +1146,7 @@ So that không có khoản tiền nào về tài khoản mà không ai biết.
 **And** `orderId` đúng định dạng nhưng không tồn tại thì lưu `payment_events` với `order_id` null, tạo `review_item` loại `unmatched` gắn BTC sở hữu `ipnKey` và log cảnh báo
 **And** mọi IPN đã qua chữ ký đều xác định được BTC theo `ipnKey`, nên `review_item` luôn có `organization_id`
 
-**Given** IPN cho Đơn không thuộc BTC sở hữu `ipnKey`, hoặc có `vaAccountNumber` khác tài khoản nhận tiền đã chụp ở `orders.payout_account_id`
+**Given** IPN cho Đơn không thuộc BTC sở hữu `ipnKey`
 **When** xử lý
 **Then** nhánh Tài khoản lệch: không chạy `markPaid` và không đổi trạng thái Đơn; lưu event; tạo `review_item` loại `unmatched` gắn BTC sở hữu `ipnKey` (không gắn Đơn của BTC khác); đẩy cảnh báo vận hành (AD-7)
 **And** vẫn trả `{"code":"00","message":"Success"}` để Tingee không gửi lại vô hạn; event đã lưu là bằng chứng để xử lý

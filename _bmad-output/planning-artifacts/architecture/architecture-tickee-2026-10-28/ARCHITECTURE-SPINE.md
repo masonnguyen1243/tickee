@@ -30,7 +30,7 @@ companions:
 | Mô-đun (`apps/api/src/modules/…`) | Sở hữu |
 | --- | --- |
 | `identity` | Tài khoản Tickee, session, OTP, TOTP và step-up, đồng ý NĐ 13, xóa tài khoản |
-| `organizer` | BTC, thành viên và vai trò, `tingee_credentials` (Client ID, Secret Token mã hóa, phiên bản khóa, `ipn_key`) và `payout_accounts` (tài khoản nhận tiền đã chọn: VA, ngân hàng, 4 số cuối, tên chủ tài khoản, credential dùng để chọn), Closed Beta, trạng thái dịch vụ thanh toán, ngưỡng cảnh báo Token, khóa BTC, kênh liên hệ BTC |
+| `organizer` | BTC, thành viên và vai trò, `tingee_credentials` (Client ID, Secret Token mã hóa, phiên bản khóa, `ipn_key`) và `payout_accounts` (các tài khoản nhận tiền đã chọn: VA, ngân hàng, 4 số cuối, tên chủ tài khoản, credential dùng để chọn, `is_default`, `retired_at`; mỗi VA hiện hành một lần, đúng một mặc định khi còn tài khoản), Closed Beta, trạng thái dịch vụ thanh toán, ngưỡng cảnh báo Token, khóa BTC, kênh liên hệ BTC |
 | `event` | Sự kiện, Hạng vé (giá, thời gian bán), giới hạn Vé/Đơn, form mua vé, trạng thái Sự kiện, `effective_end_at`, khóa Sự kiện |
 | `ordering` | Đơn, dòng Đơn, câu trả lời form (kèm nhãn), bản chụp người mua, mã Đơn, link Gateway, tồn kho `ticket_type_inventory`, sự kiện phễu mua |
 | `payment` | `payment_events`, Đối soát bù, hàng Cần xử lý (`review_items`) |
@@ -141,7 +141,7 @@ stateDiagram-v2
 
 - **Binds:** FR-5, FR-15, FR-16, FR-17, FR-18; `ordering`, `organizer`, `tingee`, `apps/web`
 - **Prevents:** Tự khớp QR tĩnh theo nội dung chuyển khoản; hai luồng thanh toán song song; popup bị Safari iOS chặn.
-- **Rule:** Mỗi lần thử của một Đơn có phí tạo link `POST /v1/payment-gateway/create-link` ký bằng credential của BTC (chụp vào Đơn), `vaAccountNumber` = tài khoản nhận tiền hiện hành của BTC (không gửi `merchantId`), `orderId` = mã Đơn (AD-20), `amount` = `orders.total_amount`, `expireInMinute` = 15, `returnUrl` = `/orders/:code` của Tickee. Web mở link bằng **redirect toàn trang**, không dùng popup `tingee.js`. Trang `/orders/:code` luôn lấy trạng thái qua REST và realtime (AD-17), không tin tham số trên URL. Không gọi API QR động/tĩnh, không tự sinh deep link. Giá Hạng vé có phí ≥ 2.000đ, kiểm khi lưu Hạng vé. Không cho chọn tài khoản VietinBank (`970415`) làm tài khoản nhận tiền (`BANK_NOT_SUPPORTED`) cho tới khi Tingee trả lời câu hỏi về VietinBank ở mục Open Questions.
+- **Rule:** Mỗi lần thử của một Đơn có phí tạo link `POST /v1/payment-gateway/create-link` ký bằng credential của BTC (chụp vào Đơn), `vaAccountNumber` = VA của tài khoản nhận tiền mặc định của BTC lúc tạo link, ký bằng credential của chính tài khoản đó (không gửi `merchantId`), `orderId` = mã Đơn (AD-20), `amount` = `orders.total_amount`, `expireInMinute` = 15, `returnUrl` = `/orders/:code` của Tickee. Web mở link bằng **redirect toàn trang**, không dùng popup `tingee.js`. Trang `/orders/:code` luôn lấy trạng thái qua REST và realtime (AD-17), không tin tham số trên URL. Không gọi API QR động/tĩnh, không tự sinh deep link. Giá Hạng vé có phí ≥ 2.000đ, kiểm khi lưu Hạng vé. Không cho chọn tài khoản VietinBank (`970415`) làm tài khoản nhận tiền (`BANK_NOT_SUPPORTED`) cho tới khi Tingee trả lời câu hỏi về VietinBank ở mục Open Questions.
 
 ### AD-7 — IPN: xác thực trên raw body, idempotent, xử lý mọi trường hợp biên
 
@@ -156,8 +156,10 @@ stateDiagram-v2
 | `success`, Sự kiện đã hủy | Đơn → `review` loại `event_cancelled`, vào danh sách hoàn tiền |
 | `success`, Đơn đã `paid`/`cancelled`/`refunded` | `review_item` loại `duplicate_payment` gắn Đơn |
 | `orderId` không tồn tại | không theo định dạng mã Đơn Tickee (AD-20) → lưu `payment_events`, trả `00`, không tạo `review_item` (BTC dùng Tingee cho việc khác); đúng định dạng → lưu `payment_events` với `order_id` null, `review_item` loại `unmatched` gắn BTC sở hữu `ipnKey`, cảnh báo |
-| Đơn của `orderId` không thuộc BTC sở hữu `ipnKey`, hoặc `vaAccountNumber` khác tài khoản nhận tiền chụp ở `orders.payout_account_id` | nhánh Tài khoản lệch: từ chối xử lý, lưu và cảnh báo |
+| Đơn của `orderId` không thuộc BTC sở hữu `ipnKey` | nhánh Tài khoản lệch: từ chối xử lý, lưu và cảnh báo |
 | `canceled`/`expired` | AD-4 (b) |
+
+IPN của Cổng thanh toán không có trường số tài khoản/VA, nên không kiểm được tiền vào VA nào; tài khoản nhận tiền của Đơn lấy từ `orders.payout_account_id`.
 
 `review_items` do `payment` sở hữu, có `status` `open` | `resolved` và `resolution` (`approved`, `rejected`, `refunded`, `dismissed`); mỗi Đơn tối đa một mục `open` cho mỗi loại. Duyệt tay gọi `markPaid(source=manual)`; kết quả khác `paid` thì mục vẫn `open` kèm lý do. Mục `duplicate_payment` và `unmatched` chỉ kết thúc bằng `refunded` hoặc `dismissed`, không phát Vé.
 
@@ -297,7 +299,7 @@ Client dùng một hook duy nhất: gọi REST khi kết nối, khi nhận tín 
   - 2FA (TOTP, Better Auth `twoFactor`, `allowPasswordless: true`) là tính năng mọi tài khoản tự bật/tắt (`users.two_factor_enabled`). Tài khoản đã bật: session mới (Google hoặc OTP email) chưa qua lớp hai (`sessions.step_up_at` rỗng); mọi request ngoài danh sách miễn trả `TOTP_REQUIRED` cho tới khi nhập TOTP hoặc mã khôi phục; hiệu lực hết session. Luật này nằm ở một guard toàn cục của `identity`, chạy ngay sau `SessionGuard`, không nằm trong `PermissionGuard`. Danh sách miễn khai báo một chỗ trong `packages/contracts`. Step-up do `identity` tự dựng vì Better Auth không hỏi TOTP khi đăng nhập bằng Google hay OTP email.
   - Tắt 2FA: endpoint riêng, đòi mã TOTP hoặc mã khôi phục hiện tại; email báo; audit.
   - Quản trị Tingee: bắt buộc đã bật 2FA; mọi request `/v1/admin/*` cần step-up trong session hiện tại.
-  - Xác nhận lại cho thao tác nhạy cảm (đổi tài khoản nhận tiền, chuyển quyền Owner): `identity` cấp một lần xác nhận ngắn hạn, dùng một lần (hiệu lực 5 phút), sau khi nhập TOTP (nếu đã bật 2FA) hoặc OTP email (nếu chưa). Thiếu → `REAUTH_REQUIRED`. Không dùng `step_up_at` cho việc này.
+  - Xác nhận lại cho thao tác nhạy cảm (đổi key Tingee, đổi tài khoản nhận tiền mặc định, hủy liên kết tài khoản nhận tiền, chuyển quyền Owner): `identity` cấp một lần xác nhận ngắn hạn, dùng một lần (hiệu lực 5 phút), sau khi nhập TOTP (nếu đã bật 2FA) hoặc OTP email (nếu chưa). Thiếu → `REAUTH_REQUIRED`. Không dùng `step_up_at` cho việc này.
   - Mã lỗi quyền: `NOT_A_MEMBER`, `FORBIDDEN_ROLE`, `TOTP_REQUIRED`, `REAUTH_REQUIRED`, `CHECKER_REVOKED`, `EVENT_ENDED`. `GET /v1/me/memberships` trả vai trò của người dùng ở từng BTC.
   - Quản trị Tingee: cờ `platform_admin`, mọi route `/v1/admin/*` giới hạn IP tại API (cấu hình trusted proxy để lấy đúng IP); giới hạn ở `/admin` của web chỉ là lớp phụ.
 
@@ -353,7 +355,7 @@ Client dùng một hook duy nhất: gọi REST khi kết nối, khi nhận tín 
 
 - **Binds:** FR-8, FR-9, FR-12, FR-27, FR-29, FR-31, NFR-8; `ordering`, `ticketing`
 - **Prevents:** Đổi giá làm IPN đúng bị xếp nhầm vào lệch tiền; người dùng sửa hồ sơ làm lệch dữ liệu BTC đã có; tra cứu SĐT trên toàn hệ thống.
-- **Rule:** TX1 ghi bất biến: `order_items.unit_price`, `orders.total_amount`, tên, SĐT (E.164), email người mua, và câu trả lời form kèm nhãn câu hỏi lúc đặt. `orders.payout_account_id` chụp lúc tạo link (trỏ tới tài khoản nhận tiền và credential đã dùng), nên đổi tài khoản nhận tiền không ảnh hưởng Đơn đang mở. Credential và tài khoản nhận tiền cũ không xóa khi đổi; secret cũ giữ (mã hóa) cho IPN và Đối soát bù của Đơn còn mở. `orders.paid_amount` và `paid_at` (thời điểm Tingee báo) ghi khi tiền về. `markPaid` ghi lên mỗi Vé: `seq` (1..N, `UNIQUE (order_id, seq)`), `order_ticket_count`, `holder_name`, `ticket_type_name`, `order_code`, `issued_at`. Màn BTC, CSV, Sheets, kết quả quét và tra tay chỉ đọc bản chụp này, trong `orgScope` và `event_id`. Tra tay khớp **đầy đủ** sau chuẩn hóa (E.164, email chữ thường), trả `{ticketId, holderName, ticketTypeName, seq, count, checkedIn}`, không log giá trị đã tra.
+- **Rule:** TX1 ghi bất biến: `order_items.unit_price`, `orders.total_amount`, tên, SĐT (E.164), email người mua, và câu trả lời form kèm nhãn câu hỏi lúc đặt. `orders.payout_account_id` chụp lúc tạo link (tài khoản mặc định lúc đó, trỏ tới credential đã dùng), nên đổi tài khoản mặc định hay hủy liên kết không ảnh hưởng Đơn đang mở. Credential và tài khoản nhận tiền cũ không xóa: hủy liên kết là gỡ mềm (`retired_at`); secret cũ giữ (mã hóa) cho IPN và Đối soát bù của Đơn còn mở. `orders.paid_amount` và `paid_at` (thời điểm Tingee báo) ghi khi tiền về. `markPaid` ghi lên mỗi Vé: `seq` (1..N, `UNIQUE (order_id, seq)`), `order_ticket_count`, `holder_name`, `ticket_type_name`, `order_code`, `issued_at`. Màn BTC, CSV, Sheets, kết quả quét và tra tay chỉ đọc bản chụp này, trong `orgScope` và `event_id`. Tra tay khớp **đầy đủ** sau chuẩn hóa (E.164, email chữ thường), trả `{ticketId, holderName, ticketTypeName, seq, count, checkedIn}`, không log giá trị đã tra.
 
 ### AD-36 — Vận hành: CI/CD, topology, job, sao lưu, secret
 
