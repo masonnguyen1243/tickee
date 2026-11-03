@@ -61,6 +61,11 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account');
     expect(guarded).toContain('DELETE /v1/orgs/:orgId/payout-account/:accountId');
     expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/:accountId/default');
+    // Story 2.7: Sự kiện (Owner và Admin).
+    expect(guarded).toContain('POST /v1/orgs/:orgId/events');
+    expect(guarded).toContain('GET /v1/orgs/:orgId/events');
+    expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId');
+    expect(guarded).toContain('PATCH /v1/orgs/:orgId/events/:eventId');
     expect(guarded).toContain('GET /v1/orgs/:orgId/test-owner-only');
     expect(guarded).toContain('POST /v1/orgs/:orgId/test-owner-only/items/:itemId');
   });
@@ -83,9 +88,27 @@ describe('cách ly BTC', () => {
   it('đối chứng: cùng route trên BTC A không trả NOT_A_MEMBER', async () => {
     for (const route of routes.filter((r) => r.permission)) {
       const res = await call(route, orgA, ownerA.cookie);
+      // Body `{}` và id ngẫu nhiên ra 4xx (400/404…), không bao giờ 500.
       expect(res.status, label(route)).toBeLessThan(500);
       const code = res.status === 403 ? ErrorResponse.parse(res.body).error.code : null;
       expect(code, label(route)).not.toBe('NOT_A_MEMBER');
+    }
+  });
+
+  it('route Sự kiện trên BTC A: body {} → 400, id ngẫu nhiên → 404 EVENT_NOT_FOUND', async () => {
+    const eventRoutes = routes.filter((r) => r.permission && r.path.startsWith('/v1/orgs/:orgId/events'));
+    expect(eventRoutes).toHaveLength(4);
+    for (const route of eventRoutes) {
+      const res = await call(route, orgA, ownerA.cookie);
+      const expected = route.path.endsWith(':eventId')
+        ? route.method === 'PATCH'
+          ? 400
+          : 404
+        : route.method === 'POST'
+          ? 400
+          : 200;
+      expect(res.status, label(route)).toBe(expected);
+      if (expected === 404) expect(ErrorResponse.parse(res.body).error.code, label(route)).toBe('EVENT_NOT_FOUND');
     }
   });
 });

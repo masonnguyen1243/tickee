@@ -75,6 +75,11 @@ export const ErrorCode = {
   MERCHANT_SUSPENDED: 'MERCHANT_SUSPENDED',
   /** Tingee tạm lỗi (timeout, lỗi mạng, lỗi hệ thống hoặc mã lỗi không lường trước): thử lại sau ít phút. */
   PAYMENT_PROVIDER_UNAVAILABLE: 'PAYMENT_PROVIDER_UNAVAILABLE',
+  /**
+   * Không tìm thấy Sự kiện: id lạ hoặc của BTC khác (route BTC); slug không tồn tại hoặc Sự kiện còn nháp (API công
+   * khai, cùng thông điệp để không lộ Sự kiện nháp có tồn tại).
+   */
+  EVENT_NOT_FOUND: 'EVENT_NOT_FOUND',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

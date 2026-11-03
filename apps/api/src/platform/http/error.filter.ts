@@ -35,6 +35,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   PAYOUT_ACCOUNT_ALREADY_LINKED: 'Tài khoản này đã được liên kết.',
   MERCHANT_SUSPENDED: 'Tài khoản Tingee của BTC đang tạm khóa.',
   PAYMENT_PROVIDER_UNAVAILABLE: 'Tingee tạm lỗi, thử lại sau ít phút.',
+  EVENT_NOT_FOUND: 'Không tìm thấy Sự kiện này.',
 };
 
 /** Lỗi DB chỉ log `{ type, code }` (message/params có thể mang email, token session); lỗi khác log nguyên để giữ stack. */
