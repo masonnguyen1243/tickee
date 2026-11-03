@@ -46,7 +46,11 @@ export type AuditAction =
    * Tài khoản mặc định của BTC đổi (đối tượng: tài khoản thành mặc định): Owner bấm "Đặt làm mặc định", hoặc hủy tài
    * khoản mặc định khiến tài khoản liên kết sớm nhất còn lại thành mặc định.
    */
-  | 'payout_account.default_changed';
+  | 'payout_account.default_changed'
+  /** Owner/Admin tạo Sự kiện nháp (Story 2.7). */
+  | 'event.created'
+  /** Owner/Admin sửa Sự kiện (`changedFields`: tên trường trong `EVENT_DRAFT_FIELDS` đã đổi, không ghi giá trị). */
+  | 'event.updated';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

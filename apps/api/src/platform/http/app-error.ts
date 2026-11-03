@@ -31,6 +31,7 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   PAYOUT_ACCOUNT_ALREADY_LINKED: 409,
   MERCHANT_SUSPENDED: 409,
   PAYMENT_PROVIDER_UNAVAILABLE: 503,
+  EVENT_NOT_FOUND: 404,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

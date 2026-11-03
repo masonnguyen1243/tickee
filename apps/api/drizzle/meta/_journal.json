@@ -71,6 +71,13 @@
       "when": 1793681316379,
       "tag": "0009_payout_accounts_multi",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793698020510,
+      "tag": "0010_events",
+      "breakpoints": true
     }
   ]
 }

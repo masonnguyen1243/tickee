@@ -1,5 +1,6 @@
 export * from './admin.js';
 export * from './errors.js';
+export * from './event.js';
 export * from './identity.js';
 export * from './jobs.js';
 export * from './money.js';

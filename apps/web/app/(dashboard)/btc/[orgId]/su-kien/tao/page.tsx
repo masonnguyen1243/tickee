@@ -1,15 +1,10 @@
 import type { Metadata } from 'next';
 
-import { ComingSoon } from '@/components/tickee/coming-soon';
+import { CreateEvent } from './create-event';
 
 export const metadata: Metadata = { title: 'Tạo Sự kiện · Tickee', robots: { index: false, follow: false } };
 
-/** Trang tạm "Sắp có": Story 2.7 thay bằng wizard tạo Sự kiện. */
+/** Wizard tạo Sự kiện nháp (Story 2.7): bước 1 "Thông tin"; bước 2–4 làm ở story sau. */
 export default function CreateEventPage() {
-  return (
-    <ComingSoon
-      title="Tạo Sự kiện"
-      description="Tạo Sự kiện nháp theo từng bước: thông tin, Hạng vé, form mua vé rồi mở bán."
-    />
-  );
+  return <CreateEvent />;
 }

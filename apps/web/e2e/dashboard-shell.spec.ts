@@ -390,13 +390,14 @@ test.describe('điện thoại < md', () => {
   });
 });
 
-test('danh sách Sự kiện trống: "Tạo Sự kiện" → trang tạm, "Sự kiện" vẫn đang chọn', async ({ page }) => {
+test('danh sách Sự kiện trống: "Tạo Sự kiện" → wizard bước 1, "Sự kiện" vẫn đang chọn', async ({ page }) => {
   await openDashboard(page);
   await expect(page.getByText('Chưa có Sự kiện nào.')).toBeVisible();
   await page.getByRole('link', { name: 'Tạo Sự kiện' }).click();
   await page.waitForURL(`**${base}/su-kien/tao`);
   await expect(page.getByRole('heading', { name: 'Tạo Sự kiện' })).toBeVisible();
-  await expect(page.getByText('Sắp có', { exact: true })).toBeVisible();
+  await expect(page.getByText('Bước 1/4 · Thông tin')).toBeVisible();
+  await expect(page.getByText('Sắp có', { exact: true })).toHaveCount(0);
   await expect(tabBar(page).getByRole('link', { name: 'Sự kiện' })).toHaveAttribute('aria-current', 'page');
 });
 

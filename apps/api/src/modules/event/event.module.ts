@@ -1,0 +1,14 @@
+import { Module } from '@nestjs/common';
+import { EVENT_SLUG_SUFFIX, EventService, randomSlugSuffix } from './event.service.js';
+import { EventsController } from './events.controller.js';
+import { PublicEventsController } from './public-events.controller.js';
+
+/**
+ * Sự kiện (FR-6). Cần `DbModule` ở gốc DI. Không đăng ký `PermissionGuard`: guard đó đã là guard toàn cục của
+ * `OrganizerModule`.
+ */
+@Module({
+  controllers: [EventsController, PublicEventsController],
+  providers: [EventService, { provide: EVENT_SLUG_SUFFIX, useValue: randomSlugSuffix }],
+})
+export class EventModule {}

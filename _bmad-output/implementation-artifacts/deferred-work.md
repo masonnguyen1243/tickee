@@ -189,3 +189,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-6-huy-lien-ket-va-nhieu-tai-khoan-nhan-tien.md`
   summary: Trang tài khoản nhận tiền đưa URL IPN `/v1/payments/tingee/ipn/{ipnKey}` cho BTC dán lên portal Tingee, trong khi route này chưa có (Story 3.5). Nếu portal gọi thử URL khi lưu, hoặc gửi IPN trước Epic 3, Tingee sẽ nhận 404.
   evidence: Review cả nhánh 03/11 (maybe-false; nếu đúng là medium). Cách chốt: lưu URL IPN trên portal UAT, xem Tingee có gọi thử không và có chặn lưu khi gọi lỗi không. Nếu có thì thêm route tạm trả thành công, hoặc ghi chú "chưa hoạt động".
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-tao-su-kien-nhap.md`
+  summary: Story 2.7-b — ảnh Sự kiện: hạ tầng object storage S3 (MinIO trong docker-compose, biến `S3_*`, `@aws-sdk/client-s3` + presigner), API cấp presigned PUT (JPEG/PNG/WebP ≤ 5 MB, key `orgs/{orgId}/events/{uuid}.{ext}`, chỉ nhận key đúng tiền tố BTC), cột `events.image_key`, ô ảnh ở wizard bước 1 và thumbnail của `event-card` (AD-22).
+  evidence: Spec 2.7 bản đầy đủ ~4.000 token; Mason chọn tách phần ảnh ra spec riêng (03/11/2026) vì đây là hạ tầng mới, review và merge riêng được mà không làm hỏng luồng tạo nháp.
