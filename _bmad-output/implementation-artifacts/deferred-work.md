@@ -193,3 +193,12 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-7-tao-su-kien-nhap.md`
   summary: Story 2.7-b — ảnh Sự kiện: hạ tầng object storage S3 (MinIO trong docker-compose, biến `S3_*`, `@aws-sdk/client-s3` + presigner), API cấp presigned PUT (JPEG/PNG/WebP ≤ 5 MB, key `orgs/{orgId}/events/{uuid}.{ext}`, chỉ nhận key đúng tiền tố BTC), cột `events.image_key`, ô ảnh ở wizard bước 1 và thumbnail của `event-card` (AD-22).
   evidence: Spec 2.7 bản đầy đủ ~4.000 token; Mason chọn tách phần ảnh ra spec riêng (03/11/2026) vì đây là hạ tầng mới, review và merge riêng được mà không làm hỏng luồng tạo nháp.
+
+## Deferred from: code review of spec-2-7-tao-su-kien-nhap.md (2026-11-05)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-tao-su-kien-nhap.md`
+  summary: `EventService.update` (`PATCH /v1/orgs/:orgId/events/:eventId`) và trang `su-kien/{id}/thiet-lap` không kiểm `status`/`locked_at`, nên Owner/Admin sửa được Sự kiện đã mở bán, ẩn, hủy hoặc bị Quản trị Tingee khóa. Cần guard + mã lỗi riêng (vd. `EVENT_NOT_EDITABLE`) và test, cùng lúc với Story 2.10/2.12 (lần đầu có đường chuyển khỏi `draft`) hoặc Epic 7 (đặt `locked_at`).
+  evidence: Review sau merge 05/11 (BH, EC, AA). Ở 2.7 chưa đạt tới được (triage #6), nhưng cảnh báo chỉ nằm trong spec 2.7, không có TODO trong code.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-tao-su-kien-nhap.md`
+  summary: `publicBySlug` chỉ loại `status = 'draft'`; Sự kiện bị khóa (`locked_at`), `hidden`, `cancelled` vẫn trả cho người ẩn danh. Story 2.11 cần chốt luật hiển thị (FR-7: `hidden` vẫn mở bằng link) và thêm test cho từng trạng thái.
+  evidence: Review sau merge 05/11 (BH, EC). Hiện chỉ test `published`.

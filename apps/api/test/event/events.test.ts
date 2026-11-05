@@ -150,6 +150,21 @@ describe('tạo Sự kiện nháp', () => {
     expect(suffixCalls).toBe(3);
   });
 
+  it('slug trùng cả 5 lần → dừng sau 5 lần sinh, 500, không ghi gì thêm', async () => {
+    const tag = randomUUID().slice(0, 8);
+    const name = `Đêm nhạc hết lượt ${tag}`;
+    suffixes = ['x7k2'];
+    await created(draft({ name }));
+    suffixes = Array(6).fill('x7k2');
+    suffixCalls = 0;
+    await create(draft({ name })).expect(500);
+    expect(suffixCalls).toBe(5);
+    const result = await h.db.orm.execute<{ count: number }>(
+      sql`SELECT count(*)::int AS count FROM events WHERE name = ${name}`,
+    );
+    expect(result.rows[0]?.count).toBe(1);
+  });
+
   it('tên không còn chữ/số → tiền tố su-kien', async () => {
     const event = await created(draft({ name: '🎉 !!!' }));
     expect(event.slug).toMatch(/^su-kien-[a-z0-9]{4}$/);

@@ -80,6 +80,8 @@ const inputOf = (values: Values) => ({
 });
 
 const YEAR_OUT_OF_RANGE = `Năm phải trong khoảng ${EVENT_YEAR_MIN}–${EVENT_YEAR_MAX}.`;
+/** Server từ chối mà không chỉ ra trường wizard biết: báo chung ở ô đầu tiên, không đoán nguyên nhân. */
+const UNMATCHED_SERVER_ERROR = 'Thông tin chưa hợp lệ. Kiểm tra lại các ô rồi lưu lại.';
 
 function messageFor(field: Field, values: Values): string {
   switch (field) {
@@ -171,7 +173,7 @@ export function EventWizard({ orgId, event, initialStep = 0 }: EventWizardProps)
       if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) router.replace(withReturnTo(LOGIN_PATH, pathname));
       else if (hasErrorCode(error, ErrorCode.VALIDATION_FAILED)) {
         const fieldErrors = fieldErrorsOf(serverIssuePaths(error), values);
-        setErrors(Object.keys(fieldErrors).length > 0 ? fieldErrors : { name: messageFor('name', values) });
+        setErrors(Object.keys(fieldErrors).length > 0 ? fieldErrors : { name: UNMATCHED_SERVER_ERROR });
         setStep(0);
       }
     },

@@ -96,6 +96,32 @@ context:
 - Given máy người dùng đặt múi giờ khác `+07`, when nhập 07:00 ngày 16/11/2026, then API nhận `2026-11-16T07:00:00+07:00` và danh sách hiện "Chủ nhật, 16/11/2026 · 07:00".
 - Given "Lưu nháp" ở bước 1 của Sự kiện mới, when lưu thành công, then URL chuyển sang `su-kien/{id}/thiet-lap`, nên bấm lưu lần nữa là `PATCH`, không tạo Sự kiện thứ hai.
 
+### Review Findings
+
+Code review sau merge (05/11/2026, diff `c819fba..aed6332`, 4 lớp: blind-hunter BH, edge-case-hunter EC, verification-gap VG, acceptance-auditor AA).
+
+- [x] [Review][Patch] Danh sách Sự kiện ở trang BTC hiện banner lỗi cả với lỗi đã xử lý nơi khác (`TOTP_REQUIRED`, `CONSENT_REQUIRED`, `UNAUTHENTICATED`, `NOT_A_MEMBER`); dùng `handledElsewhere` như `EventGate` (BH, low) [apps/web/app/(dashboard)/btc/[orgId]/organization-home.tsx:160]
+- [x] [Review][Patch] Server trả `VALIDATION_FAILED` với path lạ thì wizard báo "Tên Sự kiện tối đa 200 ký tự." dù tên hợp lệ, và không test nào chạy nhánh này; đổi fallback sang thông điệp chung ở ô tên + e2e trả path `unknown` (BH, VG, low) [apps/web/app/(dashboard)/btc/[orgId]/su-kien/event-wizard.tsx:174]
+- [x] [Review][Patch] Giờ input nhận phần lẻ giây nhưng `toEventIso` trả về bỏ phần lẻ, nên client API gửi lại giá trị vừa nhận sẽ ghi audit `event.updated` giả; thêm `precision: 0` cho giờ input (EC, AA, low) [packages/contracts/src/event.ts:58]
+- [x] [Review][Patch] Chưa có test cho slug trùng cả 5 lần (dừng sau 5 lần gọi, không lặp vô hạn) (VG) [apps/api/test/event/events.test.ts]
+- [x] [Review][Patch] e2e kiểm không cuộn ngang ở 375px, trong khi epic yêu cầu 320px (AA) [apps/web/e2e/event-draft.spec.ts:405]
+- [x] [Review][Defer] `PATCH` và trang `thiet-lap` không chặn Sự kiện không còn nháp hoặc bị khóa [apps/api/src/modules/event/event.service.ts:167] — deferred: chưa đạt tới được ở 2.7 (triage #6); phải có guard và mã lỗi khi 2.10/2.12 cho phép chuyển khỏi `draft` hoặc khi Epic 7 đặt `locked_at`
+- [x] [Review][Defer] API công khai theo slug chưa loại Sự kiện bị khóa và chưa có test cho `hidden`/`cancelled` [apps/api/src/modules/event/event.service.ts:212] — deferred: 2.11 chốt luật hiển thị (triage #7)
+
+**Rejected:**
+- Ghi đè khi hai người sửa cùng lúc (BH, EC) — low, đã reject ở triage #8; sửa phải thêm token phiên bản vào contract.
+- POST thành công nhưng mất response, "Thử lại" tạo nháp thứ hai (BH, EC) — low, Never của story loại `Idempotency-Key` (triage #20).
+- Bấm hai lần thật nhanh tạo hai POST (EC) — low; `submit` chặn khi `busy`, hai cú bấm của người cách nhau đủ để `isPending` cập nhật.
+- Danh sách không phân trang (BH, EC) — low, triage #11.
+- `?buoc=` và `?tab=` không theo bước/tab hiện tại (BH, EC) — low, triage #17, #21.
+- Hết 5 lần thử slug thì trả 500 (BH, EC) — low, triage #10 (test cho nhánh này ở mục Patch).
+- `formatEventDateTime` không chặn input sai (BH) — low, triage #18; dữ liệu đã qua schema.
+- Rời trang mất dữ liệu chưa lưu (BH) — low, triage #16.
+- Form giữ giá trị chưa trim sau khi lưu (BH) — low; chỉ khác khoảng trắng đầu cuối, sửa bằng ghi đè `values` sẽ mất chữ gõ trong lúc đang lưu.
+- `PATCH` body sai trả 400 trước khi kiểm Sự kiện có thuộc BTC (AA) — false; matrix cho phép 400/404 và không lộ dữ liệu.
+- "Quay lại"/"Tiếp" bị bỏ qua khi đang lưu (AA) — low; lưu xong trong chưa tới một giây và nút "Lưu" đã có spinner.
+- AC ghi "Chủ nhật, 16/11/2026" trong khi đó là thứ Hai (AA) — sửa phải sửa spec frozen; Mason tự sửa AC (đã ghi ở Implementation Notes, triage #23).
+
 ## Implementation Notes
 
 - **16/11/2026 là thứ Hai**, không phải Chủ nhật: ví dụ "Chủ nhật, 16/11/2026 · 07:00" ở AC và DESIGN chỉ minh họa định dạng. `formatEventDateTime` tính đúng lịch, nên danh sách hiện "Thứ hai, 16/11/2026 · 07:00"; test contracts kiểm thêm 15/11/2026 → "Chủ nhật".

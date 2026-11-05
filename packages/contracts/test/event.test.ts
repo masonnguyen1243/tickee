@@ -88,6 +88,9 @@ describe('EventDraftInput', () => {
     };
     expect(paths({ name: 'A' })).toEqual(expect.arrayContaining(['startsAt', 'endsAt']));
     expect(paths({ ...valid, startsAt: '2026-11-16T07:00' })).toEqual(['startsAt']);
+    // Phần lẻ của giây hoặc thiếu giây: API trả giờ theo giây, nhận vào cũng phải theo giây.
+    expect(paths({ ...valid, startsAt: '2026-11-16T07:00:00.500+07:00' })).toEqual(['startsAt']);
+    expect(paths({ ...valid, startsAt: '2026-11-16T07:00+07:00' })).toEqual(['startsAt']);
     expect(paths({ ...valid, endsAt: valid.startsAt })).toEqual(['endsAt']);
     expect(paths({ ...valid, endsAt: '2026-11-16T06:00:00+07:00' })).toEqual(['endsAt']);
     expect(paths({ ...valid, name: '   ' })).toEqual(['name']);

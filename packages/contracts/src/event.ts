@@ -52,10 +52,11 @@ export function isEventYearInRange(iso: string): boolean {
 }
 
 /**
- * Giờ Sự kiện nhận từ người dùng: ISO có offset, năm trong 2000–2100 (chặn năm 0–99, mà `Date.UTC` hiểu thành 19xx, và
- * năm 9999, mà `effectiveEndAt` đẩy sang năm 5 chữ số).
+ * Giờ Sự kiện nhận từ người dùng: ISO có offset, đủ giây và không có phần lẻ của giây (`toEventIso` trả về theo giây,
+ * nên client gửi lại giá trị vừa nhận không bị tính là đổi giờ), năm trong 2000–2100 (chặn năm 0–99, mà `Date.UTC` hiểu
+ * thành 19xx, và năm 9999, mà `effectiveEndAt` đẩy sang năm 5 chữ số).
  */
-const EventInputDateTime = EventDateTime.refine(isEventYearInRange, {
+const EventInputDateTime = z.iso.datetime({ offset: true, precision: 0 }).refine(isEventYearInRange, {
   message: `năm phải trong khoảng ${EVENT_YEAR_MIN}–${EVENT_YEAR_MAX}`,
 });
 
