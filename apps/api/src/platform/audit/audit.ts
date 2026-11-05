@@ -57,7 +57,18 @@ export type AuditAction =
   /** Owner/Admin sửa Hạng vé (`changedFields`: tên trường trong `TICKET_TYPE_FIELDS` đã đổi, không ghi giá trị). */
   | 'ticket_type.updated'
   /** Owner/Admin xóa Hạng vé chưa bán và chưa giữ chỗ (kèm dòng tồn kho). */
-  | 'ticket_type.deleted';
+  | 'ticket_type.deleted'
+  /** Owner/Admin thêm câu hỏi riêng vào form mua của Sự kiện (Story 2.9; đối tượng: câu hỏi; không ghi nhãn). */
+  | 'event_form.question_added'
+  /**
+   * Owner/Admin sửa câu hỏi riêng (`changedFields`: tên trường trong `FORM_QUESTION_FIELDS` đã đổi — `label`, `kind`,
+   * `required`, `options`; không ghi nhãn hay phương án).
+   */
+  | 'event_form.question_updated'
+  /** Owner/Admin xóa câu hỏi riêng (Đơn đã đặt vẫn giữ câu trả lời đã chụp). */
+  | 'event_form.question_removed'
+  /** Owner/Admin đổi thứ tự câu hỏi riêng (đối tượng: Sự kiện). */
+  | 'event_form.reordered';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

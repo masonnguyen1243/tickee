@@ -36,6 +36,8 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   CAPACITY_BELOW_COMMITTED: 409,
   FREE_EVENT_CAPACITY_EXCEEDED: 409,
   TICKET_TYPE_IN_USE: 409,
+  FORM_QUESTION_NOT_FOUND: 404,
+  FORM_QUESTION_LIMIT_REACHED: 409,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

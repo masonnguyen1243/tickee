@@ -34,12 +34,14 @@ import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
 import { createEvent, eventQueryKey, eventsQueryKey, updateEvent } from '@/lib/event/api';
 
 import { handledElsewhere } from './handled-elsewhere';
+import { PurchaseFormEditor, PurchaseFormReview } from './purchase-form-editor';
 import { TicketTypesEditor } from './ticket-types-editor';
 
 /*
  * Wizard tạo/thiết lập Sự kiện (Story 2.7, UX-DR wizard): 4 bước Thông tin → Hạng vé → Form mua → Xem trước & mở bán.
- * Bước 1 là thông tin Sự kiện; bước 2 là trình sửa Hạng vé (Story 2.8, dùng chung với tab "Hạng vé"); bước 3–4 hiện
- * "Sắp có". "Lưu nháp" có ở mọi bước; "Tiếp" lưu rồi mới sang bước sau;
+ * Bước 1 là thông tin Sự kiện; bước 2 là trình sửa Hạng vé (Story 2.8, dùng chung với tab "Hạng vé"); bước 3 là trình
+ * sửa form mua (Story 2.9, dùng chung với tab "Form mua"); bước 4 hiện mục "Form mua" (cùng phần xem trước) và phần mở
+ * bán còn "Sắp có" (Story 2.10). "Lưu nháp" có ở mọi bước; "Tiếp" lưu rồi mới sang bước sau;
  * "Quay lại" giữ nguyên dữ liệu đã nhập. Lưu lần đầu (POST) xong thì URL chuyển sang `su-kien/{id}/thiet-lap`, nên mọi
  * lần lưu sau là PATCH, không tạo Sự kiện thứ hai. Giờ nhập luôn hiểu theo giờ Việt Nam (+07:00), không theo máy.
  */
@@ -47,11 +49,8 @@ import { TicketTypesEditor } from './ticket-types-editor';
 export const WIZARD_STEPS = ['Thông tin', 'Hạng vé', 'Form mua', 'Xem trước & mở bán'] as const;
 const LAST_STEP = WIZARD_STEPS.length - 1;
 
-/** Nội dung tạm của bước 3–4 (story sau làm). */
-const COMING_SOON: Readonly<Record<number, string>> = {
-  2: 'Chọn thông tin hỏi Người mua khi đặt vé.',
-  3: 'Xem lại Sự kiện, kiểm tra điều kiện rồi mở bán.',
-};
+/** Nội dung tạm của phần điều kiện và mở bán ở bước 4 (Story 2.10). */
+const PUBLISH_COMING_SOON = 'Kiểm tra điều kiện rồi mở bán Sự kiện.';
 
 type Field = 'name' | 'startsAt' | 'endsAt' | 'venue' | 'description' | 'refundPolicy';
 /** Giá trị ô nhập; giờ là giá trị `datetime-local` (`2026-11-16T07:00`) theo giờ Việt Nam. */
@@ -295,14 +294,19 @@ export function EventWizard({ orgId, event, initialStep = 0 }: EventWizardProps)
         </div>
       ) : step === 1 && event ? (
         <TicketTypesEditor orgId={orgId} event={event} />
-      ) : (
-        <EmptyState
-          icon={Construction}
-          title="Sắp có"
-          description={COMING_SOON[step] ?? ''}
-          className="rounded-lg bg-card px-card-padding shadow-card"
-        />
-      )}
+      ) : step === 2 && event ? (
+        <PurchaseFormEditor orgId={orgId} eventId={event.id} />
+      ) : step === 3 && event ? (
+        <div className="flex min-w-0 flex-col gap-section">
+          <PurchaseFormReview orgId={orgId} eventId={event.id} />
+          <EmptyState
+            icon={Construction}
+            title="Sắp có"
+            description={PUBLISH_COMING_SOON}
+            className="rounded-lg bg-card px-card-padding shadow-card"
+          />
+        </div>
+      ) : null}
 
       {failure ? (
         <StatusBanner

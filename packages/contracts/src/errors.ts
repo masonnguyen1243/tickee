@@ -94,6 +94,12 @@ export const ErrorCode = {
   FREE_EVENT_CAPACITY_EXCEEDED: 'FREE_EVENT_CAPACITY_EXCEEDED',
   /** Hạng vé đã có Vé bán ra hoặc đang Giữ chỗ (đã bán + đang giữ chỗ > 0): không xóa được. */
   TICKET_TYPE_IN_USE: 'TICKET_TYPE_IN_USE',
+  /** Không tìm thấy câu hỏi của form mua: id lạ, sai dạng hoặc thuộc Sự kiện khác. */
+  FORM_QUESTION_NOT_FOUND: 'FORM_QUESTION_NOT_FOUND',
+  /**
+   * Sự kiện đã có đủ `FORM_QUESTIONS_MAX` câu hỏi riêng (`details`: `FormQuestionLimitReachedDetails`). Không lưu gì.
+   */
+  FORM_QUESTION_LIMIT_REACHED: 'FORM_QUESTION_LIMIT_REACHED',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
