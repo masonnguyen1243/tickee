@@ -7,3 +7,4 @@ export * from './money.js';
 export * from './organizer.js';
 export * from './pii.js';
 export * from './reporting.js';
+export * from './ticket-type.js';

@@ -80,6 +80,20 @@ export const ErrorCode = {
    * khai, cùng thông điệp để không lộ Sự kiện nháp có tồn tại).
    */
   EVENT_NOT_FOUND: 'EVENT_NOT_FOUND',
+  /** Không tìm thấy Hạng vé: id lạ, sai dạng hoặc thuộc Sự kiện khác. */
+  TICKET_TYPE_NOT_FOUND: 'TICKET_TYPE_NOT_FOUND',
+  /**
+   * Số suất mới nhỏ hơn số Vé đã bán + đang Giữ chỗ của Hạng vé. `details.minimum` = đã bán + đang giữ chỗ
+   * (`CapacityBelowCommittedDetails`). Không lưu gì.
+   */
+  CAPACITY_BELOW_COMMITTED: 'CAPACITY_BELOW_COMMITTED',
+  /**
+   * Sau thay đổi, mọi Hạng vé của Sự kiện đều 0đ và tổng số suất vượt trần Vé của Sự kiện miễn phí
+   * (`FREE_EVENT_TICKET_CAP`, `details`: `FreeEventCapacityExceededDetails`). Không lưu gì.
+   */
+  FREE_EVENT_CAPACITY_EXCEEDED: 'FREE_EVENT_CAPACITY_EXCEEDED',
+  /** Hạng vé đã có Vé bán ra hoặc đang Giữ chỗ (đã bán + đang giữ chỗ > 0): không xóa được. */
+  TICKET_TYPE_IN_USE: 'TICKET_TYPE_IN_USE',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

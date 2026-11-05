@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post } from '@nestjs/common';
-import { EventDraftInput, Permission, type EventDetail, type EventList } from '@tickee/contracts';
+import { EventDraftInput, EventOrderLimitInput, Permission, type EventDetail, type EventList } from '@tickee/contracts';
 import { Access, RequirePermission, type AccessContext } from '../../platform/access/index.js';
 import { parseRequest } from '../../platform/http/index.js';
 import { EventService } from './event.service.js';
@@ -37,5 +37,16 @@ export class EventsController {
   @RequirePermission(Permission.EVENTS_MANAGE)
   update(@Access() ctx: AccessContext, @Param('eventId') eventId: string, @Body() body: unknown): Promise<EventDetail> {
     return this.events.update(ctx, eventId, parseRequest(EventDraftInput, body));
+  }
+
+  /** Đổi giới hạn Vé/Đơn của Sự kiện (Story 2.8): 1–50, mặc định 10. */
+  @Patch(':eventId/order-limit')
+  @RequirePermission(Permission.EVENTS_MANAGE)
+  updateOrderLimit(
+    @Access() ctx: AccessContext,
+    @Param('eventId') eventId: string,
+    @Body() body: unknown,
+  ): Promise<EventDetail> {
+    return this.events.updateOrderLimit(ctx, eventId, parseRequest(EventOrderLimitInput, body));
   }
 }

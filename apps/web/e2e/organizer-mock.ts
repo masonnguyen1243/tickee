@@ -5,7 +5,7 @@ import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
 /*
  * API BTC giả bằng `page.route`: `/v1/orgs`, `/v1/orgs/**`, `/v1/org-invitations/**` và `/v1/me/memberships`
  * (xem `identity-mock.ts`). Mặc định `GET /me/memberships`, `GET /orgs/:id/notices` (dashboard luôn tải dải banner) và
- * `GET /orgs/:id/events` (trang đích luôn tải danh sách Sự kiện) → `[]`; lời gọi không có handler → 500.
+ * `GET /orgs/:id/events` (trang đích luôn tải danh sách Sự kiện), `GET /orgs/:id/events/:eventId/ticket-types` → `[]`; lời gọi không có handler → 500.
  */
 
 export const ORG_ID = '019a3b2c-5678-7abc-8def-0123456789ab';
@@ -14,6 +14,7 @@ export const OTHER_ORG_ID = '019a3b2c-9999-7abc-8def-0123456789ab';
 const ORGANIZER_PATH = /\/v1\/(orgs(\/|$)|org-invitations\/|me\/memberships$)/;
 const NOTICES_KEY = /^GET \/orgs\/[^/]+\/notices$/;
 const EVENTS_KEY = /^GET \/orgs\/[^/]+\/events$/;
+const TICKET_TYPES_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/ticket-types$/;
 
 /** Handler mặc định khi spec không khai báo. */
 function defaultHandler(key: string): Handler | undefined {
@@ -21,6 +22,8 @@ function defaultHandler(key: string): Handler | undefined {
   if (NOTICES_KEY.test(key)) return () => ({ status: 200, body: [] });
   // Trang đích BTC luôn tải danh sách Sự kiện (Story 2.7): mặc định chưa có Sự kiện nào.
   if (EVENTS_KEY.test(key)) return () => ({ status: 200, body: [] });
+  // Wizard bước 2 và tab "Hạng vé" luôn tải Hạng vé (Story 2.8): mặc định chưa có Hạng vé nào.
+  if (TICKET_TYPES_KEY.test(key)) return () => ({ status: 200, body: [] });
   return undefined;
 }
 

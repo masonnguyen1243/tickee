@@ -34,10 +34,12 @@ import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
 import { createEvent, eventQueryKey, eventsQueryKey, updateEvent } from '@/lib/event/api';
 
 import { handledElsewhere } from './handled-elsewhere';
+import { TicketTypesEditor } from './ticket-types-editor';
 
 /*
  * Wizard tạo/thiết lập Sự kiện (Story 2.7, UX-DR wizard): 4 bước Thông tin → Hạng vé → Form mua → Xem trước & mở bán.
- * Story này chỉ làm thật bước 1; bước 2–4 hiện "Sắp có". "Lưu nháp" có ở mọi bước; "Tiếp" lưu rồi mới sang bước sau;
+ * Bước 1 là thông tin Sự kiện; bước 2 là trình sửa Hạng vé (Story 2.8, dùng chung với tab "Hạng vé"); bước 3–4 hiện
+ * "Sắp có". "Lưu nháp" có ở mọi bước; "Tiếp" lưu rồi mới sang bước sau;
  * "Quay lại" giữ nguyên dữ liệu đã nhập. Lưu lần đầu (POST) xong thì URL chuyển sang `su-kien/{id}/thiet-lap`, nên mọi
  * lần lưu sau là PATCH, không tạo Sự kiện thứ hai. Giờ nhập luôn hiểu theo giờ Việt Nam (+07:00), không theo máy.
  */
@@ -45,9 +47,8 @@ import { handledElsewhere } from './handled-elsewhere';
 export const WIZARD_STEPS = ['Thông tin', 'Hạng vé', 'Form mua', 'Xem trước & mở bán'] as const;
 const LAST_STEP = WIZARD_STEPS.length - 1;
 
-/** Nội dung tạm của bước 2–4 (story sau làm). */
+/** Nội dung tạm của bước 3–4 (story sau làm). */
 const COMING_SOON: Readonly<Record<number, string>> = {
-  1: 'Thêm Hạng vé, giá và số suất cho Sự kiện.',
   2: 'Chọn thông tin hỏi Người mua khi đặt vé.',
   3: 'Xem lại Sự kiện, kiểm tra điều kiện rồi mở bán.',
 };
@@ -292,6 +293,8 @@ export function EventWizard({ orgId, event, initialStep = 0 }: EventWizardProps)
             <FieldError id={refundPolicy.errorId} message={errors.refundPolicy} />
           </div>
         </div>
+      ) : step === 1 && event ? (
+        <TicketTypesEditor orgId={orgId} event={event} />
       ) : (
         <EmptyState
           icon={Construction}

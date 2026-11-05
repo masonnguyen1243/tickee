@@ -32,6 +32,10 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   MERCHANT_SUSPENDED: 409,
   PAYMENT_PROVIDER_UNAVAILABLE: 503,
   EVENT_NOT_FOUND: 404,
+  TICKET_TYPE_NOT_FOUND: 404,
+  CAPACITY_BELOW_COMMITTED: 409,
+  FREE_EVENT_CAPACITY_EXCEEDED: 409,
+  TICKET_TYPE_IN_USE: 409,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

@@ -1,5 +1,6 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
+import { FlowsModule } from './flows/index.js';
 import { AdminModule } from './modules/admin/index.js';
 import { EventModule } from './modules/event/index.js';
 import { IdentityModule } from './modules/identity/index.js';
@@ -38,6 +39,8 @@ export class ApiModule {
         ReportingModule,
         // Sự kiện (Story 2.7): route BTC dùng `PermissionGuard` toàn cục của OrganizerModule.
         EventModule,
+        // Hạng vé và tồn kho (Story 2.8): ghi cả `event` lẫn `ordering` nên controller ở flows.
+        FlowsModule,
         // Khu `/v1/admin/*`: guard Quản trị Tingee (cờ `platform_admin`, 2FA, step-up) do IdentityModule đăng ký.
         AdminModule,
       ],

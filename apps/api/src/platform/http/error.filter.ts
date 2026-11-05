@@ -1,5 +1,5 @@
 import { ArgumentsHost, Catch, HttpException, Logger, type ExceptionFilter } from '@nestjs/common';
-import { ErrorCode, type ErrorResponse } from '@tickee/contracts';
+import { ErrorCode, FREE_EVENT_TICKET_CAP, type ErrorResponse } from '@tickee/contracts';
 import type { Response } from 'express';
 import { dbErrorSummary, isDatabaseError } from '../logging/index.js';
 import { AppError } from './app-error.js';
@@ -36,6 +36,10 @@ const MESSAGES: Record<ErrorCode, string> = {
   MERCHANT_SUSPENDED: 'Tài khoản Tingee của BTC đang tạm khóa.',
   PAYMENT_PROVIDER_UNAVAILABLE: 'Tingee tạm lỗi, thử lại sau ít phút.',
   EVENT_NOT_FOUND: 'Không tìm thấy Sự kiện này.',
+  TICKET_TYPE_NOT_FOUND: 'Không tìm thấy Hạng vé này.',
+  CAPACITY_BELOW_COMMITTED: 'Số suất không được nhỏ hơn số đã bán và đang giữ chỗ.',
+  FREE_EVENT_CAPACITY_EXCEEDED: `Sự kiện miễn phí tối đa ${FREE_EVENT_TICKET_CAP} Vé.`,
+  TICKET_TYPE_IN_USE: 'Hạng vé đã có người mua hoặc đang giữ chỗ, không xóa được.',
 };
 
 /** Lỗi DB chỉ log `{ type, code }` (message/params có thể mang email, token session); lỗi khác log nguyên để giữ stack. */

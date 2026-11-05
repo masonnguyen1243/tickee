@@ -56,12 +56,12 @@ export function isEventYearInRange(iso: string): boolean {
  * nên client gửi lại giá trị vừa nhận không bị tính là đổi giờ), năm trong 2000–2100 (chặn năm 0–99, mà `Date.UTC` hiểu
  * thành 19xx, và năm 9999, mà `effectiveEndAt` đẩy sang năm 5 chữ số).
  */
-const EventInputDateTime = z.iso.datetime({ offset: true, precision: 0 }).refine(isEventYearInRange, {
+export const EventInputDateTime = z.iso.datetime({ offset: true, precision: 0 }).refine(isEventYearInRange, {
   message: `năm phải trong khoảng ${EVENT_YEAR_MIN}–${EVENT_YEAR_MAX}`,
 });
 
 /** Ô văn bản tùy chọn: thiếu, `null` hoặc chỉ khoảng trắng → `null`; còn lại bỏ khoảng trắng hai đầu. */
-const optionalText = (max: number) =>
+export const optionalText = (max: number) =>
   z
     .string()
     .trim()
@@ -108,6 +108,11 @@ export type EventSummary = z.infer<typeof EventSummary>;
 export const EventList = z.array(EventSummary);
 export type EventList = z.infer<typeof EventList>;
 
+/** Giới hạn Vé/Đơn của Sự kiện (Story 2.8): mặc định 10, trong khoảng 1–50. */
+export const MAX_TICKETS_PER_ORDER_DEFAULT = 10;
+export const MAX_TICKETS_PER_ORDER_MIN = 1;
+export const MAX_TICKETS_PER_ORDER_MAX = 50;
+
 /** `GET`/`POST`/`PATCH /v1/orgs/:orgId/events[/:eventId]`. */
 export const EventDetail = EventSummary.extend({
   organizationId: z.uuid(),
@@ -116,6 +121,8 @@ export const EventDetail = EventSummary.extend({
   venue: z.string().nullable(),
   description: z.string().nullable(),
   refundPolicy: z.string().nullable(),
+  /** Số Vé tối đa trong một Đơn (Story 2.8). */
+  maxTicketsPerOrder: z.number().int(),
   createdAt: EventDateTime,
   updatedAt: EventDateTime,
 });
