@@ -25,6 +25,7 @@ import { fetchMe, ME_QUERY_KEY } from '@/lib/auth/api';
 import { eventsQueryKey, fetchEvents } from '@/lib/event/api';
 
 import { EVENT_STATUS_BADGE } from './su-kien/event-status';
+import { handledElsewhere } from './su-kien/handled-elsewhere';
 
 /** Khóa `localStorage` ghi nhớ Owner đã đóng thẻ gợi ý bật 2FA, theo từng tài khoản trên trình duyệt này. */
 const hintDismissedKey = (userId: string) => `tickee:goi-y-2fa:da-dong:${userId}`;
@@ -157,7 +158,8 @@ function EventListSection() {
         }
       />
     );
-  } else if (events.isError) {
+  } else if (events.isError && !handledElsewhere(events.error)) {
+    // Lỗi do nơi khác xử lý (2FA, đồng ý, 401, bị xóa khỏi BTC) giữ khung chờ, không báo lại ở đây.
     body = (
       <StatusBanner
         tone="danger"

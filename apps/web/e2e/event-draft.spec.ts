@@ -361,6 +361,25 @@ test('api trả 400 VALIDATION_FAILED cho lần lưu hợp lệ phía web → l�
   expect(writes(calls).map((c) => c.method)).toEqual(['PATCH']);
 });
 
+test('api trả 400 VALIDATION_FAILED với path wizard không biết → báo chung tại ô tên, quay về bước 1', async ({ page }) => {
+  let rejectPatch = false;
+  const patchKey = `PATCH /orgs/${ORG_ID}/events/${eventId(0)}`;
+  await openApi(page, [seeded()], (key) =>
+    rejectPatch && key === patchKey
+      ? apiError(400, 'VALIDATION_FAILED', { issues: [{ path: 'unknown', code: 'custom' }] })
+      : undefined,
+  );
+  await page.goto(`${base}/su-kien/${eventId(0)}/thiet-lap?buoc=2`);
+  await expect(page.getByText('Bước 2/4 · Hạng vé')).toBeVisible();
+  rejectPatch = true;
+  await next(page).click();
+
+  await expect(page.getByText('Bước 1/4 · Thông tin')).toBeVisible();
+  await expect(page.getByText('Thông tin chưa hợp lệ. Kiểm tra lại các ô rồi lưu lại.')).toBeVisible();
+  await expect(nameInput(page)).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByText(/Tên Sự kiện tối đa/)).toHaveCount(0);
+});
+
 test('lưu lỗi 5xx: banner "Chưa lưu được Sự kiện"; "Thử lại" gửi đúng một POST nữa rồi sang bước 2', async ({ page }) => {
   const calls = await openApi(page, [], failFirst(`POST /orgs/${ORG_ID}/events`));
   await page.goto(`${base}/su-kien/tao`);
@@ -401,8 +420,8 @@ test('tải lỗi 5xx: danh sách và Sự kiện báo "Chưa tải được…"
   await expect(page.locator('[data-slot="event-overview"]')).toBeVisible();
 });
 
-test('375px không cuộn ngang: wizard, danh sách, khung tab', async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 667 });
+test('320px không cuộn ngang: wizard, danh sách, khung tab', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
   const long = detail(0, {
     ...seeded(),
     name: 'Giải chạy bán marathon quốc tế vì cộng đồng phường Võ Thị Sáu quận Ba thành phố Hồ Chí Minh 2026',
