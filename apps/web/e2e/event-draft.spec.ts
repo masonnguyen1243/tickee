@@ -5,7 +5,8 @@ import { apiError, me, mockIdentityApi, type Call, type Handler, type Reply } fr
 import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
 
 /*
- * Sự kiện nháp (Story 2.7): wizard tạo/thiết lập (bước 1 "Thông tin"; bước 2–4 "Sắp có"), danh sách `event-card` ở
+ * Sự kiện nháp (Story 2.7): wizard tạo/thiết lập (bước 1 "Thông tin"; bước 2 Hạng vé — xem `ticket-types.spec.ts`;
+ * bước 3–4 "Sắp có"), danh sách `event-card` ở
  * `/btc/{id}`, khung tab của Sự kiện. API giả có trạng thái như api thật: POST tạo nháp, PATCH sửa, GET đọc. Máy chạy
  * test đặt múi giờ khác +07 (New York): giờ nhập vẫn hiểu theo giờ Việt Nam.
  */
@@ -32,6 +33,7 @@ type EventDetail = EventBody & {
   slug: string;
   status: 'draft';
   effectiveEndAt: string;
+  maxTicketsPerOrder: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -44,6 +46,7 @@ const detail = (n: number, body: EventBody): EventDetail => ({
   ...body,
   // Không kiểm ở web: api tính.
   effectiveEndAt: body.endsAt,
+  maxTicketsPerOrder: 10,
   createdAt: '2026-11-03T03:00:00+07:00',
   updatedAt: '2026-11-03T03:00:00+07:00',
 });
@@ -248,7 +251,7 @@ test('"Tiếp" lưu rồi sang bước 2; "Quay lại" giữ nguyên mọi ô; b
 
   await page.waitForURL(`**${base}/su-kien/${eventId(0)}/thiet-lap?buoc=2`);
   await expect(page.getByText('Bước 2/4 · Hạng vé')).toBeVisible();
-  await expect(page.getByText('Sắp có', { exact: true })).toBeVisible();
+  await expect(page.getByText('Chưa có Hạng vé nào.')).toBeVisible();
   await expect(saveDraft(page)).toBeVisible();
 
   await page.getByRole('button', { name: 'Quay lại' }).click();
@@ -281,7 +284,7 @@ test('"Tiếp" lưu rồi sang bước 2; "Quay lại" giữ nguyên mọi ô; b
   expect(writes(calls)[1]?.body).toMatchObject({ name: 'Giải chạy Hà Nội mùa đông', refundPolicy: 'Hoàn 100% trước 7 ngày.' });
 });
 
-test('bấm cả hàng event-card → tab Tổng quan; tab khác "Sắp có" (?tab=); "Tiếp tục thiết lập" mở lại wizard', async ({
+test('bấm cả hàng event-card → tab Tổng quan; tab Hạng vé (?tab=); "Tiếp tục thiết lập" mở lại wizard', async ({
   page,
 }) => {
   await openApi(page, [seeded()]);
@@ -306,7 +309,7 @@ test('bấm cả hàng event-card → tab Tổng quan; tab khác "Sắp có" (?t
 
   await page.getByRole('tab', { name: 'Hạng vé' }).click();
   await page.waitForURL(`**${base}/su-kien/${eventId(0)}?tab=hang-ve`);
-  await expect(page.getByText('Sắp có', { exact: true })).toBeVisible();
+  await expect(page.getByText('Chưa có Hạng vé nào.')).toBeVisible();
   await page.reload();
   await expect(page.getByRole('tab', { name: 'Hạng vé' })).toHaveAttribute('aria-selected', 'true');
   await page.getByRole('tab', { name: 'Tổng quan' }).click();

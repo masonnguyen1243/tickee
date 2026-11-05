@@ -12,6 +12,7 @@ import {
   type EventDetail,
   type EventDraftField,
   type EventList,
+  type EventOrderLimitInput,
   type PublicEvent,
 } from '@tickee/contracts';
 import { and, desc, eq, ne } from 'drizzle-orm';
@@ -41,9 +42,9 @@ export const randomSlugSuffix: SlugSuffixGenerator = () =>
 /** Unique index của slug; trùng thì sinh lại (không SELECT kiểm trước: hai request có thể chạy song song). */
 const SLUG_KEY = 'events_slug_key';
 const SLUG_ATTEMPTS = 5;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const notFound = () => new AppError(ErrorCode.EVENT_NOT_FOUND, 'Không tìm thấy Sự kiện này.');
+export const notFound = () => new AppError(ErrorCode.EVENT_NOT_FOUND, 'Không tìm thấy Sự kiện này.');
 
 /** Vi phạm unique index `constraint` (ở chính lỗi hoặc một tầng `cause` của Drizzle). */
 function isUniqueViolation(err: unknown, constraint: string): boolean {
@@ -70,6 +71,7 @@ const detailOf = (row: EventRow): EventDetail => ({
   venue: row.venue,
   description: row.description,
   refundPolicy: row.refundPolicy,
+  maxTicketsPerOrder: row.maxTicketsPerOrder,
   createdAt: toEventIso(row.createdAt),
   updatedAt: toEventIso(row.updatedAt),
 });
@@ -188,6 +190,38 @@ export class EventService {
         action: 'event.updated',
         target: { type: 'event', id: updated.id },
         changedFields,
+      });
+      return updated;
+    });
+    return detailOf(row);
+  }
+
+  /**
+   * Đổi giới hạn Vé/Đơn (Story 2.8). Khóa dòng Sự kiện như mọi thao tác Hạng vé; audit `event.updated` với
+   * `changedFields: ['maxTicketsPerOrder']` chỉ khi giá trị đổi.
+   */
+  async updateOrderLimit(ctx: AccessContext, eventId: string, input: EventOrderLimitInput): Promise<EventDetail> {
+    if (!UUID.test(eventId)) throw notFound();
+    const row = await this.db.transaction(async (tx) => {
+      const [current] = await tx
+        .select()
+        .from(events)
+        .where(and(orgScope(ctx)(events), eq(events.id, eventId)))
+        .for('update');
+      if (!current) throw notFound();
+      if (current.maxTicketsPerOrder === input.maxTicketsPerOrder) return current;
+      const [updated] = await tx
+        .update(events)
+        .set({ maxTicketsPerOrder: input.maxTicketsPerOrder })
+        .where(and(orgScope(ctx)(events), eq(events.id, eventId)))
+        .returning();
+      if (!updated) throw notFound();
+      await audit.record(tx, {
+        actorUserId: ctx.userId,
+        organizationId: ctx.organizationId,
+        action: 'event.updated',
+        target: { type: 'event', id: updated.id },
+        changedFields: ['maxTicketsPerOrder'],
       });
       return updated;
     });

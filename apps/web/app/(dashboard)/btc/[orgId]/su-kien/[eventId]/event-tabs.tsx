@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { EventGate } from '../event-gate';
 import { EVENT_STATUS_BADGE } from '../event-status';
+import { TicketTypesEditor } from '../ticket-types-editor';
 
 import { DEFAULT_EVENT_TAB, EVENT_TABS, isEventTab, type EventTab } from './event-tab-list';
 
@@ -96,6 +97,8 @@ export function EventTabs({ eventId, initialTab }: { eventId: string; initialTab
                     description={t.soon}
                     className="rounded-lg bg-card px-card-padding shadow-card"
                   />
+                ) : t.key === 'hang-ve' ? (
+                  <TicketTypesEditor orgId={organization.id} event={event} />
                 ) : (
                   <Overview orgId={organization.id} event={event} />
                 )}

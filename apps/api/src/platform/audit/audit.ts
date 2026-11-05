@@ -49,8 +49,15 @@ export type AuditAction =
   | 'payout_account.default_changed'
   /** Owner/Admin tạo Sự kiện nháp (Story 2.7). */
   | 'event.created'
-  /** Owner/Admin sửa Sự kiện (`changedFields`: tên trường trong `EVENT_DRAFT_FIELDS` đã đổi, không ghi giá trị). */
-  | 'event.updated';
+  /** Owner/Admin sửa Sự kiện (`changedFields`: tên trường trong `EVENT_DRAFT_FIELDS` đã đổi, hoặc
+   * `['maxTicketsPerOrder']` khi đổi giới hạn Vé/Đơn; không ghi giá trị). */
+  | 'event.updated'
+  /** Owner/Admin thêm Hạng vé (kèm dòng tồn kho) cho Sự kiện (Story 2.8). */
+  | 'ticket_type.created'
+  /** Owner/Admin sửa Hạng vé (`changedFields`: tên trường trong `TICKET_TYPE_FIELDS` đã đổi, không ghi giá trị). */
+  | 'ticket_type.updated'
+  /** Owner/Admin xóa Hạng vé chưa bán và chưa giữ chỗ (kèm dòng tồn kho). */
+  | 'ticket_type.deleted';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

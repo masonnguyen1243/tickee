@@ -2,7 +2,7 @@
 export const EVENT_TABS = [
   { key: 'tong-quan', label: 'Tổng quan' },
   { key: 'don', label: 'Đơn', soon: 'Đơn của Người mua sẽ hiện ở đây.' },
-  { key: 'hang-ve', label: 'Hạng vé', soon: 'Thêm Hạng vé, giá và số suất cho Sự kiện.' },
+  { key: 'hang-ve', label: 'Hạng vé' },
   { key: 'form-mua', label: 'Form mua', soon: 'Chọn thông tin hỏi Người mua khi đặt vé.' },
   { key: 'check-in', label: 'Check-in', soon: 'Theo dõi check-in của Sự kiện.' },
   { key: 'cai-dat', label: 'Cài đặt', soon: 'Ẩn, kết thúc sớm và các cài đặt khác của Sự kiện.' },
