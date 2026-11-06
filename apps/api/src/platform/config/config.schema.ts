@@ -93,11 +93,19 @@ export const workerConfigSchema = z.object({
   APP_ROLE: z.literal('worker'),
   ...common,
   DATABASE_URL: postgresUrl,
-  /** Origin của web: link trong email (vd. lời mời Admin `<WEB_ORIGIN>/loi-moi-btc#…`). */
+  /**
+   * Origin của web: link trong email (vd. lời mời Admin `<WEB_ORIGIN>/loi-moi-btc#…`) và nơi gọi revalidate trang Sự
+   * kiện công khai (`<WEB_ORIGIN>/api/revalidate`).
+   */
   WEB_ORIGIN: httpOrigin,
   /** Gửi email từ job (lời mời Admin); cùng dạng với vai `api`. */
   SMTP_URL: smtpUrl,
   EMAIL_FROM: z.string().min(3),
+  /**
+   * Bí mật dùng chung với web (Story 2.11-c): worker gửi `Authorization: Bearer <REVALIDATE_SECRET>` tới
+   * `<WEB_ORIGIN>/api/revalidate`; web đặt cùng giá trị (chỉ ở server). Sinh bằng `openssl rand -base64 32`. Không log.
+   */
+  REVALIDATE_SECRET: z.string().min(32),
 });
 
 export const migrateConfigSchema = z.object({

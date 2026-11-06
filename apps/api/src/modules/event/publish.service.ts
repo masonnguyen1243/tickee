@@ -10,11 +10,14 @@ import {
   type PublishReadiness,
 } from '@tickee/contracts';
 import { and, eq } from 'drizzle-orm';
+import type { PgBoss } from 'pg-boss';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import { audit } from '../../platform/audit/index.js';
 import { DATABASE, type Database, type DbExecutor } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
+import { BOSS } from '../../platform/jobs/index.js';
 import { detailOf, notFound, UUID } from './event.service.js';
+import { enqueuePublicPageRevalidation, PublicPageQueues } from './public-page-jobs.js';
 import { organizationLocked, paidSalesAllowed, refundPolicySet } from './sale-rules.js';
 import { events } from './schema.js';
 import { ticketTypesOf } from './ticket-type.service.js';
@@ -60,7 +63,11 @@ export async function publishReadiness(
 
 @Injectable()
 export class PublishService {
-  constructor(@Inject(DATABASE) private readonly db: Database) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    @Inject(BOSS) private readonly boss: PgBoss,
+    @Inject(PublicPageQueues) private readonly publicPageQueues: PublicPageQueues,
+  ) {}
 
   /** Điều kiện mở bán của Sự kiện; id lạ, sai dạng hoặc của BTC khác → `404 EVENT_NOT_FOUND`. */
   async readiness(ctx: AccessContext, eventId: string): Promise<PublishReadiness> {
@@ -75,10 +82,13 @@ export class PublishService {
 
   /**
    * Mở bán: khóa dòng Sự kiện, không còn nháp → `409 EVENT_NOT_DRAFT`; tính lại điều kiện trong cùng transaction, còn
-   * thiếu → `409 EVENT_NOT_READY` (`details.unmet`). Đạt hết thì CAS `draft` → `published` và audit `event.published`.
+   * thiếu → `409 EVENT_NOT_READY` (`details.unmet`). Đạt hết thì CAS `draft` → `published`, audit `event.published` và
+   * enqueue revalidate trang `/e/{slug}` (xóa trang 404 cũ nếu đã cache) trong cùng transaction.
    */
   async publish(ctx: AccessContext, eventId: string): Promise<EventDetail> {
     if (!UUID.test(eventId)) throw notFound();
+    // pg-boss đã start và queue đã có (ngoài transaction): `boss.send` cần cả hai.
+    await this.publicPageQueues.ready();
     const row = await this.db.transaction(async (tx) => {
       const [current] = await tx
         .select()
@@ -104,6 +114,7 @@ export class PublishService {
         action: 'event.published',
         target: { type: 'event', id: updated.id },
       });
+      await enqueuePublicPageRevalidation(this.boss, tx, updated.slug);
       return updated;
     });
     return detailOf(row);

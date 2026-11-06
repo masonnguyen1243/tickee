@@ -11,6 +11,15 @@ import { createServer } from 'node:http';
 
 export const PUBLIC_EVENT_API_PORT = 3199;
 
+/** `REVALIDATE_SECRET` của server Next cho trang công khai (Story 2.11-c); spec gọi `/api/revalidate` bằng giá trị này. */
+export const E2E_REVALIDATE_SECRET = 'e2e-only-revalidate-secret-0123456789abcdef';
+
+/**
+ * Chỉ có ở API giả: `POST` với body `{ name }` đặt tên Sự kiện `slug` (chưa có thì tạo Sự kiện đang bán) — giả lập BTC
+ * đổi tên để thử cache của trang `/e/{slug}`.
+ */
+export const renameEventPath = (slug: string) => `/__test/events/${encodeURIComponent(slug)}/name`;
+
 export const TIER_FREE_ID = '019a3b2c-0800-7abc-8def-000000000001';
 export const TIER_PAID_ID = '019a3b2c-0800-7abc-8def-000000000002';
 
@@ -55,6 +64,18 @@ export const PUBLIC_EVENTS: Record<string, unknown> = {
 
 function start(): void {
   const server = createServer((req, res) => {
+    const rename = /^\/__test\/events\/([^/?]+)\/name$/.exec(req.url ?? '');
+    if (rename && req.method === 'POST') {
+      let raw = '';
+      req.on('data', (chunk: Buffer) => (raw += chunk.toString('utf8')));
+      req.on('end', () => {
+        const slug = decodeURIComponent(rename[1]!);
+        const { name } = JSON.parse(raw) as { name: string };
+        PUBLIC_EVENTS[slug] = { ...event(slug, 'published'), name };
+        res.writeHead(204).end();
+      });
+      return;
+    }
     const match = /^\/v1\/events\/([^/?]+)$/.exec(req.url ?? '');
     const body = match && req.method === 'GET' ? PUBLIC_EVENTS[decodeURIComponent(match[1]!)] : undefined;
     res.setHeader('content-type', 'application/json');

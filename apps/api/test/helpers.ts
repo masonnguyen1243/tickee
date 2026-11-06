@@ -43,6 +43,9 @@ export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
   ...overrides,
 });
 
+/** Bí mật revalidate trang Sự kiện công khai chỉ dùng trong test (≥ 32 ký tự). */
+export const TEST_REVALIDATE_SECRET = 'test-only-revalidate-secret-0123456789abcdef';
+
 /** Cấu hình vai `worker` cho test: cùng DB, cùng origin web và SMTP giả với `apiConfig`. */
 export const workerConfig = (overrides: Partial<WorkerConfig> = {}): WorkerConfig => {
   const api = apiConfig();
@@ -54,6 +57,7 @@ export const workerConfig = (overrides: Partial<WorkerConfig> = {}): WorkerConfi
     WEB_ORIGIN: api.WEB_ORIGIN,
     SMTP_URL: api.SMTP_URL,
     EMAIL_FROM: api.EMAIL_FROM,
+    REVALIDATE_SECRET: TEST_REVALIDATE_SECRET,
     ...overrides,
   };
 };

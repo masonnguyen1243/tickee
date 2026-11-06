@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
-import { PUBLIC_EVENT_API_PORT } from './e2e/public-event-api';
+import { E2E_REVALIDATE_SECRET, PUBLIC_EVENT_API_PORT } from './e2e/public-event-api';
 
 /** Server chính: bật trang /ui-kit. Server phụ: tắt, để kiểm /ui-kit trả 404 như production. */
 export const PORT = 3100;
@@ -62,6 +62,8 @@ export default defineConfig({
       env: {
         API_INTERNAL_URL: `http://localhost:${PUBLIC_EVENT_API_PORT}`,
         WEB_ORIGIN: `http://localhost:${PORT_PUBLIC_EVENT}`,
+        // Route `/api/revalidate` (Story 2.11-c) chạy thật với `revalidateTag`; xem `public-event-revalidate.spec.ts`.
+        REVALIDATE_SECRET: E2E_REVALIDATE_SECRET,
       },
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,

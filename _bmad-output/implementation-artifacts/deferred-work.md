@@ -259,3 +259,15 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-11-b-trang-su-kien-cong-khai.md`
   summary: Checklist deploy web (Story 4.7) phải đặt `WEB_ORIGIN` (origin công khai, dùng làm `metadataBase` cho `og:image`/`og:url`) và cân nhắc `API_INTERNAL_URL` (SSR gọi api qua mạng nội bộ); thiếu `WEB_ORIGIN` ở production thì nên báo lỗi khi khởi động thay vì âm thầm dùng localhost. Kiểm luôn font OG `apps/web/assets/fonts/*.ttf` có trong image.
   evidence: Review 2.11-b #2 (BH, EC): `page.tsx` `metadataBase()` trả `undefined` khi thiếu `WEB_ORIGIN`, Next fallback `http://localhost:…`, preview Facebook/Zalo mất ảnh. Chưa có cấu hình deploy web để sửa.
+
+## Deferred from: build of spec-2-11-c-revalidate-trang-su-kien.md (2026-11-06)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-11-c-revalidate-trang-su-kien.md`
+  summary: Story 4.7 — `revalidateTag` ở `apps/web/app/api/revalidate/route.ts` chỉ xóa cache của instance web nhận request. Chạy nhiều instance web thì cần cache handler dùng chung (`cacheHandler`, vd. Redis) hoặc gọi revalidate tới từng instance; không thì instance khác vẫn trả bản cũ tới 30 giây. Checklist deploy cũng phải đặt cùng `REVALIDATE_SECRET` cho worker và web (web thiếu → route 503, im lặng chờ 30 giây) và cho worker tới được `WEB_ORIGIN` (nếu đi qua mạng nội bộ thì cân nhắc biến origin nội bộ riêng).
+  evidence: Design Notes của spec 2.11-c. Hiện chạy một instance web; worker gọi `POST {WEB_ORIGIN}/api/revalidate`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-11-c-revalidate-trang-su-kien.md`
+  summary: Story 4.7 — nếu đặt CDN trước web, CDN vẫn giữ bản cũ của `/e/{slug}` (ISR, `Cache-Control: s-maxage=…`) bất kể `revalidateTag`; cần purge CDN theo đường dẫn khi revalidate, hoặc không cache `/e/*` ở CDN.
+  evidence: Review 2.11-c #14 (BH): route handler chỉ xóa cache của Next; CDN không biết tag `event:{slug}`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-11-c-revalidate-trang-su-kien.md`
+  summary: Story nào thêm đổi tên BTC hoặc khóa BTC (Epic 7) làm đổi phần tĩnh của trang Sự kiện phải enqueue `enqueuePublicPageRevalidation` cho mọi Sự kiện không còn nháp của BTC đó.
+  evidence: Review 2.11-c #15 (BH): `publicEventDetail` trả `organizationName`; hiện chưa có endpoint đổi tên nên chưa có trigger.

@@ -18,6 +18,14 @@ const apiEnv = {
   TINGEE_BASE_URL: 'https://uat-open-api.tingee.vn',
   TINGEE_CREDENTIAL_KEYS: `v1:${KEY_1}, v2:${KEY_2}`,
 };
+const workerEnv = {
+  APP_ROLE: 'worker',
+  DATABASE_URL: apiEnv.DATABASE_URL,
+  WEB_ORIGIN: apiEnv.WEB_ORIGIN,
+  SMTP_URL: apiEnv.SMTP_URL,
+  EMAIL_FROM: apiEnv.EMAIL_FROM,
+  REVALIDATE_SECRET: `${SECRET}-${'r'.repeat(32)}`,
+};
 
 function issuesOf(env: Record<string, string | undefined>): ConfigError {
   try {
@@ -72,23 +80,29 @@ describe('loadConfig', () => {
     }
   });
 
-  it('vai worker cần WEB_ORIGIN, SMTP_URL, EMAIL_FROM (gửi email lời mời Admin)', () => {
+  it('vai worker cần WEB_ORIGIN, SMTP_URL, EMAIL_FROM (gửi email lời mời Admin), REVALIDATE_SECRET (revalidate trang Sự kiện)', () => {
     const err = issuesOf({ APP_ROLE: 'worker', DATABASE_URL: apiEnv.DATABASE_URL });
     expect(err.issues).toEqual(
       expect.arrayContaining([
         { variable: 'WEB_ORIGIN', reason: 'thiếu' },
         { variable: 'SMTP_URL', reason: 'thiếu' },
         { variable: 'EMAIL_FROM', reason: 'thiếu' },
+        { variable: 'REVALIDATE_SECRET', reason: 'thiếu' },
       ]),
     );
-    const config = loadConfig({
-      APP_ROLE: 'worker',
-      DATABASE_URL: apiEnv.DATABASE_URL,
-      WEB_ORIGIN: apiEnv.WEB_ORIGIN,
-      SMTP_URL: apiEnv.SMTP_URL,
-      EMAIL_FROM: apiEnv.EMAIL_FROM,
-    });
+    const config = loadConfig(workerEnv);
     expect(config).toMatchObject({ APP_ROLE: 'worker', WEB_ORIGIN: 'https://tickee.vn' });
+  });
+
+  it('vai worker: thiếu REVALIDATE_SECRET → dừng và nêu tên biến; ngắn hơn 32 ký tự → lỗi, không in giá trị', () => {
+    const missing = issuesOf({ ...workerEnv, REVALIDATE_SECRET: undefined });
+    expect(missing.issues).toEqual([{ variable: 'REVALIDATE_SECRET', reason: 'thiếu' }]);
+    expect(missing.message).toContain('REVALIDATE_SECRET');
+    const short = issuesOf({ ...workerEnv, REVALIDATE_SECRET: SECRET });
+    expect(short.issues).toEqual([{ variable: 'REVALIDATE_SECRET', reason: 'ngoài khoảng cho phép' }]);
+    expect(short.message).not.toContain(SECRET);
+    // Vai api không cần biến này.
+    expect(loadConfig(apiEnv)).not.toHaveProperty('REVALIDATE_SECRET');
   });
 
   it('thiếu MIGRATION_DATABASE_URL ở vai migrate', () => {
@@ -146,13 +160,7 @@ describe('loadConfig', () => {
     const tingeeKeys = Object.keys(loadConfig(apiEnv)).filter((k) => k.startsWith('TINGEE_'));
     expect(tingeeKeys.sort()).toEqual(['TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS']);
     // Vai worker không cần Tingee.
-    const worker = loadConfig({
-      APP_ROLE: 'worker',
-      DATABASE_URL: apiEnv.DATABASE_URL,
-      WEB_ORIGIN: apiEnv.WEB_ORIGIN,
-      SMTP_URL: apiEnv.SMTP_URL,
-      EMAIL_FROM: apiEnv.EMAIL_FROM,
-    });
+    const worker = loadConfig(workerEnv);
     expect(worker.APP_ROLE).toBe('worker');
   });
 

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Database } from '../src/platform/db/index.js';
-import { apiConfig, databaseUrl, migrationDatabaseUrl } from './helpers.js';
+import { apiConfig, databaseUrl, migrationDatabaseUrl, TEST_REVALIDATE_SECRET } from './helpers.js';
 
 /** Env tối thiểu cho vai api, lấy từ cấu hình test (không kế thừa env của tiến trình test). */
 function apiRoleEnv(): Record<string, string> {
@@ -111,6 +111,17 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
       ['APP_ROLE=api thiếu DATABASE_URL', { APP_ROLE: 'api' }, 'DATABASE_URL'],
       ['DATABASE_URL mysql://', { APP_ROLE: 'api', DATABASE_URL: `mysql://root:${SECRET}@db/x` }, 'DATABASE_URL'],
       ['APP_ROLE=migrate thiếu MIGRATION_DATABASE_URL', { APP_ROLE: 'migrate' }, 'MIGRATION_DATABASE_URL'],
+      [
+        'APP_ROLE=worker thiếu REVALIDATE_SECRET',
+        {
+          APP_ROLE: 'worker',
+          DATABASE_URL: `postgresql://tickee_app:${SECRET}@127.0.0.1:1/tickee_test`,
+          WEB_ORIGIN: 'http://web.tickee.test',
+          SMTP_URL: 'smtp://127.0.0.1:1',
+          EMAIL_FROM: 'Tickee <no-reply@tickee.test>',
+        },
+        'REVALIDATE_SECRET',
+      ],
     ])('%s', async (_name, env, variable) => {
       const { code, output } = await run(env);
       expect(code).not.toBe(0);
@@ -142,6 +153,7 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
       WEB_ORIGIN: c.WEB_ORIGIN,
       SMTP_URL: c.SMTP_URL,
       EMAIL_FROM: c.EMAIL_FROM,
+      REVALIDATE_SECRET: TEST_REVALIDATE_SECRET,
     });
     try {
       await waitForOutput(p, 'worker đã chạy');
