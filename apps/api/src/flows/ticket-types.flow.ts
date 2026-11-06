@@ -161,11 +161,13 @@ export async function deleteTicketType(
     assertTicketTypeId(ticketTypeId);
     const current = locked.ticketTypes.find((t) => t.id === ticketTypeId.toLowerCase());
     if (!current) throw ticketTypeNotFound();
+    // Kiểm "đã bán/giữ chỗ" trước trần miễn phí: Hạng vé đã có người mua luôn báo `TICKET_TYPE_IN_USE`. Trần vượt thì
+    // ném lỗi sau khi đã xóa dòng tồn kho, nhưng cả transaction rollback.
+    await deleteInventory(tx, current.id);
     const remaining = locked.ticketTypes
       .filter((t) => t.id !== current.id)
       .map((t) => ({ price: t.price, capacity: locked.inventory.get(t.id)?.capacity ?? 0 }));
     if (exceedsFreeEventCap(remaining)) throw freeCapExceeded();
-    await deleteInventory(tx, current.id);
     await deleteTicketTypeRow(tx, ctx, current.id);
     await audit.record(tx, {
       actorUserId: ctx.userId,

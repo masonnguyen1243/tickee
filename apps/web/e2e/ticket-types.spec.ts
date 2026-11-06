@@ -332,6 +332,8 @@ test('xóa qua Dialog xác nhận nêu hậu quả; Hạng vé đã có người
   await expect(dialog(page)).toHaveCount(0);
   await expect(rows(page)).toHaveCount(1);
   await expect(page.getByText('Đã xóa Đơn nam.')).toBeVisible();
+  // Nút "Xóa" của hàng đã mất: focus sang "Thêm Hạng vé", không rơi về body.
+  await expect(page.getByRole('button', { name: 'Thêm Hạng vé' })).toBeFocused();
 
   await page.getByRole('button', { name: 'Xóa Đôi nam nữ' }).click();
   await dialog(page).getByRole('button', { name: 'Xóa', exact: true }).click();

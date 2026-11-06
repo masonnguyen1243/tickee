@@ -376,11 +376,14 @@ function DeleteDialog({
   orgId,
   eventId,
   target,
+  returnFocusId,
   onClose,
 }: {
   orgId: string;
   eventId: string;
   target: TicketTypeDetail | null;
+  /** Nút nhận focus khi hàng vừa bị xóa (nút "Xóa" của hàng không còn trong DOM). */
+  returnFocusId: string;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -388,6 +391,8 @@ function DeleteDialog({
   // Giữ tên trong lúc `Dialog` đóng (hiệu ứng thoát) để nội dung không trống.
   const [shown, setShown] = useState(target);
   if (target && target !== shown) setShown(target);
+  /** Hàng đã bị gỡ khỏi danh sách: khi đóng, focus sang `returnFocusId` thay vì nút "Xóa" đã mất (focus rơi về `body`). */
+  const removed = useRef(false);
 
   const remove = useMutation({
     mutationFn: (t: TicketTypeDetail) => deleteTicketType(orgId, eventId, t.id),
@@ -397,6 +402,7 @@ function DeleteDialog({
       );
       void queryClient.invalidateQueries({ queryKey: ticketTypesQueryKey(orgId, eventId) });
       toast.success(`Đã xóa ${t.name}.`);
+      removed.current = true;
       onClose();
     },
     onError: (error) => {
@@ -404,6 +410,7 @@ function DeleteDialog({
       else if (hasErrorCode(error, ErrorCode.TICKET_TYPE_NOT_FOUND)) {
         toast.info('Hạng vé này không còn nữa.');
         void queryClient.invalidateQueries({ queryKey: ticketTypesQueryKey(orgId, eventId) });
+        removed.current = true;
         onClose();
       } else if (hasErrorCode(error, ErrorCode.TICKET_TYPE_IN_USE)) {
         void queryClient.invalidateQueries({ queryKey: ticketTypesQueryKey(orgId, eventId) });
@@ -425,7 +432,14 @@ function DeleteDialog({
 
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && close()}>
-      <DialogContent>
+      <DialogContent
+        onCloseAutoFocus={(e) => {
+          if (!removed.current) return;
+          removed.current = false;
+          e.preventDefault();
+          document.getElementById(returnFocusId)?.focus();
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="wrap-break-word">Xóa Hạng vé {shown?.name}?</DialogTitle>
           <DialogDescription>
@@ -695,7 +709,13 @@ export function TicketTypesEditor({ orgId, event }: { orgId: string; event: Even
           <h2 id={titleId} className="text-title">
             Hạng vé
           </h2>
-          <Button type="button" variant="primary-on-light" size="sm" onClick={() => setEditing({ kind: 'new' })}>
+          <Button
+            id={`${titleId}-add`}
+            type="button"
+            variant="primary-on-light"
+            size="sm"
+            onClick={() => setEditing({ kind: 'new' })}
+          >
             Thêm Hạng vé
           </Button>
         </div>
@@ -719,7 +739,13 @@ export function TicketTypesEditor({ orgId, event }: { orgId: string; event: Even
         </DialogContent>
       </Dialog>
 
-      <DeleteDialog orgId={orgId} eventId={event.id} target={deleting} onClose={() => setDeleting(null)} />
+      <DeleteDialog
+        orgId={orgId}
+        eventId={event.id}
+        target={deleting}
+        returnFocusId={`${titleId}-add`}
+        onClose={() => setDeleting(null)}
+      />
     </div>
   );
 }

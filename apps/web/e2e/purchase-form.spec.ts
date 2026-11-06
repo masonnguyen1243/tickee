@@ -362,6 +362,8 @@ test('xóa qua Dialog nêu hậu quả: "Hủy" không gọi api; "Xóa" → 204
   await dialog(page).getByRole('button', { name: 'Xóa', exact: true }).click();
   await expect(dialog(page)).toHaveCount(0);
   await expect(page.getByText('Đã xóa câu hỏi.')).toBeVisible();
+  // Nút "Xóa" của hàng đã mất: focus sang "Thêm câu hỏi", không rơi về body.
+  await expect(page.getByRole('button', { name: 'Thêm câu hỏi' })).toBeFocused();
   await expect(rows(page)).toHaveCount(1);
   await expect(rows(page).first()).toContainText('Trình độ');
   await expect(preview(page).getByRole('textbox', { name: /^Câu lạc bộ/ })).toHaveCount(0);
@@ -495,6 +497,36 @@ test('sửa câu hỏi đã bị xóa ở nơi khác (404) → toast "Câu hỏi
   await expect(dialog(page)).toHaveCount(0);
   await expect(rows(page)).toHaveCount(0);
   await expect(page.getByText('Chưa có câu hỏi riêng.')).toBeVisible();
+});
+
+test('tải form lỗi 500 → banner "Chưa tải được form mua"; "Thử lại" tải lại danh sách', async ({ page }) => {
+  let failing = true;
+  await openApi(page, [level(0)], (key) =>
+    failing && key === `GET ${formPath}` ? apiError(500, 'INTERNAL_ERROR') : undefined,
+  );
+  await page.goto(`${base}?tab=form-mua`);
+  await expect(page.getByText('Chưa tải được form mua')).toBeVisible();
+  await expect(rows(page)).toHaveCount(0);
+
+  failing = false;
+  await page.getByRole('button', { name: 'Thử lại' }).click();
+  await expect(rows(page)).toHaveCount(1);
+  await expect(rows(page).first()).toContainText('Trình độ');
+  await expect(page.getByText('Chưa tải được form mua')).toHaveCount(0);
+});
+
+test('xóa lỗi 500 → "Chưa xóa được" trong Dialog, hàng vẫn còn', async ({ page }) => {
+  const { calls } = await openApi(page, [level(0)], (key) =>
+    key === `DELETE ${formPath}/questions/${questionId(0)}` ? apiError(500, 'INTERNAL_ERROR') : undefined,
+  );
+  await page.goto(`${base}?tab=form-mua`);
+  await page.getByRole('button', { name: 'Xóa Trình độ' }).click();
+  await dialog(page).getByRole('button', { name: 'Xóa', exact: true }).click();
+  await expect(dialog(page).getByText('Chưa xóa được')).toBeVisible();
+  await expect(dialog(page)).toBeVisible();
+  await dialog(page).getByRole('button', { name: 'Hủy' }).click();
+  await expect(rows(page)).toHaveCount(1);
+  expect(formWrites(calls)).toEqual([{ method: 'DELETE', path: `${formPath}/questions/${questionId(0)}`, body: null }]);
 });
 
 test('xóa câu hỏi đã bị xóa ở nơi khác (404) → toast "Câu hỏi này không còn nữa.", Dialog đóng, hàng biến mất', async ({
