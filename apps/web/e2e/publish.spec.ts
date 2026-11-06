@@ -319,6 +319,25 @@ test('Sự kiện đã mở bán: vào bước 4 thấy ngay link, không tải 
   expect(calls.filter((c) => c.path.endsWith('/publish-readiness'))).toEqual([]);
 });
 
+test('Sự kiện đã mở bán: tab Tổng quan có link trang công khai và "Sao chép link"', async ({ page, browserName }) => {
+  if (browserName === 'chromium') await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await openApi(page, { status: 'published' });
+  await page.goto(base);
+  const overview = page.locator('[data-slot="event-overview"]');
+  await expect(overview.locator('[data-slot="status-badge"]')).toHaveText('Đang mở bán');
+  const origin = new URL(page.url()).origin;
+  const link = overview.locator('[data-slot="public-event-link"]');
+  await expect(link).toHaveText(`${origin}/e/${SLUG}`);
+  await expect(link).toHaveAttribute('href', `${origin}/e/${SLUG}`);
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(page.getByRole('link', { name: 'Tiếp tục thiết lập' })).toHaveCount(0);
+  await overview.getByRole('button', { name: 'Sao chép link' }).click();
+  await expect(page.getByText('Đã sao chép')).toBeVisible();
+  if (browserName === 'chromium') {
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`${origin}/e/${SLUG}`);
+  }
+});
+
 test('320px: danh sách điều kiện và phần link không cuộn ngang', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 640 });
   const { state } = await openApi(page, {

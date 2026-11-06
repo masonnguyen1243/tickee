@@ -14,9 +14,9 @@ import {
   type PublishConditionCode,
   type Role,
 } from '@tickee/contracts';
-import { CircleCheck, Copy } from 'lucide-react';
+import { CircleCheck } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 
 import { useCurrentOrganization } from '@/components/tickee/current-organization';
@@ -24,7 +24,6 @@ import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
 import { ApiError } from '@/lib/api/errors';
 import { hasErrorCode } from '@/lib/auth/api';
-import { copyWithToast } from '@/lib/clipboard';
 import {
   eventQueryKey,
   eventReadinessQueryKey,
@@ -36,6 +35,7 @@ import { fetchStatusNotices, statusNoticesQueryKey } from '@/lib/reporting/api';
 import { statusNoticeContent } from '@/lib/reporting/status-notices';
 
 import { handledElsewhere } from './handled-elsewhere';
+import { PublicEventLink } from './public-event-link';
 
 /*
  * Wizard bước 4, phần mở bán (Story 2.10, AD-34): server quyết định điều kiện (`GET …/publish-readiness`), web chỉ ánh
@@ -112,16 +112,6 @@ function conditionCopy(code: PublishConditionCode, { role, closedBetaRevoked }: 
 }
 
 const messageOf = (error: unknown) => (error instanceof ApiError ? error.message : 'Đã có lỗi xảy ra. Vui lòng thử lại.');
-
-/** `window.location.origin` sau khi hydrate (server render ra chuỗi rỗng). */
-const subscribeNoop = () => () => {};
-function useOrigin(): string {
-  return useSyncExternalStore(
-    subscribeNoop,
-    () => window.location.origin,
-    () => '',
-  );
-}
 
 /** Focus `ref` một lần sau khi mount nếu `enabled` (vd. tiêu đề "Đang mở bán" thay cho nút "Mở bán" vừa bị gỡ). */
 function useFocusOnMount(ref: RefObject<HTMLElement | null>, enabled: boolean) {
@@ -342,8 +332,6 @@ function ConditionRow({
 }
 
 function PublishedLink({ titleId, slug, focusTitle }: { titleId: string; slug: string; focusTitle: boolean }) {
-  const origin = useOrigin();
-  const url = `${origin}/e/${slug}`;
   const titleRef = useRef<HTMLHeadingElement>(null);
   useFocusOnMount(titleRef, focusTitle);
   return (
@@ -356,21 +344,7 @@ function PublishedLink({ titleId, slug, focusTitle }: { titleId: string; slug: s
         Đang mở bán
       </h2>
       <p className="text-meta text-muted-foreground">Gửi link này cho Người mua để họ đặt vé.</p>
-      <div className="flex min-w-0 flex-col gap-stack sm:flex-row sm:items-center">
-        <a
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-          className="min-w-0 break-all text-body text-brand-text underline underline-offset-2"
-          data-slot="public-event-link"
-        >
-          {url}
-        </a>
-        <Button type="button" variant="secondary" className="self-start sm:self-auto" onClick={() => void copyWithToast(url)}>
-          <Copy aria-hidden="true" />
-          Sao chép link
-        </Button>
-      </div>
+      <PublicEventLink slug={slug} />
     </section>
   );
 }

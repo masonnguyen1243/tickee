@@ -306,6 +306,8 @@ test('bấm cả hàng event-card → tab Tổng quan; tab Hạng vé (?tab=); "
   await expect(overview).toContainText('Hồ Gươm');
   await expect(overview).toContainText('Chưa có — cần có để mở bán.');
   await expect(overview.locator('[data-slot="status-badge"]')).toHaveText('Nháp');
+  // Nháp chưa có trang công khai (`/e/{slug}` trả 404) nên không hiện link.
+  await expect(overview.locator('[data-slot="public-event-link"]')).toHaveCount(0);
 
   await page.getByRole('tab', { name: 'Hạng vé' }).click();
   await page.waitForURL(`**${base}/su-kien/${eventId(0)}?tab=hang-ve`);

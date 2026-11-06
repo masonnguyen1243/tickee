@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { EventGate } from '../event-gate';
 import { EVENT_STATUS_BADGE } from '../event-status';
+import { PublicEventLink } from '../public-event-link';
 import { PurchaseFormEditor } from '../purchase-form-editor';
 import { TicketTypesEditor } from '../ticket-types-editor';
 
@@ -29,7 +30,10 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** Tab Tổng quan của Sự kiện nháp: tóm tắt thông tin và "Tiếp tục thiết lập". */
+/**
+ * Tab Tổng quan: tóm tắt thông tin. Nháp → "Tiếp tục thiết lập"; đã mở bán (kể cả Ẩn, Đã hủy: link vẫn mở được) → link
+ * trang Sự kiện công khai kèm "Sao chép link".
+ */
 function Overview({ orgId, event }: { orgId: string; event: EventDetail }) {
   const badge = EVENT_STATUS_BADGE[event.status];
   return (
@@ -43,6 +47,11 @@ function Overview({ orgId, event }: { orgId: string; event: EventDetail }) {
         <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
       </div>
       <dl className="flex flex-col gap-stack">
+        {event.status !== 'draft' ? (
+          <Row label="Link cho Người mua">
+            <PublicEventLink slug={event.slug} />
+          </Row>
+        ) : null}
         <Row label="Thời gian">
           <span className="tabular-nums">
             {formatEventDateTime(event.startsAt)} – {formatEventDateTime(event.endsAt)}
