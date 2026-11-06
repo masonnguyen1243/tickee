@@ -15,11 +15,14 @@ import {
 } from '@tickee/contracts';
 import { and, desc, eq } from 'drizzle-orm';
 import pg from 'pg';
+import type { PgBoss } from 'pg-boss';
 import type { z } from 'zod';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import { audit } from '../../platform/audit/index.js';
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
+import { BOSS } from '../../platform/jobs/index.js';
+import { enqueuePublicPageRevalidation, PublicPageQueues } from './public-page-jobs.js';
 import { events } from './schema.js';
 
 /*
@@ -102,6 +105,8 @@ export class EventService {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     @Inject(EVENT_SLUG_SUFFIX) private readonly slugSuffix: SlugSuffixGenerator,
+    @Inject(BOSS) private readonly boss: PgBoss,
+    @Inject(PublicPageQueues) private readonly publicPageQueues: PublicPageQueues,
   ) {}
 
   /** Tạo Sự kiện nháp kèm audit `event.created`. Slug trùng thì sinh hậu tố khác, tối đa `SLUG_ATTEMPTS` lần. */
@@ -162,10 +167,13 @@ export class EventService {
 
   /**
    * Sửa Sự kiện (thay toàn bộ các trường của `EventDraftInput`). Slug giữ nguyên; `effective_end_at` tính lại. Audit
-   * `event.updated` chỉ khi có trường đổi, `changedFields` là tên trường (không ghi giá trị).
+   * `event.updated` chỉ khi có trường đổi, `changedFields` là tên trường (không ghi giá trị). Sự kiện đã mở bán mà có
+   * trường đổi thì enqueue revalidate trang `/e/{slug}` trong cùng transaction (Story 2.11-c).
    */
   async update(ctx: AccessContext, eventId: string, input: DraftValues): Promise<EventDetail> {
     if (!UUID.test(eventId)) throw notFound();
+    // pg-boss đã start và queue đã có (ngoài transaction): `boss.send` cần cả hai.
+    await this.publicPageQueues.ready();
     const row = await this.db.transaction(async (tx) => {
       const [current] = await tx
         .select()
@@ -189,6 +197,7 @@ export class EventService {
         target: { type: 'event', id: updated.id },
         changedFields,
       });
+      if (updated.status !== 'draft') await enqueuePublicPageRevalidation(this.boss, tx, updated.slug);
       return updated;
     });
     return detailOf(row);

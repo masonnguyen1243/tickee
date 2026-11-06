@@ -3,7 +3,7 @@
 Monorepo pnpm + Turborepo theo Structural Seed của Architecture Spine.
 
 ```text
-apps/web            Next.js — chỉ render, gọi REST /v1 (không DB, không secret)
+apps/web            Next.js — chỉ render, gọi REST /v1 (không DB; secret duy nhất là REVALIDATE_SECRET, chỉ ở server)
 apps/api            NestJS — một image, ba vai: APP_ROLE=api | worker | migrate
   src/modules/      11 mô-đun miền; gọi nhau chỉ qua modules/<name>/index.ts
   src/flows/        luồng ghi nhiều mô-đun (AD-25)
@@ -53,6 +53,19 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:3001 pnpm --filter @tickee/web start
 ```
 
 Mailpit: SMTP `localhost:1025`, giao diện `http://localhost:8025`.
+
+### Trang Sự kiện công khai cập nhật ngay khi BTC sửa
+
+Trang `/e/{slug}` cache phần tĩnh 30 giây. BTC sửa Sự kiện đã mở bán (tên, giờ, địa điểm, Hạng vé…) hoặc bấm "Mở bán"
+thì api enqueue job `event.revalidate-public-page`; worker gọi `POST <WEB_ORIGIN>/api/revalidate` kèm
+`Authorization: Bearer <REVALIDATE_SECRET>` và web xóa cache theo tag `event:{slug}`. Thử ở local:
+
+1. Đặt cùng một `REVALIDATE_SECRET` (≥ 32 ký tự) ở `.env` (worker đọc) và ở `apps/web/.env.local` (web đọc cả khi
+   `pnpm dev` lẫn `pnpm --filter @tickee/web start`; file này không commit).
+2. `pnpm dev`, rồi chạy worker ở terminal khác: `APP_ROLE=worker node --env-file=.env apps/api/dist/main.js`.
+3. Mở `/e/{slug}`, sửa tên trong dashboard, tải lại trang sau ~3 giây: thấy tên mới.
+
+Không có worker hoặc web thiếu biến (route trả 503) thì job retry 3 lần rồi bỏ; trang vẫn tự làm mới sau 30 giây.
 
 ### Đăng nhập bằng mã OTP ở local
 
@@ -125,7 +138,8 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `TRUST_PROXY_HOPS`       | api         | mặc định `0`; số proxy tin cậy trước api (vd. `1` sau load balancer) để `req.ip` là IP thật — bắt buộc đặt khi có LB, nếu không mọi người dùng chung giới hạn 20 OTP/giờ theo IP của LB |
 | `BETTER_AUTH_SECRET`     | api         | ≥ 32 ký tự; ký session/cookie và khóa gốc HMAC bộ đếm OTP |
 | `API_PUBLIC_URL`         | api         | origin công khai của api; Better Auth ở `/v1/auth` |
-| `WEB_ORIGIN`             | api, worker | api: origin duy nhất được CORS kèm cookie; worker: gốc link trong email (lời mời Admin `<WEB_ORIGIN>/loi-moi-btc#…`) |
+| `WEB_ORIGIN`             | api, worker | api: origin duy nhất được CORS kèm cookie; worker: gốc link trong email (lời mời Admin `<WEB_ORIGIN>/loi-moi-btc#…`) và nơi gọi `<WEB_ORIGIN>/api/revalidate` |
+| `REVALIDATE_SECRET`      | worker, web | worker: bắt buộc, ≥ 32 ký tự; gửi `Authorization: Bearer …` tới `<WEB_ORIGIN>/api/revalidate`. web: server-only, cùng giá trị; thiếu thì route trả 503 (trang chỉ tự làm mới sau 30 giây). Sinh bằng `openssl rand -base64 32` |
 | `AUTH_COOKIE_DOMAIN`     | api         | tùy chọn; tên miền cha cho cookie session (vd. `tickee.vn`) |
 | `SMTP_URL`, `EMAIL_FROM` | api, worker | api gửi email OTP/2FA; worker gửi email từ job (lời mời Admin); local là Mailpit `smtp://localhost:1025` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | api | bắt buộc; OAuth client Google, redirect URI `<API_PUBLIC_URL>/v1/auth/callback/google` |

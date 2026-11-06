@@ -30,18 +30,22 @@ export function assertTicketTypeId(ticketTypeId: string): void {
   if (!UUID.test(ticketTypeId)) throw ticketTypeNotFound();
 }
 
+/** Sự kiện vừa khóa: trạng thái và slug để biết có cần revalidate trang `/e/{slug}` không. */
+export type LockedEventRef = Pick<typeof events.$inferSelect, 'id' | 'status' | 'slug'>;
+
 /**
  * Khóa dòng Sự kiện của BTC (`FOR UPDATE`): mọi thao tác Hạng vé của cùng Sự kiện chạy tuần tự, kể cả thêm Hạng vé mới
  * (khóa tồn kho không chặn được dòng chưa có). Id lạ, sai dạng hoặc của BTC khác → `404 EVENT_NOT_FOUND`.
  */
-export async function lockEventForTicketTypes(tx: Tx, ctx: AccessContext, eventId: string): Promise<void> {
+export async function lockEventForTicketTypes(tx: Tx, ctx: AccessContext, eventId: string): Promise<LockedEventRef> {
   if (!UUID.test(eventId)) throw notFound();
   const [row] = await tx
-    .select({ id: events.id })
+    .select({ id: events.id, status: events.status, slug: events.slug })
     .from(events)
     .where(and(orgScope(ctx)(events), eq(events.id, eventId)))
     .for('update');
   if (!row) throw notFound();
+  return row;
 }
 
 /** Sự kiện có thuộc BTC không (không khóa); không → `404 EVENT_NOT_FOUND`. */

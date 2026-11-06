@@ -8,6 +8,12 @@ export {
   saleEventById,
   type PublicEventRef,
 } from './public-event.js';
+export {
+  enqueuePublicPageRevalidation,
+  EventJobsModule,
+  PublicPageQueues,
+  type EventJobsConfig,
+} from './public-page-jobs.js';
 export { organizationLocked, paidSalesAllowed, refundPolicySet, type PaidSalesRules } from './sale-rules.js';
 export {
   assertEventOfOrganization,
@@ -20,6 +26,7 @@ export {
   ticketTypeNotFound,
   ticketTypesOf,
   updateTicketTypeRow,
+  type LockedEventRef,
   type TicketTypeRow,
   type TicketTypeValues,
 } from './ticket-type.service.js';

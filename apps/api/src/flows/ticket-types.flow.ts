@@ -5,10 +5,12 @@ import {
   type TicketTypeDetail,
   type TicketTypeList,
 } from '@tickee/contracts';
+import type { PgBoss } from 'pg-boss';
 import {
   assertEventOfOrganization,
   assertTicketTypeId,
   deleteTicketTypeRow,
+  enqueuePublicPageRevalidation,
   insertTicketType,
   lockEventForTicketTypes,
   ticketTypeChangedFields,
@@ -16,6 +18,7 @@ import {
   ticketTypeNotFound,
   ticketTypesOf,
   updateTicketTypeRow,
+  type LockedEventRef,
   type TicketTypeValues,
 } from '../modules/event/index.js';
 import {
@@ -36,6 +39,9 @@ import { AppError } from '../platform/http/index.js';
  * nên đặt ở flows, mỗi lệnh một transaction kèm audit. Thứ tự khóa luôn là dòng `events` rồi mọi dòng tồn kho của Sự kiện
  * theo `ticket_type_id` (AD-2): khóa Sự kiện trước thì hai lệnh Hạng vé của cùng Sự kiện (kể cả thêm Hạng vé mới) chạy
  * tuần tự, nên phép kiểm trần 200 Vé của Sự kiện miễn phí cộng tổng trên dữ liệu không đổi được giữa chừng.
+ *
+ * Sự kiện đã mở bán: tạo, sửa (có trường đổi) hay xóa Hạng vé enqueue revalidate trang `/e/{slug}` trong cùng transaction
+ * (Story 2.11-c). Người gọi đã `PublicPageQueues.ready()` trước transaction.
  */
 
 const freeCapExceeded = () =>
@@ -44,16 +50,22 @@ const freeCapExceeded = () =>
   });
 
 interface LockedEvent {
+  event: LockedEventRef;
   ticketTypes: Awaited<ReturnType<typeof ticketTypesOf>>;
   inventory: Map<string, InventoryRow>;
 }
 
 /** Khóa dòng Sự kiện rồi mọi dòng tồn kho (theo id), sau đó mới đọc Hạng vé. */
 async function lockEvent(tx: Tx, ctx: AccessContext, eventId: string): Promise<LockedEvent> {
-  await lockEventForTicketTypes(tx, ctx, eventId);
+  const event = await lockEventForTicketTypes(tx, ctx, eventId);
   const rows = await lockInventoryForEvent(tx, eventId);
   const ticketTypes = await ticketTypesOf(tx, ctx, eventId);
-  return { ticketTypes, inventory: new Map(rows.map((row) => [row.ticketTypeId, row])) };
+  return { event, ticketTypes, inventory: new Map(rows.map((row) => [row.ticketTypeId, row])) };
+}
+
+/** Sự kiện không còn nháp → enqueue revalidate trang `/e/{slug}` bằng `tx` (rollback thì không có job). */
+async function revalidatePublicPage(boss: PgBoss, tx: Tx, event: LockedEventRef): Promise<void> {
+  if (event.status !== 'draft') await enqueuePublicPageRevalidation(boss, tx, event.slug);
 }
 
 /** Giá và số suất của mọi Hạng vé sau thay đổi (`replace`: Hạng vé bị sửa; `add`: Hạng vé mới). */
@@ -89,6 +101,7 @@ export async function listTicketTypes(db: Database, ctx: AccessContext, eventId:
  */
 export async function createTicketType(
   db: Database,
+  boss: PgBoss,
   ctx: AccessContext,
   eventId: string,
   input: TicketTypeValues,
@@ -104,6 +117,7 @@ export async function createTicketType(
       action: 'ticket_type.created',
       target: { type: 'ticket_type', id: row.id },
     });
+    await revalidatePublicPage(boss, tx, locked.event);
     return ticketTypeDetailOf(row, inventory);
   });
 }
@@ -115,6 +129,7 @@ export async function createTicketType(
  */
 export async function updateTicketType(
   db: Database,
+  boss: PgBoss,
   ctx: AccessContext,
   eventId: string,
   ticketTypeId: string,
@@ -141,6 +156,7 @@ export async function updateTicketType(
       target: { type: 'ticket_type', id: row.id },
       changedFields,
     });
+    await revalidatePublicPage(boss, tx, locked.event);
     return ticketTypeDetailOf(row, inventory);
   });
 }
@@ -152,6 +168,7 @@ export async function updateTicketType(
  */
 export async function deleteTicketType(
   db: Database,
+  boss: PgBoss,
   ctx: AccessContext,
   eventId: string,
   ticketTypeId: string,
@@ -175,5 +192,6 @@ export async function deleteTicketType(
       action: 'ticket_type.deleted',
       target: { type: 'ticket_type', id: current.id },
     });
+    await revalidatePublicPage(boss, tx, locked.event);
   });
 }
