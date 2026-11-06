@@ -269,6 +269,22 @@ describe('xóa câu hỏi', () => {
     expect(d.position).toBe(2);
   });
 
+  it('xóa và thêm song song → position vẫn liền nhau từ 0 (khóa dòng Sự kiện)', async () => {
+    // Lặp vài vòng để hai request thật sự chen nhau; thiếu khóa thì câu thêm có thể lấy position cũ trước khi dồn.
+    for (let round = 0; round < 5; round++) {
+      const event = await newEvent();
+      const first = await added(event.id, club({ label: 'A' }));
+      await added(event.id, club({ label: 'B' }));
+      await added(event.id, club({ label: 'C' }));
+      const [removed, inserted] = await Promise.all([
+        h.http.delete(questionPath(event.id, first.id)).set('cookie', admin.cookie),
+        add(event.id, club({ label: 'D' })),
+      ]);
+      expect([removed.status, inserted.status]).toEqual([204, 201]);
+      expect((await positions(event.id)).map((r) => r.position)).toEqual([0, 1, 2]);
+    }
+  });
+
   it('câu hỏi lạ → 404 FORM_QUESTION_NOT_FOUND', async () => {
     const event = await newEvent();
     const res = await h.http.delete(questionPath(event.id, randomUUID())).set('cookie', admin.cookie).expect(404);

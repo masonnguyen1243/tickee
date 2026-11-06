@@ -268,6 +268,16 @@ describe('xóa Hạng vé', () => {
     expect((await audits('ticket_type', paidType.id)).map((a) => a.action)).toEqual(['ticket_type.created']);
   });
 
+  it('Hạng vé có phí duy nhất đã có người mua, phần còn lại vượt trần miễn phí → 409 TICKET_TYPE_IN_USE (không phải trần)', async () => {
+    const event = await newEvent();
+    const paidType = await created(event.id, paid({ capacity: 100 }));
+    await created(event.id, free(250));
+    await h.db.orm.execute(sql`UPDATE ticket_type_inventory SET sold = 1 WHERE ticket_type_id = ${paidType.id}`);
+    const res = await h.http.delete(`${path(event.id)}/${paidType.id}`).set('cookie', admin.cookie).expect(409);
+    expect(errorOf(res.body).code).toBe('TICKET_TYPE_IN_USE');
+    expect(await inventory(paidType.id)).toEqual({ capacity: 100, sold: 1, held: 0 });
+  });
+
   it('Hạng vé lạ → 404 TICKET_TYPE_NOT_FOUND', async () => {
     const event = await newEvent();
     const res = await h.http.delete(`${path(event.id)}/${randomUUID()}`).set('cookie', admin.cookie).expect(404);

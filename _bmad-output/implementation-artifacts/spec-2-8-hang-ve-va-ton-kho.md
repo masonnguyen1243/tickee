@@ -95,6 +95,32 @@ context:
 - Given wizard bước 2, when thêm "Đơn nam" 300.000đ 32 suất, then hàng mới hiện "300.000đ" và "32 suất" mà không tải lại trang; tab "Hạng vé" của cùng Sự kiện thấy đúng hàng đó.
 - Given hai request tạo Hạng vé 0đ (mỗi request 150 suất) chạy cùng lúc, when cả hai commit, then đúng một request thành công.
 
+### Review Findings
+
+Review sau merge 06/11/2026 (4 lớp: blind-hunter BH, edge-case-hunter EC, verification-gap VG, acceptance-auditor AA), diff `9e250a4..a376819` (bỏ snapshot drizzle).
+
+- [x] [Review][Patch] Xóa Hạng vé đã có người mua trả sai mã lỗi khi phần còn lại vượt trần miễn phí (low; AA, BH, EC) [apps/api/src/flows/ticket-types.flow.ts:167] — `exceedsFreeEventCap(remaining)` chạy trước `deleteInventory`, nên Hạng vé có phí cuối cùng có `sold + held > 0` trả `409 FREE_EVENT_CAPACITY_EXCEEDED` thay vì `TICKET_TYPE_IN_USE` (Q1); `DeleteDialog` khi đó không tắt "Xóa" và không hiện câu "đã có người mua". Sửa: gọi `deleteInventory` trước phép kiểm trần (lỗi sau đó vẫn rollback cả transaction).
+- [x] [Review][Patch] Mất focus bàn phím sau khi xóa Hạng vé (medium; BH ở 2.9, cùng mẫu) [apps/web/app/(dashboard)/btc/[orgId]/su-kien/ticket-types-editor.tsx:427] — `Dialog` xóa trả focus về nút "Xóa" của hàng vừa bị gỡ khỏi DOM, focus rơi về `body` (WCAG 2.2 AA, giống 2.9 triage #1). Sửa: `onCloseAutoFocus` chuyển focus sang "Thêm Hạng vé" khi vừa xóa xong.
+- [x] [Review][Defer] Chưa có e2e cho nhánh server trả `400 VALIDATION_FAILED` với input đã qua kiểm phía web (form Hạng vé và ô giới hạn Vé/Đơn) [apps/web/e2e/ticket-types.spec.ts] — deferred: VG (gap đã xác minh). Web và API dùng chung `TicketTypeInput`/`EventOrderLimitInput` nên hiện gần như không đạt tới được; thêm khi có luật chỉ ở server.
+
+**Rejected:**
+- BH/EC: ghi Hạng vé và giới hạn Vé/Đơn không xét `status`/khóa Sự kiện. `false`: nằm trong triage #2 và mục deferred của 2.7; chưa có đường chuyển khỏi `draft`.
+- BH: đổi giá sau khi đã bán. `false`: giá chốt vào Đơn (FR-8), triage #2.
+- BH/EC: giờ bán không so với giờ Sự kiện. `low`: giống triage #3; 2.10 là chỗ báo.
+- EC: thiếu dòng tồn kho → 409 sai / `?? 0` đếm thiếu trần. `false`: triage #5, FK và transaction chặn tồn kho mồ côi.
+- BH: audit không ghi `eventId`. `low`: giống triage #7.
+- BH/AA: CHECK ở DB lặp hằng số, thiếu `capacity >= 1`. `low`: giống triage #8, #14.
+- EC: Esc/nền đóng `Dialog` Thêm/Sửa khi đang lưu. `low`: giống triage #9.
+- EC: mở lại `Dialog` trong lúc hiệu ứng đóng giữ giá trị cũ. `low`: giống triage #10.
+- BH/EC: `OrderLimitField` không đồng bộ lại khi prop `event` đổi; PATCH Sự kiện của "Tiếp" về sau ghi cache giá trị cũ. `low`: chỉ khi hai response về ngược thứ tự commit; cache sai tới lần tải sau, DB vẫn đúng.
+- EC: giá trị giới hạn sai bị bỏ im lặng khi rời ô. `low`: cố ý theo triage #12; trong wizard ô bị unmount khi sang bước nên báo lỗi lúc blur cũng không thấy.
+- BH: ô giới hạn Vé/Đơn nằm sai chỗ. `false`: quyết định Q3.
+- BH: nút "Xóa" vẫn bấm được với Hạng vé đã bán. `low`: giống triage #13.
+- BH: không giới hạn số Hạng vé, không chặn trùng tên. `low`: giống triage #17.
+- BH: `changeCapacity` ghi trước `assertFreeCap`. `false`: triage #6.
+- AA: không có `flows.changeCapacity`. `low`: triage #24; sửa là sửa spec.
+- BH/AA: thiếu test 403 cho Member, test Owner cho order-limit, test thứ tự GET. `low`: `isolation.test.ts` đã kiểm mọi route có `@RequirePermission`; BTC chỉ có Owner/Admin.
+
 ## Implementation Notes
 
 - `ticket_type_inventory` có thêm cột `event_id` (lặp từ `ticket_types`), để `ordering` khóa mọi dòng tồn kho của Sự kiện (`ORDER BY ticket_type_id FOR UPDATE`) mà không phải join sang bảng của `event`.

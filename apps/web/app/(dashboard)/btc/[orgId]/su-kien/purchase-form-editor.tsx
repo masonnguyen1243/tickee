@@ -257,7 +257,6 @@ function QuestionForm({
     submit();
   };
 
-  /** Đổi ô phương án nào thì bỏ lỗi của ô đó và lỗi chung của danh sách. */
   /**
    * Đổi phương án bất kỳ thì bỏ mọi lỗi theo ô và lỗi chung của danh sách (lỗi trùng liên quan nhiều ô); lần lưu sau
    * kiểm lại.
@@ -473,11 +472,14 @@ function DeleteDialog({
   orgId,
   eventId,
   target,
+  returnFocusId,
   onClose,
 }: {
   orgId: string;
   eventId: string;
   target: FormQuestion | null;
+  /** Nút nhận focus khi hàng vừa bị xóa (nút "Xóa" của hàng không còn trong DOM). */
+  returnFocusId: string;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -485,6 +487,8 @@ function DeleteDialog({
   // Giữ nhãn trong lúc `Dialog` đóng (hiệu ứng thoát) để nội dung không trống.
   const [shown, setShown] = useState(target);
   if (target && target !== shown) setShown(target);
+  /** Hàng đã bị gỡ khỏi danh sách: khi đóng, focus sang `returnFocusId` thay vì nút "Xóa" đã mất (focus rơi về `body`). */
+  const removed = useRef(false);
 
   const remove = useMutation({
     mutationFn: (q: FormQuestion) => deleteFormQuestion(orgId, eventId, q.id),
@@ -494,6 +498,7 @@ function DeleteDialog({
       );
       void queryClient.invalidateQueries({ queryKey: eventFormQueryKey(orgId, eventId) });
       toast.success('Đã xóa câu hỏi.');
+      removed.current = true;
       onClose();
     },
     onError: (error) => {
@@ -501,6 +506,7 @@ function DeleteDialog({
       else if (hasErrorCode(error, ErrorCode.FORM_QUESTION_NOT_FOUND)) {
         toast.info('Câu hỏi này không còn nữa.');
         void queryClient.invalidateQueries({ queryKey: eventFormQueryKey(orgId, eventId) });
+        removed.current = true;
         onClose();
       }
     },
@@ -519,7 +525,14 @@ function DeleteDialog({
 
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && close()}>
-      <DialogContent>
+      <DialogContent
+        onCloseAutoFocus={(e) => {
+          if (!removed.current) return;
+          removed.current = false;
+          e.preventDefault();
+          document.getElementById(returnFocusId)?.focus();
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="wrap-break-word">Xóa câu hỏi {shown?.label}?</DialogTitle>
           <DialogDescription>
@@ -795,6 +808,7 @@ export function PurchaseFormEditor({ orgId, eventId }: { orgId: string; eventId:
               Câu hỏi riêng
             </h2>
             <Button
+              id={`${ids}-add`}
               type="button"
               variant="primary-on-light"
               size="sm"
@@ -864,7 +878,13 @@ export function PurchaseFormEditor({ orgId, eventId }: { orgId: string; eventId:
         </DialogContent>
       </Dialog>
 
-      <DeleteDialog orgId={orgId} eventId={eventId} target={deleting} onClose={() => setDeleting(null)} />
+      <DeleteDialog
+        orgId={orgId}
+        eventId={eventId}
+        target={deleting}
+        returnFocusId={`${ids}-add`}
+        onClose={() => setDeleting(null)}
+      />
     </div>
   );
 }

@@ -205,3 +205,15 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-9-cau-hinh-form-mua-ve.md`
   summary: "Các trường bổ sung khác" của FR-9 (trường dựng sẵn như Ngày sinh, CCCD, Size áo, mỗi trường có định dạng và cách xử lý PII riêng) chưa làm. Story 2.9 chỉ có trường mặc định và câu hỏi riêng dạng văn bản/lựa chọn một.
   evidence: Mason chọn bỏ qua ở 2.9 (05/11/2026): câu hỏi riêng đã đủ cho MVP. Trường dựng sẵn cần chốt danh sách, định dạng và xử lý PII (NĐ 13/2023).
+
+## Deferred from: code review of spec-2-8-hang-ve-va-ton-kho.md (2026-11-06)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-8-hang-ve-va-ton-kho.md`
+  summary: Chưa có e2e cho nhánh server trả `400 VALIDATION_FAILED` với input đã qua kiểm phía web, ở form Hạng vé (`serverIssuePaths` → lỗi theo ô, fallback `UNMATCHED_SERVER_ERROR`) và ô giới hạn Vé/Đơn. Thêm một case trong `ticket-types.spec.ts` cho mock trả `issues:[{path:'price'}]` với input hợp lệ.
+  evidence: Review sau merge 06/11 (VG). Web và API dùng chung schema nên hiện gần như không đạt tới được.
+
+## Deferred from: code review of spec-2-9-cau-hinh-form-mua-ve.md (2026-11-06)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-9-cau-hinh-form-mua-ve.md`
+  summary: Chưa có test API cho `PUT …/form/order` với id câu hỏi viết hoa và `PATCH` câu hỏi với id phương án viết hoa (phải giữ id cũ, `changedFields` không có `options`). Bỏ `.toLowerCase()` trong `reorder`/`optionsOf` thì không test nào đỏ.
+  evidence: Review sau merge 06/11 (VG, BH). Web chỉ gửi lại id chữ thường; thêm khi Epic 3 dùng id phương án.

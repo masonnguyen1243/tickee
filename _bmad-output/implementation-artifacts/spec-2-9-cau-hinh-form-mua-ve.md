@@ -82,6 +82,34 @@ context:
 - Given form đã có câu hỏi, when sang bước 4, then mục "Form mua" hiện đúng các trường và câu hỏi như phần xem trước ở bước 3.
 - Given hai câu hỏi, when bấm "Lên" ở câu thứ hai, then thứ tự đổi ở cả danh sách lẫn phần xem trước, và vẫn đúng sau khi tải lại.
 
+### Review Findings
+
+Review sau merge 06/11/2026 (4 lớp: blind-hunter BH, edge-case-hunter EC, verification-gap VG, acceptance-auditor AA), diff `9b9398e..55b0523` (bỏ snapshot drizzle).
+
+- [x] [Review][Patch] Mất focus bàn phím sau khi xóa câu hỏi (medium; BH) [apps/web/app/(dashboard)/btc/[orgId]/su-kien/purchase-form-editor.tsx:521] — `Dialog` trả focus về nút "Xóa" của hàng đã bị gỡ, focus rơi về `body`. Nhánh sắp thứ tự đã xử lý đúng việc này (triage #1), nhánh xóa thì chưa. Sửa: `onCloseAutoFocus` chuyển focus sang "Thêm câu hỏi" khi vừa xóa xong.
+- [x] [Review][Patch] JSDoc cũ nằm chồng trên `clearOptionErrors`, mô tả hành vi trước triage #17 (low; AA, BH, VG) [apps/web/app/(dashboard)/btc/[orgId]/su-kien/purchase-form-editor.tsx:260] — xóa dòng JSDoc đầu.
+- [x] [Review][Patch] Chưa có test xóa và thêm câu hỏi chạy song song (giữ `position` liền) (VG; BH) [apps/api/test/event/form.test.ts] — chỉ có test thêm song song; bỏ khóa trong `remove` thì không test nào đỏ. Thêm `Promise.all([DELETE câu 0, POST])` trên form 3 câu, kiểm `position` là `[0,1,2]`.
+- [x] [Review][Patch] Chưa có e2e cho lỗi tải form (banner "Chưa tải được form mua" + "Thử lại") và xóa lỗi 5xx ("Chưa xóa được") (VG) [apps/web/e2e/purchase-form.spec.ts] — mọi GET/DELETE trong e2e đều thành công hoặc 404; làm theo test reorder-500 có sẵn.
+- [x] [Review][Defer] Chưa có test API cho id viết hoa ở `PUT …/form/order` và id phương án viết hoa ở `PATCH` [apps/api/test/event/form.test.ts] — deferred: VG (gap đã xác minh). Web chỉ gửi lại id chữ thường do server trả; thêm khi Epic 3 bắt đầu dùng id phương án.
+
+**Rejected:**
+- AA: phần xem trước dùng `Input` cho câu văn bản, không có `Textarea`. `low`: Code Map ghi "`Input`/`Textarea`", hai lựa chọn đều đúng.
+- AA: wizard bước 3–4 render `null` khi không có `event`. `false`: `useState` kẹp bước về 0 khi chưa có Sự kiện.
+- AA/BH: dùng `lockEventForTicketTypes` cho form, tên gây hiểu nhầm. `low`: cố ý theo triage #7; guard `status` của 2.10/2.12 cần áp cho cả hai.
+- AA: email `required: false` trong xem trước. `false`: spec không quy định; email tự điền từ tài khoản.
+- EC: Esc/nền đóng `Dialog` khi đang lưu. `low`: giống triage #9.
+- EC: sửa ô phương án trong lúc đang lưu thì lỗi `options.N.label` của server gắn lệch hàng. `low`: cùng lớp với triage #9, phải sửa trong khoảng chưa tới một giây.
+- EC: mở lại `Dialog` trong lúc hiệu ứng đóng giữ giá trị cũ. `low`: giống 2.8 triage #10.
+- EC/BH: index `(event_id, position)` không unique. `low`: quyết định ở Implementation Notes; mọi lối ghi đều khóa dòng `events`.
+- BH: thiếu FK ghép `(event_id, organization_id)`. `low`: giống 2.8 triage #8.
+- BH: audit thêm/xóa không ghi `eventId`. `low`: giống triage #5.
+- BH: câu lỗi lặp giữa `form.service.ts` và `MESSAGES`. `low`: cùng mẫu với `ticketTypeNotFound` của 2.8; chưa có chỗ nào lệch.
+- BH: `options` không có `.max()` trước khi parse từng phần tử. `low`: thân request đã bị giới hạn kích thước; `superRefine` rẻ.
+- BH: sắp thứ tự chạy một UPDATE mỗi dòng. `low`: giống triage #15.
+- BH: helper web chép lần nữa. `low`: giống triage #8.
+- BH: mỗi lần "Lên"/"Xuống" thêm một GET. `false`: cố ý theo triage #16.
+- BH: bấm "Lên"/"Xuống" ở hàng khác trong lúc đang sắp thì bị bỏ im lặng. `low`: phải bấm trong lúc request chưa về; sửa phải truyền thêm trạng thái xuống mọi hàng.
+
 ## Implementation Notes
 
 - Id phương án do server cấp bằng `randomUUIDv7()` của Node. Phương án gửi `id` chỉ giữ id khi id đó đang thuộc chính câu hỏi; id lạ hoặc của câu khác được coi là phương án mới (server cấp id mới), không tin id từ client. `POST` luôn cấp id mới.
