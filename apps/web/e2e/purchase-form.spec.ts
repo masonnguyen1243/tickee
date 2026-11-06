@@ -581,7 +581,7 @@ test('server báo VALIDATION_FAILED tại options.1.label → lỗi tại ô "Ph
   await expect(dialog(page).getByText('Phương án tối đa 100 ký tự.')).toBeVisible();
 });
 
-test('bước 4: mục "Form mua" hiện đúng các trường và câu hỏi như xem trước ở bước 3; phần mở bán còn "Sắp có"', async ({
+test('bước 4: mục "Form mua" hiện đúng các trường và câu hỏi như xem trước ở bước 3; có phần mở bán', async ({
   page,
 }) => {
   await openApi(page, [level(0), club(1)]);
@@ -598,7 +598,9 @@ test('bước 4: mục "Form mua" hiện đúng các trường và câu hỏi nh
   await expect(reviewFields).toHaveCount(5);
   expect(await fieldNames(reviewFields)).toEqual(atStep3);
   await expect(review.getByRole('group', { name: /Trình độ/ }).getByRole('radio')).toHaveCount(3);
-  await expect(page.getByText('Sắp có', { exact: true })).toBeVisible();
+  await expect(page.getByText('Sắp có', { exact: true })).toHaveCount(0);
+  await expect(page.locator('[data-slot="publish-panel"]').getByRole('heading', { name: 'Mở bán' })).toBeVisible();
+  await expect(page.getByText('Đã đủ điều kiện mở bán.')).toBeVisible();
 });
 
 test('đủ 20 câu hỏi: "Thêm câu hỏi" tắt kèm lý do', async ({ page }) => {

@@ -3,6 +3,7 @@ import {
   EventForm,
   EventList,
   FormQuestion,
+  PublishReadiness,
   TicketTypeDetail,
   TicketTypeList,
   type EventDraftInput,
@@ -24,6 +25,9 @@ export const ticketTypesQueryKey = (orgId: string, eventId: string) =>
   ['event', 'ticket-types', orgId, eventId] as const;
 /** Câu hỏi riêng của form mua: wizard bước 3–4 và tab "Form mua" dùng chung. */
 export const eventFormQueryKey = (orgId: string, eventId: string) => ['event', 'form', orgId, eventId] as const;
+/** Điều kiện mở bán của một Sự kiện (wizard bước 4). */
+export const eventReadinessQueryKey = (orgId: string, eventId: string) =>
+  ['event', 'publish-readiness', orgId, eventId] as const;
 
 const json = (method: 'POST' | 'PATCH' | 'PUT', body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 const eventsPath = (orgId: string) => `/orgs/${encodeURIComponent(orgId)}/events`;
@@ -93,3 +97,14 @@ export const deleteFormQuestion = (orgId: string, eventId: string, questionId: s
 /** Sắp thứ tự: đúng tập id câu hỏi hiện có theo thứ tự mới; trả form sau khi sắp. */
 export const reorderFormQuestions = (orgId: string, eventId: string, body: FormOrderInput) =>
   apiRequest(`${formPath(orgId, eventId)}/order`, { schema: EventForm, init: json('PUT', body) });
+
+/** Điều kiện mở bán: chỉ các mã áp dụng cho Sự kiện, kèm đạt hay chưa (luật nằm ở server). */
+export const fetchPublishReadiness = (orgId: string, eventId: string, signal?: AbortSignal) =>
+  apiRequest(`${eventPath(orgId, eventId)}/publish-readiness`, { schema: PublishReadiness, init: { signal } });
+
+/**
+ * Mở bán (không body): trả Sự kiện đã `published`. Còn điều kiện chưa đạt → `EVENT_NOT_READY` (`details.unmet`); không
+ * còn nháp → `EVENT_NOT_DRAFT`.
+ */
+export const publishEvent = (orgId: string, eventId: string) =>
+  apiRequest(`${eventPath(orgId, eventId)}/publish`, { schema: EventDetail, init: { method: 'POST' } });

@@ -217,3 +217,21 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-9-cau-hinh-form-mua-ve.md`
   summary: Chưa có test API cho `PUT …/form/order` với id câu hỏi viết hoa và `PATCH` câu hỏi với id phương án viết hoa (phải giữ id cũ, `changedFields` không có `options`). Bỏ `.toLowerCase()` trong `reorder`/`optionsOf` thì không test nào đỏ.
   evidence: Review sau merge 06/11 (VG, BH). Web chỉ gửi lại id chữ thường; thêm khi Epic 3 dùng id phương án.
+
+## Deferred from: tách phạm vi Story 2.10 (2026-11-06)
+
+- source_spec: none
+  summary: `ordering.sellability(eventId)` — trạng thái bán theo từng Hạng vé và `eventReason` (Đang bán / Chưa mở bán / Đã đóng bán / Hết vé / Tạm ngừng bán / Ẩn / Bị khóa / Đã hủy / Đã kết thúc), gồm AC "Closed Beta bị thu hồi → Hạng vé có phí Tạm ngừng bán, 0đ vẫn bán" (AD-21, FR-37). Làm trước hoặc đầu Story 2.11.
+  evidence: Tách khỏi Story 2.10 theo lựa chọn của Mason (06/11/2026): là hàm backend ship độc lập, chưa có consumer cho tới 2.11/Epic 3. Phải dùng lại cùng luật điều kiện với `event.publishReadiness` (Closed Beta, tài khoản nhận tiền, chính sách hoàn vé, giá ≥ 2.000đ) để không lệch luật.
+
+## Deferred from: code review of spec-2-10-dieu-kien-mo-ban-va-mo-ban-su-kien.md (2026-11-06)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-10-dieu-kien-mo-ban-va-mo-ban-su-kien.md`
+  summary: Sau khi mở bán, API sửa Sự kiện/Hạng vé/form vẫn chạy không xét `status`. Có thể xóa chính sách hoàn vé, hoặc thêm Hạng vé có phí khi BTC chưa duyệt Closed Beta hoặc chưa có tài khoản nhận tiền. Story 2.12 thêm guard; `ordering.sellability` phải xét lại chính sách hoàn vé, Closed Beta và tài khoản theo từng Hạng vé.
+  evidence: Triage 2.10 #2 (BH, EC). `EventService.update` và `lockEventForTicketTypes` không kiểm `status`; `publishReadiness` chỉ chạy lúc `draft` → `published`. Wizard "Lưu nháp" vẫn PATCH được Sự kiện đã mở bán.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-10-dieu-kien-mo-ban-va-mo-ban-su-kien.md`
+  summary: Link công khai sau khi mở bán dựng từ `window.location.origin`. Nếu deploy tách host dashboard và trang Sự kiện công khai, cần biến cấu hình origin công khai (gắn Story 4.7 / 2.11).
+  evidence: Triage 2.10 #13 (BH). `publish-panel.tsx` `useOrigin()`; hiện chỉ có `NEXT_PUBLIC_API_BASE_URL`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-10-dieu-kien-mo-ban-va-mo-ban-su-kien.md`
+  summary: Epic 7 (khóa BTC) phải thay thân `organizationLocked()` trong `apps/api/src/modules/event/publish.service.ts` (đang luôn `false`) và thêm test cho nhánh `ORGANIZATION_NOT_LOCKED` chưa đạt. `sellability` cũng cần xét khóa BTC.
+  evidence: Triage 2.10 #19 (BH). Chưa có cột hay hàm khóa BTC; stub có chủ đích theo spec 2.10.

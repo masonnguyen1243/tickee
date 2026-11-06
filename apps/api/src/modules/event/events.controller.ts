@@ -1,8 +1,16 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post } from '@nestjs/common';
-import { EventDraftInput, EventOrderLimitInput, Permission, type EventDetail, type EventList } from '@tickee/contracts';
+import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post } from '@nestjs/common';
+import {
+  EventDraftInput,
+  EventOrderLimitInput,
+  Permission,
+  type EventDetail,
+  type EventList,
+  type PublishReadiness,
+} from '@tickee/contracts';
 import { Access, RequirePermission, type AccessContext } from '../../platform/access/index.js';
 import { parseRequest } from '../../platform/http/index.js';
 import { EventService } from './event.service.js';
+import { PublishService } from './publish.service.js';
 
 /**
  * Sự kiện của một BTC (Story 2.7): tạo, sửa, đọc Sự kiện nháp. Owner và Admin (`events.manage`).
@@ -10,7 +18,10 @@ import { EventService } from './event.service.js';
  */
 @Controller('orgs/:orgId/events')
 export class EventsController {
-  constructor(@Inject(EventService) private readonly events: EventService) {}
+  constructor(
+    @Inject(EventService) private readonly events: EventService,
+    @Inject(PublishService) private readonly publishing: PublishService,
+  ) {}
 
   /** Tạo Sự kiện nháp (201). */
   @Post()
@@ -48,5 +59,20 @@ export class EventsController {
     @Body() body: unknown,
   ): Promise<EventDetail> {
     return this.events.updateOrderLimit(ctx, eventId, parseRequest(EventOrderLimitInput, body));
+  }
+
+  /** Điều kiện mở bán (Story 2.10): chỉ các mã áp dụng cho Sự kiện, kèm đạt hay chưa. */
+  @Get(':eventId/publish-readiness')
+  @RequirePermission(Permission.EVENTS_MANAGE)
+  publishReadiness(@Access() ctx: AccessContext, @Param('eventId') eventId: string): Promise<PublishReadiness> {
+    return this.publishing.readiness(ctx, eventId);
+  }
+
+  /** Mở bán (không body): `draft` → `published` khi đủ điều kiện; trả `EventDetail`. */
+  @Post(':eventId/publish')
+  @HttpCode(200)
+  @RequirePermission(Permission.EVENTS_MANAGE)
+  publish(@Access() ctx: AccessContext, @Param('eventId') eventId: string): Promise<EventDetail> {
+    return this.publishing.publish(ctx, eventId);
   }
 }

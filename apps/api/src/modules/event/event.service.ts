@@ -59,7 +59,7 @@ function isUniqueViolation(err: unknown, constraint: string): boolean {
 type EventRow = typeof events.$inferSelect;
 type DraftValues = z.output<typeof EventDraftInput>;
 
-const detailOf = (row: EventRow): EventDetail => ({
+export const detailOf = (row: EventRow): EventDetail => ({
   id: row.id,
   organizationId: row.organizationId,
   slug: row.slug,
