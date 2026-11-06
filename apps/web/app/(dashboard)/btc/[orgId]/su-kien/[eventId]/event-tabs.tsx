@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { EventGate } from '../event-gate';
 import { EVENT_STATUS_BADGE } from '../event-status';
+import { PurchaseFormEditor } from '../purchase-form-editor';
 import { TicketTypesEditor } from '../ticket-types-editor';
 
 import { DEFAULT_EVENT_TAB, EVENT_TABS, isEventTab, type EventTab } from './event-tab-list';
@@ -99,6 +100,8 @@ export function EventTabs({ eventId, initialTab }: { eventId: string; initialTab
                   />
                 ) : t.key === 'hang-ve' ? (
                   <TicketTypesEditor orgId={organization.id} event={event} />
+                ) : t.key === 'form-mua' ? (
+                  <PurchaseFormEditor orgId={organization.id} eventId={event.id} />
                 ) : (
                   <Overview orgId={organization.id} event={event} />
                 )}

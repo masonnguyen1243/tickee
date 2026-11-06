@@ -72,6 +72,12 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/ticket-types');
     expect(guarded).toContain('PATCH /v1/orgs/:orgId/events/:eventId/ticket-types/:ticketTypeId');
     expect(guarded).toContain('DELETE /v1/orgs/:orgId/events/:eventId/ticket-types/:ticketTypeId');
+    // Story 2.9: form mua vé.
+    expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/form');
+    expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/form/questions');
+    expect(guarded).toContain('PATCH /v1/orgs/:orgId/events/:eventId/form/questions/:questionId');
+    expect(guarded).toContain('DELETE /v1/orgs/:orgId/events/:eventId/form/questions/:questionId');
+    expect(guarded).toContain('PUT /v1/orgs/:orgId/events/:eventId/form/order');
     expect(guarded).toContain('GET /v1/orgs/:orgId/test-owner-only');
     expect(guarded).toContain('POST /v1/orgs/:orgId/test-owner-only/items/:itemId');
   });
@@ -103,12 +109,12 @@ describe('cách ly BTC', () => {
 
   it('route Sự kiện trên BTC A: body {} → 400, id ngẫu nhiên → 404 EVENT_NOT_FOUND', async () => {
     const eventRoutes = routes.filter((r) => r.permission && r.path.startsWith('/v1/orgs/:orgId/events'));
-    expect(eventRoutes).toHaveLength(9);
+    expect(eventRoutes).toHaveLength(14);
     for (const route of eventRoutes) {
       const res = await call(route, orgA, ownerA.cookie);
       // Body được kiểm trước khi chạm DB; danh sách Sự kiện của BTC trả 200; còn lại Sự kiện ngẫu nhiên → 404.
-      const expected =
-        route.method === 'POST' || route.method === 'PATCH' ? 400 : route.path === '/v1/orgs/:orgId/events' ? 200 : 404;
+      const hasBody = route.method === 'POST' || route.method === 'PATCH' || route.method === 'PUT';
+      const expected = hasBody ? 400 : route.path === '/v1/orgs/:orgId/events' ? 200 : 404;
       expect(res.status, label(route)).toBe(expected);
       if (expected === 404) expect(ErrorResponse.parse(res.body).error.code, label(route)).toBe('EVENT_NOT_FOUND');
     }

@@ -202,3 +202,6 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-7-tao-su-kien-nhap.md`
   summary: `publicBySlug` chỉ loại `status = 'draft'`; Sự kiện bị khóa (`locked_at`), `hidden`, `cancelled` vẫn trả cho người ẩn danh. Story 2.11 cần chốt luật hiển thị (FR-7: `hidden` vẫn mở bằng link) và thêm test cho từng trạng thái.
   evidence: Review sau merge 05/11 (BH, EC). Hiện chỉ test `published`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-9-cau-hinh-form-mua-ve.md`
+  summary: "Các trường bổ sung khác" của FR-9 (trường dựng sẵn như Ngày sinh, CCCD, Size áo, mỗi trường có định dạng và cách xử lý PII riêng) chưa làm. Story 2.9 chỉ có trường mặc định và câu hỏi riêng dạng văn bản/lựa chọn một.
+  evidence: Mason chọn bỏ qua ở 2.9 (05/11/2026): câu hỏi riêng đã đủ cho MVP. Trường dựng sẵn cần chốt danh sách, định dạng và xử lý PII (NĐ 13/2023).

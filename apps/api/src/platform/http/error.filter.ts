@@ -1,5 +1,5 @@
 import { ArgumentsHost, Catch, HttpException, Logger, type ExceptionFilter } from '@nestjs/common';
-import { ErrorCode, FREE_EVENT_TICKET_CAP, type ErrorResponse } from '@tickee/contracts';
+import { ErrorCode, FORM_QUESTIONS_MAX, FREE_EVENT_TICKET_CAP, type ErrorResponse } from '@tickee/contracts';
 import type { Response } from 'express';
 import { dbErrorSummary, isDatabaseError } from '../logging/index.js';
 import { AppError } from './app-error.js';
@@ -40,6 +40,8 @@ const MESSAGES: Record<ErrorCode, string> = {
   CAPACITY_BELOW_COMMITTED: 'Số suất không được nhỏ hơn số đã bán và đang giữ chỗ.',
   FREE_EVENT_CAPACITY_EXCEEDED: `Sự kiện miễn phí tối đa ${FREE_EVENT_TICKET_CAP} Vé.`,
   TICKET_TYPE_IN_USE: 'Hạng vé đã có người mua hoặc đang giữ chỗ, không xóa được.',
+  FORM_QUESTION_NOT_FOUND: 'Không tìm thấy câu hỏi này.',
+  FORM_QUESTION_LIMIT_REACHED: `Mỗi Sự kiện tối đa ${FORM_QUESTIONS_MAX} câu hỏi.`,
 };
 
 /** Lỗi DB chỉ log `{ type, code }` (message/params có thể mang email, token session); lỗi khác log nguyên để giữ stack. */

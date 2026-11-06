@@ -1,10 +1,14 @@
 import {
   EventDetail,
+  EventForm,
   EventList,
+  FormQuestion,
   TicketTypeDetail,
   TicketTypeList,
   type EventDraftInput,
   type EventOrderLimitInput,
+  type FormOrderInput,
+  type FormQuestionInput,
   type TicketTypeInput,
 } from '@tickee/contracts';
 import { z } from 'zod';
@@ -18,8 +22,10 @@ export const eventQueryKey = (orgId: string, eventId: string) => ['event', 'deta
 /** Hạng vé (kèm tồn kho) của một Sự kiện: wizard bước 2 và tab "Hạng vé" dùng chung. */
 export const ticketTypesQueryKey = (orgId: string, eventId: string) =>
   ['event', 'ticket-types', orgId, eventId] as const;
+/** Câu hỏi riêng của form mua: wizard bước 3–4 và tab "Form mua" dùng chung. */
+export const eventFormQueryKey = (orgId: string, eventId: string) => ['event', 'form', orgId, eventId] as const;
 
-const json = (method: 'POST' | 'PATCH', body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
+const json = (method: 'POST' | 'PATCH' | 'PUT', body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 const eventsPath = (orgId: string) => `/orgs/${encodeURIComponent(orgId)}/events`;
 
 export const fetchEvents = (orgId: string, signal?: AbortSignal) =>
@@ -63,3 +69,27 @@ export const deleteTicketType = (orgId: string, eventId: string, ticketTypeId: s
 /** Đổi giới hạn Vé/Đơn (1–50); trả lại Sự kiện. */
 export const updateOrderLimit = (orgId: string, eventId: string, body: EventOrderLimitInput) =>
   apiRequest(`${eventPath(orgId, eventId)}/order-limit`, { schema: EventDetail, init: json('PATCH', body) });
+
+const formPath = (orgId: string, eventId: string) => `${eventPath(orgId, eventId)}/form`;
+const questionPath = (orgId: string, eventId: string, questionId: string) =>
+  `${formPath(orgId, eventId)}/questions/${encodeURIComponent(questionId)}`;
+
+/** Câu hỏi riêng theo thứ tự (trường mặc định cố định, không có ở đây). */
+export const fetchEventForm = (orgId: string, eventId: string, signal?: AbortSignal) =>
+  apiRequest(formPath(orgId, eventId), { schema: EventForm, init: { signal } });
+
+/** Thêm câu hỏi vào cuối form (201). Sự kiện đã đủ 20 câu → `FORM_QUESTION_LIMIT_REACHED`. */
+export const addFormQuestion = (orgId: string, eventId: string, body: FormQuestionInput) =>
+  apiRequest(`${formPath(orgId, eventId)}/questions`, { schema: FormQuestion, init: json('POST', body) });
+
+/** Sửa câu hỏi (thay toàn bộ các trường). Phương án có `id` giữ id; phương án mới không gửi `id`. */
+export const updateFormQuestion = (orgId: string, eventId: string, questionId: string, body: FormQuestionInput) =>
+  apiRequest(questionPath(orgId, eventId, questionId), { schema: FormQuestion, init: json('PATCH', body) });
+
+/** 204 No Content. */
+export const deleteFormQuestion = (orgId: string, eventId: string, questionId: string) =>
+  apiRequest(questionPath(orgId, eventId, questionId), { schema: z.undefined(), init: { method: 'DELETE' } });
+
+/** Sắp thứ tự: đúng tập id câu hỏi hiện có theo thứ tự mới; trả form sau khi sắp. */
+export const reorderFormQuestions = (orgId: string, eventId: string, body: FormOrderInput) =>
+  apiRequest(`${formPath(orgId, eventId)}/order`, { schema: EventForm, init: json('PUT', body) });

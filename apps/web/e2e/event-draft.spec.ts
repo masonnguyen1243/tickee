@@ -6,7 +6,7 @@ import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
 
 /*
  * Sự kiện nháp (Story 2.7): wizard tạo/thiết lập (bước 1 "Thông tin"; bước 2 Hạng vé — xem `ticket-types.spec.ts`;
- * bước 3–4 "Sắp có"), danh sách `event-card` ở
+ * bước 3 Form mua và bước 4 — xem `purchase-form.spec.ts`), danh sách `event-card` ở
  * `/btc/{id}`, khung tab của Sự kiện. API giả có trạng thái như api thật: POST tạo nháp, PATCH sửa, GET đọc. Máy chạy
  * test đặt múi giờ khác +07 (New York): giờ nhập vẫn hiểu theo giờ Việt Nam.
  */

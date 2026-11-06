@@ -1,6 +1,18 @@
-import { MAX_TICKETS_PER_ORDER_DEFAULT } from '@tickee/contracts';
+import { MAX_TICKETS_PER_ORDER_DEFAULT, type FormOption } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
-import { bigint, check, index, pgTable, smallint, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  boolean,
+  check,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  smallint,
+  text,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { createdAt, id, timestamptz } from '../../platform/db/index.js';
 import { organizations } from '../organizer/schema.js';
 
@@ -85,5 +97,41 @@ export const ticketTypes = pgTable(
       'ticket_types_sale_window_check',
       sql`${t.saleStartsAt} IS NULL OR ${t.saleEndsAt} IS NULL OR ${t.saleEndsAt} > ${t.saleStartsAt}`,
     ),
+  ],
+);
+
+/**
+ * Câu hỏi riêng của form mua vé (FR-9, Story 2.9). Trường mặc định (Tên, SĐT, email) cố định nên không lưu ở đây.
+ * `id` ổn định: sửa nhãn hay đổi thứ tự không đổi id. `position` tăng dần từ 0, liền nhau (xóa thì dồn lại).
+ * `options` (jsonb `[{id, label}]`, luôn đọc và ghi cùng câu hỏi): câu `choice` có 2–20 phương án, mỗi phương án có
+ * id ổn định do server cấp; câu `text` là `[]`. Mọi lần ghi khóa dòng `events` `FOR UPDATE` trước (như Hạng vé), nên
+ * các thao tác trên form của cùng Sự kiện chạy tuần tự. `organization_id` để truy vấn qua `orgScope`.
+ */
+export const eventFormQuestions = pgTable(
+  'event_form_questions',
+  {
+    id: id(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => events.id),
+    position: integer('position').notNull(),
+    kind: text('kind', { enum: ['text', 'choice'] }).notNull(),
+    label: text('label').notNull(),
+    required: boolean('required').notNull().default(false),
+    options: jsonb('options').$type<FormOption[]>().notNull().default([]),
+    createdAt: createdAt(),
+    updatedAt: timestamptz('updated_at')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index('event_form_questions_event_id_position_idx').on(t.eventId, t.position),
+    check('event_form_questions_kind_check', sql`${t.kind} IN ('text', 'choice')`),
+    check('event_form_questions_position_check', sql`${t.position} >= 0`),
+    check('event_form_questions_options_check', sql`jsonb_typeof(${t.options}) = 'array'`),
   ],
 );
