@@ -9,6 +9,8 @@ import {
   eventLocalToIso,
   eventPath,
   formatEventDateTime,
+  formatEventTimeRange,
+  publicEventTag,
   slugBase,
   toEventIso,
 } from '../src/event.js';
@@ -128,7 +130,32 @@ describe('giờ nhập trên web luôn theo +07:00', () => {
   });
 });
 
+describe('formatEventTimeRange', () => {
+  it('cùng ngày → chỉ ghi giờ kết thúc', () => {
+    expect(formatEventTimeRange('2026-11-15T07:00:00+07:00', '2026-11-15T17:00:00+07:00')).toBe(
+      'Chủ nhật, 15/11/2026 · 07:00 – 17:00',
+    );
+  });
+
+  it('khác ngày → ghi đủ hai đầu', () => {
+    expect(formatEventTimeRange('2026-11-15T19:00:00+07:00', '2026-11-16T01:00:00+07:00')).toBe(
+      'Chủ nhật, 15/11/2026 · 19:00 – Thứ hai, 16/11/2026 · 01:00',
+    );
+  });
+
+  it('so ngày theo giờ Việt Nam, không theo UTC', () => {
+    // 16/11 23:00 UTC = 17/11 06:00 giờ VN; cùng ngày 17/11 với 17/11 10:00 giờ VN.
+    expect(formatEventTimeRange('2026-11-16T23:00:00Z', '2026-11-17T10:00:00+07:00')).toBe(
+      'Thứ ba, 17/11/2026 · 06:00 – 10:00',
+    );
+  });
+});
+
 describe('đường dẫn và mã lỗi', () => {
+  it('publicEventTag', () => {
+    expect(publicEventTag('giai-chay-ab12')).toBe('event:giai-chay-ab12');
+  });
+
   it('eventPath', () => {
     expect(eventPath('o1', 'e1')).toBe('/btc/o1/su-kien/e1');
     expect(eventPath('o1', 'e1', 'thiet-lap')).toBe('/btc/o1/su-kien/e1/thiet-lap');

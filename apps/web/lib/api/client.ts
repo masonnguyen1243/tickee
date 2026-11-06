@@ -19,6 +19,17 @@ export function apiBaseUrl(): string {
   return `${base.replace(/\/+$/, '')}/v1`;
 }
 
+/**
+ * Gốc `/v1` cho chính lời gọi API (không dùng để dựng `href` cho trình duyệt). Khi chạy ở server và có
+ * `API_INTERNAL_URL` (server-only, tùy chọn) thì gọi qua địa chỉ này: production gọi API qua mạng nội bộ, e2e trỏ vào
+ * API giả. Trình duyệt luôn dùng `NEXT_PUBLIC_API_BASE_URL`.
+ */
+function requestBaseUrl(): string {
+  const internal = typeof window === 'undefined' ? process.env.API_INTERNAL_URL : undefined;
+  if (internal) return `${internal.replace(/\/+$/, '')}/v1`;
+  return apiBaseUrl();
+}
+
 async function readJson(res: Response): Promise<unknown> {
   const text = await res.text();
   if (text === '') return undefined;
@@ -44,7 +55,7 @@ export async function performApiRequest<S extends z.ZodType>(
   }
   new Headers(extraHeaders).forEach((value, key) => headers.set(key, value));
 
-  const url = `${apiBaseUrl()}${path}`;
+  const url = `${requestBaseUrl()}${path}`;
   let res: Response;
   try {
     res = await fetch(url, { ...init, headers, credentials: 'include' });

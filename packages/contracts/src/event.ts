@@ -210,6 +210,23 @@ export function formatEventDateTime(iso: string): string {
   return `${WEEKDAYS[p.weekday]}, ${pad(p.day)}/${pad(p.month)}/${p.year} · ${pad(p.hour)}:${pad(p.minute)}`;
 }
 
+/**
+ * Khoảng giờ Sự kiện theo giờ Việt Nam. Cùng ngày: "Chủ nhật, 15/11/2026 · 07:00 – 17:00"; khác ngày thì ghi đủ hai
+ * đầu: "Chủ nhật, 15/11/2026 · 07:00 – Thứ hai, 16/11/2026 · 17:00".
+ */
+export function formatEventTimeRange(startsAt: string, endsAt: string): string {
+  const start = vnParts(new Date(startsAt));
+  const end = vnParts(new Date(endsAt));
+  const sameDay = start.year === end.year && start.month === end.month && start.day === end.day;
+  const endText = sameDay ? `${pad(end.hour)}:${pad(end.minute)}` : formatEventDateTime(endsAt);
+  return `${formatEventDateTime(startsAt)} – ${endText}`;
+}
+
+/** Tag cache Next.js của trang Sự kiện công khai `/e/{slug}` (SSR gắn tag; 2.11-c revalidate theo tag này). */
+export function publicEventTag(slug: string): string {
+  return `event:${slug}`;
+}
+
 /** Trang con của một Sự kiện trong dashboard (sau `/btc/{id}/su-kien/{eventId}`). */
 export type EventSubPath = 'thiet-lap';
 
