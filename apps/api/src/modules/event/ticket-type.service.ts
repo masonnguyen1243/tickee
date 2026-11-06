@@ -55,7 +55,11 @@ export async function assertEventOfOrganization(db: DbExecutor, ctx: AccessConte
 }
 
 /** Hạng vé của một Sự kiện thuộc BTC, tạo trước đứng trước. Người gọi đã kiểm Sự kiện tồn tại. */
-export function ticketTypesOf(db: DbExecutor, ctx: AccessContext, eventId: string): Promise<TicketTypeRow[]> {
+export function ticketTypesOf(
+  db: DbExecutor,
+  ctx: Pick<AccessContext, 'organizationId'>,
+  eventId: string,
+): Promise<TicketTypeRow[]> {
   return db
     .select()
     .from(ticketTypes)

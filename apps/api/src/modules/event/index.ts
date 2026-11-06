@@ -2,6 +2,14 @@
 export { EventModule } from './event.module.js';
 export { EVENT_SLUG_SUFFIX, type SlugSuffixGenerator } from './event.service.js';
 export {
+  assertPublicSlug,
+  eventNotFound,
+  publicEventBySlug,
+  saleEventById,
+  type PublicEventRef,
+} from './public-event.js';
+export { organizationLocked, paidSalesAllowed, refundPolicySet, type PaidSalesRules } from './sale-rules.js';
+export {
   assertEventOfOrganization,
   assertTicketTypeId,
   deleteTicketTypeRow,
