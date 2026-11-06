@@ -34,7 +34,7 @@ context:
   - `EVENT_NOT_ENDED` → "Sự kiện đã kết thúc.", về bước 1 để sửa giờ.
   - `PAID_PRICE_MINIMUM` → về bước 2.
   - `PAYOUT_ACCOUNT_LINKED` → trang `tai-khoan-nhan-tien`.
-  - `CLOSED_BETA_APPROVED` → "Chờ duyệt Closed Beta", kèm hướng dẫn liên hệ Tingee (không có link sửa).
+  - `CLOSED_BETA_APPROVED` (không có link sửa), câu theo banner trạng thái (`status-notices.ts`) — BTC đang chờ duyệt: "Chờ duyệt Closed Beta" + "Tingee sẽ liên hệ qua SĐT hoặc email liên hệ của BTC để xác minh."; BTC bị thu hồi: "Closed Beta đã bị thu hồi". Web phân biệt bằng thông báo trạng thái đã tải trên dashboard, không đổi API (quyết định code review 06/11/2026, Mason).
   - Đạt hết thì hiện "Đã đủ điều kiện mở bán."
 - **Quyết định 06/11/2026 (Mason):** (Q1) Sự kiện chưa có Hạng vé nào thì không mở bán được (`HAS_TICKET_TYPE`). (Q2) Sự kiện đã qua `effective_end_at` thì không mở bán được (`EVENT_NOT_ENDED`). (Q3) Giữ một spec cho cả API và web dù dài hơn khung token.
 - Nút "Mở bán" tắt khi còn điều kiện thiếu, có lý do ngay cạnh nút (`aria-describedby`). Khi đang gọi API thì nút hiện spinner và chặn bấm lặp. Mở bán xong: hiện link `{origin}/e/{slug}` và nút "Sao chép link" (dùng `copyWithToast`, toast "Đã sao chép"). Sự kiện đã `published` mà mở lại bước 4 thì hiện ngay phần link.
@@ -95,6 +95,36 @@ context:
 - Given Sự kiện thiếu chính sách hoàn vé, when tới bước 4, then thấy "Thiếu chính sách hoàn vé — chưa mở bán được.", nút "Mở bán" tắt và có lý do; bấm link sửa thì về bước 1 mà không mất dữ liệu.
 - Given đủ điều kiện, when bấm "Mở bán", then thấy link Sự kiện và "Sao chép link"; bấm sao chép thì toast "Đã sao chép"; badge của Sự kiện ở danh sách và tab Tổng quan chuyển thành "Đang mở bán".
 - Given web đang hiện "đủ điều kiện" nhưng server đã đổi (vd. Closed Beta bị thu hồi), when bấm "Mở bán", then server trả 409 `EVENT_NOT_READY`, web báo lỗi và tải lại danh sách điều kiện.
+
+### Review Findings
+
+Code review 06/11/2026 (4 lớp: blind-hunter BH, edge-case-hunter EC, verification-gap VG, acceptance-auditor AA), diff `main...45b3244` (bỏ `_bmad-output`).
+
+- [x] [Review][Patch] Câu của dòng `CLOSED_BETA_APPROVED` sai với BTC bị thu hồi và mâu thuẫn quyết định 02/11/2026 (AA, BH, EC; Mason chọn phương án 1) [apps/web/app/(dashboard)/btc/[orgId]/su-kien/publish-panel.tsx:701] — dùng câu của `STATUS_NOTICE_CONTENT` (`CLOSED_BETA_PENDING`/`CLOSED_BETA_REVOKED`), chọn theo thông báo trạng thái của BTC đã tải trên dashboard; không đổi API.
+- [x] [Review][Patch] Admin thấy link "Liên kết tài khoản nhận tiền" tới trang chỉ Owner mở được (AA, BH, EC) [apps/web/app/(dashboard)/btc/[orgId]/su-kien/publish-panel.tsx:705] — theo mẫu `PAYOUT_ACCOUNT_NOT_LINKED` của `status-notices.ts`: Owner giữ link, Admin thấy "Nhờ Owner liên kết tài khoản nhận tiền." không có link; sửa e2e đang ghim link cho Admin.
+- [x] [Review][Patch] "Mở bán" bật và "Đã đủ điều kiện" hiện từ cache cũ khi readiness đang tải lại hoặc tải lại lỗi (AA, BH, EC) [apps/web/app/(dashboard)/btc/[orgId]/su-kien/publish-panel.tsx:775] — `ready` chỉ đúng khi `!isFetching && !isError`; `isError` thì hiện banner lỗi thay cho dữ liệu cũ; toast sau 409 đổi thành "Đang tải lại…".
+- [x] [Review][Patch] Mất focus bàn phím sau khi mở bán xong và sau 409 `EVENT_NOT_READY` (BH) [apps/web/app/(dashboard)/btc/[orgId]/su-kien/publish-panel.tsx:773] — nút bị gỡ (thành công) hoặc bị `disabled` (409) nên focus về `body`; chuyển focus sang tiêu đề "Đang mở bán" hoặc tiêu đề/danh sách điều kiện.
+- [x] [Review][Patch] e2e chưa bấm link "Sửa thời gian" của `EVENT_NOT_ENDED` (VG) [apps/web/e2e/publish.spec.ts:210] — bấm và kiểm "Bước 1/4 · Thông tin".
+- [x] [Review][Patch] Chưa test thứ tự kiểm `EVENT_NOT_DRAFT` trước `EVENT_NOT_READY` (BH) [apps/api/test/event/publish.test.ts:503] — Sự kiện đã mở bán rồi xóa chính sách hoàn vé → vẫn 409 `EVENT_NOT_DRAFT`.
+- [x] [Review][Patch] Test mở bán chưa kiểm trang công khai đổi theo (BH) [apps/api/test/event/publish.test.ts:449] — `GET /v1/events/:slug` 404 trước khi mở bán, 200 sau khi mở bán.
+- [x] [Review][Patch] Chú thích cũ (BH) [apps/api/src/modules/event/events.controller.ts:15] — doc `EventsController` và `EventModule` chưa nhắc mở bán; header `event-wizard.tsx:44` là một dòng quá dài và ghi link sửa chỉ "về bước 1–2".
+- [x] [Review][Defer] `publishReadiness` chưa export qua `apps/api/src/modules/event/index.ts` [apps/api/src/modules/event/publish.service.ts:137] — deferred: thêm public surface; làm cùng `ordering.sellability` (deferred-work), lúc đó mới biết chữ ký cần cho mô-đun `ordering`.
+
+**Rejected:**
+- EC: thu hồi Closed Beta/gỡ tài khoản đúng lúc mở bán. `low`: giữ triage #1 (kết quả giống thu hồi ngay sau khi mở bán).
+- EC: sửa được sau khi mở bán. Đã defer ở triage #2, có trong deferred-work.
+- EC: mọi Hạng vé đã hết cửa sổ bán mà `HAS_TICKET_TYPE` vẫn đạt. `low`: giữ triage #4.
+- EC: so giờ máy app thay vì `now()` của DB. `low`: giữ triage #3.
+- EC: readiness trả điều kiện cho Sự kiện không còn nháp. `low`: giữ triage #14.
+- EC: link `/e/{slug}` trả 404. `low`: giữ triage #12, thuộc 2.11.
+- BH: theo link sang trang tài khoản nhận tiền rồi bấm Back thì wizard về bước trong URL, không về bước 4. `low`: sửa phải đồng bộ `?buoc=` theo mọi lần đổi bước.
+- BH: test song song vẫn pass nếu bỏ `.for('update')`. `low`: test giữ khóa dòng trong transaction khác tốn công; khóa đã có và cùng mẫu với 2.8/2.9.
+- BH: nhánh web `hidden`/`cancelled` chưa có e2e. `low`: trong story này chưa có lối nào ẩn hay hủy Sự kiện.
+- BH: `PUBLISH_CONDITION_ORDER` và `EventNotReadyDetails` không ai dùng ngoài test/type. `low`: chưa có chỗ nào lệch thứ tự.
+- BH: `onSuccess` vừa `setQueryData` vừa invalidate cùng key. `false`: cố ý theo 2.9 triage #16, để GET cũ đang chạy không ghi đè trạng thái `published`.
+- BH: readiness chạy tới 6 truy vấn tuần tự. `low`: endpoint chỉ gọi khi vào bước 4.
+- AA: dòng task "Web" ở trên chưa đánh dấu dù đã làm. Sửa là sửa spec đang review (bookkeeping, không phải lỗi code).
+- AA: e2e AC2 kiểm badge sau khi tải lại trang, không kiểm cache trong app. `low`: VG xác nhận mọi lối vào bước 4 đều đã invalidate danh sách qua lần lưu wizard.
 
 ## Implementation Notes
 

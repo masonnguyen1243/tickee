@@ -13,7 +13,8 @@ import { EventService } from './event.service.js';
 import { PublishService } from './publish.service.js';
 
 /**
- * Sự kiện của một BTC (Story 2.7): tạo, sửa, đọc Sự kiện nháp. Owner và Admin (`events.manage`).
+ * Sự kiện của một BTC: tạo, sửa, đọc Sự kiện nháp (Story 2.7), giới hạn Vé/Đơn (Story 2.8), điều kiện mở bán và mở bán
+ * (Story 2.10). Owner và Admin (`events.manage`).
  * Mọi route mang `@RequirePermission` nên tự rơi vào bộ test cách ly. `:eventId` sai dạng → 404 `EVENT_NOT_FOUND`.
  */
 @Controller('orgs/:orgId/events')

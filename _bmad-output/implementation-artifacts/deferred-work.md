@@ -235,3 +235,9 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-10-dieu-kien-mo-ban-va-mo-ban-su-kien.md`
   summary: Epic 7 (khóa BTC) phải thay thân `organizationLocked()` trong `apps/api/src/modules/event/publish.service.ts` (đang luôn `false`) và thêm test cho nhánh `ORGANIZATION_NOT_LOCKED` chưa đạt. `sellability` cũng cần xét khóa BTC.
   evidence: Triage 2.10 #19 (BH). Chưa có cột hay hàm khóa BTC; stub có chủ đích theo spec 2.10.
+
+## Deferred from: code review of spec-2-10-dieu-kien-mo-ban-va-mo-ban-su-kien.md (2026-11-06)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-10-dieu-kien-mo-ban-va-mo-ban-su-kien.md`
+  summary: `publishReadiness` chỉ export từ `apps/api/src/modules/event/publish.service.ts`, chưa qua `apps/api/src/modules/event/index.ts`; chữ ký nhận dòng Sự kiện đã đọc, không nhận `eventId`. Khi làm `ordering.sellability`, export qua `index.ts` với chữ ký mô-đun `ordering` cần, để luật điều kiện nằm một chỗ (AD-10, AD-34).
+  evidence: Code review 2.10 (AA, BH). `module-graph.cjs` chỉ cho import qua `index.ts`; hiện chưa có consumer ngoài mô-đun `event`.

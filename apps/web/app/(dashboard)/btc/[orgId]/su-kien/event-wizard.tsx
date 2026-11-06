@@ -41,8 +41,9 @@ import { TicketTypesEditor } from './ticket-types-editor';
  * Wizard tạo/thiết lập Sự kiện (Story 2.7, UX-DR wizard): 4 bước Thông tin → Hạng vé → Form mua → Xem trước & mở bán.
  * Bước 1 là thông tin Sự kiện; bước 2 là trình sửa Hạng vé (Story 2.8, dùng chung với tab "Hạng vé"); bước 3 là trình
  * sửa form mua (Story 2.9, dùng chung với tab "Form mua"); bước 4 hiện mục "Form mua" (cùng phần xem trước) và phần mở
- * bán (Story 2.10: điều kiện còn thiếu kèm link sửa nhanh về bước 1–2, nút "Mở bán", link công khai sau khi mở bán). "Lưu nháp" có ở mọi bước; "Tiếp" lưu rồi mới sang bước sau;
- * "Quay lại" giữ nguyên dữ liệu đã nhập. Lưu lần đầu (POST) xong thì URL chuyển sang `su-kien/{id}/thiet-lap`, nên mọi
+ * bán (Story 2.10, `PublishPanel`: điều kiện còn thiếu kèm lối sửa nhanh về bước 1–2 hoặc trang khác, nút "Mở bán",
+ * link công khai sau khi mở bán). "Lưu nháp" có ở mọi bước; "Tiếp" lưu rồi mới sang bước sau; "Quay lại" giữ nguyên dữ
+ * liệu đã nhập. Lưu lần đầu (POST) xong thì URL chuyển sang `su-kien/{id}/thiet-lap`, nên mọi
  * lần lưu sau là PATCH, không tạo Sự kiện thứ hai. Giờ nhập luôn hiểu theo giờ Việt Nam (+07:00), không theo máy.
  */
 

@@ -7,7 +7,7 @@ import { PublicEventsController } from './public-events.controller.js';
 import { PublishService } from './publish.service.js';
 
 /**
- * Sự kiện (FR-6) và form mua vé (FR-9). Cần `DbModule` ở gốc DI. Không đăng ký `PermissionGuard`: guard đó đã là
+ * Sự kiện (FR-6), mở bán (FR-8, Story 2.10) và form mua vé (FR-9). Cần `DbModule` ở gốc DI. Không đăng ký `PermissionGuard`: guard đó đã là
  * guard toàn cục của `OrganizerModule`.
  */
 @Module({

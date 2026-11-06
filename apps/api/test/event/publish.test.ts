@@ -185,10 +185,14 @@ describe('GET …/publish-readiness', () => {
 });
 
 describe('POST …/publish', () => {
-  it('miễn phí, đủ: 200 published, audit event.published; danh sách cũng thấy published', async () => {
+  it('miễn phí, đủ: 200 published, audit event.published; danh sách và trang công khai cũng thấy', async () => {
     const event = await newEvent();
     await addTicketType(event.id, 0);
+    // Trang công khai chưa thấy Sự kiện nháp (404 thống nhất với slug sai).
+    const hidden = await h.http.get(`/v1/events/${event.slug}`).expect(404);
+    expect(errorOf(hidden.body).code).toBe('EVENT_NOT_FOUND');
     const res = await publish(event.id).expect(200);
+    await h.http.get(`/v1/events/${event.slug}`).expect(200);
     expect(EventDetail.parse(res.body)).toMatchObject({ id: event.id, status: 'published', slug: event.slug });
     expect(await statusOf(event.id)).toBe('published');
     expect(await publishAudits(event.id)).toEqual([
@@ -247,6 +251,16 @@ describe('POST …/publish', () => {
     await h.db.orm.execute(sql`UPDATE events SET status = 'hidden' WHERE id = ${event.id}`);
     expect(errorOf((await publish(event.id).expect(409)).body).code).toBe('EVENT_NOT_DRAFT');
     expect(await publishAudits(event.id)).toHaveLength(1);
+  });
+
+  it('không còn nháp được kiểm trước điều kiện: đã mở bán rồi mất chính sách hoàn vé → vẫn 409 EVENT_NOT_DRAFT', async () => {
+    const event = await newEvent();
+    await addTicketType(event.id, 0);
+    await publish(event.id).expect(200);
+    await h.db.orm.execute(sql`UPDATE events SET refund_policy = NULL WHERE id = ${event.id}`);
+    const res = await publish(event.id).expect(409);
+    expect(errorOf(res.body)).toMatchObject({ code: 'EVENT_NOT_DRAFT' });
+    expect(errorOf(res.body).details ?? null).toBeNull();
   });
 
   it('hai request song song → một 200, một 409 EVENT_NOT_DRAFT; một dòng audit', async () => {

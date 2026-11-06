@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 
 import { expect, test } from './fixtures';
 import { apiError, me, mockIdentityApi, type Call, type Handler } from './identity-mock';
-import { ALWAYS_CONDITIONS, mockOrganizerApi, organization, ORG_ID, readiness } from './organizer-mock';
+import { ALWAYS_CONDITIONS, mockOrganizerApi, organization, ORG_ID, readiness, statusNotice } from './organizer-mock';
 
 /*
  * Wizard bước 4 "Xem trước & mở bán" (Story 2.10): danh sách điều kiện chưa đạt kèm link sửa nhanh, nút "Mở bán" tắt có
@@ -32,8 +32,14 @@ type State = {
   publishError?: { status: number; code: string; details?: unknown; then?: (state: State) => void };
   /** Tải điều kiện trả 500 tới khi test tắt cờ (query tự thử lại khi 5xx, nên không dùng lỗi một lần). */
   readinessFails?: boolean;
+  /** Chặn phản hồi tải điều kiện tới khi promise xong. */
+  holdReadiness?: Promise<void>;
   /** Chặn phản hồi mở bán tới khi `release` được gọi. */
   holdPublish?: Promise<void>;
+  /** Vai của người xem ở BTC (mặc định Admin). */
+  role: 'owner' | 'admin';
+  /** `GET /orgs/:id/notices`. */
+  notices: unknown[];
 };
 
 const eventOf = (state: State) => ({
@@ -66,11 +72,14 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
     name: 'Giải chạy Hà Nội 2026',
     codes: ALWAYS_CONDITIONS,
     forcedUnmet: [],
+    role: 'admin',
+    notices: [],
     ...initial,
   };
   const handlers: Record<string, Handler> = {
-    [`GET /orgs/${ORG_ID}`]: () => organization({ role: 'admin' }),
-    'GET /me/memberships': () => ({ status: 200, body: [{ organizationId: ORG_ID, name: ORG_NAME, role: 'admin' }] }),
+    [`GET /orgs/${ORG_ID}`]: () => organization({ role: state.role }),
+    'GET /me/memberships': () => ({ status: 200, body: [{ organizationId: ORG_ID, name: ORG_NAME, role: state.role }] }),
+    [`GET /orgs/${ORG_ID}/notices`]: () => ({ status: 200, body: state.notices }),
     [`GET /orgs/${ORG_ID}/events`]: () => {
       const { id, slug, name, status, startsAt, endsAt } = eventOf(state);
       return { status: 200, body: [{ id, slug, name, status, startsAt, endsAt }] };
@@ -82,7 +91,8 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
       state.refundPolicy = body.refundPolicy?.trim() ? body.refundPolicy.trim() : null;
       return { status: 200, body: eventOf(state) };
     },
-    [`GET ${eventPath}/publish-readiness`]: () => {
+    [`GET ${eventPath}/publish-readiness`]: async () => {
+      if (state.holdReadiness) await state.holdReadiness;
       if (state.readinessFails) return apiError(500, 'INTERNAL_ERROR');
       return { status: 200, body: readiness(state.codes, unmetOf(state)) };
     },
@@ -165,6 +175,8 @@ test('đủ điều kiện: "Mở bán" có spinner và không gửi lặp; xong
   const link = panel(page).locator('[data-slot="public-event-link"]');
   await expect(link).toHaveText(`${origin}/e/${SLUG}`);
   await expect(link).toHaveAttribute('href', `${origin}/e/${SLUG}`);
+  // Nút "Mở bán" bị gỡ: focus chuyển sang tiêu đề "Đang mở bán", không rơi về đầu trang.
+  await expect(panel(page).getByRole('heading', { name: 'Đang mở bán' })).toBeFocused();
   expect(publishCalls(calls)).toHaveLength(1);
 
   await panel(page).getByRole('button', { name: 'Sao chép link' }).click();
@@ -197,17 +209,23 @@ test('web thấy đủ nhưng server đã đổi (Closed Beta bị thu hồi) �
   const before = calls.filter((c) => c.path.endsWith('/publish-readiness')).length;
 
   await publishButton(page).click();
-  await expect(page.getByText('Sự kiện chưa đủ điều kiện mở bán. Đã tải lại danh sách điều kiện.')).toBeVisible();
+  await expect(page.getByText('Sự kiện chưa đủ điều kiện mở bán. Đang tải lại danh sách điều kiện.')).toBeVisible();
   await expect(unmetRows(page)).toHaveCount(1);
+  // Cùng câu với banner `CLOSED_BETA_PENDING`; chưa có kênh liên hệ Tingee nên không có link.
   await expect(unmetRows(page).first()).toContainText('Chờ duyệt Closed Beta');
-  await expect(unmetRows(page).first()).toContainText('Liên hệ Tingee');
+  await expect(unmetRows(page).first()).toContainText('Tingee sẽ liên hệ qua SĐT hoặc email liên hệ của BTC để xác minh.');
+  await expect(unmetRows(page).first()).not.toContainText('Liên hệ Tingee');
   await expect(unmetRows(page).first().getByRole('link')).toHaveCount(0);
   await expectDisabledWithReason(page, 'Chưa mở bán được: còn 1 điều kiện chưa đạt.');
+  // Nút bị tắt: focus ở tiêu đề "Mở bán", ngay trên danh sách điều kiện.
+  await expect(panel(page).getByRole('heading', { name: 'Mở bán' })).toBeFocused();
   expect(calls.filter((c) => c.path.endsWith('/publish-readiness')).length).toBeGreaterThan(before);
   await expect(panel(page).locator('[data-slot="public-event-link"]')).toHaveCount(0);
 });
 
-test('Sự kiện có phí còn thiếu: mỗi mã một dòng theo thứ tự, link sửa đúng nơi', async ({ page }) => {
+test('Sự kiện có phí còn thiếu (Admin): mỗi mã một dòng theo thứ tự, link sửa đúng nơi; tài khoản nhận tiền thì nhờ Owner', async ({
+  page,
+}) => {
   await openApi(page, {
     refundPolicy: null,
     codes: PAID_CONDITIONS,
@@ -224,14 +242,71 @@ test('Sự kiện có phí còn thiếu: mỗi mã một dòng theo thứ tự, 
   ]);
   await expect(unmetRows(page).nth(1)).toContainText('Chưa có Hạng vé nào.');
   await expect(unmetRows(page).nth(2)).toContainText('Sự kiện đã kết thúc.');
-  await expect(unmetRows(page).nth(4).getByRole('link', { name: 'Liên kết tài khoản nhận tiền' })).toHaveAttribute(
+  // Admin không mở được trang tài khoản nhận tiền (chỉ Owner): không có link, chỉ nhắc nhờ Owner như banner.
+  await expect(unmetRows(page).nth(4)).toContainText('Chưa có tài khoản nhận tiền.');
+  await expect(unmetRows(page).nth(4)).toContainText('Nhờ Owner liên kết tài khoản nhận tiền.');
+  await expect(unmetRows(page).nth(4).getByRole('link')).toHaveCount(0);
+  await expectDisabledWithReason(page, 'Chưa mở bán được: còn 5 điều kiện chưa đạt.');
+
+  await unmetRows(page).nth(2).getByRole('button', { name: 'Sửa thời gian' }).click();
+  await expect(page.getByText('Bước 1/4 · Thông tin')).toBeVisible();
+
+  await page.goto(`${base}/thiet-lap?buoc=4`);
+  await unmetRows(page).nth(1).getByRole('button', { name: 'Thêm Hạng vé' }).click();
+  await expect(page.getByText('Bước 2/4 · Hạng vé')).toBeVisible();
+});
+
+test('Owner: tài khoản nhận tiền có link sửa; BTC bị thu hồi Closed Beta thấy đúng câu của banner', async ({ page }) => {
+  await openApi(page, {
+    role: 'owner',
+    codes: PAID_CONDITIONS,
+    forcedUnmet: ['CLOSED_BETA_APPROVED', 'PAYOUT_ACCOUNT_LINKED'],
+    notices: [statusNotice('CLOSED_BETA_REVOKED')],
+  });
+  await page.goto(`${base}/thiet-lap?buoc=4`);
+  await expect(unmetRows(page)).toHaveCount(2);
+  await expect(unmetRows(page).first()).toContainText('Closed Beta đã bị thu hồi');
+  await expect(unmetRows(page).first()).not.toContainText('Chờ duyệt');
+  await expect(unmetRows(page).first().getByRole('link')).toHaveCount(0);
+  await expect(unmetRows(page).nth(1).getByRole('link', { name: 'Liên kết tài khoản nhận tiền' })).toHaveAttribute(
     'href',
     `/btc/${ORG_ID}/tai-khoan-nhan-tien`,
   );
-  await expectDisabledWithReason(page, 'Chưa mở bán được: còn 5 điều kiện chưa đạt.');
+});
 
-  await unmetRows(page).nth(1).getByRole('button', { name: 'Thêm Hạng vé' }).click();
-  await expect(page.getByText('Bước 2/4 · Hạng vé')).toBeVisible();
+test('quay lại bước 4: danh sách cũ trong cache không mở khóa "Mở bán" khi đang tải lại', async ({ page }) => {
+  const { state } = await openApi(page);
+  await page.goto(`${base}/thiet-lap?buoc=4`);
+  await expect(panel(page).getByText('Đã đủ điều kiện mở bán.')).toBeVisible();
+  await expect(publishButton(page)).toBeEnabled();
+
+  // Trong lúc ở bước 3, điều kiện đổi (vd. Hạng vé cuối bị xóa ở tab khác); lần tải lại bị giữ.
+  await page.getByRole('button', { name: 'Quay lại' }).click();
+  await expect(page.getByText('Bước 3/4 · Form mua')).toBeVisible();
+  let release = () => {};
+  state.holdReadiness = new Promise<void>((resolve) => (release = resolve));
+  state.forcedUnmet = ['HAS_TICKET_TYPE'];
+  await page.getByRole('button', { name: 'Tiếp' }).click();
+  await expect(page.getByText('Bước 4/4 · Xem trước & mở bán')).toBeVisible();
+  await expectDisabledWithReason(page, 'Đang kiểm tra điều kiện…');
+
+  release();
+  state.holdReadiness = undefined;
+  await expect(unmetRows(page)).toHaveCount(1);
+  await expectDisabledWithReason(page, 'Chưa mở bán được: còn 1 điều kiện chưa đạt.');
+});
+
+test('409 EVENT_NOT_READY rồi tải lại điều kiện lỗi → banner lỗi, không giữ "Đã đủ điều kiện", nút tắt', async ({ page }) => {
+  await openApi(page, {
+    publishError: { status: 409, code: 'EVENT_NOT_READY', then: (state) => (state.readinessFails = true) },
+  });
+  await page.goto(`${base}/thiet-lap?buoc=4`);
+  await expect(panel(page).getByText('Đã đủ điều kiện mở bán.')).toBeVisible();
+  await publishButton(page).click();
+  // Query tự thử lại khi 5xx (tối đa 2 lần) trước khi báo lỗi.
+  await expect(panel(page).getByText('Chưa tải được điều kiện mở bán', { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(panel(page).getByText('Đã đủ điều kiện mở bán.')).toHaveCount(0);
+  await expectDisabledWithReason(page, 'Chưa tải được điều kiện mở bán.');
 });
 
 test('Sự kiện đã mở bán: vào bước 4 thấy ngay link, không tải điều kiện', async ({ page }) => {
