@@ -82,6 +82,17 @@ export const TicketTypeDetail = z.object({
 });
 export type TicketTypeDetail = z.infer<typeof TicketTypeDetail>;
 
+/** Hạng vé trên trang công khai: phần tĩnh, không có số vé (số vé còn lại qua `EventAvailability`). */
+export const PublicTicketType = TicketTypeDetail.pick({
+  id: true,
+  name: true,
+  description: true,
+  price: true,
+  saleStartsAt: true,
+  saleEndsAt: true,
+});
+export type PublicTicketType = z.infer<typeof PublicTicketType>;
+
 /** `GET /v1/orgs/:orgId/events/:eventId/ticket-types`: tạo trước đứng trước. */
 export const TicketTypeList = z.array(TicketTypeDetail);
 export type TicketTypeList = z.infer<typeof TicketTypeList>;

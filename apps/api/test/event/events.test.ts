@@ -261,11 +261,27 @@ describe('API công khai theo slug', () => {
     expect(ErrorResponse.parse(draftRes.body).error.code).toBe('EVENT_NOT_FOUND');
   });
 
-  it('Sự kiện không còn nháp thì đọc được (đặt status trực tiếp: story này chưa có mở bán)', async () => {
+  it('Sự kiện không còn nháp thì đọc được: kèm tên BTC và Hạng vé (thứ tự tạo, không có số vé)', async () => {
     const event = await created(draft({ refundPolicy: 'Hoàn 100% trước 7 ngày.' }));
+    const addTier = async (body: Record<string, unknown>) =>
+      (
+        await h.http
+          .post(`/v1/orgs/${orgId}/events/${event.id}/ticket-types`)
+          .set('cookie', admin.cookie)
+          .send({ capacity: 50, ...body })
+          .expect(201)
+      ).body.id as string;
+    const vip = await addTier({
+      name: 'VIP',
+      description: 'Ghế đầu',
+      price: 300_000,
+      saleStartsAt: '2026-11-01T08:00:00+07:00',
+      saleEndsAt: '2026-11-15T20:00:00+07:00',
+    });
+    const free = await addTier({ name: 'Miễn phí', price: 0 });
     await h.db.orm.execute(sql`UPDATE events SET status = 'published' WHERE id = ${event.id}`);
     const res = await h.http.get(`/v1/events/${event.slug}`).expect(200);
-    expect(PublicEvent.parse(res.body)).toEqual({
+    expect(res.body).toEqual({
       slug: event.slug,
       name: event.name,
       status: 'published',
@@ -274,7 +290,32 @@ describe('API công khai theo slug', () => {
       venue: null,
       description: null,
       refundPolicy: 'Hoàn 100% trước 7 ngày.',
+      organizationName: 'CLB Chạy Bộ',
+      ticketTypes: [
+        {
+          id: vip,
+          name: 'VIP',
+          description: 'Ghế đầu',
+          price: 300_000,
+          saleStartsAt: '2026-11-01T08:00:00+07:00',
+          saleEndsAt: '2026-11-15T20:00:00+07:00',
+        },
+        { id: free, name: 'Miễn phí', description: null, price: 0, saleStartsAt: null, saleEndsAt: null },
+      ],
     });
+    expect(PublicEvent.parse(res.body).ticketTypes).toHaveLength(2);
+  });
+
+  it.each([
+    ['hidden', sql`status = 'hidden'`, 'hidden'],
+    ['cancelled', sql`status = 'cancelled'`, 'cancelled'],
+    ['bị khóa', sql`status = 'published', locked_at = now(), lock_reason = 'vi phạm'`, 'published'],
+  ])('Sự kiện %s vẫn trả 200 (Ẩn vẫn mở được bằng link), không lộ lý do khóa', async (_label, set, status) => {
+    const event = await created();
+    await h.db.orm.execute(sql`UPDATE events SET ${set} WHERE id = ${event.id}`);
+    const res = await h.http.get(`/v1/events/${event.slug}`).expect(200);
+    expect(PublicEvent.parse(res.body)).toMatchObject({ slug: event.slug, status, ticketTypes: [] });
+    expect(JSON.stringify(res.body)).not.toMatch(/lock|vi phạm/i);
   });
 });
 

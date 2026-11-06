@@ -7,3 +7,6 @@ export {
   lockInventoryForEvent,
   type InventoryRow,
 } from './inventory.service.js';
+export { OrderingModule } from './ordering.module.js';
+export { AVAILABILITY_CLOCK, type AvailabilityClock } from './public-availability.controller.js';
+export { sellability, sellabilityOf } from './sellability.js';

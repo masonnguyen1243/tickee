@@ -128,18 +128,8 @@ export const EventDetail = EventSummary.extend({
 });
 export type EventDetail = z.infer<typeof EventDetail>;
 
-/** `GET /v1/events/:slug` (không cần đăng nhập). Sự kiện nháp và slug không tồn tại cùng trả `404 EVENT_NOT_FOUND`. */
-export const PublicEvent = z.object({
-  slug: z.string(),
-  name: z.string(),
-  status: eventStatusSchema,
-  startsAt: EventDateTime,
-  endsAt: EventDateTime,
-  venue: z.string().nullable(),
-  description: z.string().nullable(),
-  refundPolicy: z.string().nullable(),
-});
-export type PublicEvent = z.infer<typeof PublicEvent>;
+// `PublicEvent` (`GET /v1/events/:slug`) nằm ở `sellability.ts`: nó dùng schema Hạng vé, mà `ticket-type.ts` lại import
+// file này.
 
 // ---------------------------------------------------------------------------------------------------------------
 // Hàm dùng chung api và web

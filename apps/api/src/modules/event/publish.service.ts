@@ -14,8 +14,8 @@ import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import { audit } from '../../platform/audit/index.js';
 import { DATABASE, type Database, type DbExecutor } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
-import { closedBetaStatusOf, payoutAccountStatusOf } from '../organizer/index.js';
 import { detailOf, notFound, UUID } from './event.service.js';
+import { organizationLocked, paidSalesAllowed, refundPolicySet } from './sale-rules.js';
 import { events } from './schema.js';
 import { ticketTypesOf } from './ticket-type.service.js';
 
@@ -27,14 +27,6 @@ import { ticketTypesOf } from './ticket-type.service.js';
  */
 
 type EventRow = typeof events.$inferSelect;
-
-/**
- * BTC có đang bị khóa không. Chưa có khóa BTC (Epic 7) nên luôn `false`; Epic 7 thay phần thân hàm này bằng truy vấn
- * trục khóa của BTC (qua read model của `organizer`).
- */
-async function organizationLocked(_db: DbExecutor, _ctx: Pick<AccessContext, 'organizationId'>): Promise<boolean> {
-  return false;
-}
 
 /**
  * Điều kiện mở bán của một Sự kiện (đã đọc, thuộc BTC trong `ctx`), đọc qua `db` (truyền `tx` để đọc trong cùng
@@ -49,18 +41,17 @@ export async function publishReadiness(
   const ticketTypes = await ticketTypesOf(db, ctx, event.id);
   const locked = await organizationLocked(db, ctx);
   const conditions: PublishCondition[] = [
-    { code: PublishConditionCode.REFUND_POLICY, satisfied: (event.refundPolicy ?? '').trim() !== '' },
+    { code: PublishConditionCode.REFUND_POLICY, satisfied: refundPolicySet(event.refundPolicy) },
     { code: PublishConditionCode.HAS_TICKET_TYPE, satisfied: ticketTypes.length > 0 },
     { code: PublishConditionCode.EVENT_NOT_ENDED, satisfied: event.effectiveEndAt.getTime() > now.getTime() },
     { code: PublishConditionCode.ORGANIZATION_NOT_LOCKED, satisfied: !locked },
   ];
   const paidPrices = ticketTypes.map((t) => t.price).filter((price) => price > 0);
   if (paidPrices.length > 0) {
-    const closedBeta = await closedBetaStatusOf(db, ctx);
-    const payout = await payoutAccountStatusOf(db, ctx);
+    const paid = await paidSalesAllowed(db, ctx);
     conditions.push(
-      { code: PublishConditionCode.CLOSED_BETA_APPROVED, satisfied: closedBeta?.status === 'approved' },
-      { code: PublishConditionCode.PAYOUT_ACCOUNT_LINKED, satisfied: payout.status === 'linked' },
+      { code: PublishConditionCode.CLOSED_BETA_APPROVED, satisfied: paid.closedBetaApproved },
+      { code: PublishConditionCode.PAYOUT_ACCOUNT_LINKED, satisfied: paid.payoutLinked },
       { code: PublishConditionCode.PAID_PRICE_MINIMUM, satisfied: paidPrices.every((p) => p >= MIN_PAID_PRICE) },
     );
   }

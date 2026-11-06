@@ -11,9 +11,21 @@ import { and, asc, eq } from 'drizzle-orm';
 import type { z } from 'zod';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import { audit } from '../../platform/audit/index.js';
-import { DATABASE, type Database } from '../../platform/db/index.js';
+import { DATABASE, type Database, type DbExecutor } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { members, organizations } from './schema.js';
+
+/** Read model cho mô-đun khác (vd. trang Sự kiện công khai): tên BTC trong `scope`; `null` nếu BTC không còn. */
+export async function organizationNameOf(
+  db: DbExecutor,
+  scope: Pick<AccessContext, 'organizationId'>,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ name: organizations.name })
+    .from(organizations)
+    .where(orgScope(scope)({ organizationId: organizations.id }));
+  return row?.name ?? null;
+}
 
 /** Body `POST /v1/orgs` sau khi qua schema (tên đã trim, liên hệ trống → `null`). */
 export type CreateOrganizationInput = z.output<typeof CreateOrganizationRequest>;

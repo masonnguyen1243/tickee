@@ -241,3 +241,9 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-10-dieu-kien-mo-ban-va-mo-ban-su-kien.md`
   summary: `publishReadiness` chỉ export từ `apps/api/src/modules/event/publish.service.ts`, chưa qua `apps/api/src/modules/event/index.ts`; chữ ký nhận dòng Sự kiện đã đọc, không nhận `eventId`. Khi làm `ordering.sellability`, export qua `index.ts` với chữ ký mô-đun `ordering` cần, để luật điều kiện nằm một chỗ (AD-10, AD-34).
   evidence: Code review 2.10 (AA, BH). `module-graph.cjs` chỉ cho import qua `index.ts`; hiện chưa có consumer ngoài mô-đun `event`.
+
+## Deferred from: tách phạm vi Story 2.11 khi build (2026-11-06)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-11-a-sellability-va-availability.md`
+  summary: Story 2.11-b — trang `/e/{slug}` trong `(public)`. Gồm SSR fetch không cookie với `next: {revalidate: 30, tags: ['event:{slug}']}`, `event-hero` (gradient coral vì chưa có ảnh 2.7-b, ngày-giờ "· 07:00 – 17:00", địa điểm mở Google Maps), hàng BTC, chia sẻ Web Share/`copyWithToast`, `status-banner` theo `eventReason` (copy theo EXPERIENCE), `ticket-tier-row` gọi `/availability` lúc tải và khi `visibilitychange`, 2 cột ≥ `lg`, `loading.tsx` Skeleton, empty-state 404, `generateMetadata` + `opengraph-image.tsx` (font tiếng Việt), `noindex` cho `hidden`. Revalidate on-demand: API enqueue job pg-boss bằng `tx` sau mỗi lần sửa Sự kiện/Hạng vé/mở bán, gọi `POST {WEB_INTERNAL_URL}/api/revalidate` kèm `REVALIDATE_SECRET`, web gọi `revalidateTag`. e2e cần mock HTTP server cho fetch SSR (`page.route` không chặn được).
+  evidence: Mason chọn tách 2.11 thành 2.11-a (API) và 2.11-b (web) ngày 06/11/2026 vì spec gộp khoảng 4.000 token. Mason chọn cách revalidate qua pg-boss (AD-37) cùng ngày.

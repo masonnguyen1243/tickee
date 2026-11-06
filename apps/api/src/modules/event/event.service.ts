@@ -2,7 +2,6 @@ import { randomInt } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import {
   EVENT_DRAFT_FIELDS,
-  EVENT_SLUG_PATTERN,
   EVENT_SLUG_SUFFIX_LENGTH,
   EventDraftInput,
   effectiveEndAt,
@@ -13,9 +12,8 @@ import {
   type EventDraftField,
   type EventList,
   type EventOrderLimitInput,
-  type PublicEvent,
 } from '@tickee/contracts';
-import { and, desc, eq, ne } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import pg from 'pg';
 import type { z } from 'zod';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
@@ -27,7 +25,7 @@ import { events } from './schema.js';
 /*
  * Sự kiện nháp (FR-6, Story 2.7): Owner và Admin tạo, sửa, đọc Sự kiện của BTC mình; mọi truy vấn qua `orgScope(ctx)`.
  * Mỗi lần ghi là một transaction có audit (`event.created`, `event.updated` chỉ ghi tên trường đổi). API công khai theo
- * slug không bao giờ trả Sự kiện nháp: nháp và slug không tồn tại cùng `404 EVENT_NOT_FOUND`.
+ * slug (`public-event.ts`) không bao giờ trả Sự kiện nháp: nháp và slug không tồn tại cùng `404 EVENT_NOT_FOUND`.
  */
 
 /** Token DI của hàm sinh hậu tố slug (test tiêm hàm cố định để ép trùng slug). */
@@ -226,25 +224,5 @@ export class EventService {
       return updated;
     });
     return detailOf(row);
-  }
-
-  /** Trang công khai theo slug (không cần đăng nhập): nháp và slug không tồn tại cùng `404 EVENT_NOT_FOUND`. */
-  async publicBySlug(slug: string): Promise<PublicEvent> {
-    if (slug.length > 100 || !EVENT_SLUG_PATTERN.test(slug)) throw notFound();
-    const [row] = await this.db.orm
-      .select({
-        slug: events.slug,
-        name: events.name,
-        status: events.status,
-        startsAt: events.startsAt,
-        endsAt: events.endsAt,
-        venue: events.venue,
-        description: events.description,
-        refundPolicy: events.refundPolicy,
-      })
-      .from(events)
-      .where(and(eq(events.slug, slug), ne(events.status, 'draft')));
-    if (!row) throw notFound();
-    return { ...row, startsAt: toEventIso(row.startsAt), endsAt: toEventIso(row.endsAt) };
   }
 }
