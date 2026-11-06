@@ -52,6 +52,8 @@ export type AuditAction =
   /** Owner/Admin sửa Sự kiện (`changedFields`: tên trường trong `EVENT_DRAFT_FIELDS` đã đổi, hoặc
    * `['maxTicketsPerOrder']` khi đổi giới hạn Vé/Đơn; không ghi giá trị). */
   | 'event.updated'
+  /** Owner/Admin mở bán Sự kiện (Story 2.10): `draft` → `published` sau khi đủ điều kiện mở bán. */
+  | 'event.published'
   /** Owner/Admin thêm Hạng vé (kèm dòng tồn kho) cho Sự kiện (Story 2.8). */
   | 'ticket_type.created'
   /** Owner/Admin sửa Hạng vé (`changedFields`: tên trường trong `TICKET_TYPE_FIELDS` đã đổi, không ghi giá trị). */

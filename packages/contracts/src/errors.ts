@@ -100,6 +100,13 @@ export const ErrorCode = {
    * Sự kiện đã có đủ `FORM_QUESTIONS_MAX` câu hỏi riêng (`details`: `FormQuestionLimitReachedDetails`). Không lưu gì.
    */
   FORM_QUESTION_LIMIT_REACHED: 'FORM_QUESTION_LIMIT_REACHED',
+  /**
+   * Mở bán khi Sự kiện còn điều kiện chưa đạt (server kiểm lại trong transaction). `details.unmet`: mã các điều kiện
+   * chưa đạt (`EventNotReadyDetails`). Không đổi gì.
+   */
+  EVENT_NOT_READY: 'EVENT_NOT_READY',
+  /** Mở bán Sự kiện không còn ở trạng thái nháp (đã mở bán, ẩn hoặc hủy; kể cả hai người bấm cùng lúc). */
+  EVENT_NOT_DRAFT: 'EVENT_NOT_DRAFT',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

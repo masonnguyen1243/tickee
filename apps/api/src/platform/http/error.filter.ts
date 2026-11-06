@@ -42,6 +42,8 @@ const MESSAGES: Record<ErrorCode, string> = {
   TICKET_TYPE_IN_USE: 'Hạng vé đã có người mua hoặc đang giữ chỗ, không xóa được.',
   FORM_QUESTION_NOT_FOUND: 'Không tìm thấy câu hỏi này.',
   FORM_QUESTION_LIMIT_REACHED: `Mỗi Sự kiện tối đa ${FORM_QUESTIONS_MAX} câu hỏi.`,
+  EVENT_NOT_READY: 'Sự kiện chưa đủ điều kiện mở bán.',
+  EVENT_NOT_DRAFT: 'Sự kiện không còn ở trạng thái nháp.',
 };
 
 /** Lỗi DB chỉ log `{ type, code }` (message/params có thể mang email, token session); lỗi khác log nguyên để giữ stack. */
