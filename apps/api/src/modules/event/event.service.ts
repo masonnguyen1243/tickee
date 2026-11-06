@@ -46,6 +46,7 @@ const SLUG_ATTEMPTS = 5;
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const notFound = () => new AppError(ErrorCode.EVENT_NOT_FOUND, 'Không tìm thấy Sự kiện này.');
+const cancelled = () => new AppError(ErrorCode.EVENT_CANCELLED, 'Sự kiện đã hủy, không sửa được.');
 
 /** Vi phạm unique index `constraint` (ở chính lỗi hoặc một tầng `cause` của Drizzle). */
 function isUniqueViolation(err: unknown, constraint: string): boolean {
@@ -69,6 +70,7 @@ export const detailOf = (row: EventRow): EventDetail => ({
   startsAt: toEventIso(row.startsAt),
   endsAt: toEventIso(row.endsAt),
   effectiveEndAt: toEventIso(row.effectiveEndAt),
+  endedManuallyAt: row.endedManuallyAt ? toEventIso(row.endedManuallyAt) : null,
   venue: row.venue,
   description: row.description,
   refundPolicy: row.refundPolicy,
@@ -77,14 +79,18 @@ export const detailOf = (row: EventRow): EventDetail => ({
   updatedAt: toEventIso(row.updatedAt),
 });
 
-/** Cột ghi từ input (giờ đã đổi sang `Date`, `effective_end_at` tính lại). */
-function columnsOf(input: DraftValues) {
+/**
+ * Cột ghi từ input (giờ đã đổi sang `Date`). `effective_end_at` tính lại, trừ khi BTC đã bấm "Kết thúc"
+ * (`current.endedManuallyAt`): khi đó giữ nguyên mốc bấm (AD-14, CHECK `events_ended_manually_check`).
+ */
+function columnsOf(input: DraftValues, current?: Pick<EventRow, 'endedManuallyAt'>) {
   const endsAt = new Date(input.endsAt);
   return {
     name: input.name,
     startsAt: new Date(input.startsAt),
     endsAt,
-    effectiveEndAt: effectiveEndAt(endsAt),
+    // CHECK buộc `effective_end_at = ended_manually_at` khi đã bấm: ghi lại đúng mốc đó là giữ nguyên.
+    effectiveEndAt: current?.endedManuallyAt ?? effectiveEndAt(endsAt),
     venue: input.venue,
     description: input.description,
     refundPolicy: input.refundPolicy,
@@ -147,11 +153,17 @@ export class EventService {
         status: events.status,
         startsAt: events.startsAt,
         endsAt: events.endsAt,
+        effectiveEndAt: events.effectiveEndAt,
       })
       .from(events)
       .where(orgScope(ctx)(events))
       .orderBy(desc(events.createdAt), desc(events.id));
-    return rows.map((row) => ({ ...row, startsAt: toEventIso(row.startsAt), endsAt: toEventIso(row.endsAt) }));
+    return rows.map((row) => ({
+      ...row,
+      startsAt: toEventIso(row.startsAt),
+      endsAt: toEventIso(row.endsAt),
+      effectiveEndAt: toEventIso(row.effectiveEndAt),
+    }));
   }
 
   /** Một Sự kiện của BTC; id lạ, sai dạng hoặc của BTC khác → `404 EVENT_NOT_FOUND`. */
@@ -166,7 +178,8 @@ export class EventService {
   }
 
   /**
-   * Sửa Sự kiện (thay toàn bộ các trường của `EventDraftInput`). Slug giữ nguyên; `effective_end_at` tính lại. Audit
+   * Sửa Sự kiện (thay toàn bộ các trường của `EventDraftInput`) ở mọi trạng thái trừ `cancelled` (→ `409
+   * EVENT_CANCELLED`, Story 2.12). Slug giữ nguyên; `effective_end_at` tính lại trừ khi đã bấm "Kết thúc". Audit
    * `event.updated` chỉ khi có trường đổi, `changedFields` là tên trường (không ghi giá trị). Sự kiện đã mở bán mà có
    * trường đổi thì enqueue revalidate trang `/e/{slug}` trong cùng transaction (Story 2.11-c).
    */
@@ -181,7 +194,8 @@ export class EventService {
         .where(and(orgScope(ctx)(events), eq(events.id, eventId)))
         .for('update');
       if (!current) throw notFound();
-      const next = columnsOf(input);
+      if (current.status === 'cancelled') throw cancelled();
+      const next = columnsOf(input, current);
       const changedFields = changedFieldsOf(current, next);
       if (changedFields.length === 0) return current;
       const [updated] = await tx

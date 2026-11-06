@@ -92,6 +92,13 @@
       "when": 1793851814435,
       "tag": "0012_event_form_questions",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793957085106,
+      "tag": "0013_event_ended_manually",
+      "breakpoints": true
     }
   ]
 }

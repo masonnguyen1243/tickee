@@ -271,3 +271,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-11-c-revalidate-trang-su-kien.md`
   summary: Story nào thêm đổi tên BTC hoặc khóa BTC (Epic 7) làm đổi phần tĩnh của trang Sự kiện phải enqueue `enqueuePublicPageRevalidation` cho mọi Sự kiện không còn nháp của BTC đó.
   evidence: Review 2.11-c #15 (BH): `publicEventDetail` trả `organizationName`; hiện chưa có endpoint đổi tên nên chưa có trigger.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-12-sua-an-va-ket-thuc-som-su-kien.md`
+  summary: Ẩn / Hiện lại / Kết thúc / sửa Sự kiện chưa xét khóa Sự kiện (`locked_at`) hay khóa BTC; UX yêu cầu nút "Mở bán"/"Ẩn" tắt kèm lý do khi bị khóa — làm cùng Epic 7.
+  evidence: `event-status.service.ts` `transition` chỉ xét `status` và `effective_end_at`; hiện chưa có đường khóa nên chưa ai gặp (`sellability` vẫn trả `locked`). Review pass 2 #25.

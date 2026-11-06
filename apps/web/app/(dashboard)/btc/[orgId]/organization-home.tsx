@@ -24,7 +24,7 @@ import { ApiError } from '@/lib/api/errors';
 import { fetchMe, ME_QUERY_KEY } from '@/lib/auth/api';
 import { eventsQueryKey, fetchEvents } from '@/lib/event/api';
 
-import { EVENT_STATUS_BADGE } from './su-kien/event-status';
+import { eventBadge } from './su-kien/event-status';
 import { handledElsewhere } from './su-kien/handled-elsewhere';
 
 /** Khóa `localStorage` ghi nhớ Owner đã đóng thẻ gợi ý bật 2FA, theo từng tài khoản trên trình duyệt này. */
@@ -92,7 +92,7 @@ function TwoFactorHint() {
 
 /** `event-card` (DESIGN.md): chạm cả hàng mở tab Tổng quan của Sự kiện. Chưa có ảnh (Story 2.7-b): ô 56px nền thay thế. */
 function EventCard({ orgId, event }: { orgId: string; event: EventSummary }) {
-  const badge = EVENT_STATUS_BADGE[event.status];
+  const badge = eventBadge(event);
   return (
     <li>
       <Link

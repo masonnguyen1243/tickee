@@ -42,13 +42,14 @@ export const tierSaleStatusSchema = z.enum(TierSaleStatus);
 
 /**
  * Lý do cấp Sự kiện, theo thứ tự ưu tiên (có nhiều lý do thì lấy lý do đứng trước). Bốn lý do đầu làm mọi Hạng vé
- * `unavailable`; `paused` nghĩa là có ít nhất một Hạng vé "Tạm ngừng bán".
+ * `unavailable`; `paused` nghĩa là có ít nhất một Hạng vé "Tạm ngừng bán". "Đã kết thúc" thắng "Ẩn" (Story 2.12): Sự
+ * kiện ẩn đã kết thúc (bấm tay hoặc tự hết giờ) trả `ended`.
  */
 export const EventSaleReason = {
   CANCELLED: 'cancelled',
   LOCKED: 'locked',
-  HIDDEN: 'hidden',
   ENDED: 'ended',
+  HIDDEN: 'hidden',
   PAUSED: 'paused',
 } as const;
 export type EventSaleReason = (typeof EventSaleReason)[keyof typeof EventSaleReason];
@@ -61,8 +62,8 @@ export const EVENT_SALE_REASON_ORDER: readonly EventSaleReason[] = Object.values
 export const EVENT_UNAVAILABLE_REASONS: readonly EventSaleReason[] = [
   EventSaleReason.CANCELLED,
   EventSaleReason.LOCKED,
-  EventSaleReason.HIDDEN,
   EventSaleReason.ENDED,
+  EventSaleReason.HIDDEN,
 ];
 
 export const TierAvailability = z.object({

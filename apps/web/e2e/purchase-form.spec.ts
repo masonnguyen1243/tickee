@@ -39,6 +39,7 @@ const event = () => ({
   startsAt: '2026-11-16T07:00:00+07:00',
   endsAt: '2026-11-16T17:00:00+07:00',
   effectiveEndAt: '2026-11-16T23:59:59+07:00',
+  endedManuallyAt: null,
   venue: null,
   description: null,
   refundPolicy: null,

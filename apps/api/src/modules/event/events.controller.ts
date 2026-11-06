@@ -9,12 +9,13 @@ import {
 } from '@tickee/contracts';
 import { Access, RequirePermission, type AccessContext } from '../../platform/access/index.js';
 import { parseRequest } from '../../platform/http/index.js';
+import { EventStatusService } from './event-status.service.js';
 import { EventService } from './event.service.js';
 import { PublishService } from './publish.service.js';
 
 /**
  * Sự kiện của một BTC: tạo, sửa, đọc Sự kiện nháp (Story 2.7), giới hạn Vé/Đơn (Story 2.8), điều kiện mở bán và mở bán
- * (Story 2.10). Owner và Admin (`events.manage`).
+ * (Story 2.10), Ẩn / Hiện lại / Kết thúc sớm (Story 2.12). Owner và Admin (`events.manage`).
  * Mọi route mang `@RequirePermission` nên tự rơi vào bộ test cách ly. `:eventId` sai dạng → 404 `EVENT_NOT_FOUND`.
  */
 @Controller('orgs/:orgId/events')
@@ -22,6 +23,7 @@ export class EventsController {
   constructor(
     @Inject(EventService) private readonly events: EventService,
     @Inject(PublishService) private readonly publishing: PublishService,
+    @Inject(EventStatusService) private readonly statuses: EventStatusService,
   ) {}
 
   /** Tạo Sự kiện nháp (201). */
@@ -75,5 +77,29 @@ export class EventsController {
   @RequirePermission(Permission.EVENTS_MANAGE)
   publish(@Access() ctx: AccessContext, @Param('eventId') eventId: string): Promise<EventDetail> {
     return this.publishing.publish(ctx, eventId);
+  }
+
+  /** Ẩn (không body): `published` → `hidden`; trả `EventDetail`. */
+  @Post(':eventId/hide')
+  @HttpCode(200)
+  @RequirePermission(Permission.EVENTS_MANAGE)
+  hide(@Access() ctx: AccessContext, @Param('eventId') eventId: string): Promise<EventDetail> {
+    return this.statuses.hide(ctx, eventId);
+  }
+
+  /** Hiện lại (không body): `hidden` → `published`; trả `EventDetail`. */
+  @Post(':eventId/unhide')
+  @HttpCode(200)
+  @RequirePermission(Permission.EVENTS_MANAGE)
+  unhide(@Access() ctx: AccessContext, @Param('eventId') eventId: string): Promise<EventDetail> {
+    return this.statuses.unhide(ctx, eventId);
+  }
+
+  /** Kết thúc sớm (không body): `ended_manually_at` = `effective_end_at` = lúc bấm; status không đổi. */
+  @Post(':eventId/end')
+  @HttpCode(200)
+  @RequirePermission(Permission.EVENTS_MANAGE)
+  end(@Access() ctx: AccessContext, @Param('eventId') eventId: string): Promise<EventDetail> {
+    return this.statuses.end(ctx, eventId);
   }
 }

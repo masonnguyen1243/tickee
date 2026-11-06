@@ -40,6 +40,10 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   FORM_QUESTION_LIMIT_REACHED: 409,
   EVENT_NOT_READY: 409,
   EVENT_NOT_DRAFT: 409,
+  EVENT_CANCELLED: 409,
+  EVENT_STATUS_CONFLICT: 409,
+  EVENT_ALREADY_ENDED: 409,
+  EVENT_NOT_STARTED: 409,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

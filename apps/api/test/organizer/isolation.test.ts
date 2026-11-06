@@ -81,6 +81,10 @@ describe('cách ly BTC', () => {
     // Story 2.10: điều kiện mở bán và mở bán.
     expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/publish-readiness');
     expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/publish');
+    // Story 2.12: Ẩn, Hiện lại, Kết thúc sớm.
+    expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/hide');
+    expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/unhide');
+    expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/end');
     expect(guarded).toContain('GET /v1/orgs/:orgId/test-owner-only');
     expect(guarded).toContain('POST /v1/orgs/:orgId/test-owner-only/items/:itemId');
   });
@@ -112,14 +116,14 @@ describe('cách ly BTC', () => {
 
   it('route Sự kiện trên BTC A: body {} → 400, id ngẫu nhiên → 404 EVENT_NOT_FOUND', async () => {
     const eventRoutes = routes.filter((r) => r.permission && r.path.startsWith('/v1/orgs/:orgId/events'));
-    expect(eventRoutes).toHaveLength(16);
+    expect(eventRoutes).toHaveLength(19);
     for (const route of eventRoutes) {
       const res = await call(route, orgA, ownerA.cookie);
       // Body được kiểm trước khi chạm DB; danh sách Sự kiện của BTC trả 200; còn lại Sự kiện ngẫu nhiên → 404.
-      // Mở bán không có body nên cũng ra 404.
+      // Mở bán, Ẩn, Hiện lại, Kết thúc không có body nên cũng ra 404.
       const hasBody =
         (route.method === 'POST' || route.method === 'PATCH' || route.method === 'PUT') &&
-        route.path !== '/v1/orgs/:orgId/events/:eventId/publish';
+        !/\/events\/:eventId\/(publish|hide|unhide|end)$/.test(route.path);
       const expected = hasBody ? 400 : route.path === '/v1/orgs/:orgId/events' ? 200 : 404;
       expect(res.status, label(route)).toBe(expected);
       if (expected === 404) expect(ErrorResponse.parse(res.body).error.code, label(route)).toBe('EVENT_NOT_FOUND');
