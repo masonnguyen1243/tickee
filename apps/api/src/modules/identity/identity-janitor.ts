@@ -4,7 +4,15 @@ import { lt, sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
-import { googleStartEvents, otpSendEvents, otpVerifyFailures, sessions, verifications } from './schema.js';
+import {
+  googleStartEvents,
+  otpSendEvents,
+  otpVerifyFailures,
+  reauthCodes,
+  reauthGrants,
+  sessions,
+  verifications,
+} from './schema.js';
 
 /** Lịch dọn rác: mỗi 10 phút (cron, UTC). */
 export const PURGE_EXPIRED_CRON = '*/10 * * * *';
@@ -15,7 +23,9 @@ export const PURGE_EXPIRED_CRON = '*/10 * * * *';
  * - lần nhập sai ra khỏi cửa sổ 24 giờ;
  * - verification hết hạn hơn 24 giờ (`identifier` chứa email dạng rõ; state OAuth `auth-state:*`) — verification vừa
  *   hết hạn được giữ để người dùng vẫn nhận `OTP_EXPIRED` (vì vậy không bỏ `verification.disableCleanup`);
- * - session hết hạn hơn 24 giờ (chứa IP, user agent).
+ * - session hết hạn hơn 24 giờ (chứa IP, user agent);
+ * - mã xác nhận lại qua email hết hạn hơn 24 giờ (mã vừa hết hạn được giữ để người dùng nhận `OTP_EXPIRED`) và lần xác
+ *   nhận lại đã hết hạn (đã dùng hay chưa, không còn tiêu được).
  */
 export async function purgeExpired(db: Database): Promise<void> {
   await db.orm.delete(otpSendEvents).where(lt(otpSendEvents.createdAt, sql`now() - interval '1 hour'`));
@@ -25,6 +35,8 @@ export async function purgeExpired(db: Database): Promise<void> {
     .where(lt(otpVerifyFailures.createdAt, sql`now() - make_interval(secs => ${OTP_FAILURE_WINDOW_SECONDS})`));
   await db.orm.delete(verifications).where(lt(verifications.expiresAt, sql`now() - interval '24 hours'`));
   await db.orm.delete(sessions).where(lt(sessions.expiresAt, sql`now() - interval '24 hours'`));
+  await db.orm.delete(reauthCodes).where(lt(reauthCodes.expiresAt, sql`now() - interval '24 hours'`));
+  await db.orm.delete(reauthGrants).where(lt(reauthGrants.expiresAt, sql`now()`));
 }
 
 /**

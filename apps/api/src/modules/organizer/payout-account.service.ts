@@ -15,6 +15,7 @@ import {
 } from '@tickee/contracts';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import pg from 'pg';
+import type { PgBoss } from 'pg-boss';
 import type { z } from 'zod';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import { audit } from '../../platform/audit/index.js';
@@ -22,6 +23,8 @@ import type { ApiConfig } from '../../platform/config/index.js';
 import { parseCredentialKeys, SecretBox } from '../../platform/crypto/index.js';
 import { DATABASE, type Database, type DbExecutor, type Tx } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
+import { BOSS } from '../../platform/jobs/index.js';
+import { consumeReauth, type ReauthProof } from '../identity/index.js';
 import {
   TINGEE_CLIENT,
   tingeePortalUrl,
@@ -29,6 +32,7 @@ import {
   type TingeeClient,
   type TingeeCredential,
 } from '../tingee/index.js';
+import { DefaultPayoutQueues, enqueueDefaultPayoutChanged } from './payout-default-jobs.js';
 import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
 
 /*
@@ -41,6 +45,11 @@ import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
  * Tingee luôn được gọi NGOÀI transaction DB. Mỗi lần ghi là một transaction riêng có audit, bắt đầu bằng khóa dòng
  * `organizations FOR UPDATE` của BTC, nên hai tab của cùng BTC ghi lần lượt. Secret Token chỉ lưu dạng ciphertext và
  * chỉ được giải mã ngay trước khi gọi `tingee`; không bao giờ có trong response, log, audit hay lỗi.
+ *
+ * Đặt mặc định và hủy liên kết đổi nơi nhận tiền nên đòi xác nhận lại (Story 2.13-a): ngay sau khóa dòng BTC, transaction
+ * tiêu một lần xác nhận của session (`consumeReauth`; thiếu → `REAUTH_REQUIRED`); thao tác lỗi sau đó (404) thì
+ * rollback, lần xác nhận còn dùng được. Mỗi lần tài khoản mặc định đổi, cùng transaction enqueue email cảnh báo Owner và
+ * mọi Admin.
  */
 
 const cred = tingeeCredentials;
@@ -150,6 +159,8 @@ export class PayoutAccountService {
     @Inject(DATABASE) private readonly db: Database,
     @Inject(TINGEE_CLIENT) private readonly tingee: TingeeClient,
     @Inject(PAYOUT_ACCOUNT_SETTINGS) private readonly settings: PayoutAccountSettings,
+    @Inject(BOSS) private readonly boss: PgBoss,
+    @Inject(DefaultPayoutQueues) private readonly defaultPayoutQueues: DefaultPayoutQueues,
   ) {}
 
   /** Credential, các tài khoản nhận tiền hiện hành, URL IPN, link portal. Không gọi Tingee. */
@@ -292,12 +303,17 @@ export class PayoutAccountService {
 
   /**
    * Hủy liên kết một tài khoản nhận tiền: đặt `retired_at` (không xóa dòng, không gọi Tingee). Hủy tài khoản mặc định
-   * thì tài khoản liên kết sớm nhất còn lại thành mặc định. Id lạ, đã hủy hoặc của BTC khác → 404. Trả tổng quan mới.
+   * thì tài khoản liên kết sớm nhất còn lại thành mặc định, và email cảnh báo được enqueue (kể cả khi đó là tài khoản
+   * cuối cùng: "không còn tài khoản nhận tiền"). Cần lần xác nhận lại (`REAUTH_REQUIRED`). Id lạ, đã hủy hoặc của BTC
+   * khác → 404 (lần xác nhận không bị tiêu). Trả tổng quan mới.
    */
-  async unlink(ctx: AccessContext, accountId: string): Promise<PayoutAccountOverview> {
+  async unlink(ctx: AccessContext, accountId: string, reauth: ReauthProof): Promise<PayoutAccountOverview> {
     if (!UUID.test(accountId)) throw accountNotFound();
+    // pg-boss đã start và queue đã có (ngoài transaction): `boss.send` cần cả hai.
+    await this.defaultPayoutQueues.ready();
     return this.db.transaction(async (tx) => {
       await this.lockOrganization(tx, ctx);
+      await consumeReauth(tx, { userId: ctx.userId, ...reauth });
       const target = await this.currentAccount(tx, ctx, accountId);
       if (!target) throw accountNotFound();
       // Dòng đã hủy không bao giờ là mặc định: "mặc định" luôn chỉ một tài khoản đang dùng.
@@ -320,30 +336,56 @@ export class PayoutAccountService {
           .orderBy(asc(pa.linkedAt), asc(pa.id))
           .limit(1);
         if (next) await this.makeDefault(tx, ctx, next.id);
+        await this.notifyDefaultChanged(tx, ctx, target.id, next?.id ?? null);
       }
       return this.overviewOf(tx, ctx);
     });
   }
 
   /**
-   * Đặt một tài khoản hiện hành làm mặc định (tài khoản mặc định cũ thôi là mặc định). Đã là mặc định thì không đổi gì.
-   * Id lạ, đã hủy hoặc của BTC khác → 404. Trả tổng quan mới.
+   * Đặt một tài khoản hiện hành làm mặc định (tài khoản mặc định cũ thôi là mặc định) và enqueue email cảnh báo. Cần
+   * lần xác nhận lại (`REAUTH_REQUIRED`), kể cả khi tài khoản đã là mặc định (khi đó không đổi gì, không gửi email). Id
+   * lạ, đã hủy hoặc của BTC khác → 404 (lần xác nhận không bị tiêu). Trả tổng quan mới.
    */
-  async setDefault(ctx: AccessContext, accountId: string): Promise<PayoutAccountOverview> {
+  async setDefault(ctx: AccessContext, accountId: string, reauth: ReauthProof): Promise<PayoutAccountOverview> {
     if (!UUID.test(accountId)) throw accountNotFound();
+    await this.defaultPayoutQueues.ready();
     return this.db.transaction(async (tx) => {
       await this.lockOrganization(tx, ctx);
+      await consumeReauth(tx, { userId: ctx.userId, ...reauth });
       const target = await this.currentAccount(tx, ctx, accountId);
       if (!target) throw accountNotFound();
       if (!target.isDefault) {
         // Bỏ mặc định cũ trước: unique index một phần chặn hai tài khoản mặc định cùng lúc.
-        await tx
+        const previous = await tx
           .update(pa)
           .set({ isDefault: false })
-          .where(and(orgScope(ctx)(pa), eq(pa.isDefault, true), isNull(pa.retiredAt)));
+          .where(and(orgScope(ctx)(pa), eq(pa.isDefault, true), isNull(pa.retiredAt)))
+          .returning({ id: pa.id });
         await this.makeDefault(tx, ctx, target.id);
+        // Còn tài khoản thì luôn có đúng một mặc định; thiếu (dữ liệu lệch) thì không có "tài khoản cũ" để báo.
+        const [old] = previous;
+        if (old) await this.notifyDefaultChanged(tx, ctx, old.id, target.id);
       }
       return this.overviewOf(tx, ctx);
+    });
+  }
+
+  /** Enqueue email cảnh báo đổi tài khoản mặc định trong `tx` (rollback thì không có email). */
+  private async notifyDefaultChanged(
+    tx: Tx,
+    ctx: AccessContext,
+    previousAccountId: string,
+    nextAccountId: string | null,
+  ): Promise<void> {
+    // `now()` của transaction: cùng mốc với `retired_at` của lần hủy liên kết.
+    const { rows } = await tx.execute<{ now: string | Date }>(sql`SELECT now() AS now`);
+    await enqueueDefaultPayoutChanged(this.boss, tx, {
+      organizationId: ctx.organizationId,
+      previousAccountId,
+      nextAccountId,
+      actorUserId: ctx.userId,
+      changedAt: new Date(rows[0]!.now).toISOString(),
     });
   }
 

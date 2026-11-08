@@ -57,6 +57,17 @@ async function seed(): Promise<Seeded> {
     (${`cu-${tag}`}, 'x:0', now() - interval '25 hours'), (${`moi-${tag}`}, 'x:0', now() - interval '23 hours')`);
   await db.orm.execute(sql`INSERT INTO sessions (user_id, token, expires_at) VALUES
     (${userId}, ${`cu-${tag}`}, now() - interval '25 hours'), (${userId}, ${`moi-${tag}`}, now() - interval '23 hours')`);
+  // Mã xác nhận lại qua email (mỗi user một mã): mã vừa hết hạn (< 24 giờ) phải còn để người dùng nhận OTP_EXPIRED.
+  const second = await db.orm.execute<{ id: string }>(
+    sql`INSERT INTO users (email) VALUES (${`don-rac-2-${tag}@vidu.vn`}) RETURNING id`,
+  );
+  await db.orm.execute(sql`INSERT INTO reauth_codes (user_id, code_hash, expires_at) VALUES
+    (${userId}, ${`cu-${tag}`}, now() - interval '25 hours'), (${second.rows[0]!.id}, ${`moi-${tag}`}, now() - interval '23 hours')`);
+  // Lần xác nhận lại: hết hạn (đã dùng hay chưa) thì xóa; còn hạn thì giữ.
+  await db.orm.execute(sql`INSERT INTO reauth_grants (user_id, session_id, token_hash, expires_at)
+    SELECT ${userId}, id, ${`cu-${tag}`}, now() - interval '1 second' FROM sessions WHERE token = ${`moi-${tag}`}`);
+  await db.orm.execute(sql`INSERT INTO reauth_grants (user_id, session_id, token_hash, expires_at)
+    SELECT ${userId}, id, ${`moi-${tag}`}, now() + interval '4 minutes' FROM sessions WHERE token = ${`moi-${tag}`}`);
   return { tag, userId };
 }
 
@@ -76,6 +87,10 @@ async function remaining({ tag, userId }: Seeded): Promise<Record<string, string
       sql`SELECT identifier AS k FROM verifications WHERE identifier IN (${`cu-${tag}`}, ${`moi-${tag}`})`,
     ),
     sessions: await pick(sql`SELECT token AS k FROM sessions WHERE user_id = ${userId}`),
+    reauthCodes: await pick(
+      sql`SELECT code_hash AS k FROM reauth_codes WHERE code_hash IN (${`cu-${tag}`}, ${`moi-${tag}`})`,
+    ),
+    reauthGrants: await pick(sql`SELECT token_hash AS k FROM reauth_grants WHERE user_id = ${userId}`),
   };
 }
 
@@ -85,6 +100,8 @@ const ONLY_FRESH = {
   otpVerifyFailures: ['moi'],
   verifications: ['moi'],
   sessions: ['moi'],
+  reauthCodes: ['moi'],
+  reauthGrants: ['moi'],
 };
 
 describe('purgeExpired', () => {

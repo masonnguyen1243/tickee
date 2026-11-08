@@ -11,6 +11,8 @@ import { IdentityController } from './identity.controller.js';
 import { IdentityService } from './identity.service.js';
 import { OtpRateLimiter } from './otp-rate-limit.js';
 import { PlatformAdminGuard } from './platform-admin.guard.js';
+import { ReauthController } from './reauth.controller.js';
+import { ReauthService } from './reauth.service.js';
 import { SessionGuard } from './session.guard.js';
 import { SignInOtpStore } from './sign-in-otp-store.js';
 import { TotpAttemptLimiter } from './totp-attempts.js';
@@ -50,7 +52,7 @@ export class IdentityModule {
           }),
         }),
       ],
-      controllers: [IdentityController, TotpController],
+      controllers: [IdentityController, TotpController, ReauthController],
       providers: [
         { provide: IDENTITY_CONFIG, useValue: config },
         OtpRateLimiter,
@@ -59,6 +61,7 @@ export class IdentityModule {
         TotpStore,
         TotpAttemptLimiter,
         TotpService,
+        ReauthService,
         { provide: APP_GUARD, useClass: SessionGuard },
         { provide: APP_GUARD, useClass: TotpGuard },
         { provide: APP_GUARD, useClass: ConsentGuard },

@@ -12,7 +12,7 @@ import {
 } from '@tickee/contracts';
 import { ExternalLink, Landmark, OctagonAlert } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
 
 import { useCurrentOrganization } from '@/components/tickee/current-organization';
@@ -26,6 +26,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ApiError } from '@/lib/api/errors';
 import { hasErrorCode } from '@/lib/auth/api';
+import { isReauthRequired, withReauth } from '@/lib/auth/reauth';
 import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
 import { isTotpRequired } from '@/lib/auth/totp';
 import { copyWithToast } from '@/lib/clipboard';
@@ -48,7 +49,9 @@ import { cn } from '@/lib/utils';
  * form Client ID / Secret Token; đã kết nối chưa có tài khoản (hoặc đã hủy hết) → danh sách tài khoản đọc từ Tingee; đã
  * liên kết → danh sách tài khoản (badge "Mặc định", "Đặt làm mặc định", "Hủy liên kết" qua `Dialog`), "Thêm tài khoản",
  * URL IPN để sao chép và checklist cấu hình portal. Lỗi báo tại chỗ, dữ liệu đã nhập được giữ. Secret Token không bao
- * giờ quay lại trình duyệt.
+ * giờ quay lại trình duyệt. "Đặt làm mặc định" và "Hủy liên kết" đổi nơi nhận tiền nên api đòi xác nhận lại (Story
+ * 2.13-a): gọi qua `withReauth`, gặp `REAUTH_REQUIRED` thì dialog "Xác nhận để tiếp tục" mở, xác nhận xong thao tác tự
+ * chạy tiếp; đóng dialog đó thì không làm gì.
  */
 
 type Draft = { clientId: string; secretToken: string };
@@ -596,8 +599,9 @@ function AccountRow({
 }
 
 /**
- * Xác nhận hủy liên kết, nêu hậu quả. Không xác nhận lại danh tính (Story 2.13). Chỉ giữ id: tài khoản và hậu quả đọc
- * từ tổng quan hiện tại, nên đổi mặc định ở tab khác thì câu chữ đổi theo.
+ * Xác nhận hủy liên kết, nêu hậu quả. Api đòi xác nhận lại danh tính thì `Dialog` này đóng, dialog xác nhận mở; nhập mã
+ * đúng thì hủy liên kết chạy tiếp mà không phải bấm lại (lỗi sau đó báo bằng toast vì `Dialog` này đã đóng). Chỉ giữ
+ * id: tài khoản và hậu quả đọc từ tổng quan hiện tại, nên đổi mặc định ở tab khác thì câu chữ đổi theo.
  */
 function UnlinkDialog({
   orgId,
@@ -614,24 +618,42 @@ function UnlinkDialog({
   const queryClient = useQueryClient();
   const goToLogin = useGoToLogin();
   const account = accounts.find((a) => a.id === accountId) ?? null;
+  /** Lần bấm hiện tại đã qua dialog xác nhận lại (`Dialog` này đã đóng): lỗi báo bằng toast thay vì banner. */
+  const prompted = useRef(false);
   const unlink = useMutation({
-    mutationFn: (target: PayoutAccount) => unlinkPayoutAccount(orgId, target.id),
+    mutationFn: (target: PayoutAccount) => {
+      prompted.current = false;
+      return withReauth((reauthToken) => unlinkPayoutAccount(orgId, target.id, reauthToken), {
+        onPrompt: () => {
+          prompted.current = true;
+          onClose();
+        },
+      });
+    },
     onSuccess: async (overview, target) => {
       onClose();
       await applyOverview(queryClient, orgId, overview);
       toast.success(`Đã hủy liên kết ${accountLabel(target)}.`, { description: PORTAL_UNSELECT_HINT });
     },
     onError: (error) => {
+      // Đóng dialog xác nhận lại: không hủy gì, không báo lỗi.
+      if (isReauthRequired(error)) return;
       if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
       else if (hasErrorCode(error, ErrorCode.NOT_FOUND)) {
         onClose();
         toast.info('Tài khoản này đã được hủy liên kết.');
         refreshOverview(queryClient, orgId);
+      } else if (prompted.current && !handledElsewhere(error)) {
+        toast.error(`Chưa hủy liên kết được. ${messageOf(error)}`);
       }
     },
   });
   const failure =
-    unlink.error && !handledElsewhere(unlink.error) && !hasErrorCode(unlink.error, ErrorCode.NOT_FOUND)
+    unlink.error &&
+    !prompted.current &&
+    !handledElsewhere(unlink.error) &&
+    !isReauthRequired(unlink.error) &&
+    !hasErrorCode(unlink.error, ErrorCode.NOT_FOUND)
       ? unlink.error
       : null;
 
@@ -729,12 +751,15 @@ function LinkedView({
   }, [unlinkingId, accounts]);
 
   const makeDefault = useMutation({
-    mutationFn: (target: PayoutAccount) => setDefaultPayoutAccount(orgId, target.id),
+    mutationFn: (target: PayoutAccount) =>
+      withReauth((reauthToken) => setDefaultPayoutAccount(orgId, target.id, reauthToken)),
     onSuccess: async (overview, target) => {
       await applyOverview(queryClient, orgId, overview);
       toast.success(`${accountLabel(target)} là tài khoản mặc định.`);
     },
     onError: (error) => {
+      // Đóng dialog xác nhận lại: không đổi gì, không báo lỗi.
+      if (isReauthRequired(error)) return;
       if (handledElsewhere(error)) {
         if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
         return;

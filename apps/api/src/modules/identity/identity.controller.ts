@@ -18,7 +18,7 @@ import { IdentityService } from './identity.service.js';
 import type { RequestWithSession } from './session.guard.js';
 
 /** IP của request như `sendOtp`: `req.ip` theo `TRUST_PROXY_HOPS`. */
-const clientIp = (req: RequestWithSession): string => req.ip ?? req.socket.remoteAddress ?? 'unknown';
+export const clientIp = (req: RequestWithSession): string => req.ip ?? req.socket.remoteAddress ?? 'unknown';
 
 /**
  * Chỉ tên lớp lỗi và `code` (nếu có): `message` của lỗi DB/Better Auth có thể chứa tham số truy vấn (email, state).

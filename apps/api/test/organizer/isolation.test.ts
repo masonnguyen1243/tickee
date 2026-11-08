@@ -1,11 +1,11 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Controller, Get } from '@nestjs/common';
 import { DiscoveryModule } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
-import { ErrorResponse, Permission } from '@tickee/contracts';
+import { ErrorResponse, Permission, REAUTH_HEADER } from '@tickee/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RequirePermission } from '../../src/platform/access/index.js';
-import { createHarness, signUp, type Harness } from '../identity/harness.js';
+import { createHarness, reauthToken, signUp, type Harness } from '../identity/harness.js';
 import { discoverRoutes, ORG_ROUTE, type DiscoveredRoute } from './routes.js';
 import { EventsTestController, OwnerOnlyTestController } from './test-controllers.js';
 
@@ -112,6 +112,27 @@ describe('cách ly BTC', () => {
       const code = res.status === 403 ? ErrorResponse.parse(res.body).error.code : null;
       expect(code, label(route)).not.toBe('NOT_A_MEMBER');
     }
+  });
+
+  it('route đòi xác nhận lại (Story 2.13-a): lần xác nhận hợp lệ của Owner A không mở được BTC B, và không bị tiêu', async () => {
+    const reauthRoutes = [
+      'DELETE /v1/orgs/:orgId/payout-account/:accountId',
+      'POST /v1/orgs/:orgId/payout-account/:accountId/default',
+    ];
+    const guarded = routes.filter((r) => r.permission && reauthRoutes.includes(`${r.method} ${r.path}`));
+    expect(guarded).toHaveLength(reauthRoutes.length);
+    const token = await reauthToken(h, ownerA);
+    for (const route of guarded) {
+      const res = await call(route, orgB, ownerA.cookie).set(REAUTH_HEADER, token);
+      expect(res.status, label(route)).toBe(403);
+      expect(ErrorResponse.parse(res.body).error.code, label(route)).toBe('NOT_A_MEMBER');
+      // Trên BTC A mà thiếu header: REAUTH_REQUIRED (sau kiểm quyền), không phải NOT_A_MEMBER.
+      const own = await call(route, orgA, ownerA.cookie);
+      expect(ErrorResponse.parse(own.body).error.code, label(route)).toBe('REAUTH_REQUIRED');
+    }
+    const hash = createHash('sha256').update(token, 'utf8').digest('hex');
+    const { rows } = await h.db.pool.query('SELECT used_at FROM reauth_grants WHERE token_hash = $1', [hash]);
+    expect(rows).toEqual([{ used_at: null }]);
   });
 
   it('route Sự kiện trên BTC A: body {} → 400, id ngẫu nhiên → 404 EVENT_NOT_FOUND', async () => {

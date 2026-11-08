@@ -121,6 +121,18 @@ export const ErrorCode = {
   EVENT_ALREADY_ENDED: 'EVENT_ALREADY_ENDED',
   /** "Kết thúc" Sự kiện chưa tới giờ bắt đầu: dùng Ẩn để dừng nhận Đơn. Không đổi gì. */
   EVENT_NOT_STARTED: 'EVENT_NOT_STARTED',
+  /**
+   * Thao tác nhạy cảm (đặt mặc định, hủy liên kết tài khoản nhận tiền; Story 2.13) cần một lần xác nhận lại còn hiệu lực
+   * của chính session trong header `REAUTH_HEADER`: thiếu, sai, đã dùng, hết hạn hoặc của session khác. Luôn sau kiểm
+   * quyền (Admin nhận `FORBIDDEN_ROLE`). `details.method`: cách xác nhận (`ReauthRequiredDetails`). Không đổi gì.
+   */
+  REAUTH_REQUIRED: 'REAUTH_REQUIRED',
+  /**
+   * Cách xác nhận lại không còn đúng với tài khoản: xin mã email khi đã bật 2FA (`details.method` `totp`), hoặc nhập mã
+   * TOTP khi 2FA vừa bị tắt (`details.method` `email_otp`). `details.method` là cách đúng (`ReauthRequiredDetails`).
+   * Không gửi, không cấp gì.
+   */
+  REAUTH_METHOD_MISMATCH: 'REAUTH_METHOD_MISMATCH',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

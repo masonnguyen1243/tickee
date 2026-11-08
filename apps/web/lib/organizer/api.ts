@@ -17,6 +17,7 @@ import {
 import { z } from 'zod';
 
 import { apiRequest } from '@/lib/api/client';
+import { withReauthHeader } from '@/lib/auth/reauth';
 
 /** Khóa TanStack Query: BTC mà tài khoản đang đăng nhập là thành viên. */
 export const MEMBERSHIPS_QUERY_KEY = ['organizer', 'memberships'] as const;
@@ -85,16 +86,19 @@ export const fetchPayoutAccountOptions = (orgId: string, signal?: AbortSignal) =
 export const selectPayoutAccount = (orgId: string, body: SelectPayoutAccountRequest) =>
   apiRequest(`${orgPath(orgId)}/payout-account`, { schema: PayoutAccount, init: json('POST', body) });
 
-/** Hủy liên kết một tài khoản nhận tiền (Tickee ngừng dùng, không gọi Tingee); trả tổng quan mới. */
-export const unlinkPayoutAccount = (orgId: string, accountId: string) =>
+/**
+ * Hủy liên kết một tài khoản nhận tiền (Tickee ngừng dùng, không gọi Tingee); trả tổng quan mới. Cần lần xác nhận lại
+ * (`reauthToken`, Story 2.13): gọi qua `withReauth`.
+ */
+export const unlinkPayoutAccount = (orgId: string, accountId: string, reauthToken?: string) =>
   apiRequest(`${orgPath(orgId)}/payout-account/${encodeURIComponent(accountId)}`, {
     schema: PayoutAccountOverview,
-    init: { method: 'DELETE' },
+    init: withReauthHeader({ method: 'DELETE' }, reauthToken),
   });
 
-/** Đặt một tài khoản nhận tiền làm mặc định; trả tổng quan mới. */
-export const setDefaultPayoutAccount = (orgId: string, accountId: string) =>
+/** Đặt một tài khoản nhận tiền làm mặc định; trả tổng quan mới. Cần lần xác nhận lại: gọi qua `withReauth`. */
+export const setDefaultPayoutAccount = (orgId: string, accountId: string, reauthToken?: string) =>
   apiRequest(`${orgPath(orgId)}/payout-account/${encodeURIComponent(accountId)}/default`, {
     schema: PayoutAccountOverview,
-    init: { method: 'POST' },
+    init: withReauthHeader({ method: 'POST' }, reauthToken),
   });

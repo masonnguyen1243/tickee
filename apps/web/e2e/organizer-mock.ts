@@ -82,7 +82,8 @@ export async function mockOrganizerApi(page: Page, handlers: Record<string, Hand
     'access-control-allow-origin': WEB_ORIGIN,
     'access-control-allow-credentials': 'true',
     'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'access-control-allow-headers': 'accept, content-type',
+    // `x-reauth-token`: lần xác nhận lại của thao tác nhạy cảm (Story 2.13).
+    'access-control-allow-headers': 'accept, content-type, x-reauth-token',
   };
   await page.route(
     (url) => ORGANIZER_PATH.test(url.pathname),
