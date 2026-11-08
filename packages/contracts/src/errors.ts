@@ -114,7 +114,10 @@ export const ErrorCode = {
    * `details.status`: trạng thái hiện tại (`EventStatusConflictDetails`). Không đổi gì.
    */
   EVENT_STATUS_CONFLICT: 'EVENT_STATUS_CONFLICT',
-  /** "Kết thúc" Sự kiện đã kết thúc (tự động theo `effective_end_at` hoặc đã bấm trước đó). Không đổi gì. */
+  /**
+   * Sự kiện đã kết thúc (`effective_end_at <= now`: tự động hoặc đã bấm "Kết thúc"): trả cho "Kết thúc" lặp, và cho
+   * Ẩn / Hiện lại ("Đã kết thúc" thắng "Ẩn"). Không đổi gì.
+   */
   EVENT_ALREADY_ENDED: 'EVENT_ALREADY_ENDED',
   /** "Kết thúc" Sự kiện chưa tới giờ bắt đầu: dùng Ẩn để dừng nhận Đơn. Không đổi gì. */
   EVENT_NOT_STARTED: 'EVENT_NOT_STARTED',

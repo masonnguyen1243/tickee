@@ -80,6 +80,29 @@ context:
 - Given đã bấm "Kết thúc", when tải `/e/{slug}`, then hiện "Sự kiện đã kết thúc"; dashboard badge "Đã kết thúc".
 - Given wizard nháp, when lưu bước 1, then hành vi không đổi (form dùng chung).
 
+### Review Findings
+
+Code review 06/11/2026 (`bmad-code-review`, nhánh so với `main`, bỏ `0013_snapshot.json`; 4 lớp: blind-hunter, edge-case-hunter, verification-gap, acceptance-auditor).
+
+- [x] [Review][Patch] Web xác định "đã kết thúc" chỉ bằng đồng hồ máy khách, bỏ qua `endedManuallyAt`: đồng hồ máy chậm hơn server (≥ ~1 giây, `toEventIso` cắt về giây) thì sau khi "Kết thúc" thành công vẫn hiện nút Ẩn/Kết thúc và badge cũ; bấm lại → 409 → toast + tải lại, lặp. Sửa: `endedManuallyAt !== null` là đã kết thúc (medium) [apps/web/app/(dashboard)/btc/[orgId]/su-kien/event-status.ts:21]
+- [x] [Review][Patch] Lý do "Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn." hiện cả khi Sự kiện đang ẩn (đã không nhận Đơn, chỉ có nút "Hiện lại"); Sự kiện ẩn cần câu riêng [apps/web/app/(dashboard)/btc/[orgId]/su-kien/[eventId]/event-settings.tsx:39]
+- [x] [Review][Patch] Tài liệu mã lỗi lỗi thời sau loop 1: chú thích `EVENT_ALREADY_ENDED` chỉ nói "Kết thúc"; JSDoc `hideEvent`/`unhideEvent` chỉ liệt kê `EVENT_STATUS_CONFLICT` [packages/contracts/src/errors.ts:118, apps/web/lib/event/api.ts:113]
+- [x] [Review][Patch] Test 409 của Kết thúc (lặp, đã tự kết thúc, chưa bắt đầu, nháp/đã hủy) và hai test song song không đếm job revalidate; Kết thúc song song không kiểm `ended_manually_at = effective_end_at` [apps/api/test/event/event-status.test.ts:186]
+- [x] [Review][Patch] Chưa test "khóa thắng đã kết thúc" sau khi đổi thứ tự `sellability`: ca `locked` có `effective_end_at` ở tương lai [apps/api/test/ordering/sellability.test.ts:205]
+- [x] [Review][Patch] Web báo `EVENT_NOT_STARTED` tại chỗ (không stale) chưa có test: thêm e2e server trả 409 `EVENT_NOT_STARTED` khi nút đang bật → Dialog còn mở, banner "Chưa kết thúc được", không toast tải lại [apps/web/e2e/event-settings.spec.ts]
+- [x] [Review][Patch] Nhánh lỗi lưu của form Cài đặt (400 `VALIDATION_FAILED` → lỗi tại ô; 5xx → banner "Chưa lưu được thông tin" + "Thử lại") chưa có test ở call site mới [apps/web/e2e/event-settings.spec.ts]
+- [x] [Review][Defer] Sự kiện đã hủy chỉ chặn PATCH thông tin; Hạng vé, câu hỏi form và giới hạn Vé/Đơn vẫn sửa được (`form.service.ts:30` hứa "2.10/2.12 thêm guard") [apps/api/src/modules/event/event.service.ts:224] — deferred: chưa có đường hủy Sự kiện (Epic 7); làm cùng mục khóa đã hoãn
+
+**Rejected:**
+- low — Mất focus sau khi "Kết thúc" (nút kích hoạt Dialog biến mất): kết thúc là thao tác hiếm, sửa cần ref + điều hướng focus.
+- low — Nút "Kết thúc" dùng `disabled` nên lý do không đọc khi tab: lý do hiện ngay trên nút; cùng mẫu `publish-panel.tsx:275`.
+- low — Đổi tab Cài đặt làm mất giá trị chưa lưu: như mọi tab editor có sẵn; sửa cần theo dõi dirty + chặn rời trang.
+- low — Form không giải thích sửa giờ sau "Kết thúc" không đổi mốc kết thúc: hiếm gặp; thêm nhánh hint.
+- low — Hint chính sách hoàn vé ở form chỉ đọc (đã hủy) và Sự kiện đã kết thúc: đã hủy chưa có đường tới; với Sự kiện đã kết thúc câu vẫn đúng.
+- reject (sửa spec) — Implementation Notes mâu thuẫn (số test pass 1 và loop 2).
+- reject (sửa spec) — Spec `done` khi chưa kiểm tay `pnpm dev` + worker.
+- reject (sửa spec) — KEEP trỏ tới stash local.
+
 ## Implementation Notes
 
 - Migration `apps/api/drizzle/0013_event_ended_manually.sql` (tên đổi tay từ tên ngẫu nhiên của drizzle-kit, tag cập nhật trong `meta/_journal.json`).

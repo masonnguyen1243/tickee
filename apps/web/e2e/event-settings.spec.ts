@@ -32,7 +32,13 @@ type State = {
   hold?: Promise<void>;
   /** Ẩn trả 500 (lỗi không phải đổi trạng thái). */
   failHide?: boolean;
+  /** Kết thúc trả 409 EVENT_NOT_STARTED dù nút đang bật (vd. đồng hồ máy khách lệch). */
+  forceNotStarted?: boolean;
+  /** Lưu (PATCH) trả lỗi: 400 VALIDATION_FAILED tại `endsAt` hoặc 500. */
+  failPatch?: 'validation' | 'server';
 };
+
+const NOT_STARTED_MESSAGE = 'Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.';
 
 const EFFECTIVE_END = '2099-11-16T23:59:59+07:00';
 
@@ -74,6 +80,10 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
     },
     [`GET ${eventPath}`]: () => ({ status: 200, body: eventOf(state) }),
     [`PATCH ${eventPath}`]: (request) => {
+      if (state.failPatch === 'validation') {
+        return apiError(400, 'VALIDATION_FAILED', { issues: [{ path: 'endsAt', code: 'custom' }] });
+      }
+      if (state.failPatch === 'server') return apiError(500, 'INTERNAL');
       if (state.status === 'cancelled') return apiError(409, 'EVENT_CANCELLED');
       state.name = (request.postDataJSON() as { name: string }).name;
       return { status: 200, body: eventOf(state) };
@@ -99,6 +109,9 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
         return apiError(409, 'EVENT_STATUS_CONFLICT', { status: state.status });
       }
       if (ended()) return apiError(409, 'EVENT_ALREADY_ENDED');
+      if (state.forceNotStarted) {
+        return { status: 409, body: { error: { code: 'EVENT_NOT_STARTED', message: NOT_STARTED_MESSAGE, details: null } } };
+      }
       if (new Date(state.startsAt).getTime() > Date.now()) return apiError(409, 'EVENT_NOT_STARTED');
       state.endedManuallyAt = vnIso(Date.now());
       return { status: 200, body: eventOf(state) };
@@ -132,6 +145,38 @@ test('sửa tên ở Cài đặt: PATCH đủ trường, toast, tiêu đề đ�
     venue: 'Hồ Gươm',
     refundPolicy: 'Hoàn 100% trước 7 ngày.',
   });
+});
+
+test('lưu ở Cài đặt, api trả 400 VALIDATION_FAILED tại endsAt → lỗi tại ô "Kết thúc", không banner chung', async ({
+  page,
+}) => {
+  const { calls } = await openApi(page, { failPatch: 'validation' });
+  await page.goto(settings);
+  await page.getByLabel('Tên Sự kiện').fill('Giải chạy Hà Nội 2026 — mùa thu');
+  await page.getByRole('button', { name: 'Lưu thay đổi' }).click();
+  await expect(page.getByText('Giờ kết thúc phải sau giờ bắt đầu.')).toBeVisible();
+  await expect(page.getByLabel('Kết thúc', { exact: true })).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByText('Chưa lưu được thông tin')).toHaveCount(0);
+  expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(1);
+});
+
+test('lưu ở Cài đặt lỗi 500: banner "Chưa lưu được thông tin"; "Thử lại" gửi đúng một PATCH nữa rồi lưu được', async ({
+  page,
+}) => {
+  const { calls, state } = await openApi(page, { failPatch: 'server' });
+  await page.goto(settings);
+  await page.getByLabel('Tên Sự kiện').fill('Giải chạy Hà Nội 2026 — mùa thu');
+  await page.getByRole('button', { name: 'Lưu thay đổi' }).click();
+  await expect(page.getByText('Chưa lưu được thông tin')).toBeVisible();
+  await expect(page.getByLabel('Tên Sự kiện')).toHaveValue('Giải chạy Hà Nội 2026 — mùa thu');
+  expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(1);
+
+  state.failPatch = undefined;
+  await page.getByRole('button', { name: 'Thử lại' }).click();
+  await expect(page.getByText('Đã lưu thông tin Sự kiện.')).toBeVisible();
+  await expect(page.getByText('Chưa lưu được thông tin')).toHaveCount(0);
+  expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(2);
+  expect(state.name).toBe('Giải chạy Hà Nội 2026 — mùa thu');
 });
 
 test('tên trống → lỗi tại ô, không gọi api', async ({ page }) => {
@@ -215,6 +260,35 @@ test('chưa bắt đầu: "Kết thúc" tắt, lý do nối bằng aria-describe
   expect(describedBy).toBeTruthy();
   await expect(page.locator(`[id="${describedBy}"]`)).toHaveText('Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.');
   await expect(statusSection(page).getByRole('button', { name: 'Ẩn Sự kiện' })).toBeEnabled();
+});
+
+test('đang ẩn, chưa bắt đầu: lý do ngắn "Sự kiện chưa bắt đầu." (không gợi ý dùng Ẩn), nối bằng aria-describedby', async ({
+  page,
+}) => {
+  await openApi(page, { status: 'hidden', startsAt: '2099-11-16T07:00:00+07:00' });
+  await page.goto(settings);
+  const end = statusSection(page).getByRole('button', { name: 'Kết thúc', exact: true });
+  await expect(end).toBeDisabled();
+  const describedBy = await end.getAttribute('aria-describedby');
+  expect(describedBy).toBeTruthy();
+  await expect(page.locator(`[id="${describedBy}"]`)).toHaveText('Sự kiện chưa bắt đầu.');
+  await expect(statusSection(page).getByText(/dùng Ẩn/)).toHaveCount(0);
+  await expect(statusSection(page).getByRole('button', { name: 'Hiện lại' })).toBeEnabled();
+});
+
+test('server trả 409 EVENT_NOT_STARTED khi nút đang bật: Dialog vẫn mở, banner "Chưa kết thúc được" với câu của server, không toast tải lại', async ({
+  page,
+}) => {
+  const { calls } = await openApi(page, { forceNotStarted: true });
+  await page.goto(settings);
+  await statusSection(page).getByRole('button', { name: 'Kết thúc', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Kết thúc', exact: true }).click();
+  await expect(dialog.getByText('Chưa kết thúc được')).toBeVisible();
+  await expect(dialog).toContainText(NOT_STARTED_MESSAGE);
+  await expect(dialog).toBeVisible();
+  await expect(page.getByText('Trạng thái Sự kiện vừa đổi. Đã tải lại.')).toHaveCount(0);
+  expect(callsTo(calls, 'end')).toHaveLength(1);
 });
 
 test('người khác vừa ẩn (409 EVENT_STATUS_CONFLICT): toast, tải lại Sự kiện và hiện "Hiện lại"', async ({ page }) => {

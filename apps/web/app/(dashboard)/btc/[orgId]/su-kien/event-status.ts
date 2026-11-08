@@ -14,16 +14,18 @@ export const EVENT_STATUS_BADGE: Readonly<Record<EventStatus, Badge>> = {
 
 const ENDED_BADGE: Badge = { label: 'Đã kết thúc', tone: 'neutral' };
 
+/** Đủ để biết Sự kiện đã kết thúc: `EventSummary` (danh sách) hoặc `EventDetail` (có thêm `endedManuallyAt`). */
+type EndedInput = Pick<EventSummary, 'status' | 'effectiveEndAt'> & { endedManuallyAt?: string | null };
+
 /**
- * Sự kiện đã kết thúc (Story 2.12): `published`/`hidden` và `effectiveEndAt` ≤ bây giờ (tự kết thúc hoặc BTC bấm
- * "Kết thúc"). "Đã kết thúc" không phải status lưu trong DB.
+ * Sự kiện đã kết thúc (Story 2.12): `published`/`hidden` và BTC đã bấm "Kết thúc" (`endedManuallyAt` có — không phụ
+ * thuộc đồng hồ máy khách, vì `effectiveEndAt` cắt về giây có thể còn "tương lai" nếu đồng hồ chậm) hoặc
+ * `effectiveEndAt` ≤ bây giờ (tự kết thúc). "Đã kết thúc" không phải status lưu trong DB.
  */
-export const isEventEnded = (
-  event: Pick<EventSummary, 'status' | 'effectiveEndAt'>,
-  now: number = Date.now(),
-): boolean =>
-  (event.status === 'published' || event.status === 'hidden') && new Date(event.effectiveEndAt).getTime() <= now;
+export const isEventEnded = (event: EndedInput, now: number = Date.now()): boolean =>
+  (event.status === 'published' || event.status === 'hidden') &&
+  (event.endedManuallyAt != null || new Date(event.effectiveEndAt).getTime() <= now);
 
 /** Badge của Sự kiện (Tổng quan, danh sách): "Đã kết thúc" (neutral) khi đã kết thúc, còn lại theo status. */
-export const eventBadge = (event: Pick<EventSummary, 'status' | 'effectiveEndAt'>, now: number = Date.now()): Badge =>
+export const eventBadge = (event: EndedInput, now: number = Date.now()): Badge =>
   isEventEnded(event, now) ? ENDED_BADGE : EVENT_STATUS_BADGE[event.status];

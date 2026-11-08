@@ -203,6 +203,7 @@ describe('GET /v1/events/:slug/availability', () => {
     const cases: [string, ReturnType<typeof sql>][] = [
       ['cancelled', sql`status = 'cancelled', locked_at = now(), effective_end_at = now() - interval '1 second'`],
       ['locked', sql`status = 'hidden', locked_at = now(), refund_policy = NULL`],
+      ['locked', sql`locked_at = now(), effective_end_at = now() - interval '1 second'`],
       ['ended', sql`status = 'hidden', effective_end_at = now() - interval '1 second'`],
       ['ended', sql`effective_end_at = now() - interval '1 second', refund_policy = NULL`],
       ['hidden', sql`status = 'hidden', refund_policy = NULL`],

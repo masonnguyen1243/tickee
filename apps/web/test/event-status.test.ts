@@ -25,6 +25,26 @@ describe('isEventEnded / eventBadge', () => {
     expect(eventBadge(event(status, end), NOW)).toEqual({ label, tone });
   });
 
+  it.each(['published', 'hidden'] as const)(
+    '%s có endedManuallyAt, effectiveEndAt còn tương lai (đồng hồ máy khách chậm) → đã kết thúc',
+    (status) => {
+      const ended = { ...event(status, FUTURE), endedManuallyAt: FUTURE };
+      expect(isEventEnded(ended, NOW)).toBe(true);
+      expect(eventBadge(ended, NOW)).toEqual({ label: 'Đã kết thúc', tone: 'neutral' });
+    },
+  );
+
+  it('cancelled có endedManuallyAt → không tính là đã kết thúc, badge "Đã hủy"', () => {
+    const cancelled = { ...event('cancelled', PAST), endedManuallyAt: PAST };
+    expect(isEventEnded(cancelled, NOW)).toBe(false);
+    expect(eventBadge(cancelled, NOW).label).toBe('Đã hủy');
+  });
+
+  it('endedManuallyAt null vẫn dùng đồng hồ', () => {
+    expect(isEventEnded({ ...event('published', FUTURE), endedManuallyAt: null }, NOW)).toBe(false);
+    expect(isEventEnded({ ...event('published', PAST), endedManuallyAt: null }, NOW)).toBe(true);
+  });
+
   it('effectiveEndAt đúng bằng bây giờ tính là đã kết thúc', () => {
     expect(isEventEnded(event('published', '2026-11-16T10:00:00+07:00'), NOW)).toBe(true);
   });

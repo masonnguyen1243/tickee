@@ -109,11 +109,17 @@ export const fetchPublishReadiness = (orgId: string, eventId: string, signal?: A
 export const publishEvent = (orgId: string, eventId: string) =>
   apiRequest(`${eventPath(orgId, eventId)}/publish`, { schema: EventDetail, init: { method: 'POST' } });
 
-/** Ẩn (không body): `published` → `hidden`. Sai trạng thái → `EVENT_STATUS_CONFLICT` (`details.status`). */
+/**
+ * Ẩn (không body): `published` → `hidden`. Sai trạng thái → `EVENT_STATUS_CONFLICT` (`details.status`); đã kết thúc
+ * (`effective_end_at <= now`) → `EVENT_ALREADY_ENDED`.
+ */
 export const hideEvent = (orgId: string, eventId: string) =>
   apiRequest(`${eventPath(orgId, eventId)}/hide`, { schema: EventDetail, init: { method: 'POST' } });
 
-/** Hiện lại (không body): `hidden` → `published`. Sai trạng thái → `EVENT_STATUS_CONFLICT`. */
+/**
+ * Hiện lại (không body): `hidden` → `published`. Sai trạng thái → `EVENT_STATUS_CONFLICT`; đã kết thúc
+ * (`effective_end_at <= now`) → `EVENT_ALREADY_ENDED`.
+ */
 export const unhideEvent = (orgId: string, eventId: string) =>
   apiRequest(`${eventPath(orgId, eventId)}/unhide`, { schema: EventDetail, init: { method: 'POST' } });
 

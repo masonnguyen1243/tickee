@@ -185,11 +185,13 @@ describe('POST …/hide và …/unhide', () => {
 
   it('hai lần Ẩn song song → một 200, một 409 EVENT_STATUS_CONFLICT; một dòng audit', async () => {
     const { event } = await publishedEvent();
+    const jobs = await jobCount(event.slug);
     const results = await Promise.all([act('hide', event.id), act('hide', event.id, owner.cookie)]);
     expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
     const conflict = results.find((r) => r.status === 409)!;
     expect(errorOf(conflict.body)).toMatchObject({ code: 'EVENT_STATUS_CONFLICT', details: { status: 'hidden' } });
     expect(await statusAudits(event.id)).toHaveLength(1);
+    expect(await jobCount(event.slug)).toBe(jobs + 1);
   });
 });
 
@@ -229,10 +231,12 @@ describe('POST …/end', () => {
     const { event } = await publishedEvent();
     await act('end', event.id).expect(200);
     const first = await row(event.id);
+    const jobs = await jobCount(event.slug);
     const res = await act('end', event.id, owner.cookie).expect(409);
     expect(errorOf(res.body).code).toBe('EVENT_ALREADY_ENDED');
     expect((await row(event.id)).ended_ms).toBe(first.ended_ms);
     expect(await statusAudits(event.id)).toHaveLength(1);
+    expect(await jobCount(event.slug)).toBe(jobs);
   });
 
   it('đã tự kết thúc (effective_end_at ≤ now) → 409 EVENT_ALREADY_ENDED, không ghi', async () => {
@@ -241,18 +245,22 @@ describe('POST …/end', () => {
       sql`UPDATE events SET starts_at = now() - interval '2 days', ends_at = now() - interval '1 day',
           effective_end_at = now() - interval '1 second' WHERE id = ${event.id}`,
     );
+    const jobs = await jobCount(event.slug);
     const res = await act('end', event.id).expect(409);
     expect(errorOf(res.body).code).toBe('EVENT_ALREADY_ENDED');
     expect((await row(event.id)).ended_ms).toBeNull();
     expect(await statusAudits(event.id)).toEqual([]);
+    expect(await jobCount(event.slug)).toBe(jobs);
   });
 
   it('chưa tới giờ bắt đầu → 409 EVENT_NOT_STARTED, không ghi', async () => {
     const { event } = await publishedEvent(false);
+    const jobs = await jobCount(event.slug);
     const res = await act('end', event.id).expect(409);
     expect(errorOf(res.body).code).toBe('EVENT_NOT_STARTED');
     expect((await row(event.id)).ended_ms).toBeNull();
     expect(await statusAudits(event.id)).toEqual([]);
+    expect(await jobCount(event.slug)).toBe(jobs);
   });
 
   it.each(['draft', 'cancelled'] as const)('%s → 409 EVENT_STATUS_CONFLICT, không ghi', async (status) => {
@@ -264,14 +272,20 @@ describe('POST …/end', () => {
     expect(errorOf(res.body)).toMatchObject({ code: 'EVENT_STATUS_CONFLICT', details: { status } });
     expect((await row(event.id)).ended_ms).toBeNull();
     expect(await statusAudits(event.id)).toEqual([]);
+    expect(await jobCount(event.slug)).toBe(0);
   });
 
   it('hai lần Kết thúc song song → một 200, một 409 EVENT_ALREADY_ENDED', async () => {
     const { event } = await publishedEvent();
+    const jobs = await jobCount(event.slug);
     const results = await Promise.all([act('end', event.id), act('end', event.id, owner.cookie)]);
     expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
     expect(errorOf(results.find((r) => r.status === 409)!.body).code).toBe('EVENT_ALREADY_ENDED');
     expect(await statusAudits(event.id)).toHaveLength(1);
+    expect(await jobCount(event.slug)).toBe(jobs + 1);
+    const stored = await row(event.id);
+    expect(stored.ended_ms).not.toBeNull();
+    expect(stored.ended_ms).toBe(stored.effective_ms);
   });
 });
 

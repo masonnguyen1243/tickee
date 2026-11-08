@@ -37,6 +37,8 @@ import { handledElsewhere } from '../handled-elsewhere';
  */
 
 const NOT_STARTED_REASON = 'Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.';
+/** Sự kiện đang ẩn đã dừng nhận Đơn: không gợi ý "dùng Ẩn". */
+const NOT_STARTED_REASON_HIDDEN = 'Sự kiện chưa bắt đầu.';
 
 const messageOf = (error: unknown) => (error instanceof ApiError ? error.message : 'Đã có lỗi xảy ra. Vui lòng thử lại.');
 
@@ -269,7 +271,7 @@ function StatusActions({ orgId, event }: { orgId: string; event: EventDetail }) 
           <p className="text-body">Kết thúc sớm: ngừng nhận Đơn ngay, không mở lại được.</p>
           {!started ? (
             <p id={reasonId} className="text-meta text-muted-foreground">
-              {NOT_STARTED_REASON}
+              {event.status === 'hidden' ? NOT_STARTED_REASON_HIDDEN : NOT_STARTED_REASON}
             </p>
           ) : null}
           <div>
