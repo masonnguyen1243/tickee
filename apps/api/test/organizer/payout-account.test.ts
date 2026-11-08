@@ -1,12 +1,16 @@
+import { createHash, randomUUID } from 'node:crypto';
 import {
   ErrorResponse,
+  JobQueue,
   PayoutAccount,
   PayoutAccountOptions,
   PayoutAccountOverview,
+  REAUTH_HEADER,
   Role,
   StatusNoticeList,
 } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
+import type { PgBoss } from 'pg-boss';
 import type { Response } from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { payoutAccountSettings } from '../../src/modules/organizer/payout-account.service.js';
@@ -17,8 +21,16 @@ import {
   type TingeeCredential,
 } from '../../src/modules/tingee/index.js';
 import { parseCredentialKeys, SecretBox } from '../../src/platform/crypto/index.js';
-import { TEST_CREDENTIAL_KEYS, testCredentialKey } from '../helpers.js';
-import { createHarness, signUp, type Harness } from '../identity/harness.js';
+import { BOSS } from '../../src/platform/jobs/index.js';
+import { TEST_CREDENTIAL_KEYS, TEST_WEB_ORIGIN, testCredentialKey } from '../helpers.js';
+import {
+  createHarness,
+  reauthToken,
+  signIn,
+  signUp,
+  signUpWithTotp,
+  type Harness,
+} from '../identity/harness.js';
 import { fakeAccount, startTingeeFake, type FakeAccount, type TingeeFake } from '../tingee-fake/server.js';
 
 /*
@@ -26,6 +38,9 @@ import { fakeAccount, startTingeeFake, type FakeAccount, type TingeeFake } from 
  * kết, trên Tingee fake (server HTTP thật, nhiều merchant) và Postgres thật. Tingee luôn được gọi ngoài transaction;
  * mỗi lần ghi là một transaction riêng có audit; tối đa một credential hiện hành mỗi BTC, mỗi VA hiện hành tối đa một
  * lần mỗi BTC, còn tài khoản thì đúng một tài khoản mặc định. Không bao giờ gọi Tingee thật.
+ *
+ * Story 2.13-a: hủy liên kết và đặt mặc định đòi một lần xác nhận lại (header `REAUTH_HEADER`), tiêu trong chính
+ * transaction của thao tác; mỗi lần tài khoản mặc định đổi thì cùng transaction enqueue email cảnh báo.
  */
 
 const MAIN: TingeeCredential = { clientId: 'tg-client-main-0a1b2c3d', secretToken: 'tg-secret-main-Zx9Yw8Vu7' };
@@ -126,10 +141,27 @@ const connect = (credential: TingeeCredential | Record<string, unknown>, cookie 
 const options = (cookie = owner.cookie, harness = h) => tracked(harness.http.get(`${base()}/options`).set('cookie', cookie));
 const select = (vaAccountNumber: unknown, cookie = owner.cookie, harness = h) =>
   tracked(harness.http.post(base()).set('cookie', cookie).send({ vaAccountNumber }));
-const unlink = (accountId: string, cookie = owner.cookie) =>
-  tracked(h.http.delete(`${base()}/${accountId}`).set('cookie', cookie));
-const setDefault = (accountId: string, cookie = owner.cookie) =>
-  tracked(h.http.post(`${base()}/${accountId}/default`).set('cookie', cookie));
+/**
+ * Lần xác nhận lại cho thao tác nhạy cảm: `token` bỏ trống thì Owner xác nhận lại ngay trước lời gọi (gọi tuần tự; lời
+ * gọi song song phải lấy token trước); `null` thì không gửi header.
+ */
+type ReauthOption = { cookie?: string; token?: string | null };
+/** `request` dựng request SAU khi có token (supertest đóng server dùng chung khi các request xác nhận lại xong). */
+async function withReauth(request: () => ReturnType<Harness['http']['post']>, { cookie = owner.cookie, token }: ReauthOption) {
+  const proof = token === undefined && cookie === owner.cookie ? await reauthToken(h, owner) : (token ?? null);
+  const req = request().set('cookie', cookie);
+  return tracked(proof ? req.set(REAUTH_HEADER, proof) : req);
+}
+const unlink = (accountId: string, options: ReauthOption = {}) =>
+  withReauth(() => h.http.delete(`${base()}/${accountId}`), options);
+const setDefault = (accountId: string, options: ReauthOption = {}) =>
+  withReauth(() => h.http.post(`${base()}/${accountId}/default`), options);
+/** Token xác nhận lại của Owner, lấy trước cho các lời gọi song song. */
+const ownerTokens = async (n: number) => {
+  const tokens: string[] = [];
+  for (let i = 0; i < n; i++) tokens.push(await reauthToken(h, owner));
+  return tokens;
+};
 /** Thêm tài khoản `account` (fake) và trả tài khoản đã lưu. */
 const link = async (account: FakeAccount) =>
   PayoutAccount.parse(expectOk(await select(String(account.vaAccountNumber))));
@@ -201,6 +233,27 @@ async function audits() {
 }
 
 const box = new SecretBox(parseCredentialKeys(TEST_CREDENTIAL_KEYS));
+
+const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
+
+/** Lần xác nhận `token` đã bị tiêu chưa. */
+async function grantUsed(token: string): Promise<boolean> {
+  const { rows } = await h.db.pool.query<{ used_at: Date | null }>(
+    'SELECT used_at FROM reauth_grants WHERE token_hash = $1',
+    [sha256(token)],
+  );
+  if (!rows[0]) throw new Error('Không có lần xác nhận này');
+  return rows[0].used_at !== null;
+}
+
+/** Payload các job cảnh báo đổi tài khoản mặc định của BTC, theo thứ tự tạo (api không chạy worker nên job còn đó). */
+async function warningJobs(org = orgId) {
+  const boss = h.app.get<PgBoss>(BOSS);
+  const jobs = await boss.findJobs(JobQueue.ORGANIZER_NOTIFY_DEFAULT_PAYOUT_CHANGED, { data: { organizationId: org } });
+  return jobs
+    .sort((a, b) => a.createdOn.getTime() - b.createdOn.getTime() || a.id.localeCompare(b.id))
+    .map((job) => job.data as Record<string, unknown>);
+}
 
 describe('chưa kết nối Tingee', () => {
   it('overview rỗng, chưa có URL IPN; Owner và Admin cùng thấy PAYOUT_ACCOUNT_NOT_LINKED (danger, không đóng được)', async () => {
@@ -658,9 +711,11 @@ describe('nhiều tài khoản: thêm, hủy liên kết, đặt mặc định',
   it('hủy lại: id đã hủy, id lạ, id không phải UUID, id của BTC khác → 404 NOT_FOUND (cả đặt mặc định)', async () => {
     expectOk(await unlink(mbLinked.id));
     const auditCount = (await audits()).length;
+    // Thao tác 404 rollback nên một lần xác nhận dùng được cho mọi lời gọi bên dưới.
+    const token = await reauthToken(h, owner);
     for (const id of [mbLinked.id, '019a3b2c-0000-7abc-8def-0123456789ab', 'khong-phai-uuid']) {
-      expectError(await unlink(id), 404, 'NOT_FOUND');
-      expectError(await setDefault(id), 404, 'NOT_FOUND');
+      expectError(await unlink(id, { token }), 404, 'NOT_FOUND');
+      expectError(await setDefault(id, { token }), 404, 'NOT_FOUND');
     }
 
     // Tài khoản của một BTC khác (cùng Owner): không hủy, không đặt mặc định được qua BTC này.
@@ -673,8 +728,8 @@ describe('nhiều tài khoản: thêm, hủy liên kết, đặt mặc định',
         await tracked(h.http.post(base(otherOrg)).set('cookie', owner.cookie).send({ vaAccountNumber: otherVa })),
       ),
     );
-    expectError(await unlink(otherAccount.id), 404, 'NOT_FOUND');
-    expectError(await setDefault(otherAccount.id), 404, 'NOT_FOUND');
+    expectError(await unlink(otherAccount.id, { token }), 404, 'NOT_FOUND');
+    expectError(await setDefault(otherAccount.id, { token }), 404, 'NOT_FOUND');
     const otherView = PayoutAccountOverview.parse(
       expectOk(await tracked(h.http.get(base(otherOrg)).set('cookie', owner.cookie))),
     );
@@ -731,12 +786,13 @@ describe('nhiều tài khoản: thêm, hủy liên kết, đặt mặc định',
 
   it('hủy song song: cùng một tài khoản → một 200, một 404; hai tài khoản khác nhau → cả hai 200, không còn tài khoản', async () => {
     const added = await link(acb);
-    const same = await Promise.all([unlink(added.id), unlink(added.id)]);
+    const [t1, t2, t3, t4] = await ownerTokens(4);
+    const same = await Promise.all([unlink(added.id, { token: t1 }), unlink(added.id, { token: t2 })]);
     expect(same.map((r) => r.status).sort()).toEqual([200, 404]);
     await expectOneDefault();
 
     const again = await link(vcb);
-    const both = await Promise.all([unlink(mbLinked.id), unlink(again.id)]);
+    const both = await Promise.all([unlink(mbLinked.id, { token: t3 }), unlink(again.id, { token: t4 })]);
     for (const res of both) expectOk(res);
     expect((await overview()).accounts).toEqual([]);
     expect((await audits()).filter((a) => a.action === 'payout_account.unlinked')).toHaveLength(3);
@@ -747,15 +803,181 @@ describe('nhiều tài khoản: thêm, hủy liên kết, đặt mặc định',
   it('đặt mặc định và hủy song song: luôn đúng một tài khoản mặc định', async () => {
     const acbLinked = await link(acb);
     const vcbLinked = await link(vcb);
-    const results = await Promise.all([setDefault(acbLinked.id), setDefault(vcbLinked.id), unlink(mbLinked.id)]);
+    const [t1, t2, t3, t4, t5, t6] = await ownerTokens(6);
+    const results = await Promise.all([
+      setDefault(acbLinked.id, { token: t1 }),
+      setDefault(vcbLinked.id, { token: t2 }),
+      unlink(mbLinked.id, { token: t3 }),
+    ]);
     for (const res of results) expectOk(res);
     await expectOneDefault();
     expect((await overview()).accounts).toHaveLength(2);
 
-    const next = await Promise.all([unlink(acbLinked.id), setDefault(vcbLinked.id), setDefault(acbLinked.id)]);
+    const next = await Promise.all([
+      unlink(acbLinked.id, { token: t4 }),
+      setDefault(vcbLinked.id, { token: t5 }),
+      setDefault(acbLinked.id, { token: t6 }),
+    ]);
     expect(next[0]?.status).toBe(200);
     await expectOneDefault();
     expect(summary(await overview())).toEqual([[vcb.vaAccountNumber, true]]);
+  });
+});
+
+describe('xác nhận lại và email cảnh báo (Story 2.13-a)', () => {
+  let acb: FakeAccount;
+  let vcb: FakeAccount;
+  /** MB đã liên kết (mặc định) và ACB (không mặc định) ở đầu mỗi test. */
+  let mbLinked: PayoutAccount;
+  let acbLinked: PayoutAccount;
+
+  beforeEach(async () => {
+    acb = trackedAccount({ bankName: 'ACB', bankBin: '970416', accountName: 'CLB CO VUA QUAN 3' });
+    vcb = trackedAccount({ bankName: 'Vietcombank', bankBin: '970436', accountName: 'CLB CO VUA QUAN 3' });
+    fake.merchant(MAIN.clientId).accounts.push(acb, vcb);
+    expectOk(await connect(MAIN));
+    mbLinked = await link(mb);
+    acbLinked = await link(acb);
+    resetFake();
+  });
+
+  it('CORS: preflight từ WEB_ORIGIN cho phép header x-reauth-token ở cả hủy liên kết lẫn đặt mặc định', async () => {
+    for (const [method, path] of [
+      ['DELETE', `${base()}/${mbLinked.id}`],
+      ['POST', `${base()}/${mbLinked.id}/default`],
+    ] as const) {
+      const res = await h.http
+        .options(path)
+        .set('origin', TEST_WEB_ORIGIN)
+        .set('access-control-request-method', method)
+        .set('access-control-request-headers', REAUTH_HEADER);
+      expect(res.status, res.text).toBeLessThan(300);
+      expect(res.headers['access-control-allow-origin']).toBe(TEST_WEB_ORIGIN);
+      expect(res.headers['access-control-allow-credentials']).toBe('true');
+      const allowed = String(res.headers['access-control-allow-headers'] ?? '')
+        .split(',')
+        .map((h) => h.trim().toLowerCase());
+      expect(allowed).toContain(REAUTH_HEADER);
+      expect(String(res.headers['access-control-allow-methods'])).toContain(method);
+    }
+  });
+
+  it('thiếu xác nhận → 403 REAUTH_REQUIRED {method: email_otp} (kể cả id lạ), không đổi gì, không có job', async () => {
+    const before = await overview();
+    const auditCount = (await audits()).length;
+    for (const res of [
+      await setDefault(acbLinked.id, { token: null }),
+      await unlink(mbLinked.id, { token: null }),
+      await unlink(acbLinked.id, { token: 'khong-phai-token' }),
+      await setDefault(randomUUID(), { token: null }),
+      await unlink(randomUUID(), { token: null }),
+    ]) {
+      const error = expectError(res, 403, 'REAUTH_REQUIRED');
+      expect(error.details).toEqual({ method: 'email_otp' });
+    }
+    expect(await overview()).toEqual(before);
+    expect((await audits()).length).toBe(auditCount);
+    expect(await warningJobs()).toEqual([]);
+  });
+
+  it('lần xác nhận dùng một lần; của session khác hay đã hết hạn → REAUTH_REQUIRED', async () => {
+    const token = await reauthToken(h, owner);
+    expectOk(await setDefault(acbLinked.id, { token }));
+    expect(await grantUsed(token)).toBe(true);
+    expectError(await setDefault(mbLinked.id, { token }), 403, 'REAUTH_REQUIRED');
+    expectError(await unlink(mbLinked.id, { token }), 403, 'REAUTH_REQUIRED');
+
+    // Owner đăng nhập ở máy khác: lần xác nhận của session kia chỉ dùng được ở session kia.
+    const otherCookie = await signIn(h, owner.email);
+    const otherToken = await reauthToken(h, { cookie: otherCookie, email: owner.email });
+    expectError(await setDefault(mbLinked.id, { token: otherToken }), 403, 'REAUTH_REQUIRED');
+    expect(await grantUsed(otherToken)).toBe(false);
+    expectOk(await setDefault(mbLinked.id, { cookie: otherCookie, token: otherToken }));
+
+    const expired = await reauthToken(h, owner);
+    await h.db.pool.query(`UPDATE reauth_grants SET expires_at = now() - interval '1 second' WHERE token_hash = $1`, [
+      sha256(expired),
+    ]);
+    expectError(await setDefault(acbLinked.id, { token: expired }), 403, 'REAUTH_REQUIRED');
+    expect(summary(await overview())).toEqual([
+      [mb.vaAccountNumber, true],
+      [acb.vaAccountNumber, false],
+    ]);
+  });
+
+  it('thao tác lỗi (404) rollback: lần xác nhận không bị tiêu, dùng tiếp được', async () => {
+    const token = await reauthToken(h, owner);
+    expectError(await unlink(randomUUID(), { token }), 404, 'NOT_FOUND');
+    expectError(await setDefault(randomUUID(), { token }), 404, 'NOT_FOUND');
+    expect(await grantUsed(token)).toBe(false);
+    expectOk(await setDefault(acbLinked.id, { token }));
+    expect(await grantUsed(token)).toBe(true);
+  });
+
+  it('job cảnh báo khi mặc định đổi: đặt mặc định khác, hủy mặc định (kể cả tài khoản cuối); không job khi mặc định giữ nguyên', async () => {
+    const event = (previous: string, next: string | null) => ({
+      organizationId: orgId,
+      previousAccountId: previous,
+      nextAccountId: next,
+      actorUserId: owner.userId,
+      changedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    });
+
+    // Đặt ACB làm mặc định (MB đang mặc định): MB → ACB.
+    expectOk(await setDefault(acbLinked.id));
+    expect(await warningJobs()).toEqual([event(mbLinked.id, acbLinked.id)]);
+
+    // Đặt lại tài khoản đang mặc định: vẫn đòi (và tiêu) lần xác nhận, không đổi gì, không gửi email.
+    const token = await reauthToken(h, owner);
+    expectOk(await setDefault(acbLinked.id, { token }));
+    expect(await grantUsed(token)).toBe(true);
+    // Hủy tài khoản không mặc định: không email.
+    expectOk(await unlink(mbLinked.id));
+    expect(await warningJobs()).toHaveLength(1);
+
+    // Hủy tài khoản mặc định khi còn tài khoản khác: ACB → VCB (liên kết sớm nhất còn lại).
+    const vcbLinked = await link(vcb);
+    expectOk(await unlink(acbLinked.id));
+    // Hủy tài khoản cuối cùng: VCB → không còn tài khoản.
+    expectOk(await unlink(vcbLinked.id));
+    const jobs = await warningJobs();
+    expect(jobs).toEqual([
+      event(mbLinked.id, acbLinked.id),
+      event(acbLinked.id, vcbLinked.id),
+      event(vcbLinked.id, null),
+    ]);
+    // Payload không có PII: chỉ id và mốc giờ.
+    const payloads = JSON.stringify(jobs);
+    expect(payloads).not.toContain(owner.email);
+    for (const accountNumber of accountNumbers) expect(payloads).not.toContain(accountNumber);
+  });
+
+  it('Owner đã bật 2FA: thiếu xác nhận → REAUTH_REQUIRED {method: totp}; xác nhận bằng TOTP → hủy được', async () => {
+    const totpOwner = await signUpWithTotp(h);
+    const org = (await h.http.post('/v1/orgs').set('cookie', totpOwner.cookie).send({ name: 'CLB 2FA' }).expect(201))
+      .body.id as string;
+    expectOk(await tracked(h.http.post(`${base(org)}/credential`).set('cookie', totpOwner.cookie).send(MAIN)));
+    const account = PayoutAccount.parse(
+      expectOk(
+        await tracked(
+          h.http.post(base(org)).set('cookie', totpOwner.cookie).send({ vaAccountNumber: String(mb.vaAccountNumber) }),
+        ),
+      ),
+    );
+    const remove = (token?: string) => {
+      const req = h.http.delete(`${base(org)}/${account.id}`).set('cookie', totpOwner.cookie);
+      return tracked(token ? req.set(REAUTH_HEADER, token) : req);
+    };
+    const error = expectError(await remove(), 403, 'REAUTH_REQUIRED');
+    expect(error.details).toEqual({ method: 'totp' });
+    // Lần xác nhận của Owner BTC khác (session khác) không dùng được ở đây.
+    expectError(await remove(await reauthToken(h, owner)), 403, 'REAUTH_REQUIRED');
+
+    const view = PayoutAccountOverview.parse(expectOk(await remove(await reauthToken(h, totpOwner))));
+    expect(view.accounts).toEqual([]);
+    expect(await warningJobs(org)).toEqual([
+      expect.objectContaining({ previousAccountId: account.id, nextAccountId: null, actorUserId: totpOwner.userId }),
+    ]);
   });
 });
 
@@ -814,8 +1036,14 @@ describe('quyền', () => {
     expectOk(await connect(MAIN));
     const account = PayoutAccount.parse(expectOk(await select(String(mb.vaAccountNumber))));
     resetFake();
-    expectError(await unlink(account.id, admin.cookie), 403, 'FORBIDDEN_ROLE');
-    expectError(await setDefault(account.id, admin.cookie), 403, 'FORBIDDEN_ROLE');
+    expectError(await unlink(account.id, { cookie: admin.cookie }), 403, 'FORBIDDEN_ROLE');
+    expectError(await setDefault(account.id, { cookie: admin.cookie }), 403, 'FORBIDDEN_ROLE');
+    // Kiểm quyền trước xác nhận lại: Admin có lần xác nhận hợp lệ của chính mình vẫn FORBIDDEN_ROLE, và lần xác nhận đó
+    // không bị tiêu.
+    const adminToken = await reauthToken(h, admin);
+    expectError(await unlink(account.id, { cookie: admin.cookie, token: adminToken }), 403, 'FORBIDDEN_ROLE');
+    expectError(await setDefault(account.id, { cookie: admin.cookie, token: adminToken }), 403, 'FORBIDDEN_ROLE');
+    expect(await grantUsed(adminToken)).toBe(false);
     expect(fake.requests).toHaveLength(0);
     expect((await overview()).accounts).toEqual([account]);
   });

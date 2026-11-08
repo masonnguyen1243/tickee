@@ -104,6 +104,32 @@ describe('che PII trong log', () => {
     for (const v of leaked) expect(out.text).not.toContain(v);
   });
 
+  it('header xác nhận lại (x-reauth-token), cookie và authorization của request bị che', () => {
+    const out = new LogCapture();
+    const log = pino(basePinoOptions('info'), out);
+    log.info(
+      {
+        req: {
+          method: 'DELETE',
+          url: '/v1/orgs/x/payout-account/y',
+          headers: {
+            host: 'api.tickee.test',
+            'x-reauth-token': 'reauth-token-bi-mat',
+            cookie: 'tickee.session_token=cookie-bi-mat',
+            authorization: 'Bearer auth-bi-mat',
+          },
+        },
+      },
+      'request completed',
+    );
+    expect(out.lines[0]).toMatchObject({
+      req: {
+        headers: { host: 'api.tickee.test', 'x-reauth-token': REDACTED, cookie: REDACTED, authorization: REDACTED },
+      },
+    });
+    for (const v of ['reauth-token-bi-mat', 'cookie-bi-mat', 'auth-bi-mat']) expect(out.text).not.toContain(v);
+  });
+
   it('khóa `name` ở gốc và dưới đối tượng khác giữ nguyên; `user.name` bị che ở độ sâu 0–2', () => {
     const out = new LogCapture();
     const log = pino(basePinoOptions('info'), out);

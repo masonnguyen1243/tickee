@@ -244,3 +244,50 @@ export const TOTP_EXEMPT_ROUTES: readonly string[] = [
 export function isTotpExemptRoute(method: string, path: string): boolean {
   return TOTP_EXEMPT_ROUTES.includes(`${method.toUpperCase()} ${path}`);
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Xác nhận lại trước thao tác nhạy cảm (Story 2.13): đổi nơi nhận tiền, đổi key Tingee, chuyển quyền Owner
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Header mang lần xác nhận lại (`ReauthGrant.reauthToken`) ở request thao tác nhạy cảm. Thiếu hay không còn hiệu lực →
+ * 403 `REAUTH_REQUIRED`.
+ */
+export const REAUTH_HEADER = 'x-reauth-token';
+
+/** Lần xác nhận lại hiệu lực chừng này giây và dùng một lần; mã xác nhận qua email cũng hết hạn sau chừng này giây. */
+export const REAUTH_TTL_SECONDS = 300;
+
+/** Cách xác nhận lại: mã TOTP (tài khoản đã bật 2FA, không nhận mã khôi phục) hoặc mã 6 số qua email (chưa bật). */
+export const ReauthMethod = {
+  TOTP: 'totp',
+  EMAIL_OTP: 'email_otp',
+} as const;
+export type ReauthMethod = (typeof ReauthMethod)[keyof typeof ReauthMethod];
+
+/** `details` của lỗi `REAUTH_REQUIRED` và `REAUTH_METHOD_MISMATCH`. */
+export const ReauthRequiredDetails = z.object({ method: z.enum(ReauthMethod) });
+export type ReauthRequiredDetails = z.infer<typeof ReauthRequiredDetails>;
+
+/**
+ * `POST /v1/identity/reauth`: mã TOTP (đã bật 2FA) hoặc mã vừa gửi qua email (chưa bật); server chọn theo tài khoản.
+ */
+export const ReauthRequest = z.object({ code: z.union([TotpCode, OtpCode]) });
+export type ReauthRequest = z.input<typeof ReauthRequest>;
+
+/**
+ * Lần xác nhận lại: gửi `reauthToken` trong header `REAUTH_HEADER` của đúng một thao tác nhạy cảm trong cùng session,
+ * trước `expiresAt` (`REAUTH_TTL_SECONDS` giây). Thao tác lỗi (vd. 404) thì lần xác nhận vẫn còn dùng được.
+ */
+export const ReauthGrant = z.object({
+  reauthToken: z.string().min(1),
+  expiresAt: z.iso.datetime(),
+});
+export type ReauthGrant = z.infer<typeof ReauthGrant>;
+
+/**
+ * `POST /v1/identity/reauth/email-code`: gửi mã 6 số "Mã xác nhận" tới email của tài khoản (chỉ khi chưa bật 2FA),
+ * cùng giới hạn gửi với mã đăng nhập.
+ */
+export const ReauthEmailCodeResponse = SendOtpResponse;
+export type ReauthEmailCodeResponse = SendOtpResponse;

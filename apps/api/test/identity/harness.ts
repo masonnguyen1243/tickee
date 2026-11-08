@@ -6,6 +6,7 @@ import { OptionalAuth } from '@thallesp/nestjs-better-auth';
 import {
   Me,
   OTP_LENGTH,
+  ReauthGrant,
   TOTP_DIGITS,
   TOTP_PERIOD_SECONDS,
   TotpEnrollResponse,
@@ -206,4 +207,26 @@ export async function signUpWithTotp(h: Harness, email = newEmail()): Promise<To
   const user = await signUp(h, email);
   const { manualKey } = await enrollTotp(h, user);
   return { ...user, manualKey };
+}
+
+/**
+ * Một lần xác nhận lại (Story 2.13) cho session `user.cookie`: tài khoản có `manualKey` (đã bật 2FA) nhập mã TOTP, còn
+ * lại xin mã qua email rồi nhập mã đó (xóa bộ đếm gửi OTP trước, như `signIn`). Gọi tuần tự: hai lần xin mã email song
+ * song cho cùng tài khoản thì mã sau thay mã trước.
+ */
+export async function reauthToken(
+  h: Harness,
+  user: { cookie: string; email: string; manualKey?: string },
+): Promise<string> {
+  let code: string;
+  if (user.manualKey) {
+    code = totpCode(user.manualKey);
+  } else {
+    await h.db.orm.execute(sql`DELETE FROM otp_send_events`);
+    await h.http.post('/v1/identity/reauth/email-code').set('cookie', user.cookie).expect(200);
+    code = h.email.lastCodeFor(user.email);
+  }
+  const res = await h.http.post('/v1/identity/reauth').set('cookie', user.cookie).send({ code });
+  if (res.status !== 200) throw new Error(`Xác nhận lại thất bại: ${res.status} ${res.text}`);
+  return ReauthGrant.parse(res.body).reauthToken;
 }

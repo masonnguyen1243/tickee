@@ -15,5 +15,13 @@ export const JobQueue = {
    * đổi. Không có dead-letter: hết lượt retry thì cache tự hết hạn sau 30 giây.
    */
   EVENT_REVALIDATE_PUBLIC_PAGE: 'event.revalidate-public-page',
+  /**
+   * Email cảnh báo tài khoản nhận tiền mặc định của BTC vừa đổi, gửi Owner và mọi Admin (`organizer`, Story 2.13-a).
+   * Payload chỉ id và mốc giờ (`{ organizationId, previousAccountId, nextAccountId | null, actorUserId, changedAt }`);
+   * worker đọc 4 số cuối và email người nhận lúc gửi. Enqueue cùng `tx` của thay đổi.
+   */
+  ORGANIZER_NOTIFY_DEFAULT_PAYOUT_CHANGED: 'organizer.notify-default-payout-changed',
+  /** Dead-letter của `ORGANIZER_NOTIFY_DEFAULT_PAYOUT_CHANGED`: job hết lượt retry được chép sang đây. */
+  ORGANIZER_NOTIFY_DEFAULT_PAYOUT_CHANGED_DEAD_LETTER: 'organizer.notify-default-payout-changed.dead-letter',
 } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];

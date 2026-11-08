@@ -48,6 +48,8 @@ const MESSAGES: Record<ErrorCode, string> = {
   EVENT_STATUS_CONFLICT: 'Trạng thái Sự kiện đã đổi. Tải lại để xem trạng thái mới.',
   EVENT_ALREADY_ENDED: 'Sự kiện đã kết thúc.',
   EVENT_NOT_STARTED: 'Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.',
+  REAUTH_REQUIRED: 'Bạn cần xác nhận lại để tiếp tục.',
+  REAUTH_METHOD_MISMATCH: 'Cách xác nhận này không còn đúng với tài khoản. Thử lại theo cách được yêu cầu.',
 };
 
 /** Lỗi DB chỉ log `{ type, code }` (message/params có thể mang email, token session); lỗi khác log nguyên để giữ stack. */

@@ -181,5 +181,42 @@ export const totpVerifyFailures = pgTable('totp_verify_failures', {
   updatedAt: updatedAt(),
 });
 
+/**
+ * Mã xác nhận lại qua email (Story 2.13) của user chưa bật 2FA: mỗi user tối đa một mã đang chờ (gửi mã mới thì thay mã
+ * cũ), hết hạn sau `REAUTH_TTL_SECONDS`, tối đa `OTP_MAX_ATTEMPTS` lần nhập sai. Chỉ lưu HMAC của mã (gắn với user);
+ * dùng đúng thì xóa dòng.
+ */
+export const reauthCodes = pgTable('reauth_codes', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  codeHash: text('code_hash').notNull(),
+  attempts: integer('attempts').notNull().default(0),
+  expiresAt: timestamptz('expires_at').notNull(),
+});
+
+/**
+ * Lần xác nhận lại đã cấp (Story 2.13): gắn user và session, hết hạn sau `REAUTH_TTL_SECONDS`, dùng một lần
+ * (`used_at`). Chỉ lưu SHA-256 của token (token 256 bit ngẫu nhiên chỉ nằm trong response và header của request thao
+ * tác). Session bị xóa (đăng xuất, xoay session) thì lần xác nhận đi theo.
+ */
+export const reauthGrants = pgTable(
+  'reauth_grants',
+  {
+    id: id(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull().unique(),
+    expiresAt: timestamptz('expires_at').notNull(),
+    usedAt: timestamptz('used_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('reauth_grants_session_id_idx').on(t.sessionId), index('reauth_grants_user_id_idx').on(t.userId)],
+);
+
 /** Schema truyền cho adapter Drizzle của Better Auth. */
 export const authSchema = { users, sessions, accounts, verifications, twoFactors };

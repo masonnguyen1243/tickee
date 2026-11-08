@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { PII_KEYS } from '@tickee/contracts';
+import { PII_KEYS, REAUTH_HEADER } from '@tickee/contracts';
 import type { LoggerOptions } from 'pino';
 
 export const REQUEST_ID_HEADER = 'x-request-id';
@@ -41,6 +41,8 @@ export function buildRedactPaths(keys: readonly string[] = PII_KEYS): string[] {
     ...paths,
     'req.headers.authorization',
     'req.headers.cookie',
+    // Lần xác nhận lại trước thao tác nhạy cảm (Story 2.13): token dùng được 5 phút, không bao giờ vào log.
+    `req.headers["${REAUTH_HEADER}"]`,
     ...REQUEST_PII_PATHS,
     'res.headers["set-cookie"]',
   ];

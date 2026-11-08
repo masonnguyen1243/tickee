@@ -1,7 +1,10 @@
 import type { EmailMessage } from '../../platform/email/index.js';
 
-/** Email báo việc về xác thực hai lớp: tiêu đề + các đoạn (đoạn cuối là lời dặn khi không phải người dùng làm). */
-function securityEmail(subject: string, paragraphs: readonly string[], warning: string): Omit<EmailMessage, 'to'> {
+/**
+ * Email bảo mật của tài khoản (xác thực hai lớp, mã xác nhận lại): tiêu đề + các đoạn, rồi lời dặn khi không phải người
+ * dùng làm. Các đoạn chèn thẳng vào HTML: người gọi chỉ truyền chữ cố định hoặc đã an toàn (không có dữ liệu người dùng).
+ */
+export function securityEmail(subject: string, paragraphs: readonly string[], warning: string): Omit<EmailMessage, 'to'> {
   return {
     subject,
     text: [...paragraphs.flatMap((p) => [p, '']), warning].join('\n'),

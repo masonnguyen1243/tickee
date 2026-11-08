@@ -1,7 +1,7 @@
-import type { Page } from '@playwright/test';
+import type { Page, Request } from '@playwright/test';
 
 import { expect, test } from './fixtures';
-import { apiError, me, mockIdentityApi, type Call, type Handler } from './identity-mock';
+import { apiError, EMAIL, me, mockIdentityApi, type Call, type Handler } from './identity-mock';
 import { mockOrganizerApi, organization, ORG_ID, statusNotice } from './organizer-mock';
 
 /*
@@ -9,6 +9,9 @@ import { mockOrganizerApi, organization, ORG_ID, statusNotice } from './organize
  * khoản, đặt mặc định và hủy liên kết. API giả có trạng thái như api thật, "Tingee" giả theo cặp key như Tingee fake của
  * api: MAIN có MB (chọn được), VietinBank (mờ) và ACB (chọn được) · EMPTY chưa có tài khoản · FLAKY lần đầu Tingee tạm
  * lỗi. Key khác hoặc secret sai → `TINGEE_CREDENTIAL_INVALID`.
+ *
+ * Story 2.13-a: với `reauth`, hủy liên kết và đặt mặc định đòi header `x-reauth-token` (thiếu hay đã dùng →
+ * `REAUTH_REQUIRED`), cấp bởi `/identity/reauth` giả: mã đúng là `123456`.
  */
 
 const CONSENTED = '2026-10-29T01:02:03.000Z';
@@ -89,9 +92,31 @@ type State = {
   optionsError: 'invalid' | 'down' | null;
   /** `POST …/payout-account` lỗi: key bị thu hồi trên Tingee (422). */
   selectError: 'invalid' | null;
+  /** Hủy liên kết (đã qua xác nhận lại) lỗi hệ thống 503. */
+  unlinkFailure: boolean;
 };
 
-async function openPage(page: Page, { role = 'owner', initial = {} }: { role?: string; initial?: Partial<State> } = {}) {
+/** Mã xác nhận lại đúng ở API giả (TOTP hay mã email đều vậy). */
+const REAUTH_CODE = '123456';
+
+async function openPage(
+  page: Page,
+  {
+    role = 'owner',
+    initial = {},
+    reauth,
+    requiredMethod = reauth,
+    resendAfterSeconds = 60,
+  }: {
+    role?: string;
+    initial?: Partial<State>;
+    /** Cách xác nhận thật của tài khoản ở api giả; bỏ trống = thao tác không đòi xác nhận lại. */
+    reauth?: 'totp' | 'email_otp';
+    /** `details.method` của `REAUTH_REQUIRED` (mặc định = `reauth`; khác đi để giả lập 2FA vừa bật ở nơi khác). */
+    requiredMethod?: 'totp' | 'email_otp';
+    resendAfterSeconds?: number;
+  } = {},
+) {
   const state: State = {
     credential: null,
     clientId: null,
@@ -106,6 +131,7 @@ async function openPage(page: Page, { role = 'owner', initial = {} }: { role?: s
     flakyFailures: 1,
     optionsError: null,
     selectError: null,
+    unlinkFailure: false,
     ...initial,
   };
   let connections = 0;
@@ -122,25 +148,56 @@ async function openPage(page: Page, { role = 'owner', initial = {} }: { role?: s
     ipnUrl: state.credential ? IPN_URL : null,
     tingeePortalUrl: PORTAL,
   });
+  // Xác nhận lại như api (Story 2.13-a): mỗi token dùng một lần; `reauthHeaders` ghi header của mọi lần gọi thao tác.
+  const issued = new Set<string>();
+  const reauthHeaders: (string | null)[] = [];
+  const reauthGranted = (request: Request) => {
+    const token = request.headers()['x-reauth-token'] ?? null;
+    reauthHeaders.push(token);
+    if (!reauth) return true;
+    if (!token || !issued.has(token)) return false;
+    issued.delete(token);
+    return true;
+  };
+  const reauthRequired = () => apiError(403, 'REAUTH_REQUIRED', { method: requiredMethod });
   // Hủy liên kết và đặt mặc định như api: id lạ hoặc đã hủy → 404; hủy tài khoản mặc định thì tài khoản liên kết sớm
   // nhất còn lại thành mặc định.
   const accountRoutes: Record<string, Handler> = {};
   for (const id of ACCOUNT_IDS) {
-    accountRoutes[`DELETE /orgs/${ORG_ID}/payout-account/${id}`] = () => {
+    accountRoutes[`DELETE /orgs/${ORG_ID}/payout-account/${id}`] = (request) => {
+      if (!reauthGranted(request)) return reauthRequired();
+      if (state.unlinkFailure) return apiError(503, 'SERVICE_UNAVAILABLE');
       const target = state.accounts.find((a) => a.id === id);
       if (!target) return apiError(404, 'NOT_FOUND');
       state.accounts = state.accounts.filter((a) => a.id !== id);
       if (target.isDefault && state.accounts[0]) state.accounts[0] = { ...state.accounts[0], isDefault: true };
       return { status: 200, body: overviewOf() };
     };
-    accountRoutes[`POST /orgs/${ORG_ID}/payout-account/${id}/default`] = () => {
+    accountRoutes[`POST /orgs/${ORG_ID}/payout-account/${id}/default`] = (request) => {
+      if (!reauthGranted(request)) return reauthRequired();
       if (!state.accounts.some((a) => a.id === id)) return apiError(404, 'NOT_FOUND');
       state.accounts = state.accounts.map((a) => ({ ...a, isDefault: a.id === id }));
       return { status: 200, body: overviewOf() };
     };
   }
 
-  await mockIdentityApi(page, { 'GET /identity/me': () => me(CONSENTED) });
+  let grants = 0;
+  const identityCalls = await mockIdentityApi(page, {
+    'GET /identity/me': () => me(CONSENTED, reauth === 'totp'),
+    'POST /identity/reauth/email-code': () =>
+      reauth === 'totp'
+        ? apiError(409, 'REAUTH_METHOD_MISMATCH', { method: 'totp' })
+        : { status: 200, body: { resendAfterSeconds } },
+    'POST /identity/reauth': (request) => {
+      if ((request.postDataJSON() as { code: string }).code !== REAUTH_CODE) {
+        return apiError(400, reauth === 'totp' ? 'TOTP_INVALID' : 'OTP_INVALID', { remainingAttempts: 4 });
+      }
+      grants += 1;
+      const reauthToken = `tok-${grants}`;
+      issued.add(reauthToken);
+      return { status: 200, body: { reauthToken, expiresAt: '2026-11-08T03:09:00.000Z' } };
+    },
+  });
   const calls = await mockOrganizerApi(page, {
     [`GET /orgs/${ORG_ID}`]: () => organization({ role }),
     'GET /me/memberships': () => ({ status: 200, body: [{ organizationId: ORG_ID, name: ORG_NAME, role }] }),
@@ -187,7 +244,7 @@ async function openPage(page: Page, { role = 'owner', initial = {} }: { role?: s
   });
   await page.goto(PAGE_PATH);
   await expect(page.getByRole('heading', { name: 'Tài khoản nhận tiền', level: 1 })).toBeVisible();
-  return { calls, state };
+  return { calls, state, identityCalls, reauthHeaders };
 }
 
 const field = (page: Page, label: string) => page.getByLabel(label, { exact: true });
@@ -203,6 +260,8 @@ const chooserBanner = (page: Page) => chooser(page).locator('[data-slot="status-
 const accountRows = (page: Page) => page.locator('[data-slot="payout-account-row"]');
 const accountRow = (page: Page, bankName: string) => accountRows(page).filter({ hasText: bankName });
 const unlinkDialog = (page: Page) => page.getByRole('dialog', { name: 'Hủy liên kết tài khoản này?' });
+const reauthDialog = (page: Page) => page.getByRole('dialog', { name: 'Xác nhận để tiếp tục' });
+const reauthBoxes = (page: Page) => reauthDialog(page).locator('[data-slot="otp-input"] input');
 const CONNECTED = { credential: credentialOf(MAIN.clientId, 1), clientId: MAIN.clientId };
 const horizontalOverflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -617,8 +676,174 @@ test('đã từng liên kết, key bị thu hồi trên Tingee: banner chỉ đ�
 });
 
 test('Admin mở URL: "Chỉ Owner xem được mục này.", không gọi api tài khoản nhận tiền', async ({ page }) => {
-  const { calls } = await openPage(page, { role: 'admin' });
+  const { calls } = await openPage(page, { role: 'admin', initial: { ...CONNECTED, accounts: [linkedAccount(MB)] } });
   await expect(page.getByText('Chỉ Owner xem được mục này.')).toBeVisible();
   await expect(page.locator('[data-slot="tingee-connect-form"]')).toHaveCount(0);
+  // Story 2.13-a giữ nguyên 2.6: Admin không thấy nút đổi nơi nhận tiền.
+  await expect(page.getByRole('button', { name: 'Đặt làm mặc định' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Hủy liên kết' })).toHaveCount(0);
   expect(calls.filter((c) => c.path.startsWith(`/orgs/${ORG_ID}/payout-account`))).toHaveLength(0);
+});
+
+test('xác nhận lại bằng TOTP: "Đặt làm mặc định" mở dialog "Xác nhận để tiếp tục"; Hủy thì không đổi gì; mã sai báo tại ô; đúng → tự chạy tiếp', async ({
+  page,
+}) => {
+  const { calls, identityCalls, reauthHeaders } = await openPage(page, {
+    initial: { ...CONNECTED, accounts: [linkedAccount(MB), linkedAccount(ACB, 1, false)] },
+    reauth: 'totp',
+  });
+  const defaults = () => posts(calls, `/${accountId(1)}/default`);
+
+  // Đóng dialog bằng "Hủy": thao tác không chạy, không báo lỗi.
+  await accountRow(page, 'ACB').getByRole('button', { name: 'Đặt làm mặc định' }).click();
+  await expect(reauthDialog(page)).toBeVisible();
+  await expect(reauthDialog(page)).toContainText('Mã 6 số trong ứng dụng xác thực');
+  await expect(reauthDialog(page).getByRole('button', { name: /Gửi mã/ })).toHaveCount(0);
+  await reauthDialog(page).getByRole('button', { name: 'Hủy', exact: true }).click();
+  await expect(reauthDialog(page)).toBeHidden();
+  await expect(accountRow(page, 'MB Bank').locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
+  await expect(page.getByText('Lỗi giả lập')).toHaveCount(0);
+  expect(defaults()).toHaveLength(1);
+
+  // Mã sai: báo tại ô, dialog vẫn mở; mã đúng: đặt mặc định chạy lại với lần xác nhận, không phải bấm lại.
+  await accountRow(page, 'ACB').getByRole('button', { name: 'Đặt làm mặc định' }).click();
+  await reauthBoxes(page).first().fill('000000');
+  await expect(reauthDialog(page).getByText('Mã chưa đúng, còn 4 lần.')).toBeVisible();
+  await reauthBoxes(page).first().fill(REAUTH_CODE);
+  await expect(reauthDialog(page)).toBeHidden();
+  await expect(accountRow(page, 'ACB').locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
+  await expect(page.getByText('ACB •••• 2222 là tài khoản mặc định.')).toBeVisible();
+  expect(defaults()).toHaveLength(3);
+  expect(reauthHeaders).toEqual([null, null, 'tok-1']);
+  expect(identityCalls.filter((c) => c.path === '/identity/reauth').map((c) => c.body)).toEqual([
+    { code: '000000' },
+    { code: REAUTH_CODE },
+  ]);
+  expect(identityCalls.filter((c) => c.path === '/identity/reauth/email-code')).toHaveLength(0);
+
+  // Hủy liên kết: Dialog hủy liên kết đóng, dialog xác nhận hiện; mã đúng → hủy chạy tiếp mà không bấm lại.
+  await accountRow(page, 'MB Bank').getByRole('button', { name: 'Hủy liên kết' }).click();
+  await unlinkDialog(page).getByRole('button', { name: 'Hủy liên kết' }).click();
+  await expect(reauthDialog(page)).toBeVisible();
+  await expect(unlinkDialog(page)).toHaveCount(0);
+  // Form dựng lại cho yêu cầu mới: không còn lỗi cũ.
+  await expect(reauthDialog(page).getByText('Mã chưa đúng')).toHaveCount(0);
+  await reauthBoxes(page).first().fill(REAUTH_CODE);
+  await expect(reauthDialog(page)).toBeHidden();
+  await expect(page.getByText('Đã hủy liên kết MB Bank •••• 4321.')).toBeVisible();
+  await expect(accountRows(page)).toHaveCount(1);
+  await expect(unlinkDialog(page)).toHaveCount(0);
+  const deletes = calls.filter((c) => c.method === 'DELETE');
+  expect(deletes.map((c) => c.path)).toEqual([
+    `/orgs/${ORG_ID}/payout-account/${accountId(0)}`,
+    `/orgs/${ORG_ID}/payout-account/${accountId(0)}`,
+  ]);
+  expect(reauthHeaders.slice(-2)).toEqual([null, 'tok-2']);
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+});
+
+test('xác nhận lại bằng mã email (chưa bật 2FA): "Gửi mã tới {email}" → nhập mã → thao tác tự chạy tiếp, cả đặt mặc định lẫn hủy liên kết', async ({
+  page,
+}) => {
+  const { identityCalls, reauthHeaders } = await openPage(page, {
+    initial: { ...CONNECTED, accounts: [linkedAccount(MB), linkedAccount(ACB, 1, false)] },
+    reauth: 'email_otp',
+    // Ngắn để thấy đếm ngược ở lần xác nhận thứ hai mà test không phải chờ 60 giây.
+    resendAfterSeconds: 8,
+  });
+  const emailCodes = () => identityCalls.filter((c) => c.path === '/identity/reauth/email-code');
+
+  await accountRow(page, 'ACB').getByRole('button', { name: 'Đặt làm mặc định' }).click();
+  const send = reauthDialog(page).getByRole('button', { name: `Gửi mã tới ${EMAIL}` });
+  await expect(send).toBeVisible();
+  // Chưa gửi thì chưa có ô nhập mã.
+  await expect(reauthBoxes(page)).toHaveCount(0);
+  expect(emailCodes()).toHaveLength(0);
+  await send.click();
+  await expect(reauthDialog(page).getByText(`Mã đã gửi tới ${EMAIL}`)).toBeVisible();
+  await expect(reauthDialog(page).getByText(/Gửi lại mã sau \d+ giây/)).toBeVisible();
+  await reauthBoxes(page).first().fill('111111');
+  await expect(reauthDialog(page).getByText('Mã chưa đúng, còn 4 lần.')).toBeVisible();
+  await reauthBoxes(page).first().fill(REAUTH_CODE);
+  await expect(reauthDialog(page)).toBeHidden();
+  await expect(accountRow(page, 'ACB').locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
+  expect(emailCodes()).toHaveLength(1);
+
+  // Thao tác thứ hai ngay sau đó: mã cũ đã dùng, api còn chặn gửi lại → đếm ngược kèm lý do, nút gửi tắt tới hết giờ.
+  await accountRow(page, 'ACB').getByRole('button', { name: 'Hủy liên kết' }).click();
+  await unlinkDialog(page).getByRole('button', { name: 'Hủy liên kết' }).click();
+  await expect(unlinkDialog(page)).toHaveCount(0);
+  const resend = reauthDialog(page).getByRole('button', { name: `Gửi mã tới ${EMAIL}` });
+  await expect(reauthDialog(page).getByText(/Gửi được mã mới sau \d+ giây/)).toBeVisible();
+  await expect(resend).toBeDisabled();
+  await expect(reauthBoxes(page)).toHaveCount(0);
+  await expect(resend).toBeEnabled({ timeout: 12_000 });
+  await resend.click();
+  await reauthBoxes(page).first().fill(REAUTH_CODE);
+  await expect(reauthDialog(page)).toBeHidden();
+  await expect(page.getByText('Đã hủy liên kết ACB •••• 2222.')).toBeVisible();
+  await expect(accountRows(page)).toHaveCount(1);
+  await expect(accountRow(page, 'MB Bank').locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
+  expect(emailCodes()).toHaveLength(2);
+  expect(reauthHeaders).toEqual([null, 'tok-1', null, 'tok-2']);
+});
+
+test('hủy liên kết cần xác nhận lại: đóng dialog xác nhận → không hủy, không báo lỗi; xác nhận xong mà api lỗi → toast "Chưa hủy liên kết được."', async ({
+  page,
+}) => {
+  const { state, reauthHeaders } = await openPage(page, {
+    initial: { ...CONNECTED, accounts: [linkedAccount(MB), linkedAccount(ACB, 1, false)] },
+    reauth: 'totp',
+  });
+
+  // (a) Đóng dialog xác nhận: tài khoản còn nguyên, không toast lỗi, không banner lỗi trong Dialog hủy liên kết.
+  await accountRow(page, 'ACB').getByRole('button', { name: 'Hủy liên kết' }).click();
+  await unlinkDialog(page).getByRole('button', { name: 'Hủy liên kết' }).click();
+  await expect(reauthDialog(page)).toBeVisible();
+  await expect(unlinkDialog(page)).toHaveCount(0);
+  await reauthDialog(page).getByRole('button', { name: 'Hủy', exact: true }).click();
+  await expect(reauthDialog(page)).toBeHidden();
+  await expect(accountRows(page)).toHaveCount(2);
+  await expect(page.getByText('Lỗi giả lập')).toHaveCount(0);
+  await expect(page.getByText('Chưa hủy liên kết được')).toHaveCount(0);
+  // Mở lại Dialog hủy liên kết: không còn lỗi cũ.
+  await accountRow(page, 'ACB').getByRole('button', { name: 'Hủy liên kết' }).click();
+  await expect(unlinkDialog(page)).toBeVisible();
+  await expect(unlinkDialog(page).locator('[data-slot="status-banner"]')).toHaveCount(0);
+  await unlinkDialog(page).getByRole('button', { name: 'Giữ tài khoản' }).click();
+  expect(reauthHeaders).toEqual([null]);
+
+  // (b) Xác nhận đúng nhưng hủy liên kết lỗi (không phải 404): Dialog hủy liên kết đã đóng nên báo bằng toast.
+  state.unlinkFailure = true;
+  await accountRow(page, 'ACB').getByRole('button', { name: 'Hủy liên kết' }).click();
+  await unlinkDialog(page).getByRole('button', { name: 'Hủy liên kết' }).click();
+  await reauthBoxes(page).first().fill(REAUTH_CODE);
+  await expect(reauthDialog(page)).toBeHidden();
+  await expect(page.getByText('Chưa hủy liên kết được.', { exact: false })).toBeVisible();
+  await expect(unlinkDialog(page)).toHaveCount(0);
+  await expect(accountRows(page)).toHaveCount(2);
+  expect(reauthHeaders).toEqual([null, null, 'tok-1']);
+});
+
+test('2FA vừa bật ở nơi khác: REAUTH_REQUIRED báo email_otp nhưng gửi mã → REAUTH_METHOD_MISMATCH {totp} → ô mã TOTP kèm lời báo; mã đúng → thao tác chạy tiếp', async ({
+  page,
+}) => {
+  const { identityCalls, reauthHeaders } = await openPage(page, {
+    initial: { ...CONNECTED, accounts: [linkedAccount(MB), linkedAccount(ACB, 1, false)] },
+    reauth: 'totp',
+    requiredMethod: 'email_otp',
+  });
+  await accountRow(page, 'ACB').getByRole('button', { name: 'Đặt làm mặc định' }).click();
+  await reauthDialog(page).getByRole('button', { name: `Gửi mã tới ${EMAIL}` }).click();
+  await expect(
+    reauthDialog(page).getByText('Tài khoản đã bật xác thực hai lớp. Nhập mã trong ứng dụng xác thực.'),
+  ).toBeVisible();
+  await expect(reauthDialog(page)).toContainText('Mã 6 số trong ứng dụng xác thực');
+  await expect(reauthDialog(page).getByRole('button', { name: /Gửi mã/ })).toHaveCount(0);
+  await reauthBoxes(page).first().fill(REAUTH_CODE);
+  await expect(reauthDialog(page)).toBeHidden();
+  await expect(accountRow(page, 'ACB').locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
+  expect(identityCalls.filter((c) => c.path === '/identity/reauth/email-code')).toHaveLength(1);
+  expect(identityCalls.filter((c) => c.path === '/identity/reauth').map((c) => c.body)).toEqual([{ code: REAUTH_CODE }]);
+  expect(reauthHeaders).toEqual([null, 'tok-1']);
 });

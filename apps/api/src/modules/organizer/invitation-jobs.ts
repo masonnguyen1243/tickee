@@ -15,6 +15,7 @@ import { EMAIL_TRANSPORT, type EmailTransport } from '../../platform/email/index
 import { BOSS } from '../../platform/jobs/index.js';
 import { buildAdminInvitationEmail } from './invitation-email.js';
 import { generateInvitationToken, hashInvitationToken } from './invitation-token.js';
+import { DefaultPayoutWorker } from './payout-default-jobs.js';
 import { organizationInvitations, organizations } from './schema.js';
 
 const QUEUE = JobQueue.ORGANIZER_SEND_ADMIN_INVITATION;
@@ -201,15 +202,15 @@ export class AdminInvitationWorker implements OnApplicationBootstrap {
 }
 
 /**
- * Job nền của `organizer` cho vai `worker` (gửi email mời Admin). Cần `DbModule`, `JobsModule` và `EmailModule`
- * (toàn cục) ở gốc DI.
+ * Job nền của `organizer` cho vai `worker` (gửi email mời Admin, email cảnh báo đổi tài khoản nhận tiền mặc định). Cần
+ * `DbModule`, `JobsModule` và `EmailModule` (toàn cục) ở gốc DI.
  */
 @Module({})
 export class OrganizerJobsModule {
   static forRoot(config: OrganizerJobsConfig): DynamicModule {
     return {
       module: OrganizerJobsModule,
-      providers: [{ provide: ORGANIZER_JOBS_CONFIG, useValue: config }, AdminInvitationWorker],
+      providers: [{ provide: ORGANIZER_JOBS_CONFIG, useValue: config }, AdminInvitationWorker, DefaultPayoutWorker],
     };
   }
 }

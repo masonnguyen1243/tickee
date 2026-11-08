@@ -279,3 +279,20 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 ## Deferred from: code review of spec-2-12-sua-an-va-ket-thuc-som-su-kien.md (2026-11-06)
 
 - Sự kiện `cancelled` chỉ bị chặn sửa thông tin (`PATCH …/events/:eventId` → `409 EVENT_CANCELLED`); Hạng vé, câu hỏi form mua vé và `PATCH …/order-limit` vẫn ghi được, tab Hạng vé/Form mua vẫn sửa được. `form.service.ts:30` ghi "2.10/2.12 thêm guard" nhưng chưa có. Chưa ai gặp vì chưa có đường hủy Sự kiện — làm cùng Epic 7 (cùng mục khóa Sự kiện đã hoãn).
+
+- source_spec: none
+  summary: Story 2.13-b — luồng "Đổi key Tingee": xác nhận lại, nhập key mới, chọn tài khoản; credential mới thành hiện hành, tài khoản của credential cũ gỡ mềm, credential cũ giữ (mã hóa), ipnKey không đổi; audit + email cảnh báo; key sai/Tingee lỗi giữ nguyên hiện trạng.
+  evidence: Tách khỏi Story 2.13 lúc bmad-build (2026-11-08) để 2.13-a làm trước phần xác nhận lại (REAUTH_REQUIRED) dùng chung cho đặt mặc định/hủy liên kết, đổi key và 2.14.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-13-a-xac-nhan-lai-doi-noi-nhan-tien.md`
+  summary: Mã TOTP dùng lại được trong cửa sổ 30 giây (Better Auth `verifyTOTP` không lưu bước thời gian đã dùng), nên một mã bị lộ cấp được nhiều lần xác nhận lại (và step-up nhiều lần); cần lưu bước TOTP đã nhận theo user và từ chối bước ≤ bước cũ.
+  evidence: Review 2.13-a #3 (BH, EC). Có từ step-up (2.2); `payout-account.test.ts` đang dựa vào việc dùng lại mã (`ownerTokens(6)`), sửa thì phải đổi test.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-13-a-xac-nhan-lai-doi-noi-nhan-tien.md`
+  summary: Xóa Admin (`DELETE /orgs/:orgId/members/:memberId`) không đòi xác nhận lại, nên phiên Owner bị lộ có thể xóa hết Admin trước khi đổi tài khoản mặc định, và email cảnh báo chỉ tới hộp thư của Owner; cân nhắc thêm xóa Admin vào danh sách thao tác nhạy cảm (AD xác nhận lại) hoặc báo Admin bị xóa.
+  evidence: Review 2.13-a #6 (BH). Kiến trúc hiện chỉ liệt kê đổi key, đặt mặc định, hủy liên kết, chuyển Owner; xóa Admin có từ 2.4.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-13-a-xac-nhan-lai-doi-noi-nhan-tien.md`
+  summary: Story 2.13-b — `PayoutAccountService.select` biến tài khoản đầu tiên thành mặc định (`isDefault = linkedVas.size === 0`) mà không xác nhận lại và không gửi cảnh báo; đổi key xong chọn tài khoản đầu tiên chính là đường này, nên 2.13-b phải gửi cảnh báo (payload `previousAccountId` cần cho phép null hoặc mang 4 số cuối mặc định cũ).
+  evidence: Review 2.13-a #7 (BH, EC, VG). Hành vi có từ 2.6; ở 2.13-a lần hủy tài khoản cuối đã gửi cảnh báo và tài khoản mới phải cùng merchant Tingee.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-13-a-xac-nhan-lai-doi-noi-nhan-tien.md`
+  summary: Email bảo mật (TOTP, mã xác nhận, cảnh báo đổi tài khoản mặc định) khuyên "đăng xuất khỏi mọi thiết bị" nhưng Tickee chưa có tính năng đăng xuất mọi session; cần thêm tính năng hoặc đổi câu chữ.
+  evidence: Review 2.13-a #12 (BH). Câu chữ có từ `totp-email.ts` (2.2); không có route revoke-all trong `apps/api/src` hay `apps/web`.

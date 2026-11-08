@@ -5,6 +5,7 @@ import { ErrorCode } from '@tickee/contracts';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
+import { ReauthDialog } from '@/components/tickee/reauth-dialog';
 import { StepUpDialog } from '@/components/tickee/step-up-dialog';
 import { hasErrorCode, ME_QUERY_KEY } from '@/lib/auth/api';
 import { CONSENT_PATH, LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
@@ -112,6 +113,8 @@ export function Providers({ children }: { children: ReactNode }) {
     <QueryClientProvider client={queryClient}>
       {children}
       <StepUpDialog open={stepUpOpen} onSuccess={onStepUpSuccess} onRecovered={onRecovered} onSignedOut={onSignedOut} />
+      {/* Xác nhận lại trước thao tác nhạy cảm (Story 2.13): mở khi `withReauth` gặp `REAUTH_REQUIRED`. */}
+      <ReauthDialog />
     </QueryClientProvider>
   );
 }

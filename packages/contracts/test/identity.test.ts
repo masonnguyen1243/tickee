@@ -116,3 +116,31 @@ describe('TOTP', () => {
     expect(safeReturnTo(ACCOUNT_SECURITY_PATH)).toBe(ACCOUNT_SECURITY_PATH);
   });
 });
+
+describe('xác nhận lại (Story 2.13)', () => {
+  it('thông số: header chữ thường, hiệu lực 5 phút; mã lỗi có trong ErrorCode', () => {
+    expect(identity.REAUTH_HEADER).toBe('x-reauth-token');
+    expect(identity.REAUTH_TTL_SECONDS).toBe(300);
+    expect(ErrorCode.REAUTH_REQUIRED).toBe('REAUTH_REQUIRED');
+    expect(ErrorCode.REAUTH_METHOD_MISMATCH).toBe('REAUTH_METHOD_MISMATCH');
+  });
+
+  it('ReauthRequest: đúng 6 chữ số (TOTP hoặc mã email); mã khôi phục bị từ chối', () => {
+    expect(identity.ReauthRequest.parse({ code: '012345' })).toEqual({ code: '012345' });
+    for (const code of ['12345', '1234567', 'ABCDE-FGH23', 'ABCDEFGH23', 123456]) {
+      expect(identity.ReauthRequest.safeParse({ code }).success, String(code)).toBe(false);
+    }
+  });
+
+  it('ReauthRequiredDetails: method là totp hoặc email_otp', () => {
+    expect(identity.ReauthRequiredDetails.parse({ method: 'totp' })).toEqual({ method: 'totp' });
+    expect(identity.ReauthRequiredDetails.parse({ method: 'email_otp' })).toEqual({ method: 'email_otp' });
+    expect(identity.ReauthRequiredDetails.safeParse({ method: 'recovery_code' }).success).toBe(false);
+  });
+
+  it('ReauthGrant: token và hạn ISO 8601', () => {
+    const grant = { reauthToken: 'abc', expiresAt: '2026-11-08T03:09:00.000Z' };
+    expect(identity.ReauthGrant.parse(grant)).toEqual(grant);
+    expect(identity.ReauthGrant.safeParse({ ...grant, reauthToken: '' }).success).toBe(false);
+  });
+});
