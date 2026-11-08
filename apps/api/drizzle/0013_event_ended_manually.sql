@@ -1,0 +1,2 @@
+ALTER TABLE "events" ADD COLUMN "ended_manually_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "events" ADD CONSTRAINT "events_ended_manually_check" CHECK ("events"."ended_manually_at" IS NULL OR "events"."effective_end_at" = "events"."ended_manually_at");

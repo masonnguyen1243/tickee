@@ -101,6 +101,11 @@ export const EventSummary = z.object({
   status: eventStatusSchema,
   startsAt: EventDateTime,
   endsAt: EventDateTime,
+  /**
+   * Mốc kết thúc thực tế: `effectiveEndAt(endsAt)`, hoặc lúc BTC bấm "Kết thúc" (Story 2.12). "Đã kết thúc" không lưu
+   * thành status: Sự kiện `published`/`hidden` có mốc này ≤ bây giờ là đã kết thúc.
+   */
+  effectiveEndAt: EventDateTime,
 });
 export type EventSummary = z.infer<typeof EventSummary>;
 
@@ -116,8 +121,8 @@ export const MAX_TICKETS_PER_ORDER_MAX = 50;
 /** `GET`/`POST`/`PATCH /v1/orgs/:orgId/events[/:eventId]`. */
 export const EventDetail = EventSummary.extend({
   organizationId: z.uuid(),
-  /** Mốc tự kết thúc (`effectiveEndAt`), tính lại mỗi lần sửa giờ. */
-  effectiveEndAt: EventDateTime,
+  /** Lúc BTC bấm "Kết thúc" (Story 2.12); có thì `effectiveEndAt` bằng mốc này và sửa giờ không đổi nó. */
+  endedManuallyAt: EventDateTime.nullable(),
   venue: z.string().nullable(),
   description: z.string().nullable(),
   refundPolicy: z.string().nullable(),
@@ -127,6 +132,10 @@ export const EventDetail = EventSummary.extend({
   updatedAt: EventDateTime,
 });
 export type EventDetail = z.infer<typeof EventDetail>;
+
+/** `details` của `409 EVENT_STATUS_CONFLICT` (Ẩn, Hiện lại, Kết thúc): trạng thái hiện tại của Sự kiện. */
+export const EventStatusConflictDetails = z.object({ status: eventStatusSchema });
+export type EventStatusConflictDetails = z.infer<typeof EventStatusConflictDetails>;
 
 // `PublicEvent` (`GET /v1/events/:slug`) nằm ở `sellability.ts`: nó dùng schema Hạng vé, mà `ticket-type.ts` lại import
 // file này.

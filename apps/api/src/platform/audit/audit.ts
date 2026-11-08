@@ -54,6 +54,12 @@ export type AuditAction =
   | 'event.updated'
   /** Owner/Admin mở bán Sự kiện (Story 2.10): `draft` → `published` sau khi đủ điều kiện mở bán. */
   | 'event.published'
+  /** Owner/Admin ẩn Sự kiện (Story 2.12): `published` → `hidden`; link vẫn mở được nhưng không nhận Đơn mới. */
+  | 'event.hidden'
+  /** Owner/Admin hiện lại Sự kiện đã ẩn (Story 2.12): `hidden` → `published`. */
+  | 'event.unhidden'
+  /** Owner/Admin bấm "Kết thúc" (Story 2.12): `ended_manually_at` = `effective_end_at` = lúc bấm; status giữ nguyên. */
+  | 'event.ended'
   /** Owner/Admin thêm Hạng vé (kèm dòng tồn kho) cho Sự kiện (Story 2.8). */
   | 'ticket_type.created'
   /** Owner/Admin sửa Hạng vé (`changedFields`: tên trường trong `TICKET_TYPE_FIELDS` đã đổi, không ghi giá trị). */

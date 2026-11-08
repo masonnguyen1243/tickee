@@ -10,8 +10,8 @@ const TIER_ID = '0192f0a0-0000-7000-8000-000000000001';
 
 describe('trạng thái bán', () => {
   it('thứ tự ưu tiên của eventReason; bốn lý do đầu làm mọi Hạng vé unavailable', () => {
-    expect(EVENT_SALE_REASON_ORDER).toEqual(['cancelled', 'locked', 'hidden', 'ended', 'paused']);
-    expect(EVENT_UNAVAILABLE_REASONS).toEqual(['cancelled', 'locked', 'hidden', 'ended']);
+    expect(EVENT_SALE_REASON_ORDER).toEqual(['cancelled', 'locked', 'ended', 'hidden', 'paused']);
+    expect(EVENT_UNAVAILABLE_REASONS).toEqual(['cancelled', 'locked', 'ended', 'hidden']);
   });
 
   it('EventAvailability nhận eventReason null, từ chối status lạ và remaining âm', () => {

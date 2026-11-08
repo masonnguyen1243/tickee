@@ -42,8 +42,9 @@ export async function paymentServiceStatus(
 function blockingReason(event: PublicEventRef, orgLocked: boolean, now: Date): EventSaleReason | null {
   if (event.status === 'cancelled') return EventSaleReason.CANCELLED;
   if (event.lockedAt !== null || orgLocked) return EventSaleReason.LOCKED;
-  if (event.status === 'hidden') return EventSaleReason.HIDDEN;
+  // "Đã kết thúc" thắng "Ẩn" (Story 2.12).
   if (event.effectiveEndAt.getTime() <= now.getTime()) return EventSaleReason.ENDED;
+  if (event.status === 'hidden') return EventSaleReason.HIDDEN;
   return null;
 }
 

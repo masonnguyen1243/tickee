@@ -44,6 +44,10 @@ const MESSAGES: Record<ErrorCode, string> = {
   FORM_QUESTION_LIMIT_REACHED: `Mỗi Sự kiện tối đa ${FORM_QUESTIONS_MAX} câu hỏi.`,
   EVENT_NOT_READY: 'Sự kiện chưa đủ điều kiện mở bán.',
   EVENT_NOT_DRAFT: 'Sự kiện không còn ở trạng thái nháp.',
+  EVENT_CANCELLED: 'Sự kiện đã hủy, không sửa được.',
+  EVENT_STATUS_CONFLICT: 'Trạng thái Sự kiện đã đổi. Tải lại để xem trạng thái mới.',
+  EVENT_ALREADY_ENDED: 'Sự kiện đã kết thúc.',
+  EVENT_NOT_STARTED: 'Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.',
 };
 
 /** Lỗi DB chỉ log `{ type, code }` (message/params có thể mang email, token session); lỗi khác log nguyên để giữ stack. */

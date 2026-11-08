@@ -33,6 +33,7 @@ type EventDetail = EventBody & {
   slug: string;
   status: 'draft';
   effectiveEndAt: string;
+  endedManuallyAt: null;
   maxTicketsPerOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -46,12 +47,21 @@ const detail = (n: number, body: EventBody): EventDetail => ({
   ...body,
   // Không kiểm ở web: api tính.
   effectiveEndAt: body.endsAt,
+  endedManuallyAt: null,
   maxTicketsPerOrder: 10,
   createdAt: '2026-11-03T03:00:00+07:00',
   updatedAt: '2026-11-03T03:00:00+07:00',
 });
 
-const summary = ({ id, slug, name, status, startsAt, endsAt }: EventDetail) => ({ id, slug, name, status, startsAt, endsAt });
+const summary = ({ id, slug, name, status, startsAt, endsAt, effectiveEndAt }: EventDetail) => ({
+  id,
+  slug,
+  name,
+  status,
+  startsAt,
+  endsAt,
+  effectiveEndAt,
+});
 
 const trim = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
 

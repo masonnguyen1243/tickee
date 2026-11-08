@@ -20,7 +20,8 @@ import { organizations } from '../organizer/schema.js';
  * Sự kiện của một BTC (FR-6, Story 2.7). `slug` sinh một lần lúc tạo (`slugBase(name)` + `-` + 4 ký tự ngẫu nhiên) và
  * không đổi khi đổi tên. `status` chuyển bằng compare-and-set (`draft` → `published` ↔ `hidden`; `published`/`hidden`
  * → `cancelled`); Story 2.7 chỉ ghi `draft`. "Đã kết thúc" không lưu thành status: luôn tính từ `effective_end_at`
- * (`effectiveEndAt(ends_at)` của contracts, tính lại mỗi lần sửa giờ). Khóa Sự kiện (Epic 7) là trục riêng
+ * (`effectiveEndAt(ends_at)` của contracts, tính lại mỗi lần sửa giờ, trừ khi BTC đã bấm "Kết thúc":
+ * `ended_manually_at`). Khóa Sự kiện (Epic 7) là trục riêng
  * (`locked_at`, `locked_by`, `lock_reason`), không đụng `status`.
  */
 export const events = pgTable(
@@ -38,6 +39,11 @@ export const events = pgTable(
     startsAt: timestamptz('starts_at').notNull(),
     endsAt: timestamptz('ends_at').notNull(),
     effectiveEndAt: timestamptz('effective_end_at').notNull(),
+    /**
+     * Lúc BTC bấm "Kết thúc" (Story 2.12, AD-14): đặt cùng `effective_end_at` trong một lệnh; có rồi thì sửa giờ không
+     * tính lại `effective_end_at`. Không có thao tác hoàn tác.
+     */
+    endedManuallyAt: timestamptz('ended_manually_at'),
     venue: text('venue'),
     description: text('description'),
     /** Bắt buộc để mở bán (Story 2.10); nháp để trống được. */
@@ -60,6 +66,10 @@ export const events = pgTable(
     check('events_status_check', sql`${t.status} IN ('draft', 'published', 'hidden', 'cancelled')`),
     check('events_ends_after_starts_check', sql`${t.endsAt} > ${t.startsAt}`),
     check('events_max_tickets_per_order_check', sql`${t.maxTicketsPerOrder} BETWEEN 1 AND 50`),
+    check(
+      'events_ended_manually_check',
+      sql`${t.endedManuallyAt} IS NULL OR ${t.effectiveEndAt} = ${t.endedManuallyAt}`,
+    ),
   ],
 );
 

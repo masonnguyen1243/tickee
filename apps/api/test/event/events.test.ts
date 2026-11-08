@@ -86,6 +86,7 @@ describe('tạo Sự kiện nháp', () => {
       startsAt: START,
       endsAt: END,
       effectiveEndAt: '2026-11-16T23:59:59+07:00',
+      endedManuallyAt: null,
       venue: null,
       description: null,
       refundPolicy: null,
@@ -220,6 +221,64 @@ describe('sửa Sự kiện nháp', () => {
   });
 });
 
+describe('sửa Sự kiện đã mở bán, ẩn, đã kết thúc hoặc đã hủy (Story 2.12)', () => {
+  const patch = (eventId: string, body: unknown) =>
+    h.http.patch(`/v1/orgs/${orgId}/events/${eventId}`).set('cookie', admin.cookie).send(body as object);
+
+  it.each(['published', 'hidden'] as const)('%s: đổi tên → 200, audit changedFields [name], status giữ nguyên', async (status) => {
+    const event = await created();
+    await h.db.orm.execute(sql`UPDATE events SET status = ${status} WHERE id = ${event.id}`);
+    const res = await patch(event.id, draft({ name: 'Tên mới' })).expect(200);
+    expect(EventDetail.parse(res.body)).toMatchObject({ name: 'Tên mới', status, slug: event.slug });
+    expect((await audits(event.id)).at(-1)).toEqual({
+      action: 'event.updated',
+      actor_user_id: admin.userId,
+      changed_fields: ['name'],
+    });
+  });
+
+  it('đã hủy → 409 EVENT_CANCELLED, không ghi, không audit', async () => {
+    const event = await created();
+    await h.db.orm.execute(sql`UPDATE events SET status = 'cancelled' WHERE id = ${event.id}`);
+    const res = await patch(event.id, draft({ name: 'Tên mới' })).expect(409);
+    expect(ErrorResponse.parse(res.body).error.code).toBe('EVENT_CANCELLED');
+    const fetched = EventDetail.parse(
+      (await h.http.get(`/v1/orgs/${orgId}/events/${event.id}`).set('cookie', admin.cookie).expect(200)).body,
+    );
+    expect(fetched.name).toBe(event.name);
+    expect((await audits(event.id)).map((a) => a.action)).toEqual(['event.created']);
+  });
+
+  it('đã bấm Kết thúc: đổi endsAt → endsAt đổi, effectiveEndAt giữ nguyên mốc bấm', async () => {
+    const event = await created();
+    const endedAt = '2026-11-16T09:30:00+07:00';
+    await h.db.orm.execute(
+      sql`UPDATE events SET status = 'published', ended_manually_at = ${endedAt}, effective_end_at = ${endedAt}
+          WHERE id = ${event.id}`,
+    );
+    const res = await patch(event.id, draft({ endsAt: '2026-11-16T20:00:00+07:00' })).expect(200);
+    expect(EventDetail.parse(res.body)).toMatchObject({
+      endsAt: '2026-11-16T20:00:00+07:00',
+      effectiveEndAt: endedAt,
+      endedManuallyAt: endedAt,
+    });
+  });
+
+  it('CHECK events_ended_manually_check: effective_end_at lệch khỏi ended_manually_at bị DB từ chối', async () => {
+    const event = await created();
+    await expect(
+      h.db.orm.execute(sql`UPDATE events SET ended_manually_at = now() WHERE id = ${event.id}`),
+    ).rejects.toSatisfy((error: unknown) => {
+      // drizzle bọc lỗi pg: tên ràng buộc nằm ở message hoặc trong chuỗi `cause`.
+      for (let e: unknown = error; e; e = (e as { cause?: unknown }).cause) {
+        const { message, constraint } = e as { message?: string; constraint?: string };
+        if (constraint === 'events_ended_manually_check' || message?.includes('events_ended_manually_check')) return true;
+      }
+      return false;
+    });
+  });
+});
+
 describe('danh sách và cách ly', () => {
   it('danh sách của BTC, mới tạo trước; BTC chưa có Sự kiện → []', async () => {
     const latest = await created(draft({ name: 'Sự kiện mới nhất' }));
@@ -231,6 +290,7 @@ describe('danh sách và cách ly', () => {
       status: 'draft',
       startsAt: START,
       endsAt: END,
+      effectiveEndAt: '2026-11-16T23:59:59+07:00',
     });
     const empty = await h.http.get(`/v1/orgs/${orgB}/events`).set('cookie', ownerB.cookie).expect(200);
     expect(empty.body).toEqual([]);

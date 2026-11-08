@@ -51,6 +51,7 @@ const eventOf = (state: State) => ({
   startsAt: '2099-11-16T07:00:00+07:00',
   endsAt: '2099-11-16T17:00:00+07:00',
   effectiveEndAt: '2099-11-16T23:59:59+07:00',
+  endedManuallyAt: null,
   venue: 'Hồ Gươm',
   description: null,
   refundPolicy: state.refundPolicy,
@@ -81,8 +82,8 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
     'GET /me/memberships': () => ({ status: 200, body: [{ organizationId: ORG_ID, name: ORG_NAME, role: state.role }] }),
     [`GET /orgs/${ORG_ID}/notices`]: () => ({ status: 200, body: state.notices }),
     [`GET /orgs/${ORG_ID}/events`]: () => {
-      const { id, slug, name, status, startsAt, endsAt } = eventOf(state);
-      return { status: 200, body: [{ id, slug, name, status, startsAt, endsAt }] };
+      const { id, slug, name, status, startsAt, endsAt, effectiveEndAt } = eventOf(state);
+      return { status: 200, body: [{ id, slug, name, status, startsAt, endsAt, effectiveEndAt }] };
     },
     [`GET ${eventPath}`]: () => ({ status: 200, body: eventOf(state) }),
     [`PATCH ${eventPath}`]: (request) => {

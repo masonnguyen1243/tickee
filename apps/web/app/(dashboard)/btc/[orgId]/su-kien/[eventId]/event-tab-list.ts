@@ -5,7 +5,7 @@ export const EVENT_TABS = [
   { key: 'hang-ve', label: 'Hạng vé' },
   { key: 'form-mua', label: 'Form mua' },
   { key: 'check-in', label: 'Check-in', soon: 'Theo dõi check-in của Sự kiện.' },
-  { key: 'cai-dat', label: 'Cài đặt', soon: 'Ẩn, kết thúc sớm và các cài đặt khác của Sự kiện.' },
+  { key: 'cai-dat', label: 'Cài đặt' },
 ] as const;
 export type EventTab = (typeof EVENT_TABS)[number]['key'];
 export const DEFAULT_EVENT_TAB: EventTab = 'tong-quan';

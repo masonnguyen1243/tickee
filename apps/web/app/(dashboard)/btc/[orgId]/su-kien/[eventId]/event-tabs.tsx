@@ -14,11 +14,12 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { EventGate } from '../event-gate';
-import { EVENT_STATUS_BADGE } from '../event-status';
+import { eventBadge } from '../event-status';
 import { PublicEventLink } from '../public-event-link';
 import { PurchaseFormEditor } from '../purchase-form-editor';
 import { TicketTypesEditor } from '../ticket-types-editor';
 
+import { EventSettings } from './event-settings';
 import { DEFAULT_EVENT_TAB, EVENT_TABS, isEventTab, type EventTab } from './event-tab-list';
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -35,7 +36,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
  * trang Sự kiện công khai kèm "Sao chép link".
  */
 function Overview({ orgId, event }: { orgId: string; event: EventDetail }) {
-  const badge = EVENT_STATUS_BADGE[event.status];
+  const badge = eventBadge(event);
   return (
     <section
       aria-label="Tóm tắt Sự kiện"
@@ -111,6 +112,8 @@ export function EventTabs({ eventId, initialTab }: { eventId: string; initialTab
                   <TicketTypesEditor orgId={organization.id} event={event} />
                 ) : t.key === 'form-mua' ? (
                   <PurchaseFormEditor orgId={organization.id} eventId={event.id} />
+                ) : t.key === 'cai-dat' ? (
+                  <EventSettings orgId={organization.id} event={event} />
                 ) : (
                   <Overview orgId={organization.id} event={event} />
                 )}

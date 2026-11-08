@@ -1,0 +1,381 @@
+import type { Page } from '@playwright/test';
+
+import { expect, test } from './fixtures';
+import { apiError, me, mockIdentityApi, type Call, type Handler } from './identity-mock';
+import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
+
+/*
+ * Tab "Cài đặt" của Sự kiện (Story 2.12): form thông tin (dùng chung với wizard bước 1), Ẩn / Hiện lại (không hỏi xác
+ * nhận) và "Kết thúc" qua `Dialog`. API giả có trạng thái, luật trạng thái như server.
+ */
+
+test.use({ timezoneId: 'America/New_York' });
+
+const CONSENTED = '2026-10-29T01:02:03.000Z';
+const ORG_NAME = 'CLB Cờ Vua Quận 3';
+const EVENT_ID = '019a3b2c-0712-7abc-8def-0123456789ab';
+const SLUG = 'giai-chay-ha-noi-2026-c4d5';
+const base = `/btc/${ORG_ID}/su-kien/${EVENT_ID}`;
+const settings = `${base}?tab=cai-dat`;
+const eventPath = `/orgs/${ORG_ID}/events/${EVENT_ID}`;
+
+/** ISO 8601 theo giờ Việt Nam (`+07:00`, không mili giây) như api trả. */
+const vnIso = (ms: number) => `${new Date(ms + 7 * 3_600_000).toISOString().slice(0, 19)}+07:00`;
+
+type Status = 'draft' | 'published' | 'hidden' | 'cancelled';
+type State = {
+  status: Status;
+  name: string;
+  startsAt: string;
+  endedManuallyAt: string | null;
+  /** Chặn phản hồi Ẩn/Hiện lại/Kết thúc tới khi promise xong. */
+  hold?: Promise<void>;
+  /** Ẩn trả 500 (lỗi không phải đổi trạng thái). */
+  failHide?: boolean;
+  /** Kết thúc trả 409 EVENT_NOT_STARTED dù nút đang bật (vd. đồng hồ máy khách lệch). */
+  forceNotStarted?: boolean;
+  /** Lưu (PATCH) trả lỗi: 400 VALIDATION_FAILED tại `endsAt` hoặc 500. */
+  failPatch?: 'validation' | 'server';
+};
+
+const NOT_STARTED_MESSAGE = 'Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.';
+
+const EFFECTIVE_END = '2099-11-16T23:59:59+07:00';
+
+const eventOf = (state: State) => ({
+  id: EVENT_ID,
+  organizationId: ORG_ID,
+  slug: SLUG,
+  name: state.name,
+  status: state.status,
+  startsAt: state.startsAt,
+  endsAt: '2099-11-16T17:00:00+07:00',
+  effectiveEndAt: state.endedManuallyAt ?? EFFECTIVE_END,
+  endedManuallyAt: state.endedManuallyAt,
+  venue: 'Hồ Gươm',
+  description: null,
+  refundPolicy: 'Hoàn 100% trước 7 ngày.',
+  maxTicketsPerOrder: 10,
+  createdAt: '2026-11-03T03:00:00+07:00',
+  updatedAt: '2026-11-03T03:00:00+07:00',
+});
+
+async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ calls: Call[]; state: State }> {
+  await mockIdentityApi(page, { 'GET /identity/me': () => me(CONSENTED) });
+  const state: State = {
+    status: 'published',
+    name: 'Giải chạy Hà Nội 2026',
+    // Đã bắt đầu: "Kết thúc" bấm được.
+    startsAt: '2020-11-16T07:00:00+07:00',
+    endedManuallyAt: null,
+    ...initial,
+  };
+  const ended = () => state.endedManuallyAt !== null;
+  const handlers: Record<string, Handler> = {
+    [`GET /orgs/${ORG_ID}`]: () => organization({ role: 'admin' }),
+    'GET /me/memberships': () => ({ status: 200, body: [{ organizationId: ORG_ID, name: ORG_NAME, role: 'admin' }] }),
+    [`GET /orgs/${ORG_ID}/events`]: () => {
+      const { id, slug, name, status, startsAt, endsAt, effectiveEndAt } = eventOf(state);
+      return { status: 200, body: [{ id, slug, name, status, startsAt, endsAt, effectiveEndAt }] };
+    },
+    [`GET ${eventPath}`]: () => ({ status: 200, body: eventOf(state) }),
+    [`PATCH ${eventPath}`]: (request) => {
+      if (state.failPatch === 'validation') {
+        return apiError(400, 'VALIDATION_FAILED', { issues: [{ path: 'endsAt', code: 'custom' }] });
+      }
+      if (state.failPatch === 'server') return apiError(500, 'INTERNAL');
+      if (state.status === 'cancelled') return apiError(409, 'EVENT_CANCELLED');
+      state.name = (request.postDataJSON() as { name: string }).name;
+      return { status: 200, body: eventOf(state) };
+    },
+    [`POST ${eventPath}/hide`]: async () => {
+      if (state.hold) await state.hold;
+      if (state.failHide) return apiError(500, 'INTERNAL');
+      if (state.status !== 'published') return apiError(409, 'EVENT_STATUS_CONFLICT', { status: state.status });
+      if (ended()) return apiError(409, 'EVENT_ALREADY_ENDED');
+      state.status = 'hidden';
+      return { status: 200, body: eventOf(state) };
+    },
+    [`POST ${eventPath}/unhide`]: async () => {
+      if (state.hold) await state.hold;
+      if (state.status !== 'hidden') return apiError(409, 'EVENT_STATUS_CONFLICT', { status: state.status });
+      if (ended()) return apiError(409, 'EVENT_ALREADY_ENDED');
+      state.status = 'published';
+      return { status: 200, body: eventOf(state) };
+    },
+    [`POST ${eventPath}/end`]: async () => {
+      if (state.hold) await state.hold;
+      if (state.status !== 'published' && state.status !== 'hidden') {
+        return apiError(409, 'EVENT_STATUS_CONFLICT', { status: state.status });
+      }
+      if (ended()) return apiError(409, 'EVENT_ALREADY_ENDED');
+      if (state.forceNotStarted) {
+        return { status: 409, body: { error: { code: 'EVENT_NOT_STARTED', message: NOT_STARTED_MESSAGE, details: null } } };
+      }
+      if (new Date(state.startsAt).getTime() > Date.now()) return apiError(409, 'EVENT_NOT_STARTED');
+      state.endedManuallyAt = vnIso(Date.now());
+      return { status: 200, body: eventOf(state) };
+    },
+  };
+  const calls = await mockOrganizerApi(page, handlers);
+  return { calls, state };
+}
+
+const statusSection = (page: Page) => page.locator('[data-slot="event-status-actions"]');
+const callsTo = (calls: Call[], action: string) =>
+  calls.filter((c) => c.method === 'POST' && c.path === `${eventPath}/${action}`);
+
+test('sửa tên ở Cài đặt: PATCH đủ trường, toast, tiêu đề đổi theo', async ({ page }) => {
+  const { calls } = await openApi(page);
+  await page.goto(settings);
+  await expect(page.getByRole('tab', { name: 'Cài đặt' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByLabel('Tên Sự kiện')).toHaveValue('Giải chạy Hà Nội 2026');
+  await expect(page.getByLabel('Địa điểm (không bắt buộc)')).toHaveValue('Hồ Gươm');
+  await expect(page.getByText('Cần có để bán vé. Để trống thì mọi Hạng vé chuyển Tạm ngừng bán.')).toBeVisible();
+
+  await page.getByLabel('Tên Sự kiện').fill('Giải chạy Hà Nội 2026 — mùa thu');
+  await page.getByRole('button', { name: 'Lưu thay đổi' }).click();
+  await expect(page.getByText('Đã lưu thông tin Sự kiện.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Giải chạy Hà Nội 2026 — mùa thu', level: 1 })).toBeVisible();
+  const patch = calls.find((c) => c.method === 'PATCH' && c.path === eventPath);
+  expect(patch?.body).toMatchObject({
+    name: 'Giải chạy Hà Nội 2026 — mùa thu',
+    startsAt: '2020-11-16T07:00:00+07:00',
+    endsAt: '2099-11-16T17:00:00+07:00',
+    venue: 'Hồ Gươm',
+    refundPolicy: 'Hoàn 100% trước 7 ngày.',
+  });
+});
+
+test('lưu ở Cài đặt, api trả 400 VALIDATION_FAILED tại endsAt → lỗi tại ô "Kết thúc", không banner chung', async ({
+  page,
+}) => {
+  const { calls } = await openApi(page, { failPatch: 'validation' });
+  await page.goto(settings);
+  await page.getByLabel('Tên Sự kiện').fill('Giải chạy Hà Nội 2026 — mùa thu');
+  await page.getByRole('button', { name: 'Lưu thay đổi' }).click();
+  await expect(page.getByText('Giờ kết thúc phải sau giờ bắt đầu.')).toBeVisible();
+  await expect(page.getByLabel('Kết thúc', { exact: true })).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByText('Chưa lưu được thông tin')).toHaveCount(0);
+  expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(1);
+});
+
+test('lưu ở Cài đặt lỗi 500: banner "Chưa lưu được thông tin"; "Thử lại" gửi đúng một PATCH nữa rồi lưu được', async ({
+  page,
+}) => {
+  const { calls, state } = await openApi(page, { failPatch: 'server' });
+  await page.goto(settings);
+  await page.getByLabel('Tên Sự kiện').fill('Giải chạy Hà Nội 2026 — mùa thu');
+  await page.getByRole('button', { name: 'Lưu thay đổi' }).click();
+  await expect(page.getByText('Chưa lưu được thông tin')).toBeVisible();
+  await expect(page.getByLabel('Tên Sự kiện')).toHaveValue('Giải chạy Hà Nội 2026 — mùa thu');
+  expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(1);
+
+  state.failPatch = undefined;
+  await page.getByRole('button', { name: 'Thử lại' }).click();
+  await expect(page.getByText('Đã lưu thông tin Sự kiện.')).toBeVisible();
+  await expect(page.getByText('Chưa lưu được thông tin')).toHaveCount(0);
+  expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(2);
+  expect(state.name).toBe('Giải chạy Hà Nội 2026 — mùa thu');
+});
+
+test('tên trống → lỗi tại ô, không gọi api', async ({ page }) => {
+  const { calls } = await openApi(page);
+  await page.goto(settings);
+  await page.getByLabel('Tên Sự kiện').fill('  ');
+  await page.getByRole('button', { name: 'Lưu thay đổi' }).click();
+  await expect(page.getByText('Nhập tên Sự kiện.')).toBeVisible();
+  expect(calls.filter((c) => c.method === 'PATCH')).toEqual([]);
+});
+
+test('Ẩn không hỏi xác nhận, có spinner, không gửi lặp; badge "Ẩn"; "Hiện lại" bán lại', async ({ page }) => {
+  let release = () => {};
+  const { calls, state } = await openApi(page, { hold: new Promise<void>((resolve) => (release = resolve)) });
+  await page.goto(settings);
+  const hide = statusSection(page).getByRole('button', { name: 'Ẩn Sự kiện' });
+  await hide.click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(hide).toHaveAttribute('aria-busy', 'true');
+  await hide.click({ force: true });
+  release();
+  await expect(page.getByText('Đã ẩn Sự kiện. Link vẫn mở được nhưng không nhận Đơn mới.')).toBeVisible();
+  expect(callsTo(calls, 'hide')).toHaveLength(1);
+  expect(state.status).toBe('hidden');
+
+  state.hold = undefined;
+  await statusSection(page).getByRole('button', { name: 'Hiện lại' }).click();
+  await expect(page.getByText('Đã hiện lại Sự kiện.')).toBeVisible();
+  await expect(statusSection(page).getByRole('button', { name: 'Ẩn Sự kiện' })).toBeVisible();
+  expect(callsTo(calls, 'unhide')).toHaveLength(1);
+
+  await page.getByRole('tab', { name: 'Tổng quan' }).click();
+  await expect(page.locator('[data-slot="event-overview"] [data-slot="status-badge"]')).toHaveText('Đang mở bán');
+});
+
+test('badge "Ẩn" ở Tổng quan sau khi ẩn', async ({ page }) => {
+  await openApi(page);
+  await page.goto(settings);
+  await statusSection(page).getByRole('button', { name: 'Ẩn Sự kiện' }).click();
+  await expect(statusSection(page).getByRole('button', { name: 'Hiện lại' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Tổng quan' }).click();
+  await expect(page.locator('[data-slot="event-overview"] [data-slot="status-badge"]')).toHaveText('Ẩn');
+});
+
+test('Kết thúc qua Dialog nêu hậu quả: "Hủy" không gọi api; xác nhận → "Đã kết thúc lúc …", hết nút Kết thúc, badge "Đã kết thúc"', async ({
+  page,
+}) => {
+  const { calls } = await openApi(page);
+  await page.goto(settings);
+  const end = statusSection(page).getByRole('button', { name: 'Kết thúc', exact: true });
+
+  await end.click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'Kết thúc Sự kiện?' })).toBeVisible();
+  await expect(dialog).toContainText('Ngừng nhận Đơn ngay, không mở lại được.');
+  await dialog.getByRole('button', { name: 'Hủy' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(callsTo(calls, 'end')).toEqual([]);
+
+  await end.click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Kết thúc', exact: true }).click();
+  await expect(page.getByText('Đã kết thúc Sự kiện.')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(statusSection(page).locator('[data-slot="event-ended-at"]')).toContainText(/^Đã kết thúc lúc .+\d{2}:\d{2}/);
+  await expect(statusSection(page).getByRole('button', { name: 'Kết thúc', exact: true })).toHaveCount(0);
+  await expect(statusSection(page).getByRole('button', { name: 'Ẩn Sự kiện' })).toHaveCount(0);
+  expect(callsTo(calls, 'end')).toHaveLength(1);
+
+  await page.getByRole('tab', { name: 'Tổng quan' }).click();
+  await expect(page.locator('[data-slot="event-overview"] [data-slot="status-badge"]')).toHaveText('Đã kết thúc');
+  await page.goto(`/btc/${ORG_ID}`);
+  await expect(page.locator('[data-slot="event-card"] [data-slot="status-badge"]')).toHaveText('Đã kết thúc');
+});
+
+test('chưa bắt đầu: "Kết thúc" tắt, lý do nối bằng aria-describedby; Ẩn vẫn bấm được', async ({ page }) => {
+  await openApi(page, { startsAt: '2099-11-16T07:00:00+07:00' });
+  await page.goto(settings);
+  const end = statusSection(page).getByRole('button', { name: 'Kết thúc', exact: true });
+  await expect(end).toBeDisabled();
+  const describedBy = await end.getAttribute('aria-describedby');
+  expect(describedBy).toBeTruthy();
+  await expect(page.locator(`[id="${describedBy}"]`)).toHaveText('Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.');
+  await expect(statusSection(page).getByRole('button', { name: 'Ẩn Sự kiện' })).toBeEnabled();
+});
+
+test('đang ẩn, chưa bắt đầu: lý do ngắn "Sự kiện chưa bắt đầu." (không gợi ý dùng Ẩn), nối bằng aria-describedby', async ({
+  page,
+}) => {
+  await openApi(page, { status: 'hidden', startsAt: '2099-11-16T07:00:00+07:00' });
+  await page.goto(settings);
+  const end = statusSection(page).getByRole('button', { name: 'Kết thúc', exact: true });
+  await expect(end).toBeDisabled();
+  const describedBy = await end.getAttribute('aria-describedby');
+  expect(describedBy).toBeTruthy();
+  await expect(page.locator(`[id="${describedBy}"]`)).toHaveText('Sự kiện chưa bắt đầu.');
+  await expect(statusSection(page).getByText(/dùng Ẩn/)).toHaveCount(0);
+  await expect(statusSection(page).getByRole('button', { name: 'Hiện lại' })).toBeEnabled();
+});
+
+test('server trả 409 EVENT_NOT_STARTED khi nút đang bật: Dialog vẫn mở, banner "Chưa kết thúc được" với câu của server, không toast tải lại', async ({
+  page,
+}) => {
+  const { calls } = await openApi(page, { forceNotStarted: true });
+  await page.goto(settings);
+  await statusSection(page).getByRole('button', { name: 'Kết thúc', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Kết thúc', exact: true }).click();
+  await expect(dialog.getByText('Chưa kết thúc được')).toBeVisible();
+  await expect(dialog).toContainText(NOT_STARTED_MESSAGE);
+  await expect(dialog).toBeVisible();
+  await expect(page.getByText('Trạng thái Sự kiện vừa đổi. Đã tải lại.')).toHaveCount(0);
+  expect(callsTo(calls, 'end')).toHaveLength(1);
+});
+
+test('người khác vừa ẩn (409 EVENT_STATUS_CONFLICT): toast, tải lại Sự kiện và hiện "Hiện lại"', async ({ page }) => {
+  const { state } = await openApi(page);
+  await page.goto(settings);
+  await expect(statusSection(page).getByRole('button', { name: 'Ẩn Sự kiện' })).toBeVisible();
+  state.status = 'hidden';
+  await statusSection(page).getByRole('button', { name: 'Ẩn Sự kiện' }).click();
+  await expect(page.getByText('Trạng thái Sự kiện vừa đổi. Đã tải lại.')).toBeVisible();
+  await expect(statusSection(page).getByRole('button', { name: 'Hiện lại' })).toBeVisible();
+});
+
+test('vừa kết thúc ở nơi khác (409 EVENT_ALREADY_ENDED từ Dialog): toast, không banner lỗi, Dialog đóng, tải lại thấy "Đã kết thúc lúc …"', async ({
+  page,
+}) => {
+  const { state } = await openApi(page);
+  await page.goto(settings);
+  await statusSection(page).getByRole('button', { name: 'Kết thúc', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'Kết thúc Sự kiện?' })).toBeVisible();
+  state.endedManuallyAt = vnIso(Date.now() - 60_000);
+  await dialog.getByRole('button', { name: 'Kết thúc', exact: true }).click();
+  await expect(page.getByText('Trạng thái Sự kiện vừa đổi. Đã tải lại.')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('Chưa kết thúc được')).toHaveCount(0);
+  await expect(page.getByText('Chưa đổi được trạng thái')).toHaveCount(0);
+  await expect(statusSection(page).locator('[data-slot="event-ended-at"]')).toBeVisible();
+});
+
+test('Sự kiện ẩn đã kết thúc: không còn nút Hiện lại / Ẩn / Kết thúc, hiện "Đã kết thúc lúc …", badge "Đã kết thúc"', async ({
+  page,
+}) => {
+  await openApi(page, { status: 'hidden', endedManuallyAt: '2026-11-01T09:30:00+07:00' });
+  await page.goto(settings);
+  await expect(statusSection(page).locator('[data-slot="event-ended-at"]')).toContainText(/^Đã kết thúc lúc .+\d{2}:\d{2}/);
+  await expect(statusSection(page).getByRole('button')).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Tổng quan' }).click();
+  await expect(page.locator('[data-slot="event-overview"] [data-slot="status-badge"]')).toHaveText('Đã kết thúc');
+});
+
+test('lỗi Ẩn trước đó không hiện trong Dialog Kết thúc', async ({ page }) => {
+  const { state } = await openApi(page, { failHide: true });
+  await page.goto(settings);
+  await statusSection(page).getByRole('button', { name: 'Ẩn Sự kiện' }).click();
+  await expect(statusSection(page).getByText('Chưa đổi được trạng thái')).toBeVisible();
+  state.failHide = false;
+  await statusSection(page).getByRole('button', { name: 'Kết thúc', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'Kết thúc Sự kiện?' })).toBeVisible();
+  await expect(dialog.getByText('Chưa kết thúc được')).toHaveCount(0);
+  await expect(dialog.locator('[data-slot="status-banner"]')).toHaveCount(0);
+});
+
+test('lưu khi Sự kiện vừa bị hủy (409 EVENT_CANCELLED): toast, không banner lỗi; tải lại thì form chỉ đọc với giá trị server', async ({
+  page,
+}) => {
+  const { state } = await openApi(page);
+  await page.goto(settings);
+  await expect(page.getByLabel('Tên Sự kiện')).toHaveValue('Giải chạy Hà Nội 2026');
+  state.status = 'cancelled';
+  await page.getByLabel('Tên Sự kiện').fill('Tên chưa lưu');
+  await page.getByRole('button', { name: 'Lưu thay đổi' }).click();
+  await expect(page.getByText('Sự kiện đã hủy, không sửa được. Đã tải lại Sự kiện.')).toBeVisible();
+  await expect(page.getByText('Chưa lưu được thông tin')).toHaveCount(0);
+  await expect(page.getByText('Thông tin chỉ để xem, không sửa được nữa.')).toBeVisible();
+  await expect(page.getByLabel('Tên Sự kiện')).toHaveAttribute('readonly', '');
+  await expect(page.getByLabel('Tên Sự kiện')).toHaveValue('Giải chạy Hà Nội 2026');
+  await expect(page.getByRole('button', { name: 'Lưu thay đổi' })).toHaveCount(0);
+});
+
+test('đã hủy: form chỉ đọc kèm lý do, không có nút lưu hay nút trạng thái', async ({ page }) => {
+  await openApi(page, { status: 'cancelled' });
+  await page.goto(settings);
+  await expect(page.getByText('Thông tin chỉ để xem, không sửa được nữa.')).toBeVisible();
+  await expect(page.getByLabel('Tên Sự kiện')).toHaveAttribute('readonly', '');
+  await expect(page.getByRole('button', { name: 'Lưu thay đổi' })).toHaveCount(0);
+  await expect(statusSection(page).getByRole('button')).toHaveCount(0);
+  await expect(statusSection(page)).toContainText('Sự kiện đã hủy, không đổi trạng thái được nữa.');
+});
+
+test('320px: tab Cài đặt không cuộn ngang', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await openApi(page);
+  await page.goto(settings);
+  await expect(statusSection(page)).toBeVisible();
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
+});
