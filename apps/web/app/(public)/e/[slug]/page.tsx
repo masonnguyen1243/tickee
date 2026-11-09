@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 
 import { hasErrorCode } from '@/lib/auth/api';
 import { fetchPublicEvent } from '@/lib/event/public-api';
+import { REFUND_POLICY_ANCHOR } from '@/lib/event/public-sale';
 
 import { EventHero } from './event-hero';
 import { SaleStatusBanner, TicketTiers } from './ticket-tiers';
@@ -53,9 +54,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-function TextSection({ heading, text }: { heading: string; text: string }) {
+function TextSection({ id, heading, text }: { id?: string; heading: string; text: string }) {
   return (
-    <section className="flex flex-col gap-2">
+    <section id={id} className="flex flex-col gap-2">
       <h2 className="text-title">{heading}</h2>
       <p className="whitespace-pre-line text-body">{text}</p>
     </section>
@@ -64,7 +65,8 @@ function TextSection({ heading, text }: { heading: string; text: string }) {
 
 /**
  * Trang Sự kiện công khai `/e/{slug}` (Story 2.11-b). Phần tĩnh SSR, cache 30 giây; trạng thái bán và số vé tải ở
- * trình duyệt (`ticket-tiers.tsx`). Mobile: hero, BTC, banner, Hạng vé, mô tả. ≥ `lg`: 2 cột, Hạng vé dính bên phải.
+ * trình duyệt (`ticket-tiers.tsx`). Mobile: hero, BTC, banner, Hạng vé, mô tả, `purchase-bar` nổi dính đáy. ≥ `lg`: 2
+ * cột, Hạng vé và `purchase-bar` dính bên phải (Story 3.1).
  */
 export default async function PublicEventPage({ params }: Props) {
   const { slug } = await params;
@@ -93,13 +95,20 @@ export default async function PublicEventPage({ params }: Props) {
       </div>
       <aside aria-label="Hạng vé" className="min-w-0 lg:col-start-2 lg:row-span-2 lg:row-start-1">
         <div className="lg:sticky lg:top-4">
-          <TicketTiers slug={slug} ticketTypes={event.ticketTypes} />
+          <TicketTiers
+            slug={slug}
+            ticketTypes={event.ticketTypes}
+            maxTicketsPerOrder={event.maxTicketsPerOrder}
+            hasRefundPolicy={Boolean(event.refundPolicy)}
+          />
         </div>
       </aside>
       {event.description || event.refundPolicy ? (
         <div className="flex min-w-0 flex-col gap-section lg:col-start-1 lg:row-start-2">
           {event.description ? <TextSection heading="Giới thiệu" text={event.description} /> : null}
-          {event.refundPolicy ? <TextSection heading="Chính sách hoàn vé" text={event.refundPolicy} /> : null}
+          {event.refundPolicy ? (
+            <TextSection id={REFUND_POLICY_ANCHOR} heading="Chính sách hoàn vé" text={event.refundPolicy} />
+          ) : null}
         </div>
       ) : null}
     </div>

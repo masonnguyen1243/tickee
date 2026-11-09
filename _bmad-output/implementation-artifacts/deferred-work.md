@@ -334,3 +334,12 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-5-refactor-web.md`
   summary: E2E `purchase-form.spec.ts:376` (sắp thứ tự câu hỏi, kiểm focus sang nút "Xuống") chập chờn trên cả android-chromium và ios-webkit.
   evidence: Chạy lặp 40 lần: baseline `14b9084` fail 4/40, bản E2-5 fail 2/40. Focus được đặt trong `requestAnimationFrame` sau `setQueryData` + `invalidateQueries` (`purchase-form-editor.tsx` ~:671-675), nên dễ đua với lần render của refetch. Nên gộp vào việc ghi các test webkit chập chờn ở E2-8.
+
+## Deferred from: build of spec-3-1-chon-ve-va-dang-nhap-khi-bam-mua.md (2026-11-09)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-1-chon-ve-va-dang-nhap-khi-bam-mua.md`
+  summary: Story 4.6 — giới hạn tốc độ theo IP cho `POST /v1/events/:slug/funnel-events` (`@Public`, không cần đăng nhập). Hiện ai cũng bơm được `buy_clicked` (mỗi lần một `funnelId` mới) làm lệch mẫu số SM-C2 và phình bảng append-only `checkout_funnel_events`; `login_completed` thì phải đi theo cặp với `buy_clicked`. Đếm trong Postgres theo HMAC IP như `google_start_events`, vượt ngưỡng thì vẫn trả 204 nhưng không ghi.
+  evidence: Spec 3.1 § Never: "Không giới hạn tốc độ theo IP cho endpoint phễu ở story này (ghi vào `deferred-work.md`, gắn 4.6)". `apps/api/src/modules/ordering/funnel.service.ts` chưa có throttle.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-1-chon-ve-va-dang-nhap-khi-bam-mua.md`
+  summary: (Chưa kiểm, nếu đúng thì medium) `useBuy` ở `ticket-tiers.tsx` đặt `pending = true` và không bao giờ trả về false. Nếu Checkout redirect server về `/e/{slug}` (lựa chọn hết hợp lệ) mà App Router giữ nguyên instance `TicketPicker`, nút "Mua" sẽ quay mãi tới khi tải lại trang.
+  evidence: Review 3.1 (BH, EC, VG) triage #5. Cần thử trên trình duyệt: người đã đăng nhập chọn vé, BTC hạ giới hạn Vé/Đơn (hoặc đóng giờ bán), bấm "Mua", rồi xem nút có bấm lại được không. Đúng thì reset `pending` khi URL đổi, hoặc dùng `useTransition`. Nên làm cùng 3.2, lúc thanh mua được dùng lại ở Checkout.

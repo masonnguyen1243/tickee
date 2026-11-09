@@ -22,8 +22,8 @@ describe('trạng thái bán', () => {
     expect(EventAvailability.safeParse({ eventReason: null, tiers: [{ ...tier, remaining: -1 }] }).success).toBe(false);
   });
 
-  it('PublicEvent có tên BTC và Hạng vé tĩnh, bỏ các trường số vé', () => {
-    const event = PublicEvent.parse({
+  it('PublicEvent có tên BTC, giới hạn Vé/Đơn và Hạng vé tĩnh, bỏ các trường số vé', () => {
+    const base = {
       slug: 'giai-chay-abcd',
       name: 'Giải chạy',
       status: 'published',
@@ -33,6 +33,7 @@ describe('trạng thái bán', () => {
       description: null,
       refundPolicy: 'Hoàn 100%.',
       organizationName: 'CLB Chạy Bộ',
+      maxTicketsPerOrder: 4,
       ticketTypes: [
         {
           id: TIER_ID,
@@ -45,7 +46,9 @@ describe('trạng thái bán', () => {
           sold: 3,
         },
       ],
-    });
+    };
+    const event = PublicEvent.parse(base);
+    expect(event.maxTicketsPerOrder).toBe(4);
     expect(event.ticketTypes[0]).toEqual({
       id: TIER_ID,
       name: 'Phổ thông',
@@ -54,5 +57,10 @@ describe('trạng thái bán', () => {
       saleStartsAt: null,
       saleEndsAt: null,
     });
+    // Giới hạn Vé/Đơn bắt buộc, trong khoảng 1–50.
+    const { maxTicketsPerOrder: _omit, ...withoutLimit } = base;
+    expect(PublicEvent.safeParse(withoutLimit).success).toBe(false);
+    expect(PublicEvent.safeParse({ ...base, maxTicketsPerOrder: 0 }).success).toBe(false);
+    expect(PublicEvent.safeParse({ ...base, maxTicketsPerOrder: 51 }).success).toBe(false);
   });
 });

@@ -321,7 +321,7 @@ describe('API công khai theo slug', () => {
     expect(ErrorResponse.parse(draftRes.body).error.code).toBe('EVENT_NOT_FOUND');
   });
 
-  it('Sự kiện không còn nháp thì đọc được: kèm tên BTC và Hạng vé (thứ tự tạo, không có số vé)', async () => {
+  it('Sự kiện không còn nháp thì đọc được: kèm tên BTC, giới hạn Vé/Đơn và Hạng vé (thứ tự tạo, không có số vé)', async () => {
     const event = await created(draft({ refundPolicy: 'Hoàn 100% trước 7 ngày.' }));
     const addTier = async (body: Record<string, unknown>) =>
       (
@@ -351,6 +351,7 @@ describe('API công khai theo slug', () => {
       description: null,
       refundPolicy: 'Hoàn 100% trước 7 ngày.',
       organizationName: 'CLB Chạy Bộ',
+      maxTicketsPerOrder: 10,
       ticketTypes: [
         {
           id: vip,

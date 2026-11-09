@@ -73,7 +73,10 @@ export async function saleEventById(db: DbExecutor, eventId: string): Promise<Pu
   return row;
 }
 
-/** Phần tĩnh của trang Sự kiện: thông tin Sự kiện, tên BTC, Hạng vé (tạo trước đứng trước, không có số vé). */
+/**
+ * Phần tĩnh của trang Sự kiện: thông tin Sự kiện, tên BTC, giới hạn Vé/Đơn, Hạng vé (tạo trước đứng trước, không có
+ * số vé).
+ */
 export async function publicEventDetail(db: DbExecutor, slug: string): Promise<PublicEvent> {
   const row = await publishedRowBySlug(db, slug);
   const scope = { organizationId: row.organizationId };
@@ -92,6 +95,7 @@ export async function publicEventDetail(db: DbExecutor, slug: string): Promise<P
     description: row.description,
     refundPolicy: row.refundPolicy,
     organizationName,
+    maxTicketsPerOrder: row.maxTicketsPerOrder,
     ticketTypes: tiers.map((t) => ({
       id: t.id,
       name: t.name,

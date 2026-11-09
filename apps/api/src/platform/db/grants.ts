@@ -5,9 +5,9 @@ export const APP_DB_ROLE = 'tickee_app';
 
 /**
  * Bảng chỉ cho INSERT/SELECT với `tickee_app` (`schema.table`). Thu UPDATE/DELETE/TRUNCATE sau khi cấp quyền,
- * nên quyền này vẫn bị chặn sau mỗi lần migrate.
+ * nên quyền này vẫn bị chặn sau mỗi lần migrate. `checkout_funnel_events`: phễu mua (Story 3.1).
  */
-export const APPEND_ONLY_TABLES = ['public.audit_events'] as const;
+export const APPEND_ONLY_TABLES = ['public.audit_events', 'public.checkout_funnel_events'] as const;
 
 /**
  * Cột `tickee_app` không được UPDATE (`schema.table` → tên cột). Sau mỗi lần migrate, bảng bị thu UPDATE cấp bảng rồi

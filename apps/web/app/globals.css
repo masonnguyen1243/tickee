@@ -233,6 +233,27 @@
   --spacing-content-max-landing: 1120px;
   --spacing-icon-button: 40px;
   --spacing-qr-plate-padding: 12px;
+  /* purchase-bar: nút `control-height` + đệm 10px trên dưới. */
+  --spacing-purchase-bar: 70px;
+}
+
+/*
+ * purchase-bar nổi dính đáy (< lg, DESIGN.md › purchase-bar): thanh cao `purchase-bar`, cách đáy 10px + safe-area.
+ * Trang có thanh chừa đáy bằng chừng đó cộng 10px, và `scroll-padding-bottom` cùng giá trị để phần tử được focus bằng
+ * bàn phím luôn cuộn lên trên thanh (WCAG 2.4.11). ≥ lg thanh nằm trong luồng nên không cần.
+ */
+:root {
+  --purchase-bar-clearance: calc(var(--spacing-purchase-bar) + 20px + env(safe-area-inset-bottom));
+}
+
+@media (width < 64rem) {
+  html:has([data-slot='purchase-bar']) {
+    scroll-padding-bottom: var(--purchase-bar-clearance);
+  }
+
+  body:has([data-slot='purchase-bar']) {
+    padding-bottom: var(--purchase-bar-clearance);
+  }
 }
 
 @layer base {

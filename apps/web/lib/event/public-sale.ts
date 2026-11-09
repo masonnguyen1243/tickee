@@ -8,6 +8,9 @@ import {
 
 import type { StatusTone } from '@/components/tickee/tone';
 
+/** Id của khối "Chính sách hoàn vé" trên trang Sự kiện (dòng ghi chú dưới danh sách Hạng vé trỏ tới đây). */
+export const REFUND_POLICY_ANCHOR = 'chinh-sach-hoan-ve';
+
 /** "Còn N vé" đậm màu thương hiệu khi còn từ chừng này vé trở xuống. */
 export const LOW_STOCK_THRESHOLD = 10;
 
