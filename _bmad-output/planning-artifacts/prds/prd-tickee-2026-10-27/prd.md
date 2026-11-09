@@ -2,7 +2,7 @@
 title: Tickee
 status: final
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-11-09
 ---
 
 # PRD: Tickee — MVP v1
@@ -22,7 +22,7 @@ Cách đọc tài liệu:
 
 ## 1. Vision
 
-Tickee là nền tảng bán vé sự kiện cho các ban tổ chức (BTC) vừa và nhỏ ở Việt Nam, chạy trên hạ tầng thanh toán Tingee. BTC tạo trang Sự kiện trong vài phút và gửi link lên nhóm Zalo hoặc Facebook. Người mua quét VietQR là nhận Vé ngay. Tiền vé chuyển thẳng vào tài khoản của BTC, Tickee không giữ đồng nào. Hệ thống tự khớp từng giao dịch, nên BTC không còn phải dò sao kê hay xem ảnh chụp chuyển khoản. Ngày diễn ra Sự kiện, CTV quét Vé bằng trình duyệt trên điện thoại, không cần cài app.
+Tickee là nền tảng bán vé sự kiện cho các ban tổ chức (BTC) vừa và nhỏ ở Việt Nam, chạy trên hạ tầng thanh toán Tingee. BTC tạo trang Sự kiện trong vài phút và gửi link lên nhóm Zalo hoặc Facebook. Người mua trả tiền trên trang thanh toán của Tingee là nhận Vé ngay. Tiền vé chuyển thẳng vào tài khoản của BTC, Tickee không giữ đồng nào. Hệ thống tự khớp từng giao dịch, nên BTC không còn phải dò sao kê hay xem ảnh chụp chuyển khoản. Ngày diễn ra Sự kiện, CTV quét Vé bằng trình duyệt trên điện thoại, không cần cài app.
 
 Tickee thay cho cách làm thủ công hiện nay: Google Forms, ảnh chụp giao dịch, đối chiếu sao kê bằng mắt và điểm danh trên giấy. Phí của Tickee cũng thấp hơn nhiều lần so với các sàn vé lớn. Sàn vé thu 8–15% kèm phí cố định và giữ tiền 7–14 ngày. Ở MVP Tickee chưa thu phí; BTC chỉ trả phí dịch vụ của Tingee (Token) trực tiếp cho Tingee. Cách Tickee thu phí sẽ chốt sau MVP.
 
@@ -56,12 +56,12 @@ Các phân khúc trong Closed Beta: thể thao phong trào (Pickleball, cầu l�
     1. Minh xem trang Sự kiện và chọn số lượng Vé. Một Đơn có thể gồm nhiều Hạng vé, ví dụ 1 "Đơn nam" và 1 "Đôi nam".
     2. Minh bấm "Mua". Hệ thống yêu cầu đăng nhập Tài khoản Tickee bằng Google hoặc OTP qua email.
     3. Minh điền form mua vé **một lần cho cả Đơn**: Tên, SĐT, email và câu hỏi "Trình độ" của BTC.
-    4. Màn hình hiện QR thanh toán đúng số tiền, đếm ngược 15 phút. Minh quét QR hoặc bấm mở app ngân hàng để chuyển khoản.
-  - **Cao trào:** Màn hình tự chuyển sang "Thành công" và hiện từng Vé, mỗi Vé có một Mã QR vé riêng. Cùng lúc đó Minh nhận Vé qua email.
+    4. Màn thanh toán hiện số tiền của Đơn, BTC nhận tiền và đếm ngược 15 phút. Minh bấm "Thanh toán", được chuyển sang trang thanh toán của Tingee, trả tiền ở đó rồi quay lại Tickee.
+  - **Cao trào:** Trang Đơn trên Tickee tự chuyển sang "Thành công" và hiện từng Vé, mỗi Vé có một Mã QR vé riêng. Cùng lúc đó Minh nhận Vé qua email.
   - **Kết thúc:** Các Vé nằm trong "Vé của tôi". Minh gửi một Vé cho bạn đánh đôi để mỗi người tự vào cổng. Minh xem lại Vé trong "Vé của tôi" hoặc trong email, vì Người mua không tra được Vé theo SĐT. Ngày thi đấu, CTV quét từng Vé ở cổng. Sau khi Sự kiện kết thúc, Vé không còn trong "Vé của tôi", chỉ còn lịch sử ghi Minh đã tham dự. → FR-3, FR-12–FR-18, FR-22–FR-25.
   - **Tình huống lỗi:**
-    - Minh chưa trả tiền khi QR thanh toán hết hạn. Màn hình báo hết hạn, chỗ được trả lại, Minh phải mua lại từ đầu. → FR-14.
-    - Minh chuyển thiếu tiền hoặc ghi sai nội dung chuyển khoản. Hệ thống không phát Vé tự động, Đơn vào hàng "Cần xử lý". → FR-21.
+    - Minh chưa trả tiền khi link thanh toán hết hạn. Màn hình báo hết hạn, chỗ được trả lại, Minh phải mua lại từ đầu. → FR-14.
+    - Tingee báo số tiền nhận được khác số tiền của Đơn. Hệ thống không phát Vé tự động, Đơn vào hàng "Cần xử lý". → FR-21.
     - Đến cổng Minh không mở được Vé. Minh đọc SĐT hoặc email của Tài khoản Tickee. CTV, Owner hoặc Admin tra theo thông tin đó rồi check-in tay. → FR-29.
 
 - **UJ-2. Anh Tuấn, chủ nhiệm CLB ABC, mở bán giải Pickleball đầu tiên trên Tickee và thấy tiền về thẳng tài khoản CLB.**
@@ -71,11 +71,11 @@ Các phân khúc trong Closed Beta: thể thao phong trào (Pickleball, cầu l�
     1. Anh đăng ký Tài khoản Tickee bằng email và tạo BTC, anh là Owner.
     2. Anh liên kết tài khoản nhận tiền của CLB qua Tingee. BTC nhập Client ID và Secret Token Tingee của mình, chọn tài khoản nhận tiền trong danh sách tài khoản đã liên kết trên Tingee, rồi dán URL IPN của Tickee vào portal Tingee. CLB ABC đã được Quản trị Tingee duyệt vào Closed Beta, nên xong bước này là mở bán được Vé có phí.
     3. Anh tạo Sự kiện: tên, thời gian, địa điểm, mô tả, ảnh, chính sách hoàn vé. Sau đó tạo các Hạng vé với giá, số suất và thời gian mở/đóng bán.
-    4. Anh cấu hình form mua vé: các trường mặc định, câu hỏi riêng của BTC và các trường bổ sung.
+    4. Anh cấu hình form mua vé: các trường mặc định và câu hỏi riêng của BTC.
     5. Anh mở bán và gửi link vào nhóm Zalo và Facebook của CLB.
   - **Cao trào:** Đơn đầu tiên được thanh toán. Tiền vào thẳng tài khoản CLB, Đơn tự duyệt, dashboard hiện ngay tên Người mua. Anh Tuấn không phải dò sao kê.
   - **Kết thúc:** Anh theo dõi doanh thu, số Vé theo Hạng vé và danh sách Người mua trên dashboard, có thể xuất CSV hoặc đồng bộ Google Sheets. Tiền vé đã về được dùng để chi trả chi phí tổ chức trước ngày thi đấu. → FR-1, FR-2, FR-5, FR-37, FR-7–FR-11, FR-31, FR-32.
-  - **Tình huống lỗi:** Một Người mua chuyển thiếu tiền. Đơn không được duyệt mà nằm trong hàng "Cần xử lý" chờ anh Tuấn kiểm tra và quyết định. → FR-21.
+  - **Tình huống lỗi:** Tingee báo một Đơn nhận thiếu tiền. Đơn không được duyệt mà nằm trong hàng "Cần xử lý" chờ anh Tuấn kiểm tra và quyết định. → FR-21.
 
 - **UJ-3. Lan, sinh viên được CLB ABC nhờ soát vé, cho khách qua cổng nhanh chỉ bằng điện thoại.**
   - **Nhân vật và bối cảnh:** Lan là CTV, không thuộc BTC. Sáng ngày thi đấu Lan đứng cổng cùng vài CTV khác.
@@ -91,7 +91,7 @@ Các phân khúc trong Closed Beta: thể thao phong trào (Pickleball, cầu l�
 
 ## 3. Glossary
 
-- **Tingee** — Hạ tầng thanh toán và đối soát QR mà Tickee chạy trên đó. Tingee là nguồn dữ liệu gốc về tiền và Token, kết nối với 14 ngân hàng.
+- **Tingee** — Hạ tầng thanh toán (cổng thanh toán Payment Gateway) và đối soát mà Tickee chạy trên đó. Tingee là nguồn dữ liệu gốc về tiền và Token, kết nối với 14 ngân hàng.
 - **Quản trị Tingee** — Nhân sự vận hành nội bộ của Tingee: hỗ trợ, xử lý báo cáo vi phạm, khóa Sự kiện hoặc BTC.
 - **Tài khoản Tickee** — Danh tính đăng nhập của một người. Một tài khoản có thể là Người mua, thành viên của một hay nhiều BTC, hoặc CTV của một hay nhiều Sự kiện. `[ASSUMPTION: Người mua, thành viên BTC và CTV dùng chung một loại Tài khoản Tickee; vai trò gắn theo từng BTC hoặc từng Sự kiện]`
 - **BTC (Ban tổ chức)** — Tổ chức bán Vé trên Tickee và là khách hàng trả phí. Mỗi BTC có tối đa một bộ credential Tingee hiện hành và một hoặc nhiều tài khoản nhận tiền (mỗi tài khoản là một VA trong tài khoản Tingee của BTC), trong đó đúng một tài khoản mặc định nhận tiền của Đơn mới; BTC có một hoặc nhiều thành viên.
@@ -103,20 +103,18 @@ Các phân khúc trong Closed Beta: thể thao phong trào (Pickleball, cầu l�
 - **Tài khoản nhận tiền** — Một tài khoản (VA) BTC đã liên kết trên Tingee và chọn trên Tickee để nhận tiền vé.
 - **Sự kiện** — Một buổi hoặc một giải có thời gian và địa điểm, thuộc một BTC. Mỗi Sự kiện có một hoặc nhiều Hạng vé.
 - **Sự kiện kết thúc** — Mốc Sự kiện chuyển sang "Đã kết thúc". Hệ thống tự chuyển vào mốc muộn hơn trong hai mốc: 23:59 của ngày kết thúc đã khai báo, hoặc giờ kết thúc đã khai báo cộng 6 tiếng. Owner hoặc Admin có thể bấm "Kết thúc" sớm hơn. Từ mốc này Vé rời khỏi "Vé của tôi" và quyền CTV hết hạn.
-- **Sự kiện miễn phí** — Sự kiện mà mọi Hạng vé đều có giá 0đ. Không tạo QR thanh toán và không tiêu Token.
+- **Sự kiện miễn phí** — Sự kiện mà mọi Hạng vé đều có giá 0đ. Không tạo link thanh toán và không tiêu Token.
 - **Hạng vé** — Một loại Vé trong Sự kiện, có giá, số suất và thời gian mở/đóng bán.
-- **Đơn** — Một lần mua của Người mua trong một Sự kiện. Một Đơn gồm một hoặc nhiều Vé thuộc một hoặc nhiều Hạng vé. Mỗi Đơn có một QR thanh toán và một mã Đơn, mã này cũng là billId trên Tingee. Form mua vé được điền một lần cho cả Đơn.
+- **Đơn** — Một lần mua của Người mua trong một Sự kiện. Một Đơn gồm một hoặc nhiều Vé thuộc một hoặc nhiều Hạng vé. Mỗi Đơn có một mã Đơn. Với Đơn có phí, mã Đơn là `orderId` gửi cổng thanh toán Tingee, không phải `billId`; Đơn có phí trả tiền qua một link thanh toán. Form mua vé được điền một lần cho cả Đơn.
 - **Vé** — Quyền vào cổng của một người, được phát khi Đơn đã thanh toán. Mỗi Vé có một Mã QR vé riêng.
-- **Mã QR vé** — Mã QR có chữ ký số trên mỗi Vé, dùng để check-in. Đây không phải QR thanh toán.
-- **QR thanh toán** — VietQR dùng để trả tiền cho một Đơn. Có hai loại:
-  - **QR động:** gắn số tiền và billId, hết hạn sau 15 phút.
-  - **QR tĩnh:** không gắn số tiền, đối soát theo nội dung chuyển khoản có chứa mã Đơn.
-- **Giữ chỗ** — Số suất tạm khóa cho một Đơn chưa thanh toán, kéo dài đúng thời hạn QR thanh toán (15 phút).
+- **Mã QR vé** — Mã QR có chữ ký số trên mỗi Vé, dùng để check-in. Mã này chỉ dùng để check-in, không dùng để thanh toán.
+- **Link thanh toán** — Link tới trang thanh toán của Tingee Payment Gateway, tạo riêng cho từng Đơn có phí, đúng số tiền của Đơn, hết hạn sau 15 phút. Người mua được chuyển hẳn sang trang này (redirect toàn trang), trả tiền ở đó rồi quay về trang Đơn của Tickee. Tickee không tự hiển thị mã QR thanh toán, không dùng QR tĩnh hay Deep Link. *(Thay mục "QR thanh toán" (QR động, QR tĩnh) từ 09/11/2026, theo Architecture AD-6.)*
+- **Giữ chỗ** — Số suất tạm khóa cho một Đơn chưa thanh toán, kéo dài theo thời hạn link thanh toán (15 phút). Chỗ chỉ được trả lại khi Tingee xác nhận Đơn chưa được trả, hoặc khi quá hạn mà vẫn không có xác nhận (FR-14).
 - **IPN** — Thông báo giao dịch Tingee gửi về Tickee, có kèm số tiền thực nhận.
-- **Đối soát bù** — Việc Tickee chủ động hỏi Tingee về trạng thái QR thanh toán khi IPN đến trễ hoặc bị mất.
+- **Đối soát bù** — Việc Tickee chủ động hỏi Tingee về trạng thái thanh toán của Đơn trên cổng thanh toán khi IPN đến trễ hoặc bị mất.
 - **Token** — Đơn vị phí dịch vụ do Tingee quản lý. Tingee trừ Token trên tài khoản Tingee của BTC mỗi khi gửi IPN về một giao dịch. Token không quy đổi ngược ra tiền và không chuyển nhượng được.
-- **Token khả dụng** — Số dư Token cộng hạn mức âm (hoặc hạn mức trả sau), trừ đi số Đơn đang Chờ thanh toán (cả QR động lẫn QR tĩnh) nhân với mức trừ mỗi giao dịch.
-- **Cần xử lý** — Hàng các giao dịch hoặc Đơn mà hệ thống không tự phát Vé được, gồm ba loại: "Lệch số tiền", "Thanh toán mồ côi" (tiền về sau khi đã trả lại chỗ mà Hạng vé đã hết, với cả QR động lẫn QR tĩnh) và "Giao dịch chưa khớp".
+- **Token khả dụng** — Số dư Token cộng hạn mức âm (hoặc hạn mức trả sau), do Tingee báo. Tickee không tự trừ trước cho Đơn đang Chờ thanh toán; khi BTC chạm hạn mức, Tingee ngắt dịch vụ và Tickee phát hiện qua lần tạo link bị từ chối (FR-15).
+- **Cần xử lý** — Hàng các giao dịch hoặc Đơn mà hệ thống không tự phát Vé được, gồm năm loại: "Lệch số tiền", "Thanh toán mồ côi" (tiền về sau khi đã trả lại chỗ mà Hạng vé đã hết), "Giao dịch chưa khớp" (tiền về với mã Đơn không tồn tại), "Thanh toán trùng" (tiền về cho Đơn đã thanh toán, đã hủy hoặc đã hoàn) và "Sự kiện đã hủy" (tiền về sau khi Sự kiện bị hủy).
 - **Closed Beta** — Giai đoạn chạy thật với 2–5 Sự kiện của các BTC được mời, trước khi mở công khai.
 - **Closed Beta được duyệt** — Trạng thái của một BTC đã được Quản trị Tingee duyệt vào Closed Beta. Chỉ BTC có trạng thái này mới bán được Vé có phí trước khi mở công khai.
 - **Vé của tôi** — Trang của Người mua liệt kê các Vé còn hiệu lực và lịch sử các Sự kiện đã tham dự.
@@ -126,16 +124,16 @@ Các phân khúc trong Closed Beta: thể thao phong trào (Pickleball, cầu l�
 
 | Trạng thái | Ý nghĩa |
 |---|---|
-| Chờ thanh toán | Đang Giữ chỗ, QR thanh toán còn hiệu lực |
+| Chờ thanh toán | Đang Giữ chỗ, chờ Người mua trả tiền qua link thanh toán |
 | Đã thanh toán | Đã khớp IPN và phát Vé |
-| Hết hạn | QR thanh toán hết hạn khi chưa trả tiền, đã trả lại chỗ. Nếu tiền về muộn sau đó, Đơn chuyển sang Đã thanh toán (còn chỗ) hoặc Cần xử lý (hết chỗ) |
-| Cần xử lý | Lệch số tiền, Thanh toán mồ côi hoặc Giao dịch chưa khớp |
+| Hết hạn | Tingee xác nhận Đơn chưa được trả, hoặc quá hạn link mà không có xác nhận; đã trả lại chỗ. Nếu tiền về muộn sau đó, Đơn chuyển sang Đã thanh toán (còn chỗ) hoặc Cần xử lý (hết chỗ) |
+| Cần xử lý | Lệch số tiền, Thanh toán mồ côi, Giao dịch chưa khớp, Thanh toán trùng hoặc Sự kiện đã hủy |
 | Đã hủy | Sự kiện bị hủy, hoặc BTC từ chối Đơn đang Cần xử lý |
 | Đã hoàn tay | BTC tự chuyển hoàn tiền ngoài hệ thống rồi đánh dấu |
 
 **Trạng thái Vé:** Hợp lệ → Đã check-in, hoặc Hợp lệ → Đã hủy.
 
-**Trạng thái Sự kiện:** Nháp → Đang mở bán → Đã kết thúc. Từ trạng thái Đang mở bán, Sự kiện có thể chuyển sang Ẩn, Đã hủy, hoặc Bị khóa (do Quản trị Tingee). "Tạm ngừng bán" không phải một trạng thái riêng. Đây là thông báo hiện trên Sự kiện đang mở bán khi hệ thống tạm thời không tạo được QR thanh toán, vì Token khả dụng không đủ (FR-15) hoặc vì BTC bị thu hồi trạng thái Closed Beta được duyệt (FR-37).
+**Trạng thái Sự kiện:** Nháp → Đang mở bán → Đã kết thúc. Từ trạng thái Đang mở bán, Sự kiện có thể chuyển sang Ẩn, Đã hủy, hoặc Bị khóa (do Quản trị Tingee). "Tạm ngừng bán" không phải một trạng thái riêng. Đây là thông báo hiện trên Sự kiện đang mở bán khi hệ thống tạm thời không bán được Vé có phí, vì Tingee đang ngắt dịch vụ thanh toán của BTC hoặc key Tingee của BTC không còn dùng được (FR-15), hoặc vì BTC bị thu hồi trạng thái Closed Beta được duyệt (FR-37).
 
 `[ASSUMPTION: danh sách trạng thái Đơn, Vé và Sự kiện do PM đề xuất; Architecture chốt máy trạng thái chi tiết]`
 
@@ -155,7 +153,7 @@ Người dùng đăng ký và đăng nhập Tài khoản Tickee bằng Google ho
 - Mọi Tài khoản Tickee tự bật hoặc tắt xác thực hai lớp (2FA) bằng ứng dụng xác thực (TOTP) ở trang "Bảo mật tài khoản". Owner được khuyến khích bật nhưng không bắt buộc.
 - Tài khoản đã bật 2FA phải nhập mã TOTP sau mỗi lần đăng nhập (Google hoặc OTP email) mới dùng được tài khoản. Có 10 mã khôi phục dùng một lần cho trường hợp mất thiết bị.
 - Tắt 2FA phải nhập mã TOTP (hoặc mã khôi phục) hiện tại; hệ thống gửi email báo.
-- Thao tác nhạy cảm (đổi key Tingee, đổi tài khoản nhận tiền mặc định, hủy liên kết tài khoản nhận tiền, chuyển quyền Owner) luôn yêu cầu xác nhận lại ngay lúc thao tác: nhập mã TOTP nếu đã bật 2FA, nếu chưa bật thì nhập mã OTP gửi qua email; kèm email cảnh báo.
+- Thao tác nhạy cảm (bật 2FA, đổi key Tingee, đổi tài khoản nhận tiền mặc định, hủy liên kết tài khoản nhận tiền, chuyển quyền Owner) luôn yêu cầu xác nhận lại ngay lúc thao tác: nhập mã TOTP nếu đã bật 2FA, nếu chưa bật thì nhập mã OTP gửi qua email; kèm email cảnh báo.
 - Dù đăng nhập bằng cách nào, cùng một email luôn ra cùng một Tài khoản Tickee.
 
 **Ngoài phạm vi:** đăng nhập bằng OTP qua SĐT, SSO tài khoản Tingee `[ASSUMPTION: SSO Tingee để sau MVP]`.
@@ -260,17 +258,19 @@ Owner và Admin tạo nhiều Hạng vé cho một Sự kiện. Mỗi Hạng vé
 - Ngoài thời gian mở bán, Hạng vé hiện "Chưa mở bán" hoặc "Đã đóng bán" và không cho chọn.
 - Số suất không được giảm xuống thấp hơn số Vé đã bán cộng số đang Giữ chỗ.
 - Giá được chốt vào Đơn tại thời điểm đặt. Đổi giá về sau không ảnh hưởng đến Đơn đã tạo.
+- Giá Hạng vé có phí tối thiểu 2.000đ, kiểm khi lưu Hạng vé (AD-6).
 
 #### FR-9: Cấu hình form mua vé
 Owner và Admin cấu hình form mua vé của Sự kiện.
 - Trường mặc định: Tên, SĐT (hỏi nếu Tài khoản Tickee chưa có), email (tự điền từ Tài khoản Tickee).
 - Câu hỏi riêng của BTC: dạng văn bản hoặc lựa chọn, bắt buộc hoặc không bắt buộc.
-- Các trường bổ sung khác.
 
 **Hệ quả:**
 - Form được điền một lần cho mỗi Đơn, dù Đơn có bao nhiêu Vé.
 - Không gửi được Đơn khi còn trường bắt buộc để trống.
 - Câu trả lời trong form hiện trong danh sách Đơn, file CSV và Google Sheets.
+
+**Ngoài phạm vi MVP:** trường dựng sẵn khác (vd. Ngày sinh, CCCD, Size áo). Mỗi trường cần định dạng và cách xử lý dữ liệu cá nhân riêng. Câu hỏi riêng của BTC đủ cho MVP. *(Mason chốt 05/11/2026 ở Story 2.9, xác nhận 09/11/2026.)*
 
 #### FR-10: Trang Sự kiện công khai
 Ai có link đều xem được trang Sự kiện mà không cần đăng nhập. Trang tối ưu cho điện thoại và có ảnh xem trước khi chia sẻ lên Facebook hoặc Zalo.
@@ -284,14 +284,14 @@ Ai có link đều xem được trang Sự kiện mà không cần đăng nhập
 Owner và Admin tạo Sự kiện miễn phí. Người mua đăng ký Vé mà không phải thanh toán.
 
 **Hệ quả:**
-- Không tạo QR thanh toán và không tiêu Token.
+- Không tạo link thanh toán và không tiêu Token.
 - Người mua vẫn phải đăng nhập Tài khoản Tickee. `[ASSUMPTION: Sự kiện miễn phí vẫn bắt buộc đăng nhập]`
 - Vé được phát ngay khi gửi Đơn.
 - Mỗi Sự kiện có tối đa 200 suất miễn phí: tổng số suất của mọi Hạng vé 0đ ≤ 200, áp cho mọi Sự kiện ở mọi trạng thái, kể cả Sự kiện có cả Hạng vé có phí. `[ASSUMPTION: BRD ghi 200 là "tham khảo" — PRD coi là trần cứng ở MVP]` *(Quyết định Mason 09/11/2026, E2-3.)*
 
 ### 4.4 Checkout và Giữ chỗ
 
-**Mô tả:** Người mua chọn Vé, điền form và nhận QR thanh toán. Hệ thống Giữ chỗ trong 15 phút và không bao giờ bán quá số suất. Hiện thực hóa UJ-1.
+**Mô tả:** Người mua chọn Vé, điền form rồi được chuyển sang trang thanh toán của Tingee. Hệ thống Giữ chỗ trong 15 phút và không bao giờ bán quá số suất. Hiện thực hóa UJ-1.
 
 #### FR-12: Tạo Đơn nhiều Vé, nhiều Hạng vé
 Người mua chọn số lượng Vé, có thể thuộc nhiều Hạng vé trong cùng Sự kiện, rồi gửi một Đơn.
@@ -309,40 +309,43 @@ Với mỗi Hạng vé, số Vé đã bán cộng số đang Giữ chỗ không 
 - Điều kiện này vẫn đúng khi 5.000 người cùng vào mua một Sự kiện 300 Vé (NFR-3).
 
 #### FR-14: Giữ chỗ 15 phút và hết hạn
-Khi Đơn được tạo, hệ thống Giữ chỗ đúng bằng thời hạn QR động (15 phút) và hiện đồng hồ đếm ngược.
+Khi Đơn có phí được tạo, hệ thống Giữ chỗ và hiện đồng hồ đếm ngược theo hạn link thanh toán (15 phút).
 
 **Hệ quả:**
-- Hết 15 phút mà chưa thanh toán: QR không còn thanh toán được, chỗ được trả lại, Đơn chuyển sang "Hết hạn". Màn hình báo hết hạn và mời Người mua tạo Đơn mới.
+- Chỗ được trả lại và Đơn chuyển "Hết hạn" khi gặp điều kiện đầu tiên trong ba điều kiện:
+  - chưa tạo được link thanh toán sau 60 giây;
+  - Tingee xác nhận Đơn chưa được trả;
+  - quá hạn link 5 phút mà vẫn chưa có xác nhận.
+- Màn hình báo hết hạn và mời Người mua tạo Đơn mới.
+- Đồng hồ về 0 mà chưa có xác nhận thì màn hình hiện "Đang xác nhận thanh toán", chưa báo hết hạn.
 - Chỗ đã trả lại được người khác mua ngay.
-- IPN hợp lệ hoặc Đối soát bù xác nhận tiền đã về sau khi chỗ đã trả lại (ví dụ ngân hàng xử lý chậm ở sát giây cuối), áp dụng cho cả QR động lẫn QR tĩnh:
+- IPN hợp lệ hoặc Đối soát bù xác nhận tiền đã về sau khi chỗ đã trả lại (ví dụ ngân hàng xử lý chậm ở sát giây cuối):
   - Hạng vé còn chỗ: Giữ chỗ lại và phát Vé bình thường.
   - Hạng vé đã hết: không phát Vé. Đơn vào "Cần xử lý" với loại "Thanh toán mồ côi", hệ thống báo cho BTC và gửi email cho Người mua. BTC tự hoàn tiền hoặc mở thêm chỗ.
 - Không bao giờ phát Vé vượt số suất, kể cả với tiền về muộn (FR-13).
-- Với QR tĩnh: xem FR-17.
 
-#### FR-15: Kiểm tra Token trước khi tạo QR
-Hệ thống chỉ tạo QR thanh toán khi Token khả dụng của BTC còn đủ cho ít nhất một giao dịch.
+#### FR-15: Tạm ngừng bán khi dịch vụ thanh toán của BTC bị ngắt
+Tickee không tự tính Token trước khi tạo link. Khi Tingee ngắt dịch vụ của BTC (vd. vượt hạn mức Token), hoặc key Tingee hiện hành của BTC không còn dùng được, lần tạo link bị từ chối và hệ thống đánh dấu dịch vụ thanh toán của BTC là tạm ngừng.
 
 **Hệ quả:**
-- Token khả dụng không đủ: không tạo QR, trang Sự kiện hiện "Tạm ngừng bán".
-- Khi Tingee ngắt dịch vụ của BTC vì vượt hạn mức: mọi Sự kiện có phí của BTC đó hiện "Tạm ngừng bán".
+- Đơn đang tạo link bị từ chối thì hết hạn, chỗ được trả lại, Người mua thấy "Sự kiện tạm ngừng bán".
+- Mọi Sự kiện có phí của BTC hiện "Tạm ngừng bán" cho tới khi dịch vụ mở lại. Hệ thống tự kiểm tra lại định kỳ; Owner bấm "Kiểm tra lại" hoặc lưu key mới được.
+- Dịch vụ mở lại thì hệ thống Đối soát bù mọi Đơn còn mở của BTC (FR-20).
 - Sự kiện miễn phí không bị ảnh hưởng.
 
-#### FR-16: Thanh toán bằng QR động
-Người mua thấy QR động đúng số tiền của Đơn, có nút tải ảnh QR và nút mở thẳng app ngân hàng (Deep Link).
+#### FR-16: Thanh toán qua cổng thanh toán Tingee
+Người mua thấy màn thanh toán của Tickee với số tiền, đếm ngược và BTC nhận tiền, rồi bấm "Thanh toán" để chuyển sang trang thanh toán của Tingee (redirect toàn trang, không popup). Trả tiền xong, Tingee đưa Người mua về trang Đơn của Tickee.
 
 **Hệ quả:**
-- QR được tạo xong dưới 2 giây (NFR-1).
+- Link đúng số tiền của Đơn, tiền vào tài khoản nhận tiền mặc định của BTC lúc tạo link, hết hạn sau 15 phút.
+- Link tạo xong dưới 2 giây (NFR-1).
 - Trang thanh toán ghi rõ "Tiền chuyển thẳng cho [tên BTC]" và hiện chính sách hoàn vé của BTC.
+- Tingee báo lỗi rõ ràng khi tạo link thì Người mua thử lại được cho cùng Đơn trong 60 giây. Hết thời gian hoặc kết quả không rõ thì Đơn hết hạn, Người mua tạo Đơn mới.
+- Trang Đơn luôn lấy trạng thái từ Tickee, không tin tham số trên link quay về.
+- Tickee không tự hiển thị mã QR thanh toán, không dùng QR tĩnh, không mở thẳng app ngân hàng (Deep Link).
 
-#### FR-17: Thanh toán bằng QR tĩnh
-BTC không dùng được QR động thì Người mua thanh toán qua QR tĩnh. Nội dung chuyển khoản phải chứa mã Đơn, và trang thanh toán hướng dẫn rõ điều này.
-
-**Hệ quả:**
-- Trang thanh toán hiện mã Đơn nổi bật, có nút sao chép và hướng dẫn ghi đúng nội dung chuyển khoản.
-- Giữ chỗ với QR tĩnh cũng kéo dài 15 phút như QR động. Hết 15 phút, Đơn chuyển sang "Hết hạn" và chỗ được trả lại.
-- Đơn QR tĩnh đang Chờ thanh toán cũng được tính vào phần trừ khi tính Token khả dụng, giống Đơn QR động đang Chờ thanh toán.
-- Tiền về sau khi chỗ đã trả lại: xử lý theo quy tắc tiền về muộn ở FR-14.
+#### FR-17: ~~Thanh toán bằng QR tĩnh~~ (bỏ)
+Mọi thanh toán đi qua cổng thanh toán (FR-16, AD-6). Cổng tự khớp giao dịch với Đơn, nên Tickee không đối soát theo nội dung chuyển khoản và không có QR tĩnh. Giữ mã FR-17 để truy vết. *(Bỏ ngày 09/11/2026, theo Architecture 28/10/2026.)*
 
 #### FR-18: Tự chuyển sang "Thành công"
 Khi Đơn được thanh toán, màn hình của Người mua tự chuyển sang "Thành công" và hiện tất cả Vé của Đơn, không cần tải lại trang.
@@ -354,7 +357,7 @@ Khi Đơn được thanh toán, màn hình của Người mua tự chuyển sang
 **Mô tả:** Tickee nhận trạng thái thanh toán từ Tingee qua IPN, khớp với Đơn rồi phát Vé. Tickee không bao giờ giữ tiền. Hiện thực hóa UJ-1, UJ-2.
 
 #### FR-19: Xử lý IPN và phát Vé
-Hệ thống nhận IPN, xác thực chữ ký, khớp billId và số tiền thực nhận với Đơn, rồi phát Vé.
+Hệ thống nhận IPN, xác thực chữ ký, khớp mã Đơn và số tiền thực nhận với Đơn, rồi phát Vé.
 
 **Hệ quả:**
 - Chỉ phát Vé khi IPN hợp lệ và số tiền thực nhận bằng đúng số tiền của Đơn.
@@ -363,21 +366,22 @@ Hệ thống nhận IPN, xác thực chữ ký, khớp billId và số tiền th
 - Ghi nhận thanh toán, phát Vé và lên lịch gửi email diễn ra trọn gói hoặc không diễn ra gì (NFR-5).
 
 #### FR-20: Đối soát bù
-Khi IPN đến trễ hoặc bị mất, và khi BTC được Tingee mở lại dịch vụ, hệ thống chủ động hỏi Tingee trạng thái các QR thanh toán còn mở rồi phát Vé bù.
+Khi IPN đến trễ hoặc bị mất, và khi BTC được Tingee mở lại dịch vụ, hệ thống chủ động hỏi Tingee trạng thái thanh toán của các Đơn còn mở rồi phát Vé bù.
 
 **Hệ quả:**
 - Đơn đã thanh toán mà sau một khoảng thời gian vẫn chưa nhận IPN thì được Đối soát bù tự động. `[ASSUMPTION: bắt đầu hỏi sau 2 phút; Architecture chốt nhịp]`
-- Sau khi BTC được mở lại dịch vụ, mọi QR thanh toán đã mở trong thời gian bị ngắt đều được kiểm tra trạng thái.
+- Sau khi BTC được mở lại dịch vụ, mọi Đơn còn mở của BTC đều được kiểm tra trạng thái.
 - Đối soát bù tuân theo cùng quy tắc chỉ xử lý một lần như FR-19.
 
 **Lưu ý:** Câu hỏi mở #4 (QR tĩnh khi BTC bị ngắt dịch vụ) đã chốt 03/11/2026: thanh toán chỉ qua Gateway (AD-6), không dùng QR tĩnh.
 
 #### FR-21: Hàng "Cần xử lý"
-Giao dịch lệch số tiền, Thanh toán mồ côi và Giao dịch chưa khớp (sai nội dung chuyển khoản khi dùng QR tĩnh) vào hàng "Cần xử lý". Owner hoặc Admin ghép tay giao dịch với Đơn, duyệt tay để phát Vé, hoặc từ chối.
+Giao dịch lệch số tiền, Thanh toán mồ côi, Giao dịch chưa khớp (tiền về với mã Đơn không tồn tại), Thanh toán trùng (tiền về cho Đơn đã thanh toán, đã hủy hoặc đã hoàn) và tiền về cho Sự kiện đã hủy vào hàng "Cần xử lý". Owner hoặc Admin ghép tay giao dịch với Đơn, duyệt tay để phát Vé, hoặc từ chối.
 
 **Hệ quả:**
 - Đơn lệch số tiền không được phát Vé tự động.
-- Ghép tay một giao dịch chưa khớp vào một Đơn đang chờ thì phát Vé cho Đơn đó, với điều kiện Hạng vé còn chỗ.
+- Ghép tay một giao dịch chưa khớp vào một Đơn đã hết hạn hoặc đang Cần xử lý của cùng BTC, cùng số tiền, thì phát Vé cho Đơn đó, với điều kiện Hạng vé còn chỗ.
+- "Thanh toán trùng" và "Giao dịch chưa khớp" không ghép được thì chỉ đánh dấu "Đã hoàn tay" hoặc bỏ qua (kèm lý do), không phát Vé.
 - Khi BTC từ chối và tự chuyển hoàn tiền ngoài hệ thống, BTC đánh dấu Đơn là "Đã hoàn tay".
 - Mọi thao tác xử lý tay đều ghi nhật ký: ai làm, lúc nào, quyết định gì (NFR-11).
 - Dashboard hiện số mục đang chờ trong hàng "Cần xử lý".
@@ -392,6 +396,7 @@ Mỗi Vé trong Đơn đã thanh toán có một Mã QR vé riêng được ký 
 **Hệ quả:**
 - Đơn có N Vé thì sinh ra N Mã QR vé khác nhau. Mỗi Mã QR vé check-in độc lập.
 - Người mua chia sẻ từng Vé cho người đi cùng, bằng cách gửi link Vé hoặc ảnh Vé. `[ASSUMPTION: MVP không có chuyển nhượng Vé sang Tài khoản Tickee khác]`
+- Link Vé chứa mã ngẫu nhiên, không đoán được. Chủ Vé tạo lại link được; link cũ mất hiệu lực. Người mở link không cần đăng nhập, chỉ thấy Vé đó (Mã QR vé, Sự kiện, Hạng vé, số thứ tự Vé, trạng thái), không thấy SĐT, email hay tên Người mua. Vé đã hủy, quá mốc kết thúc hoặc link sai đều báo "không tìm thấy" như nhau (AD-29).
 - Người mua không tra được Vé theo SĐT.
 
 #### FR-23: Gửi Vé qua email
@@ -518,7 +523,7 @@ Các con số dưới đây là mục tiêu đề xuất. Đội kỹ thuật c�
 
 | ID | Nhóm | Yêu cầu |
 |---|---|---|
-| NFR-1 | Hiệu năng | Trang Sự kiện tải dưới 2 giây trên 4G. Tạo QR thanh toán dưới 2 giây |
+| NFR-1 | Hiệu năng | Trang Sự kiện tải dưới 2 giây trên 4G. Tạo link thanh toán dưới 2 giây |
 | NFR-2 | Hiệu năng | Từ lúc nhận IPN đến lúc Vé hiện trên trình duyệt dưới 3 giây. Quét check-in phản hồi dưới 1 giây |
 | NFR-3 | Chịu tải | 5.000 người cùng vào mua một Sự kiện 300 Vé mà không bán quá số suất. Có phòng chờ cho Sự kiện đông Người mua `[ASSUMPTION: tiêu chí bật phòng chờ — Câu hỏi mở #5]` |
 | NFR-4 | Sẵn sàng | Uptime 99,9%/tháng cho Checkout, IPN và check-in |
@@ -536,9 +541,9 @@ Các con số dưới đây là mục tiêu đề xuất. Đội kỹ thuật c�
 | Hệ thống | Dùng cho | Trạng thái |
 |---|---|---|
 | Tingee: Tài khoản & Định danh | Đọc danh sách tài khoản của BTC (get-va-paging) (FR-5) | Có |
+| Tingee: Payment Gateway | Tạo link thanh toán cho từng Đơn (FR-16), tra trạng thái theo mã Đơn (FR-20) | Có. Tên API tra trạng thái theo `orderId` đang chờ Tingee xác nhận |
 | Tingee: Webhook (IPN) | Nhận giao dịch kèm số tiền thực nhận (FR-19) | Có. Mỗi IPN bị trừ Token |
-| Tingee: Token | Đọc số dư, hạn mức, lịch sử trừ (FR-15, FR-34) | **Tingee chưa xác nhận API đọc Token bằng key merchant**, đây là điểm chặn |
-| Tingee: Deep Link | Mở app ngân hàng (FR-16) | Có |
+| Tingee: Token | Đọc số dư, hạn mức, lịch sử trừ (FR-34); trạng thái dịch vụ (FR-15) | **Tingee chưa xác nhận API đọc Token bằng key merchant**, đây là điểm chặn |
 | Email | Gửi Vé, OTP, thông báo, cảnh báo Token | Cần chọn nhà cung cấp (Architecture) |
 | Google (OAuth đăng nhập) | Đăng nhập Tài khoản Tickee (FR-1) | Có |
 | Google Sheets API | Đồng bộ một chiều (FR-32) | BTC cấp quyền OAuth |
@@ -548,10 +553,10 @@ Các con số dưới đây là mục tiêu đề xuất. Đội kỹ thuật c�
 
 - Tingee quản lý số dư Token, lịch sử trừ, bảng giá và hóa đơn. Tickee không lưu bản sao.
 - BTC trả trước, hoặc được Tingee cấp hạn mức âm hay trả sau ngay từ đầu.
-- Tingee trừ Token cho mỗi IPN báo một giao dịch, gồm cả QR tĩnh, giao dịch lệch tiền và giao dịch chưa khớp.
+- Tingee trừ Token cho mỗi IPN báo một giao dịch, gồm cả giao dịch lệch tiền và giao dịch chưa khớp.
 - Token được trừ **theo giao dịch, tức theo mỗi Đơn**, không theo mỗi Vé. Mức do Tingee quy định. Mức tham khảo tương đương 3.000–5.000đ/giao dịch, sẽ chốt sau. Bảng so sánh chi phí trong BRD giả định mỗi Đơn chỉ có 1 Vé. Với Đơn nhiều Vé, phí tính trên mỗi Vé sẽ thấp hơn và doanh thu Token cũng giảm theo (xem Câu hỏi mở #11). `[ASSUMPTION: PM suy ra từ BR-05 của BRD]`
 - Sự kiện miễn phí không tiêu Token.
-- Vượt hạn mức thì Tingee ngắt API và Webhook của BTC. Tickee ngừng tạo QR trước thời điểm đó (FR-15).
+- Vượt hạn mức thì Tingee ngắt API và Webhook của BTC. Tickee phát hiện việc này khi tạo link bị từ chối, rồi chuyển các Sự kiện có phí sang "Tạm ngừng bán" (FR-15).
 - Token chỉ dùng cho dịch vụ Tingee, không quy đổi ngược ra tiền và không chuyển nhượng, để không bị coi là ví điện tử.
 
 ## 8. Pháp lý và dữ liệu cá nhân
@@ -567,13 +572,13 @@ Các con số dưới đây là mục tiêu đề xuất. Đội kỹ thuật c�
 |---|---|---|---|
 | R-1 | Sự kiện lừa đảo, tiền đã về tài khoản kẻ gian | Cao | **Closed Beta chấp nhận rủi ro có chủ đích:** chỉ BTC được Quản trị Tingee duyệt mới bán được Vé có phí (FR-37), có báo cáo và khóa (FR-35). Đã cân nhắc và không áp trần số Vé hay số tiền cho BTC chưa KYC. Trước khi mở công khai bắt buộc có KYC (FR-6) và biện pháp chống lừa đảo |
 | R-2 | Khách đổ lỗi cho Tickee khi không được hoàn tiền | Cao | Chính sách hoàn vé bắt buộc. Ghi rõ "Tiền chuyển thẳng cho [tên BTC]" (FR-7, FR-16) |
-| R-3 | BTC bị ngắt dịch vụ khi còn QR thanh toán đang mở, khách đã trả tiền mà không nhận Vé | Cao | Kiểm tra Token khả dụng (FR-15), cảnh báo sớm, hạn mức âm hoặc trả sau, Đối soát bù (FR-20) |
-| R-4 | BTC dùng QR tĩnh: tỉ lệ ghép tay cao, vẫn bị trừ Token cho giao dịch sai nội dung | Trung bình | Hướng dẫn rõ ở trang thanh toán (FR-17) |
+| R-3 | BTC bị ngắt dịch vụ khi còn Đơn đang chờ thanh toán, khách đã trả tiền mà không nhận Vé | Cao | Tạm ngừng bán ngay khi phát hiện (FR-15), cảnh báo Token sớm (FR-34), hạn mức âm hoặc trả sau, Đối soát bù khi mở lại (FR-20) |
+| ~~R-4~~ | ~~BTC dùng QR tĩnh: tỉ lệ ghép tay cao, vẫn bị trừ Token cho giao dịch sai nội dung~~ | — | Bỏ 09/11/2026: không còn QR tĩnh (FR-17) |
 | R-5 | Bắt đăng nhập trước khi mua làm giảm tỉ lệ mua | Trung bình | Chỉ yêu cầu đăng nhập lúc bấm "Mua". Có đăng nhập Google một chạm. Giữ lựa chọn Vé sau khi đăng nhập (FR-3). Theo dõi SM-C2 |
 | R-6 | Nghĩa vụ thương mại điện tử và thuế theo NĐ 117/2025 | Trung bình | Có ý kiến pháp chế trước khi mở công khai |
 | R-7 | Token bị coi là ví điện tử | Trung bình | Không rút, không chuyển nhượng, xuất hóa đơn khi mua |
 | R-8 | Dữ liệu cá nhân theo NĐ 13/2023 | Trung bình | NFR-8, thu sự đồng ý ở FR-3 |
-| R-9 | Tingee chưa xác nhận API Token | Cao | Xin xác nhận trước Phase 1. Nếu không có thì FR-15 và FR-34 phải thiết kế lại |
+| R-9 | Tingee chưa xác nhận API Token | Cao | Xin xác nhận trước Phase 1. Nếu không có thì FR-34 và việc tự mở lại ở FR-15 phải thiết kế lại |
 | R-10 | Đối thủ hạ phí hoặc sao chép | Trung bình | Trải nghiệm sản phẩm và mạng lưới merchant Tingee |
 | R-11 | Lộ Secret Token của BTC | Cao | Mã hóa khi lưu (NFR-6). Đổi key phải xác nhận lại (FR-1), ghi nhật ký (NFR-11). Hỏi Tingee về key giới hạn quyền (Câu hỏi mở #3) |
 | R-12 | BTC cấu hình cổng thanh toán trên portal Tingee sai (thiếu URL IPN, chưa cho phép tài khoản đã chọn) | Trung bình | Checklist cấu hình kèm URL IPN để sao chép (FR-5). Đối soát bù bắt các Đơn bị mất IPN (FR-20) |
@@ -594,7 +599,7 @@ Các con số dưới đây là mục tiêu đề xuất. Đội kỹ thuật c�
 - Kết nối tài khoản Tingee của BTC và chọn tài khoản nhận tiền. Quản trị Tingee duyệt BTC vào Closed Beta.
 - Xóa Tài khoản Tickee và rút lại đồng ý xử lý dữ liệu.
 - Sự kiện, Hạng vé, form mua vé tùy chỉnh, trang Sự kiện công khai, Sự kiện miễn phí.
-- Đơn nhiều Vé và nhiều Hạng vé, Giữ chỗ 15 phút, thanh toán bằng QR động hoặc QR tĩnh.
+- Đơn nhiều Vé và nhiều Hạng vé, Giữ chỗ 15 phút, thanh toán qua cổng thanh toán Tingee (redirect).
 - IPN, Đối soát bù, hàng "Cần xử lý".
 - Mỗi Vé một Mã QR vé, "Vé của tôi", gửi Vé qua email.
 - Check-in bằng ứng dụng web, nhiều người quét song song, tra Vé và check-in tay, theo dõi check-in thời gian thực.
@@ -612,6 +617,7 @@ Các con số dưới đây là mục tiêu đề xuất. Đội kỹ thuật c�
 - Đồng bộ Sheets hai chiều, báo cáo nâng cao, Apple Wallet và Google Wallet.
 - Chuyển nhượng Vé sang Tài khoản Tickee khác, Sự kiện định kỳ, hóa đơn điện tử cho Người mua.
 - SSO tài khoản Tingee.
+- Trường dựng sẵn trong form mua vé ngoài Tên, SĐT, email (vd. Ngày sinh, CCCD, Size áo) (FR-9).
 
 ### 11.3 Thay đổi so với BRD
 
@@ -630,6 +636,7 @@ Các mã trong cột BRD (FR-xx, BR-xx, R-xx) là mã của BRD, không phải m
 | Điều kiện mở công khai có "Mẫu ZNS đã duyệt" | Bỏ điều kiện này | ZNS không thuộc MVP |
 | Bắt buộc 2FA cho Owner (NFR-06, §12) | 2FA là tính năng tự bật cho mọi tài khoản; Owner được khuyến khích; thao tác nhạy cảm luôn xác nhận lại bằng TOTP hoặc OTP email | Đưa 2FA thành tính năng bảo mật chung, không chặn BTC ngay khi vừa tạo BTC (Mason chốt 30/10/2026) |
 | Tickee là Master Merchant trên Tingee (BRD 43, 110, D-02) | Tickee không làm Master Merchant. BTC dùng tài khoản merchant Tingee của mình (FR-5) | BTC tự liên kết ngân hàng, làm KYC và cấu hình cổng thanh toán trên portal Tingee (Sprint Change Proposal 03/11/2026) |
+| QR động, QR tĩnh do Tickee hiển thị; Deep Link mở app ngân hàng | Thanh toán qua Tingee Payment Gateway, redirect toàn trang (FR-16); bỏ QR tĩnh (FR-17) | Gateway tự khớp giao dịch với Đơn, bỏ đối soát theo nội dung chuyển khoản (Architecture AD-6, 28/10/2026; PRD cập nhật 09/11/2026) |
 
 ### 11.4 Lộ trình và điều kiện ra mắt
 
@@ -637,7 +644,7 @@ Các mã trong cột BRD (FR-xx, BR-xx, R-xx) là mã của BRD, không phải m
 
 | Phase | Nội dung | Điều kiện hoàn thành |
 |---|---|---|
-| Phase 1, tuần 1–2 | Tài khoản, BTC, Sự kiện, Hạng vé, form, Checkout, Giữ chỗ, QR thanh toán, IPN, Đối soát bù, "Cần xử lý", kiểm tra Token, phát Vé, gửi email | Trên sandbox Tingee: mua Vé bằng QR động thành công, không bán quá số suất, IPN lặp không phát Vé trùng, hết Token thì "Tạm ngừng bán" |
+| Phase 1, tuần 1–2 | Tài khoản, BTC, Sự kiện, Hạng vé, form, Checkout, Giữ chỗ, link thanh toán Gateway, IPN, Đối soát bù, "Cần xử lý", kiểm tra Token, phát Vé, gửi email | Trên sandbox Tingee: mua Vé qua Gateway thành công, không bán quá số suất, IPN lặp không phát Vé trùng, hết Token thì "Tạm ngừng bán" |
 | Phase 2, tuần 3–4 | Check-in, CTV, Dashboard, CSV, Sheets, hiển thị và cảnh báo Token, báo cáo và khóa, các mục Should/Could | Check-in tại cổng đạt yêu cầu. Sheets cập nhật trong vòng 1 phút. Kiểm thử tải NFR-3 đạt |
 | Phase 3, tuần 5–6 | Closed Beta với 2–5 Sự kiện thật | Không còn lỗi nghiêm trọng nào chưa xử lý |
 
@@ -653,7 +660,7 @@ Các mã trong cột BRD (FR-xx, BR-xx, R-xx) là mã của BRD, không phải m
 - **SM-1: Closed Beta không lỗi.** Có 2–5 Sự kiện thật chạy trọn từ mở bán đến check-in, không có lỗi nghiêm trọng nào. Lỗi nghiêm trọng gồm: Vé phát trùng, bán quá số suất, phát Vé khi chưa nhận tiền, khách đã trả tiền mà không nhận được Vé, check-in sai. Kiểm chứng FR-13, FR-19, FR-20, FR-28.
 
 **Phụ** `[ASSUMPTION: mục tiêu số do PM đề xuất, chưa có con số được xác nhận]`
-- **SM-2: Tỉ lệ Đơn tự duyệt.** Là số Đơn có phí được phát Vé mà không qua "Cần xử lý", chia cho tổng số Đơn có phí đã thanh toán. Mục tiêu ≥ 95% với QR động và ≥ 80% với QR tĩnh. Kiểm chứng FR-17, FR-19.
+- **SM-2: Tỉ lệ Đơn tự duyệt.** Là số Đơn có phí được phát Vé mà không qua "Cần xử lý", chia cho tổng số Đơn có phí đã thanh toán. Mục tiêu ≥ 95%. Kiểm chứng FR-16, FR-19.
 - **SM-3: Thời gian từ chuyển khoản đến có Vé.** Tính từ lúc tiền vào tài khoản BTC đến lúc Vé hiện trên màn hình Người mua. Mục tiêu p95 < 10 giây. Kiểm chứng FR-18, FR-19.
 - **SM-4: Tỉ lệ BTC quay lại.** Là tỉ lệ BTC trong Closed Beta tạo Sự kiện thứ hai trong vòng 60 ngày. Mục tiêu ≥ 50%. Kiểm chứng giá trị của UJ-2.
 - **SM-5: Thời gian tạo Sự kiện.** Tính từ lúc BTC liên kết xong tài khoản nhận tiền đến lúc Sự kiện đầu tiên mở bán. Mục tiêu trung vị < 15 phút. Kiểm chứng FR-7 đến FR-9.
@@ -669,7 +676,7 @@ Các mã trong cột BRD (FR-xx, BR-xx, R-xx) là mã của BRD, không phải m
 
 ## 13. Câu hỏi mở
 
-1. ~~**Giữ chỗ với QR tĩnh**~~ — **Đã chốt (27/10/2026):** Giữ chỗ 15 phút như QR động. Đơn QR tĩnh đang Chờ thanh toán được tính vào phần trừ của Token khả dụng (FR-17, §3).
+1. ~~**Giữ chỗ với QR tĩnh**~~ — **Đã chốt (27/10/2026):** Giữ chỗ 15 phút như QR động. Đơn QR tĩnh đang Chờ thanh toán được tính vào phần trừ của Token khả dụng (FR-17, §3). Không còn áp dụng từ 03/11/2026: không dùng QR tĩnh (AD-6).
 2. **Giới hạn Vé:** mỗi Đơn tối đa bao nhiêu Vé? Mỗi Tài khoản Tickee tối đa bao nhiêu Vé cho một Sự kiện?
 3. **API Token của Tingee** *(chặn Phase 1. Người phụ trách: Mason làm việc với Tingee. Hạn: trước khi bắt đầu Phase 1)*: Tingee có API đọc số dư, hạn mức Token và trạng thái dịch vụ gọi bằng key của merchant không? Key merchant có giới hạn quyền được không (không cho Chi hộ)?
 4. ~~**QR tĩnh khi BTC bị ngắt dịch vụ**~~ — **Đã chốt (03/11/2026):** thanh toán chỉ qua Gateway (AD-6), không dùng QR tĩnh.

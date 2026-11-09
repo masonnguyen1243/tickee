@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-09-2026 10:03
+last_updated: 11-09-2026 16:00
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -81,6 +81,7 @@ development_status:
   4-5-token-và-cảnh-báo-token: backlog
   4-6-giám-sát-và-lưới-an-toàn-vận-hành: backlog
   4-7-môi-trường-staging-production-deploy-và-diễn-tập-khôi-phục: backlog
+  4-8-ảnh-sự-kiện-trên-object-storage: backlog
   epic-4-retrospective: optional
 
   epic-5: backlog
@@ -110,6 +111,7 @@ development_status:
   7-4-quản-trị-tingee-xem-báo-cáo-và-khóa-mở-khóa: backlog
   7-5-vô-hiệu-vé-đã-phát: backlog
   7-6-xóa-tài-khoản-tickee-hoặc-rút-đồng-ý: backlog
+  7-7-quản-trị-tingee-đặt-lại-totp: backlog
   epic-7-retrospective: optional
 
   epic-8: backlog
@@ -231,8 +233,13 @@ action_items:
       backlog hoặc chuyển Epic 4/7, spine:41, spec-2-2 superseded (retro E1-E5, B1,
       C8, D1)"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
+    note: "Xong qua sprint-change-proposal-2026-11-09-doi-chieu-spec.md: PRD và UX theo
+      Gateway; epics khớp code (sellability ở 2.11, 2.13 a/b, 2.14); AD-32, 3.4, 4.1,
+      4.2 theo credential hiện hành; AC Epic 2 chưa làm chuyển sang 4.7, 4.8 (mới), 5.8,
+      7.7 (mới), trường dựng sẵn FR-9 ra ngoài MVP; spine admin, spec 2.11-a, spec 2.2
+      cũ superseded"
   - id: "epic-2-retro-e2-5-refactor-truoc-epic-3"
     epic: 2
     action: "E2-5 (trước story Epic 3 đầu tiên có UI/queue mới): gom helper web (messageOf,

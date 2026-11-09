@@ -100,6 +100,8 @@ context:
 
 ## Spec Change Log
 
+- 09/11/2026 (retro Epic 2 E2-4, mục C8): code dùng thứ tự `eventReason` là `cancelled` > `locked` > `ended` > `hidden` > `paused`. Story 2.12 đã đổi để "Đã kết thúc" thắng "Ẩn" (`apps/api/src/modules/ordering/sellability.ts:42-49`). Dòng thứ tự trong Intent giữ nguyên văn đã duyệt; thứ tự hiện hành theo ghi chú này.
+
 ## Review Triage Log
 
 Pass 1 (06/11/2026, 3 lớp: blind-hunter BH, edge-case-hunter EC, verification-gap VG).
