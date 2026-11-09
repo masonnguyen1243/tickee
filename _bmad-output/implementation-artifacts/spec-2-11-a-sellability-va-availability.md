@@ -22,7 +22,7 @@ context:
 
 **Always:**
 - `sellability` export qua `ordering/index.ts` và trả `{eventReason, tiers: [{ticketTypeId, status, remaining, saleStartsAt}]}`.
-  - `eventReason` lấy theo thứ tự ưu tiên `cancelled` > `locked` (Sự kiện có `locked_at` hoặc BTC bị khóa) > `hidden` > `ended` (`effective_end_at` ≤ now) > `paused` (có ít nhất một Hạng vé `paused`) > `null`.
+  - `eventReason` lấy theo thứ tự ưu tiên `cancelled` > `locked` (Sự kiện có `locked_at` hoặc BTC bị khóa) > `ended` (`effective_end_at` ≤ now) > `hidden` > `paused` (có ít nhất một Hạng vé `paused`) > `null`. *(Đổi ở Story 2.12, xem Spec Change Log.)*
   - Khi `eventReason ∈ {cancelled, locked, hidden, ended}`, mọi Hạng vé là `unavailable`.
   - Ngoài trường hợp trên, `status` của mỗi Hạng vé xét theo thứ tự `paused` → `not_started` (now < `sale_starts_at`) → `closed` (now ≥ `sale_ends_at`) → `sold_out` → `on_sale`.
   - `paused` áp cho mọi Hạng vé khi thiếu chính sách hoàn vé. Với Hạng vé > 0đ, `paused` còn áp khi Closed Beta khác `approved`, khi không còn tài khoản nhận tiền chưa `retired_at`, hoặc khi dịch vụ thanh toán không `active`.
@@ -99,6 +99,8 @@ context:
 - Hạng vé `unavailable` vẫn trả `remaining` (không lộ số thô capacity/sold/held).
 
 ## Spec Change Log
+
+- 09/11/2026 (retro Epic 2, C8; Sprint Change Proposal 09/11/2026): Story 2.12 đổi thứ tự thành `ended` > `hidden` (quyết định 06/11/2026, `spec-2-12-sua-an-va-ket-thuc-som-su-kien.md:27`). Sự kiện vừa ẩn vừa đã kết thúc trả `ended`. Code: `ordering/sellability.ts` `blockingReason`.
 
 ## Review Triage Log
 

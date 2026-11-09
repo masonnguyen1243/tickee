@@ -7,7 +7,7 @@ paradigm: 'Modular monolith (NestJS) — một codebase, ba vai chạy: api, wor
 scope: 'Toàn bộ Tickee MVP v1: trang mua Vé, dashboard BTC, check-in CTV, Quản trị Tingee, tích hợp Tingee Payment Gateway'
 status: final
 created: '2026-10-28'
-updated: '2026-11-03'
+updated: '2026-11-09'
 binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37, FR-38, NFR-1, NFR-2, NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-8, NFR-9, NFR-10, NFR-11, NFR-12]
 sources:
   - _bmad-output/planning-artifacts/prds/prd-tickee-2026-10-27/prd.md
@@ -38,7 +38,7 @@ companions:
 | `checkin` | Lời mời CTV, phân công CTV theo Sự kiện, màn quét, tra tay |
 | `reporting` | Dashboard, CSV, danh sách hoàn tiền, thông báo trạng thái (`notices`) — chỉ đọc |
 | `integration` | Gửi email (`EmailTransport`), kết nối Google Sheets và ánh xạ dòng, danh mục thông báo |
-| `admin` | Báo cáo vi phạm; endpoint của Quản trị Tingee (ghi qua `flows`) |
+| `admin` | Báo cáo vi phạm; endpoint của Quản trị Tingee. Ghi vào một mô-đun thì gọi service công khai của mô-đun đó (vd. `organizer` cho Closed Beta); ghi nhiều mô-đun trong một transaction thì qua `flows` (AD-25, vd. `lockEvent`/`lockOrganization` ở Epic 7) |
 | `tingee` | Adapter Tingee — không sở hữu bảng |
 | `platform` (shared kernel) | DB và transaction, cổng `AccessResolver` và guard quyền, `orgScope`, `audit_events`, hàng đợi job, realtime (SSE/NOTIFY), config, log |
 
@@ -338,8 +338,8 @@ Client dùng một hook duy nhất: gọi REST khi kết nối, khi nhận tín 
 ### AD-32 — Trạng thái dịch vụ thanh toán của BTC
 
 - **Binds:** FR-15, FR-20, FR-34, FR-37; `organizer`, `tingee`, `payment`
-- **Prevents:** "Tạm ngừng bán" kẹt mãi vì không ai tắt; Đối soát bù sau khi mở lại dịch vụ không bao giờ chạy.
-- **Rule:** `organizer` sở hữu `payment_service_status` của BTC (`active` | `suspended`, `reason` `token` | `tingee_disabled` | `credential_invalid`, `since`, `last_checked_at`) và `token_alert_threshold`. Bật `suspended` khi adapter trả `MERCHANT_SUSPENDED` (trong transaction bù của AD-5); bật với `reason` `credential_invalid` khi lời gọi bằng key của BTC trả `TINGEE_CREDENTIAL_INVALID`. Tắt bằng: job dò `tingee.getMerchantServiceStatus(credential)` mỗi 5 phút khi đang `suspended`, nút "Kiểm tra lại" của Owner, hoặc Quản trị Tingee; riêng `credential_invalid` tắt khi Owner lưu credential mới hợp lệ, hoặc bấm "Kiểm tra lại" mà Tingee chấp nhận key. Tắt cờ → enqueue Đối soát bù cho mọi Đơn còn mở của BTC (AD-8). Thu hồi Closed Beta là trường riêng (`closed_beta_status`), không dùng cờ này. Số dư và hạn mức Token đọc trực tiếp từ Tingee bằng credential của BTC mỗi lần xem (timeout 3 giây, lỗi → "Chưa đọc được số dư"), không lưu.
+- **Prevents:** "Tạm ngừng bán" kẹt mãi vì không ai tắt; Đối soát bù sau khi mở lại dịch vụ không bao giờ chạy; key cũ BTC đã thu hồi làm BTC đang bán bằng key mới bị tạm ngừng bán.
+- **Rule:** `organizer` sở hữu `payment_service_status` của BTC (`active` | `suspended`, `reason` `token` | `tingee_disabled` | `credential_invalid`, `since`, `last_checked_at`) và `token_alert_threshold`. Bật `suspended` khi adapter trả `MERCHANT_SUSPENDED` (trong transaction bù của AD-5); bật với `reason` `credential_invalid` khi lời gọi bằng credential hiện hành của BTC (`tingee_credentials.retired_at IS NULL`) trả `TINGEE_CREDENTIAL_INVALID`. Lời gọi bằng credential đã thay (Đơn cũ chụp `payout_account_id` trỏ tới credential có `retired_at`) trả lỗi này thì không đổi cờ: Đơn đó đi luồng hết hạn (AD-4) và đẩy cảnh báo vận hành. Tắt bằng: job dò `tingee.getMerchantServiceStatus(credential)` mỗi 5 phút khi đang `suspended`, nút "Kiểm tra lại" của Owner, hoặc Quản trị Tingee; riêng `credential_invalid` tắt khi Owner lưu credential mới hợp lệ, hoặc bấm "Kiểm tra lại" mà Tingee chấp nhận key. Tắt cờ → enqueue Đối soát bù cho mọi Đơn còn mở của BTC (AD-8). Thu hồi Closed Beta là trường riêng (`closed_beta_status`), không dùng cờ này. Số dư và hạn mức Token đọc trực tiếp từ Tingee bằng credential của BTC mỗi lần xem (timeout 3 giây, lỗi → "Chưa đọc được số dư"), không lưu.
 
 ### AD-33 — Read model cho đọc chéo mô-đun
 
