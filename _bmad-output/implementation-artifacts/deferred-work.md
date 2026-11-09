@@ -296,3 +296,6 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-13-a-xac-nhan-lai-doi-noi-nhan-tien.md`
   summary: Email bảo mật (TOTP, mã xác nhận, cảnh báo đổi tài khoản mặc định) khuyên "đăng xuất khỏi mọi thiết bị" nhưng Tickee chưa có tính năng đăng xuất mọi session; cần thêm tính năng hoặc đổi câu chữ.
   evidence: Review 2.13-a #12 (BH). Câu chữ có từ `totp-email.ts` (2.2); không có route revoke-all trong `apps/api/src` hay `apps/web`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-13-b-doi-key-tingee.md`
+  summary: Các route nhận key Tingee (`POST …/payout-account/credential` của BTC chưa liên kết, `POST …/credential/replacement/preview` sau một lần xác nhận lại) không giới hạn tần suất, nên dùng được để dò key Tingee và đốt hạn mức gọi Tingee; cần giới hạn theo user/BTC trước `listAccounts`.
+  evidence: Review 2.13-b #3 (BH, EC). Không có throttle nào trong `modules/organizer`, `modules/tingee`, `platform/http`; `connect` cho dò như vậy từ 2.6, `preview` lặp lại cùng mức phơi bày trong 5 phút của một lần xác nhận.

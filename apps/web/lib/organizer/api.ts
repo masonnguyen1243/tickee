@@ -9,9 +9,11 @@ import {
   PayoutAccount,
   PayoutAccountOptions,
   PayoutAccountOverview,
+  TingeeKeyPreview,
   type ConnectTingeeRequest,
   type CreateOrganizationRequest,
   type InviteAdminRequest,
+  type ReplaceTingeeKeyRequest,
   type SelectPayoutAccountRequest,
 } from '@tickee/contracts';
 import { z } from 'zod';
@@ -101,4 +103,31 @@ export const setDefaultPayoutAccount = (orgId: string, accountId: string, reauth
   apiRequest(`${orgPath(orgId)}/payout-account/${encodeURIComponent(accountId)}/default`, {
     schema: PayoutAccountOverview,
     init: withReauthHeader({ method: 'POST' }, reauthToken),
+  });
+
+/**
+ * Đổi key Tingee (Story 2.13-b), mỗi bước cần lần xác nhận lại (`reauthToken`): gọi qua `withReauth`. Bước 1 kiểm lần
+ * xác nhận còn hiệu lực (không tiêu; 204 No Content).
+ */
+export const beginTingeeKeyReplacement = (orgId: string, reauthToken?: string) =>
+  apiRequest(`${orgPath(orgId)}/payout-account/credential/replacement/begin`, {
+    schema: z.undefined(),
+    init: withReauthHeader({ method: 'POST' }, reauthToken),
+  });
+
+/** Bước 2: danh sách tài khoản của key mới; api không lưu gì, không tiêu lần xác nhận. */
+export const previewTingeeKeyReplacement = (orgId: string, body: ConnectTingeeRequest, reauthToken?: string) =>
+  apiRequest(`${orgPath(orgId)}/payout-account/credential/replacement/preview`, {
+    schema: TingeeKeyPreview,
+    init: withReauthHeader(json('POST', body), reauthToken),
+  });
+
+/**
+ * Bước 3: lưu key mới và tài khoản đã chọn làm mặc định (mọi tài khoản hiện hành bị hủy liên kết); tiêu lần xác nhận;
+ * trả tổng quan mới.
+ */
+export const replaceTingeeKey = (orgId: string, body: ReplaceTingeeKeyRequest, reauthToken?: string) =>
+  apiRequest(`${orgPath(orgId)}/payout-account/credential/replacement`, {
+    schema: PayoutAccountOverview,
+    init: withReauthHeader(json('POST', body), reauthToken),
   });

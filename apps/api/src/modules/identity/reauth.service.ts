@@ -25,12 +25,13 @@ import { TotpAttemptLimiter } from './totp-attempts.js';
 import { TotpStore } from './totp-store.js';
 
 /*
- * Xác nhận lại trước thao tác nhạy cảm (Story 2.13): đổi tài khoản nhận tiền mặc định, hủy liên kết tài khoản nhận tiền;
- * sau này đổi key Tingee (2.13-b) và chuyển quyền Owner (2.14). Tài khoản đã bật 2FA nhập mã TOTP (không nhận mã khôi
- * phục, cùng bộ đếm sai `TotpAttemptLimiter`); chưa bật thì nhập mã 6 số gửi qua email (cùng giới hạn gửi và khóa sai
- * theo ngày `OtpRateLimiter` của đăng nhập). Đúng → một lần xác nhận gắn user + session, hết hạn sau
+ * Xác nhận lại trước thao tác nhạy cảm (Story 2.13): đổi tài khoản nhận tiền mặc định, hủy liên kết tài khoản nhận
+ * tiền, đổi key Tingee (2.13-b); sau này chuyển quyền Owner (2.14). Tài khoản đã bật 2FA nhập mã TOTP (không nhận mã
+ * khôi phục, cùng bộ đếm sai `TotpAttemptLimiter`); chưa bật thì nhập mã 6 số gửi qua email (cùng giới hạn gửi và khóa
+ * sai theo ngày `OtpRateLimiter` của đăng nhập). Đúng → một lần xác nhận gắn user + session, hết hạn sau
  * `REAUTH_TTL_SECONDS`, dùng một lần. Thao tác nhạy cảm tiêu lần xác nhận bằng `consumeReauth` trong chính transaction
- * của nó (thao tác lỗi thì rollback, lần xác nhận còn dùng được). Không dùng `sessions.step_up_at`.
+ * của nó (thao tác lỗi thì rollback, lần xác nhận còn dùng được); bước đầu của thao tác nhiều bước chỉ kiểm bằng
+ * `assertReauth` (không tiêu). Không dùng `sessions.step_up_at`.
  */
 
 /** Token: 256 bit ngẫu nhiên; DB chỉ giữ SHA-256 (đủ entropy nên không cần khóa bí mật). */
@@ -75,6 +76,16 @@ export interface ReauthProof {
   token: string | null | undefined;
 }
 
+/** Điều kiện của một lần xác nhận còn dùng được: `token` của đúng user và session, chưa dùng, chưa hết hạn. */
+const usableGrant = (token: string, input: { userId: string } & ReauthProof) =>
+  and(
+    eq(reauthGrants.tokenHash, hashReauthToken(token)),
+    eq(reauthGrants.userId, input.userId),
+    eq(reauthGrants.sessionId, input.sessionId),
+    isNull(reauthGrants.usedAt),
+    gt(reauthGrants.expiresAt, sql`now()`),
+  );
+
 /**
  * Tiêu một lần xác nhận lại trong `tx` của thao tác nhạy cảm (gọi sau khi đã kiểm quyền và khóa dòng cần khóa): token
  * phải của đúng user và session, chưa dùng, chưa hết hạn. Đúng → đánh dấu đã dùng (rollback `tx` thì lần xác nhận còn
@@ -87,19 +98,25 @@ export async function consumeReauth(tx: Tx, input: { userId: string } & ReauthPr
     const [used] = await tx
       .update(reauthGrants)
       .set({ usedAt: sql`now()` })
-      .where(
-        and(
-          eq(reauthGrants.tokenHash, hashReauthToken(token)),
-          eq(reauthGrants.userId, input.userId),
-          eq(reauthGrants.sessionId, input.sessionId),
-          isNull(reauthGrants.usedAt),
-          gt(reauthGrants.expiresAt, sql`now()`),
-        ),
-      )
+      .where(usableGrant(token, input))
       .returning({ id: reauthGrants.id });
     if (used) return;
   }
   throw reauthRequired(await reauthMethodOf(tx, input.userId));
+}
+
+/**
+ * Kiểm (không tiêu) lần xác nhận lại cho bước đầu của một thao tác nhạy cảm nhiều bước (đổi key Tingee: mở form, xem
+ * trước key mới), cùng điều kiện với `consumeReauth`: còn dùng được → không làm gì; không → 403 `REAUTH_REQUIRED` kèm
+ * `method`. Bước ghi cuối cùng vẫn phải `consumeReauth` trong transaction của nó.
+ */
+export async function assertReauth(db: DbExecutor, input: { userId: string } & ReauthProof): Promise<void> {
+  const token = input.token?.trim();
+  if (token) {
+    const [grant] = await db.select({ id: reauthGrants.id }).from(reauthGrants).where(usableGrant(token, input));
+    if (grant) return;
+  }
+  throw reauthRequired(await reauthMethodOf(db, input.userId));
 }
 
 /** Kết quả kiểm mã email trong transaction: lần xác nhận vừa cấp, hoặc lỗi (`countFailure`: tính vào khóa theo ngày). */

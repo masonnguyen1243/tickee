@@ -8,10 +8,10 @@ import type { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_PAYOUT_QUEUE_OPTIONS,
+  DefaultPayoutChangedPayload,
   DefaultPayoutQueues,
   enqueueDefaultPayoutChanged,
   notifyDefaultPayoutChanged,
-  type DefaultPayoutChangedPayload,
 } from '../../src/modules/organizer/payout-default-jobs.js';
 import { EMAIL_TRANSPORT } from '../../src/platform/email/index.js';
 import { BOSS } from '../../src/platform/jobs/index.js';
@@ -20,9 +20,10 @@ import { workerConfig } from '../helpers.js';
 import { createHarness, FakeEmailTransport, reauthToken, signUp, type Harness } from '../identity/harness.js';
 
 /*
- * Job `organizer.notify-default-payout-changed` (Story 2.13-a): mỗi lần tài khoản nhận tiền mặc định đổi, worker gửi
- * email cảnh báo cho Owner và mọi Admin của BTC (tên BTC, 4 số cuối cũ → mới, người đổi, giờ Việt Nam). Job enqueue bằng
- * chính `tx` của thay đổi: rollback thì không có job, không có email. Email đi qua transport giả.
+ * Job `organizer.notify-default-payout-changed` (Story 2.13-a, 2.13-b): mỗi lần tài khoản nhận tiền mặc định đổi (kể
+ * cả đổi key Tingee khi BTC đã hủy hết tài khoản: `previousAccountId` null), worker gửi email cảnh báo cho Owner và mọi
+ * Admin của BTC (tên BTC, 4 số cuối cũ → mới, người đổi, giờ Việt Nam). Job enqueue bằng chính `tx` của thay đổi:
+ * rollback thì không có job, không có email. Email đi qua transport giả.
  */
 
 const QUEUE = JobQueue.ORGANIZER_NOTIFY_DEFAULT_PAYOUT_CHANGED;
@@ -128,10 +129,59 @@ describe('notifyDefaultPayoutChanged', () => {
     expect(message?.text).toContain('BTC chưa bán được Vé có phí cho tới khi liên kết một tài khoản nhận tiền khác.');
   });
 
+  it('đổi key Tingee khi BTC đã hủy hết (Story 2.13-b): "chưa có tài khoản nhận tiền → ACB ••••2222"', async () => {
+    expect(await notifyDefaultPayoutChanged(notifier(), payload({ previousAccountId: null }))).toBe(3);
+    const [message] = email.sent;
+    expect(message?.text).toContain('chưa có tài khoản nhận tiền → ACB ••••2222');
+    expect(message?.text).toContain('Đơn mới sẽ nhận tiền vào ACB ••••2222.');
+    expect(message?.html).toContain('chưa có tài khoản nhận tiền → ACB ••••2222');
+    expect(message?.text).not.toContain('MB Bank');
+  });
+
+  it('đổi key Tingee (reason tingee_key_replaced): tiêu đề và câu mở đầu nói key Tingee vừa đổi, mọi tài khoản cũ bị hủy liên kết; giữ dòng ••••cũ → ••••mới', async () => {
+    expect(await notifyDefaultPayoutChanged(notifier(), payload({ reason: 'tingee_key_replaced' }))).toBe(3);
+    expect(email.sent.map((m) => m.to)).toEqual(recipients());
+    const [message] = email.sent;
+    expect(message?.subject).toBe(`Key Tingee của ${orgName} vừa đổi`);
+    expect(message?.text).toContain(
+      `Key Tingee của BTC ${orgName} trên Tickee vừa đổi. Mọi tài khoản nhận tiền cũ đã bị hủy liên kết; tài khoản nhận tiền mặc định:`,
+    );
+    expect(message?.text).toContain('MB Bank ••••1111 → ACB ••••2222');
+    expect(message?.text).toContain('Đơn mới sẽ nhận tiền vào ACB ••••2222.');
+    expect(message?.text).not.toContain('Tài khoản nhận tiền mặc định của BTC');
+    expect(message?.html).toContain(`Key Tingee của BTC <strong>CLB &lt;Cờ&gt; &amp; &quot;Vua&quot; ${orgSeq}</strong>`);
+    expect(message?.html).toContain('Mọi tài khoản nhận tiền cũ đã bị hủy liên kết');
+    expect(message?.html).toContain('MB Bank ••••1111 → ACB ••••2222');
+
+    // BTC đã hủy hết rồi mới đổi key: "chưa có tài khoản nhận tiền → …".
+    email.sent.length = 0;
+    await notifyDefaultPayoutChanged(notifier(), payload({ reason: 'tingee_key_replaced', previousAccountId: null }));
+    expect(email.sent[0]?.text).toContain('chưa có tài khoản nhận tiền → ACB ••••2222');
+  });
+
+  it('payload: reason mặc định default_changed (job tạo trước 2.13-b vẫn hợp lệ); reason lạ bị từ chối', () => {
+    expect(DefaultPayoutChangedPayload.parse(payload()).reason).toBe('default_changed');
+    expect(DefaultPayoutChangedPayload.parse(payload({ reason: 'tingee_key_replaced' })).reason).toBe(
+      'tingee_key_replaced',
+    );
+    expect(DefaultPayoutChangedPayload.safeParse({ ...payload(), reason: 'khac' }).success).toBe(false);
+  });
+
+  it('payload: previousAccountId null được nhận; cả hai null thì không (không có gì đổi)', () => {
+    expect(DefaultPayoutChangedPayload.safeParse(payload({ previousAccountId: null })).success).toBe(true);
+    expect(DefaultPayoutChangedPayload.safeParse(payload({ nextAccountId: null })).success).toBe(true);
+    expect(
+      DefaultPayoutChangedPayload.safeParse(payload({ previousAccountId: null, nextAccountId: null })).success,
+    ).toBe(false);
+  });
+
   it('BTC hay tài khoản không còn (hoặc của BTC khác) → skipped, không gửi gì', async () => {
     expect(await notifyDefaultPayoutChanged(notifier(), payload({ organizationId: randomUUID() }))).toBe('skipped');
     expect(await notifyDefaultPayoutChanged(notifier(), payload({ previousAccountId: randomUUID() }))).toBe('skipped');
     expect(await notifyDefaultPayoutChanged(notifier(), payload({ nextAccountId: randomUUID() }))).toBe('skipped');
+    expect(
+      await notifyDefaultPayoutChanged(notifier(), payload({ previousAccountId: null, nextAccountId: randomUUID() })),
+    ).toBe('skipped');
     expect(email.sent).toEqual([]);
   });
 
@@ -157,7 +207,8 @@ describe('enqueue cùng transaction', () => {
 
     await h.db.transaction((tx) => enqueueDefaultPayoutChanged(boss, tx, payload()));
     const jobs = await boss.findJobs(QUEUE, { data: { organizationId: orgId } });
-    expect(jobs.map((j) => j.data)).toEqual([payload()]);
+    // Payload lưu dạng đã parse: thiếu `reason` → `default_changed`.
+    expect(jobs.map((j) => j.data)).toEqual([{ ...payload(), reason: 'default_changed' }]);
   });
 
   it('cấu hình queue: có retry (backoff) và dead-letter', async () => {

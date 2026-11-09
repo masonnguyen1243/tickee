@@ -12,6 +12,10 @@ import { mockOrganizerApi, organization, ORG_ID, statusNotice } from './organize
  *
  * Story 2.13-a: với `reauth`, hủy liên kết và đặt mặc định đòi header `x-reauth-token` (thiếu hay đã dùng →
  * `REAUTH_REQUIRED`), cấp bởi `/identity/reauth` giả: mã đúng là `123456`.
+ *
+ * Story 2.13-b: "Đổi key Tingee" (BTC đã từng liên kết) như api: begin và xem trước chỉ kiểm lần xác nhận (không tiêu),
+ * lưu tiêu lần xác nhận rồi thay credential và mọi tài khoản bằng tài khoản đã chọn (mặc định). Key NEXT có VCB (chọn
+ * được) và VietinBank (mờ).
  */
 
 const CONSENTED = '2026-10-29T01:02:03.000Z';
@@ -59,6 +63,7 @@ const ACB: Option = { ...MB, vaAccountNumber: '9600002222', bankBin: '970416', b
 const MAIN = { clientId: 'tg-client-main-0a1b2c3d', secretToken: 'tg-secret-main-Zx9Yw8Vu7' };
 const EMPTY = { clientId: 'tg-client-empty-8c9d0e1f', secretToken: 'tg-secret-empty-Nm3Lk2Ji1' };
 const FLAKY = { clientId: 'tg-client-flaky-4e5f6a7b', secretToken: 'tg-secret-flaky-Ts6Rq5Po4' };
+const NEXT = { clientId: 'tg-client-next-9a8b7c6d', secretToken: 'tg-secret-next-Qw1Er2Ty3' };
 
 const credentialOf = (clientId: string, n: number): Credential => ({
   id: `019a3b2c-02${String(n).padStart(2, '0')}-7abc-8def-0123456789ab`,
@@ -94,6 +99,8 @@ type State = {
   selectError: 'invalid' | null;
   /** Hủy liên kết (đã qua xác nhận lại) lỗi hệ thống 503. */
   unlinkFailure: boolean;
+  /** Lưu đổi key lỗi: key mới bị thu hồi trên Tingee sau bước xem trước (422). */
+  replaceError: 'invalid' | null;
 };
 
 /** Mã xác nhận lại đúng ở API giả (TOTP hay mã email đều vậy). */
@@ -126,15 +133,18 @@ async function openPage(
       [MAIN.clientId]: { secretToken: MAIN.secretToken, accounts: [MB, VIETIN, ACB] },
       [EMPTY.clientId]: { secretToken: EMPTY.secretToken, accounts: [] },
       [FLAKY.clientId]: { secretToken: FLAKY.secretToken, accounts: [VCB] },
+      [NEXT.clientId]: { secretToken: NEXT.secretToken, accounts: [VCB, VIETIN] },
     },
     unavailable: new Set(),
     flakyFailures: 1,
     optionsError: null,
     selectError: null,
     unlinkFailure: false,
+    replaceError: null,
     ...initial,
   };
-  let connections = 0;
+  // Credential seed (`credentialOf(…, n)`) đã chiếm số `n`: credential tạo sau (kết nối, đổi key) luôn có id mới.
+  let connections = Number(state.credential?.id.match(/^019a3b2c-02(\d{2})-/)?.[1] ?? 0);
   let linkedCount = state.accounts.length;
   const isLinked = (vaAccountNumber: string) => state.accounts.some((a) => a.vaAccountNumber === vaAccountNumber);
   const optionsOf = () => ({
@@ -149,15 +159,21 @@ async function openPage(
     tingeePortalUrl: PORTAL,
   });
   // Xác nhận lại như api (Story 2.13-a): mỗi token dùng một lần; `reauthHeaders` ghi header của mọi lần gọi thao tác.
+  // `consume: false`: chỉ kiểm (bước đầu của đổi key); xóa `issued` để giả lập lần xác nhận quá 5 phút.
   const issued = new Set<string>();
   const reauthHeaders: (string | null)[] = [];
-  const reauthGranted = (request: Request) => {
+  const reauthGranted = (request: Request, consume = true) => {
     const token = request.headers()['x-reauth-token'] ?? null;
     reauthHeaders.push(token);
     if (!reauth) return true;
     if (!token || !issued.has(token)) return false;
-    issued.delete(token);
+    if (consume) issued.delete(token);
     return true;
+  };
+  /** Key mới đúng (cặp Client ID + Secret Token có ở "Tingee"), không thì `null`. */
+  const tingeeKey = (key: { clientId: string; secretToken: string }) => {
+    const found = state.tingee[key.clientId];
+    return found && found.secretToken === key.secretToken ? found : null;
   };
   const reauthRequired = () => apiError(403, 'REAUTH_REQUIRED', { method: requiredMethod });
   // Hủy liên kết và đặt mặc định như api: id lạ hoặc đã hủy → 404; hủy tài khoản mặc định thì tài khoản liên kết sớm
@@ -240,11 +256,48 @@ async function openPage(
       state.everLinked = true;
       return { status: 200, body: account };
     },
+    // Đổi key Tingee: chưa từng liên kết → 409 (trước xác nhận lại); key sai → 422, không đổi gì, không tiêu token.
+    [`POST /orgs/${ORG_ID}/payout-account/credential/replacement/begin`]: (request) => {
+      if (!state.everLinked) return apiError(409, 'PAYOUT_ACCOUNT_NOT_LINKED_YET');
+      if (!reauthGranted(request, false)) return reauthRequired();
+      return { status: 204 };
+    },
+    [`POST /orgs/${ORG_ID}/payout-account/credential/replacement/preview`]: (request) => {
+      if (!state.everLinked) return apiError(409, 'PAYOUT_ACCOUNT_NOT_LINKED_YET');
+      if (!reauthGranted(request, false)) return reauthRequired();
+      const key = request.postDataJSON() as { clientId: string; secretToken: string };
+      const found = tingeeKey(key);
+      if (!found) return apiError(422, 'TINGEE_CREDENTIAL_INVALID');
+      return {
+        status: 200,
+        body: {
+          clientIdMasked: `••••${key.clientId.slice(-4)}`,
+          accounts: found.accounts.map((a) => ({ ...a, linked: false })),
+        },
+      };
+    },
+    [`POST /orgs/${ORG_ID}/payout-account/credential/replacement`]: (request) => {
+      if (!state.everLinked) return apiError(409, 'PAYOUT_ACCOUNT_NOT_LINKED_YET');
+      if (!reauthGranted(request, false)) return reauthRequired();
+      const body = request.postDataJSON() as { clientId: string; secretToken: string; vaAccountNumber: string };
+      const found = tingeeKey(body);
+      if (!found || state.replaceError === 'invalid') return apiError(422, 'TINGEE_CREDENTIAL_INVALID');
+      const option = found.accounts.find((a) => a.vaAccountNumber === body.vaAccountNumber);
+      if (!option) return apiError(409, 'PAYOUT_ACCOUNT_UNAVAILABLE');
+      if (!option.selectable) return apiError(422, 'BANK_NOT_SUPPORTED');
+      issued.delete(request.headers()['x-reauth-token'] ?? '');
+      connections += 1;
+      state.credential = credentialOf(body.clientId, connections);
+      state.clientId = body.clientId;
+      state.accounts = [linkedAccount(option, linkedCount, true)];
+      linkedCount += 1;
+      return { status: 200, body: overviewOf() };
+    },
     ...accountRoutes,
   });
   await page.goto(PAGE_PATH);
   await expect(page.getByRole('heading', { name: 'Tài khoản nhận tiền', level: 1 })).toBeVisible();
-  return { calls, state, identityCalls, reauthHeaders };
+  return { calls, state, identityCalls, reauthHeaders, issued };
 }
 
 const field = (page: Page, label: string) => page.getByLabel(label, { exact: true });
@@ -262,6 +315,10 @@ const accountRow = (page: Page, bankName: string) => accountRows(page).filter({ 
 const unlinkDialog = (page: Page) => page.getByRole('dialog', { name: 'Hủy liên kết tài khoản này?' });
 const reauthDialog = (page: Page) => page.getByRole('dialog', { name: 'Xác nhận để tiếp tục' });
 const reauthBoxes = (page: Page) => reauthDialog(page).locator('[data-slot="otp-input"] input');
+const replaceKeyForm = (page: Page) => page.locator('[data-slot="tingee-replace-key-form"]');
+const replaceKeyAccounts = (page: Page) => page.locator('[data-slot="tingee-replace-key-accounts"]');
+const replacements = (calls: Call[]) => posts(calls, '/credential/replacement');
+const CREDENTIAL_REVOKED_LOCKED = 'Client ID hoặc Secret Token không còn đúng. Bấm “Đổi key Tingee” để nhập key mới.';
 const CONNECTED = { credential: credentialOf(MAIN.clientId, 1), clientId: MAIN.clientId };
 const horizontalOverflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -380,6 +437,8 @@ test('đã kết nối, chưa chọn: mở trang đọc lại danh sách; "Dùng
   await expect(optionRows(page)).toHaveCount(3);
   expect(optionLoads(calls)).toHaveLength(1);
   await expect(page.locator('[data-slot="tingee-connect-form"]')).toHaveCount(0);
+  // Chưa từng liên kết: đổi key bằng "Dùng key khác" (không xác nhận lại), không có "Đổi key Tingee".
+  await expect(page.getByRole('button', { name: 'Đổi key Tingee' })).toHaveCount(0);
 
   await chooser(page).getByRole('button', { name: 'Dùng key khác' }).click();
   await expect(page.getByRole('heading', { name: 'Nhập key Tingee khác' })).toBeVisible();
@@ -644,44 +703,59 @@ test('đặt mặc định tài khoản mà tab khác đã hủy: toast "Tài kh
   await expect(accountRow(page, 'MB Bank').locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
 });
 
-test('thêm tài khoản khi key bị thu hồi trên Tingee: banner chỉ đường sang portal, không có "Dùng key khác"', async ({
+test('thêm tài khoản khi key bị thu hồi trên Tingee: banner gợi ý "Đổi key Tingee", không có "Dùng key khác"', async ({
   page,
 }) => {
   await openPage(page, { initial: { ...CONNECTED, accounts: [linkedAccount(MB)], selectError: 'invalid' } });
   await page.getByRole('button', { name: 'Thêm tài khoản' }).click();
+  // Đang thêm tài khoản: "Đổi key Tingee" chỉ ở thẻ tài khoản nhận tiền, không lặp ở đầu danh sách.
+  await expect(chooser(page).getByRole('button', { name: 'Đổi key Tingee' })).toHaveCount(0);
   await optionRow(page, 'ACB').getByRole('button', { name: 'Dùng tài khoản này' }).click();
   const banner = chooserBanner(page);
   await expect(banner).toContainText('Chưa dùng được tài khoản này');
-  await expect(banner).toContainText('Kiểm tra API key trên portal Tingee.');
-  await expect(banner.getByRole('link', { name: 'Mở portal Tingee' })).toHaveAttribute('href', PORTAL);
+  await expect(banner).toContainText(CREDENTIAL_REVOKED_LOCKED);
+  await expect(banner.getByRole('button', { name: 'Đổi key Tingee' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Dùng key khác' })).toHaveCount(0);
   await expect(accountRows(page)).toHaveCount(1);
 });
 
-test('đã từng liên kết rồi hủy hết: không có "Dùng key khác", không có form nhập key', async ({ page }) => {
+test('đã từng liên kết rồi hủy hết: không có "Dùng key khác", không có form nhập key; có "Đổi key Tingee"', async ({
+  page,
+}) => {
   await openPage(page, { initial: { ...CONNECTED, everLinked: true } });
   await expect(optionRows(page)).toHaveCount(3);
   await expect(chooser(page).getByRole('button', { name: 'Dùng key khác' })).toHaveCount(0);
   await expect(page.locator('[data-slot="tingee-connect-form"]')).toHaveCount(0);
+  await expect(chooser(page).getByRole('button', { name: 'Đổi key Tingee' })).toBeVisible();
 });
 
-test('đã từng liên kết, key bị thu hồi trên Tingee: banner chỉ đường sang portal, không có "Dùng key khác"', async ({
+test('đã từng liên kết, key bị thu hồi trên Tingee: banner gợi ý "Đổi key Tingee" → xác nhận lại → form nhập key mới', async ({
   page,
 }) => {
-  await openPage(page, { initial: { ...CONNECTED, everLinked: true, optionsError: 'invalid' } });
+  const { reauthHeaders } = await openPage(page, {
+    initial: { ...CONNECTED, everLinked: true, optionsError: 'invalid' },
+    reauth: 'totp',
+  });
   await expect(chooserBanner(page)).toContainText('Key Tingee không còn dùng được');
-  await expect(chooserBanner(page)).toContainText('Kiểm tra API key trên portal Tingee.');
-  await expect(chooserBanner(page).getByRole('link', { name: 'Mở portal Tingee' })).toHaveAttribute('href', PORTAL);
+  await expect(chooserBanner(page)).toContainText(CREDENTIAL_REVOKED_LOCKED);
   await expect(page.getByRole('button', { name: 'Dùng key khác' })).toHaveCount(0);
+  await chooserBanner(page).getByRole('button', { name: 'Đổi key Tingee' }).click();
+  await expect(reauthDialog(page)).toBeVisible();
+  await reauthBoxes(page).first().fill(REAUTH_CODE);
+  await expect(reauthDialog(page)).toBeHidden();
+  await expect(replaceKeyForm(page)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Đổi key Tingee' })).toBeVisible();
+  expect(reauthHeaders).toEqual([null, 'tok-1']);
 });
 
 test('Admin mở URL: "Chỉ Owner xem được mục này.", không gọi api tài khoản nhận tiền', async ({ page }) => {
   const { calls } = await openPage(page, { role: 'admin', initial: { ...CONNECTED, accounts: [linkedAccount(MB)] } });
   await expect(page.getByText('Chỉ Owner xem được mục này.')).toBeVisible();
   await expect(page.locator('[data-slot="tingee-connect-form"]')).toHaveCount(0);
-  // Story 2.13-a giữ nguyên 2.6: Admin không thấy nút đổi nơi nhận tiền.
+  // Story 2.13-a giữ nguyên 2.6: Admin không thấy nút đổi nơi nhận tiền (kể cả "Đổi key Tingee" của 2.13-b).
   await expect(page.getByRole('button', { name: 'Đặt làm mặc định' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Hủy liên kết' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Đổi key Tingee' })).toHaveCount(0);
   expect(calls.filter((c) => c.path.startsWith(`/orgs/${ORG_ID}/payout-account`))).toHaveLength(0);
 });
 
@@ -846,4 +920,168 @@ test('2FA vừa bật ở nơi khác: REAUTH_REQUIRED báo email_otp nhưng gử
   expect(identityCalls.filter((c) => c.path === '/identity/reauth/email-code')).toHaveLength(1);
   expect(identityCalls.filter((c) => c.path === '/identity/reauth').map((c) => c.body)).toEqual([{ code: REAUTH_CODE }]);
   expect(reauthHeaders).toEqual([null, 'tok-1']);
+});
+
+async function enterNewKey(page: Page, key: { clientId: string; secretToken: string }) {
+  await field(page, 'Client ID').fill(key.clientId);
+  await field(page, 'Secret Token').fill(key.secretToken);
+  await page.getByRole('button', { name: 'Tiếp tục', exact: true }).click();
+}
+
+test('đổi key Tingee: bấm nút → xác nhận lại ngay; key sai báo tại form; key đúng → danh sách; "Lưu" → chỉ còn tài khoản mới (mặc định), Client ID mới che, URL IPN giữ nguyên', async ({
+  page,
+}) => {
+  const { calls, reauthHeaders } = await openPage(page, {
+    initial: { ...CONNECTED, accounts: [linkedAccount(MB), linkedAccount(ACB, 1, false)] },
+    reauth: 'totp',
+  });
+  const keyRow = page.locator('[data-slot="tingee-key"]');
+  await expect(keyRow).toContainText('Client ID ••••2c3d');
+
+  // Dialog xác nhận lại hiện ngay khi bấm; mã đúng → form nhập key mới (chưa gọi Tingee, chưa đổi gì).
+  await keyRow.getByRole('button', { name: 'Đổi key Tingee' }).click();
+  await expect(reauthDialog(page)).toBeVisible();
+  await expect(replaceKeyForm(page)).toHaveCount(0);
+  await reauthBoxes(page).first().fill(REAUTH_CODE);
+  await expect(reauthDialog(page)).toBeHidden();
+  await expect(replaceKeyForm(page)).toBeVisible();
+  await expect(field(page, 'Secret Token')).toHaveAttribute('type', 'password');
+  await expect(field(page, 'Secret Token')).toHaveAttribute('autocomplete', 'new-password');
+  // Lỗi tại ô, không gọi api.
+  await page.getByRole('button', { name: 'Tiếp tục', exact: true }).click();
+  await expect(page.getByText('Nhập Client ID.')).toBeVisible();
+  expect(posts(calls, '/credential/replacement/preview')).toHaveLength(0);
+
+  // Key sai: lỗi tại form, dữ liệu giữ nguyên, không tiêu lần xác nhận.
+  await enterNewKey(page, { clientId: NEXT.clientId, secretToken: 'tg-secret-sai' });
+  await expect(replaceKeyForm(page).getByText(CREDENTIAL_INVALID)).toBeVisible();
+  await expect(field(page, 'Client ID')).toHaveValue(NEXT.clientId);
+  await expect(field(page, 'Secret Token')).toHaveValue('tg-secret-sai');
+
+  // Key đúng (dán kèm khoảng trắng): danh sách của key mới; VietinBank mờ, không chọn được.
+  await field(page, 'Secret Token').fill(` ${NEXT.secretToken} `);
+  await page.getByRole('button', { name: 'Tiếp tục', exact: true }).click();
+  const accounts = replaceKeyAccounts(page);
+  await expect(accounts).toContainText('Client ID ••••7c6d');
+  await expect(accounts.locator('[data-slot="replace-key-consequences"]')).toContainText(
+    'mọi tài khoản nhận tiền hiện tại bị hủy liên kết',
+  );
+  await expect(accounts.getByRole('radio', { name: /Vietcombank/ })).toBeEnabled();
+  await expect(accounts.getByRole('radio', { name: /VietinBank/ })).toBeDisabled();
+  await expect(accounts).toContainText('Chưa hỗ trợ VietinBank');
+  expect(posts(calls, '/credential/replacement/preview').map((c) => c.body)).toEqual([
+    { clientId: NEXT.clientId, secretToken: 'tg-secret-sai' },
+    { clientId: NEXT.clientId, secretToken: NEXT.secretToken },
+  ]);
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+
+  // "Lưu" chưa chọn tài khoản: báo tại chỗ, không gọi api.
+  await accounts.getByRole('button', { name: 'Lưu', exact: true }).click();
+  await expect(accounts.getByText('Chọn một tài khoản nhận tiền.')).toBeVisible();
+  expect(replacements(calls)).toHaveLength(0);
+
+  await accounts.getByRole('radio', { name: /Vietcombank/ }).check();
+  await accounts.getByRole('button', { name: 'Lưu', exact: true }).click();
+  await expect(page.getByText('Đã đổi key Tingee.')).toBeVisible();
+  await expect(replaceKeyAccounts(page)).toHaveCount(0);
+  // Chỉ còn tài khoản mới (mặc định) và Client ID mới dạng che; URL IPN giữ nguyên.
+  await expect(accountRows(page)).toHaveCount(1);
+  await expect(accountRow(page, 'Vietcombank').locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
+  await expect(keyRow).toContainText('Client ID ••••7c6d');
+  await expect(field(page, 'URL IPN')).toHaveValue(IPN_URL);
+  expect(replacements(calls).map((c) => c.body)).toEqual([
+    { clientId: NEXT.clientId, secretToken: NEXT.secretToken, vaAccountNumber: VCB.vaAccountNumber },
+  ]);
+  // begin (không header → dialog, rồi lần xác nhận), hai lần xem trước và lần lưu cùng mang lần xác nhận đó.
+  expect(reauthHeaders).toEqual([null, 'tok-1', 'tok-1', 'tok-1', 'tok-1']);
+  expect(await page.content()).not.toContain(NEXT.secretToken);
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+});
+
+test('đổi key Tingee: quá 5 phút thì dialog hiện lại lúc lưu (đóng → không làm gì); lưu lỗi vì key bị thu hồi → báo tại chỗ; "Hủy" → key và tài khoản cũ giữ nguyên', async ({
+  page,
+}) => {
+  const { calls, state, issued, reauthHeaders } = await openPage(page, {
+    initial: { ...CONNECTED, accounts: [linkedAccount(MB), linkedAccount(ACB, 1, false)] },
+    reauth: 'totp',
+  });
+  await page.getByRole('button', { name: 'Đổi key Tingee' }).click();
+  await reauthBoxes(page).first().fill(REAUTH_CODE);
+  await expect(replaceKeyForm(page)).toBeVisible();
+  await enterNewKey(page, NEXT);
+  const accounts = replaceKeyAccounts(page);
+  await accounts.getByRole('radio', { name: /Vietcombank/ }).check();
+
+  // Lần xác nhận hết hạn: "Lưu" → dialog hiện lại; đóng dialog thì vẫn ở danh sách, không báo lỗi.
+  issued.clear();
+  await accounts.getByRole('button', { name: 'Lưu', exact: true }).click();
+  await expect(reauthDialog(page)).toBeVisible();
+  await reauthDialog(page).getByRole('button', { name: 'Hủy', exact: true }).click();
+  await expect(reauthDialog(page)).toBeHidden();
+  await expect(accounts).toBeVisible();
+  await expect(accounts.locator('[data-slot="status-banner"]')).toHaveCount(0);
+
+  // Xác nhận lại xong, lần lưu tự chạy tiếp với lần xác nhận mới; key bị thu hồi → báo tại chỗ.
+  state.replaceError = 'invalid';
+  await accounts.getByRole('button', { name: 'Lưu', exact: true }).click();
+  await reauthBoxes(page).first().fill(REAUTH_CODE);
+  await expect(reauthDialog(page)).toBeHidden();
+  const banner = accounts.locator('[data-slot="status-banner"]');
+  await expect(banner).toContainText('Chưa đổi được key Tingee');
+  await expect(banner).toContainText('Key và tài khoản nhận tiền hiện tại vẫn giữ nguyên.');
+  await expect(banner.getByRole('button', { name: 'Nhập key khác' })).toBeVisible();
+  expect(replacements(calls)).toHaveLength(3);
+  expect(reauthHeaders.slice(-3)).toEqual(['tok-1', 'tok-1', 'tok-2']);
+
+  // "Nhập key khác": về form với key mới vẫn điền sẵn; tài khoản đã chọn không còn được giữ.
+  await banner.getByRole('button', { name: 'Nhập key khác' }).click();
+  await expect(replaceKeyForm(page)).toBeVisible();
+  await expect(field(page, 'Client ID')).toHaveValue(NEXT.clientId);
+  await expect(field(page, 'Secret Token')).toHaveValue(NEXT.secretToken);
+  await expect(replaceKeyAccounts(page)).toHaveCount(0);
+
+  // "Hủy": quay về màn cũ; key, tài khoản và tài khoản mặc định cũ không đổi.
+  await replaceKeyForm(page).getByRole('button', { name: 'Hủy', exact: true }).click();
+  await expect(replaceKeyForm(page)).toHaveCount(0);
+  await expect(page.locator('[data-slot="tingee-key"]')).toContainText('Client ID ••••2c3d');
+  await expect(accountRows(page)).toHaveCount(2);
+  await expect(accountRow(page, 'MB Bank').locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
+  expect(await page.content()).not.toContain(NEXT.secretToken);
+});
+
+test('đổi key Tingee: tài khoản đã chọn không còn trên Tingee lúc lưu → báo tại chỗ; "Tải lại" đọc lại danh sách của key mới (không còn tài khoản đó)', async ({
+  page,
+}) => {
+  const { calls, state } = await openPage(page, {
+    initial: { ...CONNECTED, accounts: [linkedAccount(MB), linkedAccount(ACB, 1, false)] },
+    reauth: 'totp',
+  });
+  await page.getByRole('button', { name: 'Đổi key Tingee' }).click();
+  await reauthBoxes(page).first().fill(REAUTH_CODE);
+  await enterNewKey(page, NEXT);
+  const accounts = replaceKeyAccounts(page);
+  await accounts.getByRole('radio', { name: /Vietcombank/ }).check();
+
+  // VCB bị gỡ khỏi tài khoản Tingee của key mới (BTC liên kết thêm ACB) trước khi bấm "Lưu".
+  state.tingee[NEXT.clientId]!.accounts = [VIETIN, ACB];
+  await accounts.getByRole('button', { name: 'Lưu', exact: true }).click();
+  const banner = accounts.locator('[data-slot="status-banner"]');
+  await expect(banner).toContainText('Chưa đổi được key Tingee');
+  await expect(banner).toContainText(
+    'Tài khoản này không còn dùng được trên Tingee. Tải lại danh sách rồi chọn tài khoản khác.',
+  );
+  await expect(accounts.getByRole('radio', { name: /Vietcombank/ })).toBeChecked();
+  const previews = () => posts(calls, '/credential/replacement/preview');
+  expect(previews()).toHaveLength(1);
+
+  await banner.getByRole('button', { name: 'Tải lại' }).click();
+  await expect(accounts.getByRole('radio', { name: /Vietcombank/ })).toHaveCount(0);
+  await expect(accounts.getByRole('radio', { name: /ACB/ })).toBeEnabled();
+  await expect(accounts.getByRole('radio', { name: /ACB/ })).not.toBeChecked();
+  await expect(accounts.locator('[data-slot="status-banner"]')).toHaveCount(0);
+  expect(previews()).toHaveLength(2);
+  expect(previews().at(-1)?.body).toEqual({ clientId: NEXT.clientId, secretToken: NEXT.secretToken });
+  // Không có gì được lưu: key và tài khoản cũ vẫn hiện hành.
+  expect(state.clientId).toBe(MAIN.clientId);
+  expect(state.accounts.map((a) => a.bankName)).toEqual(['MB Bank', 'ACB']);
 });

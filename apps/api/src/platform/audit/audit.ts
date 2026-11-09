@@ -35,16 +35,23 @@ export type AuditAction =
    * có, "Dùng key khác") chuyển `retired_at`. Không ghi Client ID hay Secret Token.
    */
   | 'tingee_credential.connected'
+  /**
+   * Owner đổi key Tingee sau khi BTC đã từng liên kết tài khoản nhận tiền (Story 2.13-b, đã xác nhận lại; đối tượng:
+   * credential mới): credential mới thành hiện hành, credential cũ chuyển `retired_at` (giữ ciphertext). Cùng
+   * transaction có `payout_account.unlinked` cho từng tài khoản hiện hành cũ, `payout_account.linked` và
+   * `payout_account.default_changed` cho tài khoản mới. Không ghi Client ID hay Secret Token.
+   */
+  | 'tingee_credential.replaced'
   /** Owner thêm một tài khoản nhận tiền từ danh sách tài khoản Tingee (tài khoản đầu tiên tự thành mặc định). */
   | 'payout_account.linked'
   /**
-   * Owner hủy liên kết một tài khoản nhận tiền: dòng chuyển `retired_at` (không xóa, không gọi Tingee). Tickee chỉ
-   * ngừng dùng tài khoản; VA trên Tingee giữ nguyên.
+   * Owner hủy liên kết một tài khoản nhận tiền, hoặc đổi key Tingee (mọi tài khoản hiện hành): dòng chuyển `retired_at`
+   * (không xóa, không gọi Tingee). Tickee chỉ ngừng dùng tài khoản; VA trên Tingee giữ nguyên.
    */
   | 'payout_account.unlinked'
   /**
-   * Tài khoản mặc định của BTC đổi (đối tượng: tài khoản thành mặc định): Owner bấm "Đặt làm mặc định", hoặc hủy tài
-   * khoản mặc định khiến tài khoản liên kết sớm nhất còn lại thành mặc định.
+   * Tài khoản mặc định của BTC đổi (đối tượng: tài khoản thành mặc định): Owner bấm "Đặt làm mặc định", hủy tài khoản
+   * mặc định khiến tài khoản liên kết sớm nhất còn lại thành mặc định, hoặc đổi key Tingee (tài khoản đã chọn).
    */
   | 'payout_account.default_changed'
   /** Owner/Admin tạo Sự kiện nháp (Story 2.7). */

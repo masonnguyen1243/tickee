@@ -5,6 +5,7 @@ import {
   ErrorCode,
   isBlockedBankBin,
   maskTingeeClientId,
+  ReplaceTingeeKeyRequest,
   SelectPayoutAccountRequest,
   tingeeIpnUrl,
   type PayoutAccount,
@@ -12,6 +13,7 @@ import {
   type PayoutAccountOptions,
   type PayoutAccountOverview,
   type TingeeCredentialSummary,
+  type TingeeKeyPreview,
 } from '@tickee/contracts';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import pg from 'pg';
@@ -24,7 +26,7 @@ import { parseCredentialKeys, SecretBox } from '../../platform/crypto/index.js';
 import { DATABASE, type Database, type DbExecutor, type Tx } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
-import { consumeReauth, type ReauthProof } from '../identity/index.js';
+import { assertReauth, consumeReauth, type ReauthProof } from '../identity/index.js';
 import {
   TINGEE_CLIENT,
   tingeePortalUrl,
@@ -32,6 +34,7 @@ import {
   type TingeeClient,
   type TingeeCredential,
 } from '../tingee/index.js';
+import type { DefaultPayoutChangeReason } from './payout-default-email.js';
 import { DefaultPayoutQueues, enqueueDefaultPayoutChanged } from './payout-default-jobs.js';
 import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
 
@@ -40,7 +43,8 @@ import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
  * nối API key (Client ID + Secret Token), Tickee đọc danh sách tài khoản bằng key đó, Owner thêm một hay nhiều tài
  * khoản (mỗi VA một lần), đặt tài khoản mặc định và hủy liên kết từng tài khoản. Hủy liên kết chỉ là Tickee ngừng dùng
  * tài khoản (`retired_at`, không xóa dòng, không gọi Tingee). Còn tài khoản thì có đúng một tài khoản mặc định. Gửi key
- * chỉ được nhận khi BTC chưa từng liên kết tài khoản nào; từ đó đổi key là Story 2.13.
+ * chỉ được nhận khi BTC chưa từng liên kết tài khoản nào; từ đó đổi key là luồng "Đổi key Tingee" có xác nhận lại
+ * (Story 2.13-b: `beginReplacement` → `previewReplacement` → `replaceKey`).
  *
  * Tingee luôn được gọi NGOÀI transaction DB. Mỗi lần ghi là một transaction riêng có audit, bắt đầu bằng khóa dòng
  * `organizations FOR UPDATE` của BTC, nên hai tab của cùng BTC ghi lần lượt. Secret Token chỉ lưu dạng ciphertext và
@@ -127,7 +131,7 @@ const optionOf = (account: TingeeAccount, linkedVas: ReadonlySet<string>): Payou
 
 const notAMember = () => new AppError(ErrorCode.NOT_A_MEMBER, 'Bạn không phải thành viên của BTC này.');
 const noCredential = () => new AppError(ErrorCode.NOT_FOUND, 'BTC chưa kết nối tài khoản Tingee.');
-/** Gửi key sau khi BTC đã từng liên kết tài khoản (kể cả đã hủy hết): đổi key là Story 2.13. */
+/** Gửi key sau khi BTC đã từng liên kết tài khoản (kể cả đã hủy hết): đổi key qua "Đổi key Tingee" (`replaceKey`). */
 const keyLocked = () =>
   new AppError(
     ErrorCode.PAYOUT_ACCOUNT_ALREADY_LINKED,
@@ -142,6 +146,12 @@ const unavailable = () =>
   );
 const bankNotSupported = () =>
   new AppError(ErrorCode.BANK_NOT_SUPPORTED, 'Chưa hỗ trợ VietinBank. Chọn tài khoản ở ngân hàng khác.');
+/** Đổi key Tingee khi BTC chưa từng liên kết tài khoản nào: dùng form kết nối (không cần xác nhận lại). */
+const notLinkedYet = () =>
+  new AppError(
+    ErrorCode.PAYOUT_ACCOUNT_NOT_LINKED_YET,
+    'BTC chưa liên kết tài khoản nhận tiền nào. Nhập key Tingee ở form kết nối.',
+  );
 
 /** Vi phạm unique index `constraint` (ở chính lỗi hoặc một tầng `cause` của Drizzle). */
 function isUniqueViolation(err: unknown, constraint: string): boolean {
@@ -171,8 +181,8 @@ export class PayoutAccountService {
   /**
    * Kết nối API key Tingee: đọc danh sách tài khoản bằng key (key sai → `TINGEE_CREDENTIAL_INVALID`, không ghi gì), rồi
    * trong một transaction lưu credential mới làm hiện hành (credential cũ, nếu có, chuyển `retired_at`) và sinh `ipnKey`
-   * nếu BTC chưa có. BTC đã từng liên kết tài khoản nhận tiền (kể cả đã hủy hết) → 409, không gọi Tingee (đổi key là
-   * Story 2.13).
+   * nếu BTC chưa có. BTC đã từng liên kết tài khoản nhận tiền (kể cả đã hủy hết) → 409, không gọi Tingee (đổi key qua
+   * `beginReplacement` → `previewReplacement` → `replaceKey`, có xác nhận lại).
    */
   async connect(ctx: AccessContext, input: z.output<typeof ConnectTingeeRequest>): Promise<PayoutAccountOptions> {
     if (await this.hasEverLinked(this.db.orm, ctx)) throw keyLocked();
@@ -371,12 +381,178 @@ export class PayoutAccountService {
     });
   }
 
-  /** Enqueue email cảnh báo đổi tài khoản mặc định trong `tx` (rollback thì không có email). */
+  /**
+   * Bước đầu của "Đổi key Tingee" (Story 2.13-b): BTC đã từng liên kết tài khoản (chưa →
+   * `PAYOUT_ACCOUNT_NOT_LINKED_YET`) và request mang lần xác nhận lại còn hiệu lực (`REAUTH_REQUIRED`). Không tiêu lần
+   * xác nhận, không gọi Tingee, không ghi gì: web mở form nhập key mới và giữ lần xác nhận cho các bước sau.
+   */
+  async beginReplacement(ctx: AccessContext, reauth: ReauthProof): Promise<void> {
+    await this.assertCanReplaceKey(ctx, reauth);
+  }
+
+  /**
+   * Xem trước key mới: đọc danh sách tài khoản bằng key mới (key sai → `TINGEE_CREDENTIAL_INVALID`, Tingee lỗi →
+   * `PAYMENT_PROVIDER_UNAVAILABLE`, merchant bị khóa → `MERCHANT_SUSPENDED`). Không ghi gì, không tiêu lần xác nhận:
+   * key và tài khoản cũ vẫn hiện hành. Mọi dòng `linked: false` (đổi key xong, tài khoản hiện hành đều bị hủy liên
+   * kết).
+   */
+  async previewReplacement(
+    ctx: AccessContext,
+    input: z.output<typeof ConnectTingeeRequest>,
+    reauth: ReauthProof,
+  ): Promise<TingeeKeyPreview> {
+    await this.assertCanReplaceKey(ctx, reauth);
+    const accounts = await this.tingee.listAccounts({ clientId: input.clientId, secretToken: input.secretToken });
+    const noneLinked = new Set<string>();
+    return {
+      clientIdMasked: maskTingeeClientId(input.clientId),
+      accounts: accounts.map((account) => optionOf(account, noneLinked)),
+    };
+  }
+
+  /**
+   * Đổi key Tingee: đọc lại danh sách bằng key mới (không tin danh sách web giữ; key sai, Tingee lỗi, VA không còn
+   * `active` → `PAYOUT_ACCOUNT_UNAVAILABLE`, VietinBank → `BANK_NOT_SUPPORTED`: không ghi gì, lần xác nhận không bị
+   * tiêu). Rồi trong một transaction: tiêu lần xác nhận, credential cũ `retired_at` (giữ ciphertext cho IPN/Đối soát bù
+   * của Đơn cũ), mọi tài khoản hiện hành bị hủy liên kết (gỡ mềm), credential mới (Secret Token mã hóa) và tài khoản đã
+   * chọn (mặc định) được chèn, kèm audit và email cảnh báo (tài khoản mặc định cũ, hoặc "chưa có", → tài khoản mới).
+   * `ipnKey` không đổi. Trả tổng quan mới.
+   */
+  async replaceKey(
+    ctx: AccessContext,
+    input: z.output<typeof ReplaceTingeeKeyRequest>,
+    reauth: ReauthProof,
+  ): Promise<PayoutAccountOverview> {
+    await this.assertCanReplaceKey(ctx, reauth);
+    const accounts = await this.tingee.listAccounts({ clientId: input.clientId, secretToken: input.secretToken });
+    const chosen = accounts.find((account) => account.vaAccountNumber === input.vaAccountNumber);
+    if (!chosen) throw unavailable();
+    if (isBlockedBankBin(chosen.bankBin)) throw bankNotSupported();
+    const secretTokenCiphertext = this.settings.secretBox.seal(input.secretToken);
+    await this.defaultPayoutQueues.ready();
+
+    try {
+      return await this.db.transaction(async (tx) => {
+        await this.lockOrganization(tx, ctx);
+        await consumeReauth(tx, { userId: ctx.userId, ...reauth });
+        if (!(await this.hasEverLinked(tx, ctx))) throw notLinkedYet();
+
+        const retired = await tx
+          .update(cred)
+          .set({ retiredAt: sql`now()` })
+          .where(and(orgScope(ctx)(cred), isNull(cred.retiredAt)))
+          .returning({ id: cred.id });
+        // Khóa dòng BTC giữ danh sách này đứng yên tới khi gỡ mềm bên dưới.
+        const current = await tx
+          .select({ id: pa.id, isDefault: pa.isDefault })
+          .from(pa)
+          .where(and(orgScope(ctx)(pa), isNull(pa.retiredAt)))
+          .orderBy(asc(pa.linkedAt), asc(pa.id));
+        // Gỡ mềm trước khi chèn: unique index một phần (VA hiện hành, mặc định hiện hành) cho phép key mới có lại cùng
+        // VA (cùng merchant, chỉ thay key).
+        await tx
+          .update(pa)
+          .set({ retiredAt: sql`now()`, isDefault: false })
+          .where(and(orgScope(ctx)(pa), isNull(pa.retiredAt)));
+
+        const [credential] = await tx
+          .insert(cred)
+          .values({
+            organizationId: ctx.organizationId,
+            clientId: input.clientId,
+            secretTokenCiphertext,
+            createdBy: ctx.userId,
+          })
+          .returning({ id: cred.id });
+        if (!credential) throw new Error('INSERT tingee_credentials không trả về dòng nào');
+        const [account] = await tx
+          .insert(pa)
+          .values({
+            organizationId: ctx.organizationId,
+            tingeeCredentialId: credential.id,
+            vaAccountNumber: chosen.vaAccountNumber,
+            bankBin: chosen.bankBin,
+            bankName: chosen.bankName,
+            accountType: chosen.accountType,
+            accountLast4: chosen.accountLast4,
+            accountName: chosen.accountName,
+            tingeeShopId: chosen.shopId,
+            isDefault: true,
+            createdBy: ctx.userId,
+          })
+          .returning({ id: pa.id });
+        if (!account) throw new Error('INSERT payout_accounts không trả về dòng nào');
+
+        await audit.record(tx, {
+          actorUserId: ctx.userId,
+          organizationId: ctx.organizationId,
+          action: 'tingee_credential.replaced',
+          target: { type: 'tingee_credential', id: credential.id },
+          changedFields: ['client_id', 'secret_token_ciphertext', ...(retired.length > 0 ? ['retired_at'] : [])],
+        });
+        for (const old of current) {
+          await audit.record(tx, {
+            actorUserId: ctx.userId,
+            organizationId: ctx.organizationId,
+            action: 'payout_account.unlinked',
+            target: { type: 'payout_account', id: old.id },
+            changedFields: ['retired_at', ...(old.isDefault ? ['is_default'] : [])],
+          });
+        }
+        await audit.record(tx, {
+          actorUserId: ctx.userId,
+          organizationId: ctx.organizationId,
+          action: 'payout_account.linked',
+          target: { type: 'payout_account', id: account.id },
+          changedFields: [
+            'tingee_credential_id',
+            'va_account_number',
+            'bank_bin',
+            'bank_name',
+            'account_type',
+            'account_last4',
+            'account_name',
+            'tingee_shop_id',
+            'is_default',
+            'linked_at',
+          ],
+        });
+        await audit.record(tx, {
+          actorUserId: ctx.userId,
+          organizationId: ctx.organizationId,
+          action: 'payout_account.default_changed',
+          target: { type: 'payout_account', id: account.id },
+          changedFields: ['is_default'],
+        });
+        // BTC đã hủy hết tài khoản trước khi đổi key: không có tài khoản mặc định cũ ("chưa có tài khoản nhận tiền").
+        const previousDefault = current.find((row) => row.isDefault)?.id ?? null;
+        await this.notifyDefaultChanged(tx, ctx, previousDefault, account.id, 'tingee_key_replaced');
+        return this.overviewOf(tx, ctx);
+      });
+    } catch (err) {
+      // Khóa dòng BTC và gỡ mềm trước khi chèn đã loại trùng VA; unique index một phần là lưới an toàn cuối cùng.
+      if (isUniqueViolation(err, CURRENT_VA_KEY)) throw alreadyLinked();
+      throw err;
+    }
+  }
+
+  /** Điều kiện chung của các bước đổi key, theo thứ tự: đã từng liên kết tài khoản, rồi lần xác nhận còn hiệu lực. */
+  private async assertCanReplaceKey(ctx: AccessContext, reauth: ReauthProof): Promise<void> {
+    if (!(await this.hasEverLinked(this.db.orm, ctx))) throw notLinkedYet();
+    await assertReauth(this.db.orm, { userId: ctx.userId, ...reauth });
+  }
+
+  /**
+   * Enqueue email cảnh báo đổi tài khoản mặc định trong `tx` (rollback thì không có email). `previousAccountId` `null`:
+   * trước đó BTC không có tài khoản nào; `nextAccountId` `null`: BTC không còn tài khoản nào. `reason`
+   * `tingee_key_replaced`: email nói key Tingee vừa đổi và mọi tài khoản cũ đã bị hủy liên kết.
+   */
   private async notifyDefaultChanged(
     tx: Tx,
     ctx: AccessContext,
-    previousAccountId: string,
+    previousAccountId: string | null,
     nextAccountId: string | null,
+    reason: DefaultPayoutChangeReason = 'default_changed',
   ): Promise<void> {
     // `now()` của transaction: cùng mốc với `retired_at` của lần hủy liên kết.
     const { rows } = await tx.execute<{ now: string | Date }>(sql`SELECT now() AS now`);
@@ -386,6 +562,7 @@ export class PayoutAccountService {
       nextAccountId,
       actorUserId: ctx.userId,
       changedAt: new Date(rows[0]!.now).toISOString(),
+      reason,
     });
   }
 
