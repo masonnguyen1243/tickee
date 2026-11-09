@@ -10,12 +10,16 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.build.json && (tsc -p tsconfig.build.json --watch --preserveWatchOutput & APP_ROLE=api node --watch --env-file-if-exists=../../.env dist/main.js | pino-pretty)",
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput & APP_ROLE=api node --watch --env-file-if-exists=../../.env dist/main.js | pino-pretty",
+    "dev:worker": "APP_ROLE=worker node --watch --env-file-if-exists=../../.env dist/main.js | pino-pretty",
+    "dev:tingee": "pnpm run tingee:fake",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node --env-file-if-exists=../../.env dist/main.js",
     "test": "vitest run",
     "lint:deps": "depcruise src --config .dependency-cruiser.cjs",
     "db:generate": "drizzle-kit generate",
+    "db:migrate": "APP_ROLE=migrate node --env-file-if-exists=../../.env dist/main.js",
+    "db:seed": "tsc -p test/dev-seed/tsconfig.json && node --env-file-if-exists=../../.env node_modules/.cache/dev-seed/test/dev-seed/main.js",
     "tingee:fake": "tsc -p test/tingee-fake/tsconfig.json && node --env-file-if-exists=../../.env node_modules/.cache/tingee-fake/test/tingee-fake/main.js",
     "admin:grant": "node --env-file-if-exists=../../.env dist/roles/admin-cli.js grant",
     "admin:revoke": "node --env-file-if-exists=../../.env dist/roles/admin-cli.js revoke"

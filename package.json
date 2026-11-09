@@ -6,11 +6,13 @@
     "node": ">=26.12.1"
   },
   "scripts": {
-    "dev": "turbo dev --ui=tui",
+    "dev": "turbo dev dev:worker dev:tingee --ui=tui",
     "build": "turbo build",
-    "typecheck": "turbo typecheck",
-    "test": "turbo test",
-    "lint:deps": "turbo lint:deps"
+    "typecheck": "sh scripts/dev-env.sh turbo typecheck",
+    "test": "sh scripts/dev-env.sh turbo test",
+    "test:e2e": "sh scripts/dev-env.sh turbo build --filter=@tickee/web && pnpm --filter @tickee/web test:e2e",
+    "lint:deps": "turbo lint:deps",
+    "db:seed": "pnpm --filter @tickee/api db:seed"
   },
   "devDependencies": {
     "turbo": "2.11.10",
