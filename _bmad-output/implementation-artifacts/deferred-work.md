@@ -322,3 +322,15 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-3-guard-hang-ve-sau-mo-ban.md`
   summary: Nửa còn lại của deferred 2.10: sau mở bán vẫn sửa được thông tin Sự kiện (kể cả xóa chính sách hoàn vé) và câu hỏi form mua.
   evidence: Review E2-3 #10. E2-3 chỉ đóng phần Hạng vé. Người nhận đề xuất: E2-6 (checklist sẵn sàng Epic 3, mục "snapshot chính sách hoàn vé") hoặc một story Epic 3 có tên trước 3.2.
+
+- source_spec: none
+  summary: E2-5 phần API — helper queue/worker chung cho pg-boss (gom khung 4 file `*-jobs.ts`, sửa lỗi gửi lại email cho mọi người nhận khi retry), `escapeHtml` vào `platform/email`, formatter ngày giờ `Asia/Ho_Chi_Minh` chung trong contracts, bỏ phần `MESSAGES` không dùng trong `error.filter.ts`.
+  evidence: Tách khỏi E2-5 (retro Epic 2 mục D2) theo quyết định của Mason ngày 09/11/2026: phần Web làm trước để gỡ chặn Story 3.1; phần API phải xong trước story Epic 3 đầu tiên thêm queue mới (3.5 / 3.8).
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-5-refactor-web.md`
+  summary: Đăng xuất từ menu tài khoản (`components/tickee/account-menu.tsx`) thất bại thì không báo gì, người dùng tưởng đã đăng xuất.
+  evidence: Review E2-5 #15. `useSignOut` ở account-menu không có `onError`, và bản trước refactor cũng không có, tức là lỗi có từ trước. Hướng sửa: `toast.error('Chưa đăng xuất được. Vui lòng thử lại.')`.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-5-refactor-web.md`
+  summary: E2E `purchase-form.spec.ts:376` (sắp thứ tự câu hỏi, kiểm focus sang nút "Xuống") chập chờn trên cả android-chromium và ios-webkit.
+  evidence: Chạy lặp 40 lần: baseline `14b9084` fail 4/40, bản E2-5 fail 2/40. Focus được đặt trong `requestAnimationFrame` sau `setQueryData` + `invalidateQueries` (`purchase-form-editor.tsx` ~:671-675), nên dễ đua với lần render của refetch. Nên gộp vào việc ghi các test webkit chập chờn ở E2-8.

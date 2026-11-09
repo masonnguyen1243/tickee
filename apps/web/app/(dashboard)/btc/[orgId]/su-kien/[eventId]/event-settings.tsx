@@ -3,16 +3,16 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EventDraftInput, ErrorCode, eventPath, formatEventDateTime, type EventDetail } from '@tickee/contracts';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
 import { useId, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 
+import { ConfirmDialog } from '@/components/tickee/confirm-dialog';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { ApiError } from '@/lib/api/errors';
+import { handledElsewhere } from '@/lib/api/handled-elsewhere';
+import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
-import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
+import { useGoToLogin } from '@/lib/auth/use-go-to-login';
 import { endEvent, eventQueryKey, eventsQueryKey, hideEvent, unhideEvent, updateEvent } from '@/lib/event/api';
 
 import {
@@ -26,7 +26,6 @@ import {
   type EventInfoValues,
 } from '../event-info-form';
 import { isEventEnded } from '../event-status';
-import { handledElsewhere } from '../handled-elsewhere';
 
 /*
  * Tab "Cài đặt" của Sự kiện (Story 2.12): form thông tin (dùng chung với wizard bước 1) và hai hành động trạng thái:
@@ -39,14 +38,6 @@ import { handledElsewhere } from '../handled-elsewhere';
 const NOT_STARTED_REASON = 'Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.';
 /** Sự kiện đang ẩn đã dừng nhận Đơn: không gợi ý "dùng Ẩn". */
 const NOT_STARTED_REASON_HIDDEN = 'Sự kiện chưa bắt đầu.';
-
-const messageOf = (error: unknown) => (error instanceof ApiError ? error.message : 'Đã có lỗi xảy ra. Vui lòng thử lại.');
-
-function useGoToLogin() {
-  const router = useRouter();
-  const pathname = usePathname();
-  return () => router.replace(withReturnTo(LOGIN_PATH, pathname));
-}
 
 /** Cập nhật cache sau khi Sự kiện đổi (chi tiết + danh sách). */
 function useEventSaved(orgId: string) {
@@ -309,47 +300,22 @@ function StatusActions({ orgId, event }: { orgId: string; event: EventDetail }) 
         <StatusBanner tone="danger" title="Chưa đổi được trạng thái" description={messageOf(failure)} />
       ) : null}
 
-      <Dialog
+      <ConfirmDialog
         open={confirmEnd}
         onOpenChange={(open) => {
-          if (open || change.isPending) return;
+          if (open) return;
           change.reset();
           setConfirmEnd(false);
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Kết thúc Sự kiện?</DialogTitle>
-            <DialogDescription>Ngừng nhận Đơn ngay, không mở lại được.</DialogDescription>
-          </DialogHeader>
-          {failure ? (
-            <StatusBanner tone="danger" title="Chưa kết thúc được" description={messageOf(failure)} />
-          ) : null}
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="destructive"
-              className="w-full"
-              loading={pending === 'end'}
-              onClick={() => change.mutate('end')}
-            >
-              Kết thúc
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              className="w-full"
-              onClick={() => {
-                if (change.isPending) return;
-                change.reset();
-                setConfirmEnd(false);
-              }}
-            >
-              Hủy
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        title="Kết thúc Sự kiện?"
+        description="Ngừng nhận Đơn ngay, không mở lại được."
+        confirmLabel="Kết thúc"
+        onConfirm={() => change.mutate('end')}
+        // Dialog che các nút khác, nên đang chạy chỉ có thể là "Kết thúc".
+        pending={change.isPending}
+        failureTitle="Chưa kết thúc được"
+        failure={failure && messageOf(failure)}
+      />
     </section>
   );
 }

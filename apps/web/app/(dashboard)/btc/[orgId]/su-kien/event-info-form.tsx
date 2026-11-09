@@ -12,9 +12,9 @@ import {
   isEventYearInRange,
   type EventDetail,
 } from '@tickee/contracts';
-import { OctagonAlert } from 'lucide-react';
 import { useId, type ChangeEvent, type ReactNode } from 'react';
 
+import { FieldError } from '@/components/tickee/field-error';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -100,19 +100,6 @@ export function serverFieldErrors(error: ApiError, values: EventInfoValues): Eve
   const paths = Array.isArray(issues) ? issues.map((i) => String(i.path ?? '').split('.')[0] ?? '') : [];
   const errors = fieldErrorsOf(paths, values);
   return Object.keys(errors).length > 0 ? errors : { name: UNMATCHED_SERVER_ERROR };
-}
-
-function FieldError({ id, message }: { id: string; message: string | undefined }) {
-  return (
-    <p id={id} role="alert" className="flex min-h-0 items-start gap-1.5 text-meta text-danger-text empty:hidden">
-      {message ? (
-        <>
-          <OctagonAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          <span>{message}</span>
-        </>
-      ) : null}
-    </p>
-  );
 }
 
 type EventInfoFieldsProps = {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { ACCOUNT_SECURITY_PATH, CREATE_ORGANIZATION_PATH, organizationDashboardPath } from '@tickee/contracts';
 import { CircleUserRound, LayoutDashboard, LogOut, Plus, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
@@ -15,8 +15,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { fetchMe, ME_QUERY_KEY, signOut } from '@/lib/auth/api';
+import { fetchMe, ME_QUERY_KEY } from '@/lib/auth/api';
 import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
+import { useSignOut } from '@/lib/auth/use-sign-out';
 import { fetchMemberships, MEMBERSHIPS_QUERY_KEY } from '@/lib/organizer/api';
 
 /**
@@ -29,7 +30,6 @@ export function AccountMenu() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const queryClient = useQueryClient();
   const me = useQuery({ queryKey: ME_QUERY_KEY, queryFn: ({ signal }) => fetchMe(signal) });
   // Chỉ hỏi khi đã đồng ý NĐ 13 (chưa đồng ý thì api trả CONSENT_REQUIRED và chuyển trang).
   const memberships = useQuery({
@@ -39,13 +39,9 @@ export function AccountMenu() {
   });
   const firstOrganization = memberships.data?.[0];
 
-  const logout = useMutation({
-    mutationFn: signOut,
-    onSuccess: () => {
-      queryClient.clear();
-      router.replace('/');
-      router.refresh();
-    },
+  const logout = useSignOut(() => {
+    router.replace('/');
+    router.refresh();
   });
 
   if (me.isPending) return <span aria-hidden="true" className="block h-10 w-24" />;

@@ -22,7 +22,8 @@ import { toast } from 'sonner';
 import { useCurrentOrganization } from '@/components/tickee/current-organization';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
-import { ApiError } from '@/lib/api/errors';
+import { handledElsewhere } from '@/lib/api/handled-elsewhere';
+import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
 import {
   eventQueryKey,
@@ -34,7 +35,6 @@ import {
 import { fetchStatusNotices, statusNoticesQueryKey } from '@/lib/reporting/api';
 import { statusNoticeContent } from '@/lib/reporting/status-notices';
 
-import { handledElsewhere } from './handled-elsewhere';
 import { PublicEventLink } from './public-event-link';
 
 /*
@@ -110,8 +110,6 @@ function conditionCopy(code: PublishConditionCode, { role, closedBetaRevoked }: 
   }
   return PUBLISH_CONDITION_COPY[code];
 }
-
-const messageOf = (error: unknown) => (error instanceof ApiError ? error.message : 'Đã có lỗi xảy ra. Vui lòng thử lại.');
 
 /** Focus `ref` một lần sau khi mount nếu `enabled` (vd. tiêu đề "Đang mở bán" thay cho nút "Mở bán" vừa bị gỡ). */
 function useFocusOnMount(ref: RefObject<HTMLElement | null>, enabled: boolean) {

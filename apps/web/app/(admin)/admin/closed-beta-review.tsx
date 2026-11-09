@@ -14,11 +14,11 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
+import { ConfirmDialog } from '@/components/tickee/confirm-dialog';
 import { EmptyState } from '@/components/tickee/empty-state';
 import { PageHeading } from '@/components/tickee/page-heading';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -27,7 +27,7 @@ import {
   closedBetaQueueQueryKey,
   fetchClosedBetaQueue,
 } from '@/lib/admin/api';
-import { ApiError } from '@/lib/api/errors';
+import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
 import { LOGIN_PATH, TOTP_ENROLL_PATH, withReturnTo } from '@/lib/auth/return-to';
 import { isTotpRequired } from '@/lib/auth/totp';
@@ -62,8 +62,6 @@ const TABS: readonly { status: ClosedBetaStatus; label: string; empty: string; e
 
 const isClosedBetaStatus = (value: string): value is ClosedBetaStatus =>
   (Object.values(ClosedBetaStatus) as string[]).includes(value);
-
-const messageOf = (error: unknown) => (error instanceof ApiError ? error.message : 'Đã có lỗi xảy ra. Vui lòng thử lại.');
 
 /** Lỗi làm cả trang đổi trạng thái (không phải lỗi của một thao tác): mất cờ, chưa bật 2FA, hết phiên. */
 const isGateError = (error: unknown) =>
@@ -178,43 +176,18 @@ function RevokeDialog({
   onClose: () => void;
 }) {
   return (
-    <Dialog
+    <ConfirmDialog
       open={organization !== null}
-      onOpenChange={(open) => {
-        if (!open && !pending) onClose();
-      }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Thu hồi Closed Beta?</DialogTitle>
-          <DialogDescription className="break-words">
-            {organization ? `Sự kiện có phí của ${organization.name} sẽ Tạm ngừng bán.` : null}
-          </DialogDescription>
-        </DialogHeader>
-        {failure ? <StatusBanner tone="danger" title="Chưa thu hồi được" description={messageOf(failure)} /> : null}
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="destructive"
-            className="w-full"
-            loading={pending}
-            onClick={() => organization && onConfirm(organization)}
-          >
-            Thu hồi
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            className="w-full"
-            onClick={() => {
-              if (!pending) onClose();
-            }}
-          >
-            Hủy
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      onOpenChange={(open) => !open && onClose()}
+      title="Thu hồi Closed Beta?"
+      descriptionClassName="break-words"
+      description={organization ? `Sự kiện có phí của ${organization.name} sẽ Tạm ngừng bán.` : null}
+      confirmLabel="Thu hồi"
+      onConfirm={() => organization && onConfirm(organization)}
+      pending={pending}
+      failureTitle="Chưa thu hồi được"
+      failure={Boolean(failure) && messageOf(failure)}
+    />
   );
 }
 

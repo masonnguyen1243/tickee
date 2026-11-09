@@ -2,12 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ACCOUNT_SECURITY_PATH, ErrorCode, type Me } from '@tickee/contracts';
-import { OctagonAlert } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useId, useState } from 'react';
 import { toast } from 'sonner';
 
+import { FieldError } from '@/components/tickee/field-error';
 import { StatusBadge } from '@/components/tickee/status-badge';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
@@ -24,19 +24,6 @@ import {
   isTotpRequired,
   totpErrorMessage,
 } from '@/lib/auth/totp';
-
-function FieldError({ id, message }: { id: string; message: string | null }) {
-  return (
-    <p id={id} role="alert" className="flex min-h-0 items-start gap-1.5 text-meta text-danger-text empty:hidden">
-      {message ? (
-        <>
-          <OctagonAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          <span>{message}</span>
-        </>
-      ) : null}
-    </p>
-  );
-}
 
 /**
  * Ô mã TOTP hoặc mã khôi phục để tắt 2FA. Đặt xử lý kết quả trên `useMutation`: nếu session chưa qua lớp hai, api trả

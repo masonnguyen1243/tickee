@@ -25,12 +25,13 @@ import {
   type EventDetail,
   type TicketTypeDetail,
 } from '@tickee/contracts';
-import { OctagonAlert, Ticket } from 'lucide-react';
-import { usePathname, useRouter } from 'next/navigation';
+import { Ticket } from 'lucide-react';
 import { useId, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
 import { toast } from 'sonner';
 
+import { ConfirmDialog } from '@/components/tickee/confirm-dialog';
 import { EmptyState } from '@/components/tickee/empty-state';
+import { FieldError } from '@/components/tickee/field-error';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -38,8 +39,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError } from '@/lib/api/errors';
+import { handledElsewhere } from '@/lib/api/handled-elsewhere';
+import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
-import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
+import { useGoToLogin } from '@/lib/auth/use-go-to-login';
 import {
   createTicketType,
   deleteTicketType,
@@ -50,8 +53,6 @@ import {
   updateTicketType,
 } from '@/lib/event/api';
 
-import { handledElsewhere } from './handled-elsewhere';
-
 /*
  * Trình sửa Hạng vé (Story 2.8) dùng chung cho wizard bước 2 và tab "Hạng vé": danh sách Hạng vé (tên, giá, số suất,
  * giờ bán), "Thêm Hạng vé" / "Sửa" mở `Dialog` chứa form, "Xóa" mở `Dialog` xác nhận nêu hậu quả. Ô "Giới hạn Vé/Đơn"
@@ -59,27 +60,6 @@ import { handledElsewhere } from './handled-elsewhere';
  * (BTC chưa đủ điều kiện bán Vé có phí, xóa Hạng vé cuối của Sự kiện đã mở bán) hiện câu của server. Giờ bán luôn hiểu
  * theo giờ Việt Nam (+07:00).
  */
-
-const messageOf = (error: unknown) => (error instanceof ApiError ? error.message : 'Đã có lỗi xảy ra. Vui lòng thử lại.');
-
-function FieldError({ id, message }: { id: string; message: string | undefined }) {
-  return (
-    <p id={id} role="alert" className="flex min-h-0 items-start gap-1.5 text-meta text-danger-text empty:hidden">
-      {message ? (
-        <>
-          <OctagonAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          <span>{message}</span>
-        </>
-      ) : null}
-    </p>
-  );
-}
-
-function useGoToLogin() {
-  const router = useRouter();
-  const pathname = usePathname();
-  return () => router.replace(withReturnTo(LOGIN_PATH, pathname));
-}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Form Hạng vé
@@ -389,9 +369,6 @@ function DeleteDialog({
 }) {
   const queryClient = useQueryClient();
   const goToLogin = useGoToLogin();
-  // Giữ tên trong lúc `Dialog` đóng (hiệu ứng thoát) để nội dung không trống.
-  const [shown, setShown] = useState(target);
-  if (target && target !== shown) setShown(target);
   /** Hàng đã bị gỡ khỏi danh sách: khi đóng, focus sang `returnFocusId` thay vì nút "Xóa" đã mất (focus rơi về `body`). */
   const removed = useRef(false);
 
@@ -434,48 +411,28 @@ function DeleteDialog({
   };
 
   return (
-    <Dialog open={target !== null} onOpenChange={(open) => !open && close()}>
-      <DialogContent
-        onCloseAutoFocus={(e) => {
-          if (!removed.current) return;
-          removed.current = false;
-          e.preventDefault();
-          document.getElementById(returnFocusId)?.focus();
-        }}
-      >
-        <DialogHeader>
-          <DialogTitle className="wrap-break-word">Xóa Hạng vé {shown?.name}?</DialogTitle>
-          <DialogDescription>
-            Hạng vé và số suất của nó bị xóa khỏi Sự kiện, không khôi phục được. Chỉ xóa được Hạng vé chưa có ai mua hoặc
-            giữ chỗ.
-          </DialogDescription>
-        </DialogHeader>
-        {failure ? (
-          <StatusBanner
-            tone="danger"
-            title="Chưa xóa được"
-            description={
-              inUse ? 'Hạng vé đã có người mua hoặc đang giữ chỗ, không xóa được.' : messageOf(failure)
-            }
-          />
-        ) : null}
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="destructive"
-            className="w-full"
-            loading={remove.isPending}
-            disabled={blocked}
-            onClick={() => target && remove.mutate(target)}
-          >
-            Xóa
-          </Button>
-          <Button type="button" variant="secondary" className="w-full" onClick={close}>
-            {blocked ? 'Đóng' : 'Hủy'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDialog
+      open={target !== null}
+      onOpenChange={(open) => !open && close()}
+      onCloseAutoFocus={(e) => {
+        if (!removed.current) return;
+        removed.current = false;
+        e.preventDefault();
+        document.getElementById(returnFocusId)?.focus();
+      }}
+      titleClassName="wrap-break-word"
+      title={`Xóa Hạng vé ${target?.name}?`}
+      description="Hạng vé và số suất của nó bị xóa khỏi Sự kiện, không khôi phục được. Chỉ xóa được Hạng vé chưa có ai mua hoặc giữ chỗ."
+      confirmLabel="Xóa"
+      confirmDisabled={blocked}
+      cancelLabel={blocked ? 'Đóng' : 'Hủy'}
+      onConfirm={() => target && remove.mutate(target)}
+      pending={remove.isPending}
+      failureTitle="Chưa xóa được"
+      failure={
+        failure && (inUse ? 'Hạng vé đã có người mua hoặc đang giữ chỗ, không xóa được.' : messageOf(failure))
+      }
+    />
   );
 }
 

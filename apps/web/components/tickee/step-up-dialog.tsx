@@ -2,30 +2,17 @@
 
 import { useMutation } from '@tanstack/react-query';
 import { TOTP_DIGITS } from '@tickee/contracts';
-import { OctagonAlert } from 'lucide-react';
 import { useId, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { signOut } from '@/lib/auth/api';
 import { isTotpNotEnabled, stepUpWithRecoveryCode, stepUpWithTotp, totpErrorMessage } from '@/lib/auth/totp';
+import { useSignOut } from '@/lib/auth/use-sign-out';
 
+import { FieldError } from './field-error';
 import { OtpInput } from './otp-input';
-
-function FieldError({ id, message }: { id: string; message: string | null }) {
-  return (
-    <p id={id} role="alert" className="flex min-h-0 items-start gap-1.5 text-meta text-danger-text empty:hidden">
-      {message ? (
-        <>
-          <OctagonAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          <span>{message}</span>
-        </>
-      ) : null}
-    </p>
-  );
-}
 
 type StepUpFormProps = {
   /** Qua lớp hai bằng mã TOTP (hoặc tài khoản đã không còn bật 2FA): người gọi thử lại thao tác dở. */
@@ -65,11 +52,7 @@ function StepUpForm({ onSuccess, onRecovered, onSignedOut }: StepUpFormProps) {
     },
   });
   const recovery = useMutation({ mutationFn: stepUpWithRecoveryCode, onSuccess: onRecovered, onError });
-  const logout = useMutation({
-    mutationFn: signOut,
-    onSuccess: onSignedOut,
-    onError: () => setError('Chưa đăng xuất được. Vui lòng thử lại.'),
-  });
+  const logout = useSignOut(onSignedOut, { onError: () => setError('Chưa đăng xuất được. Vui lòng thử lại.') });
   const pending = totp.isPending || recovery.isPending || logout.isPending;
 
   const submitTotp = (code: string) => {

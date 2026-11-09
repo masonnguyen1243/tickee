@@ -15,9 +15,10 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
 import { ApiError } from '@/lib/api/errors';
-import { fetchMe, hasErrorCode, ME_QUERY_KEY, signOut } from '@/lib/auth/api';
+import { fetchMe, hasErrorCode, ME_QUERY_KEY } from '@/lib/auth/api';
 import { CONSENT_PATH, LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
 import { isTotpRequired } from '@/lib/auth/totp';
+import { useSignOut } from '@/lib/auth/use-sign-out';
 import { acceptInvitation, MEMBERSHIPS_QUERY_KEY, previewInvitation } from '@/lib/organizer/api';
 import {
   forgetInvitationToken,
@@ -118,14 +119,8 @@ export function InvitationAcceptance() {
     },
   });
 
-  const logout = useMutation({
-    mutationFn: signOut,
-    onSuccess: () => {
-      queryClient.clear();
-      // Token vẫn giữ trong tab: đăng nhập đúng email xong quay lại nhận tiếp.
-      router.replace(LOGIN_TO_ACCEPT);
-    },
-  });
+  // Token vẫn giữ trong tab: đăng nhập đúng email xong quay lại nhận tiếp.
+  const logout = useSignOut(() => router.replace(LOGIN_TO_ACCEPT));
 
   const signedOut = hasErrorCode(me.error, ErrorCode.UNAUTHENTICATED);
   const needsConsent = Boolean(me.data && !me.data.consentedAt);

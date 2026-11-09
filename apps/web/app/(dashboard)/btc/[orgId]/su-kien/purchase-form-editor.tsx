@@ -14,12 +14,13 @@ import {
   type EventForm,
   type FormQuestion,
 } from '@tickee/contracts';
-import { ArrowDown, ArrowUp, ListChecks, Lock, OctagonAlert, Plus } from 'lucide-react';
-import { usePathname, useRouter } from 'next/navigation';
+import { ArrowDown, ArrowUp, ListChecks, Lock, Plus } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 
+import { ConfirmDialog } from '@/components/tickee/confirm-dialog';
 import { EmptyState } from '@/components/tickee/empty-state';
+import { FieldError } from '@/components/tickee/field-error';
 import { PURCHASE_FORM_DEFAULT_FIELDS, PurchaseFormPreview, RequiredMark } from '@/components/tickee/purchase-form-preview';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
@@ -28,8 +29,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ApiError } from '@/lib/api/errors';
+import { handledElsewhere } from '@/lib/api/handled-elsewhere';
+import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
-import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
+import { useGoToLogin } from '@/lib/auth/use-go-to-login';
 import {
   addFormQuestion,
   deleteFormQuestion,
@@ -39,34 +42,11 @@ import {
   updateFormQuestion,
 } from '@/lib/event/api';
 
-import { handledElsewhere } from './handled-elsewhere';
-
 /*
  * Trình sửa form mua vé (Story 2.9) dùng chung cho wizard bước 3 và tab "Form mua": ba trường mặc định chỉ đọc, danh
  * sách câu hỏi riêng (thêm/sửa qua `Dialog`, xóa qua `Dialog` nêu hậu quả, sắp thứ tự bằng nút "Lên"/"Xuống") và phần
  * xem trước giống form Người mua sẽ thấy. Mỗi `Dialog` lưu ngay qua API, nên "Tiếp" ở bước 3 không cần lưu gì thêm.
  */
-
-const messageOf = (error: unknown) => (error instanceof ApiError ? error.message : 'Đã có lỗi xảy ra. Vui lòng thử lại.');
-
-function FieldError({ id, message }: { id: string; message: string | undefined }) {
-  return (
-    <p id={id} role="alert" className="flex min-h-0 items-start gap-1.5 text-meta text-danger-text empty:hidden">
-      {message ? (
-        <>
-          <OctagonAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          <span>{message}</span>
-        </>
-      ) : null}
-    </p>
-  );
-}
-
-function useGoToLogin() {
-  const router = useRouter();
-  const pathname = usePathname();
-  return () => router.replace(withReturnTo(LOGIN_PATH, pathname));
-}
 
 function serverIssuePaths(error: ApiError): string[] {
   const issues = (error.details as { issues?: { path?: unknown }[] } | null)?.issues;
@@ -484,9 +464,6 @@ function DeleteDialog({
 }) {
   const queryClient = useQueryClient();
   const goToLogin = useGoToLogin();
-  // Giữ nhãn trong lúc `Dialog` đóng (hiệu ứng thoát) để nội dung không trống.
-  const [shown, setShown] = useState(target);
-  if (target && target !== shown) setShown(target);
   /** Hàng đã bị gỡ khỏi danh sách: khi đóng, focus sang `returnFocusId` thay vì nút "Xóa" đã mất (focus rơi về `body`). */
   const removed = useRef(false);
 
@@ -524,39 +501,24 @@ function DeleteDialog({
   };
 
   return (
-    <Dialog open={target !== null} onOpenChange={(open) => !open && close()}>
-      <DialogContent
-        onCloseAutoFocus={(e) => {
-          if (!removed.current) return;
-          removed.current = false;
-          e.preventDefault();
-          document.getElementById(returnFocusId)?.focus();
-        }}
-      >
-        <DialogHeader>
-          <DialogTitle className="wrap-break-word">Xóa câu hỏi {shown?.label}?</DialogTitle>
-          <DialogDescription>
-            Câu hỏi bị xóa khỏi form mua, Người mua đặt vé sau đây không còn thấy câu này. Đơn đã đặt vẫn giữ câu trả lời
-            cũ.
-          </DialogDescription>
-        </DialogHeader>
-        {failure ? <StatusBanner tone="danger" title="Chưa xóa được" description={messageOf(failure)} /> : null}
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="destructive"
-            className="w-full"
-            loading={remove.isPending}
-            onClick={() => target && remove.mutate(target)}
-          >
-            Xóa
-          </Button>
-          <Button type="button" variant="secondary" className="w-full" onClick={close}>
-            Hủy
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDialog
+      open={target !== null}
+      onOpenChange={(open) => !open && close()}
+      onCloseAutoFocus={(e) => {
+        if (!removed.current) return;
+        removed.current = false;
+        e.preventDefault();
+        document.getElementById(returnFocusId)?.focus();
+      }}
+      titleClassName="wrap-break-word"
+      title={`Xóa câu hỏi ${target?.label}?`}
+      description="Câu hỏi bị xóa khỏi form mua, Người mua đặt vé sau đây không còn thấy câu này. Đơn đã đặt vẫn giữ câu trả lời cũ."
+      confirmLabel="Xóa"
+      onConfirm={() => target && remove.mutate(target)}
+      pending={remove.isPending}
+      failureTitle="Chưa xóa được"
+      failure={failure && messageOf(failure)}
+    />
   );
 }
 

@@ -2,11 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ErrorCode, TOTP_DIGITS, type TotpEnrollResponse } from '@tickee/contracts';
-import { Copy, Download, OctagonAlert } from 'lucide-react';
+import { Copy, Download } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import QRCode from 'qrcode';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 
+import { FieldError } from '@/components/tickee/field-error';
 import { OtpInput } from '@/components/tickee/otp-input';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
@@ -29,19 +30,6 @@ import { copyWithToast } from '@/lib/clipboard';
 /** 409 `VALIDATION_FAILED`: đã đăng ký (lúc bắt đầu) hoặc phiên đăng ký đã hết (lúc xác nhận). */
 const isConflict = (error: unknown) =>
   error instanceof ApiError && error.code === ErrorCode.VALIDATION_FAILED && error.status === 409;
-
-function ErrorText({ id, message }: { id: string; message: string | null }) {
-  return (
-    <p id={id} role="alert" className="flex min-h-0 items-start gap-1.5 text-meta text-danger-text empty:hidden">
-      {message ? (
-        <>
-          <OctagonAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          <span>{message}</span>
-        </>
-      ) : null}
-    </p>
-  );
-}
 
 function QrImage({ uri }: { uri: string }) {
   const [src, setSrc] = useState<string | null>(null);
@@ -153,7 +141,7 @@ function ScanStep({
           onChange={setPartial}
           onComplete={submit}
         />
-        <ErrorText id={errorId} message={error} />
+        <FieldError id={errorId} message={error} />
         {isConflict(confirm.error) ? (
           <StatusBanner
             tone="warning"

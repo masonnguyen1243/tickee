@@ -9,8 +9,9 @@ import { useEffect } from 'react';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
 import { ApiError } from '@/lib/api/errors';
-import { fetchMe, giveConsent, hasErrorCode, ME_QUERY_KEY, signOut } from '@/lib/auth/api';
+import { fetchMe, giveConsent, hasErrorCode, ME_QUERY_KEY } from '@/lib/auth/api';
 import { LOGIN_PATH, withNotice, withReturnTo } from '@/lib/auth/return-to';
+import { useSignOut } from '@/lib/auth/use-sign-out';
 import type { NoticeCode } from '@/lib/notices';
 
 const DECLINED: NoticeCode = 'consent-declined';
@@ -32,13 +33,7 @@ export function ConsentForm({ returnTo }: { returnTo: string }) {
     },
   });
 
-  const decline = useMutation({
-    mutationFn: signOut,
-    onSuccess: () => {
-      queryClient.clear();
-      router.replace(withNotice(returnTo, DECLINED));
-    },
-  });
+  const decline = useSignOut(() => router.replace(withNotice(returnTo, DECLINED)));
 
   const failure = accept.error ?? decline.error;
   const busy = accept.isPending || accept.isSuccess || decline.isPending || decline.isSuccess;

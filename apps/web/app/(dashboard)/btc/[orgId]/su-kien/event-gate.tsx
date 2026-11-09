@@ -11,11 +11,10 @@ import { EmptyState } from '@/components/tickee/empty-state';
 import { PageHeading } from '@/components/tickee/page-heading';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
-import { ApiError } from '@/lib/api/errors';
+import { handledElsewhere } from '@/lib/api/handled-elsewhere';
+import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
 import { eventQueryKey, fetchEvent } from '@/lib/event/api';
-
-import { handledElsewhere } from './handled-elsewhere';
 
 function PageSkeleton() {
   return (
@@ -64,7 +63,7 @@ export function EventGate({ eventId, children }: { eventId: string; children: (e
       <StatusBanner
         tone="danger"
         title="Chưa tải được Sự kiện"
-        description={event.error instanceof ApiError ? event.error.message : 'Đã có lỗi xảy ra. Vui lòng thử lại.'}
+        description={messageOf(event.error)}
         action={
           <Button type="button" variant="link" size="sm" onClick={() => void event.refetch()}>
             Thử lại
