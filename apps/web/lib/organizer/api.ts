@@ -67,6 +67,16 @@ export const removeMember = (orgId: string, memberId: string) =>
     init: { method: 'DELETE' },
   });
 
+/**
+ * Chuyển quyền Owner cho Admin `memberId` (id dòng thành viên; Story 2.14); 204 No Content. Cần lần xác nhận lại
+ * (`reauthToken`): gọi qua `withReauth`.
+ */
+export const transferOwnership = (orgId: string, memberId: string, reauthToken?: string) =>
+  apiRequest(`${orgPath(orgId)}/members/${encodeURIComponent(memberId)}/ownership-transfer`, {
+    schema: z.undefined(),
+    init: withReauthHeader({ method: 'POST' }, reauthToken),
+  });
+
 /** Lời mời Admin: token luôn đi trong body (không bao giờ trong URL của request). */
 export const previewInvitation = (token: string) =>
   apiRequest('/org-invitations/preview', { schema: InvitationPreview, init: json('POST', { token }) });

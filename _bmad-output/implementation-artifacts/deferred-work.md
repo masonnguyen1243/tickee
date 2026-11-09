@@ -299,3 +299,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-13-b-doi-key-tingee.md`
   summary: Các route nhận key Tingee (`POST …/payout-account/credential` của BTC chưa liên kết, `POST …/credential/replacement/preview` sau một lần xác nhận lại) không giới hạn tần suất, nên dùng được để dò key Tingee và đốt hạn mức gọi Tingee; cần giới hạn theo user/BTC trước `listAccounts`.
   evidence: Review 2.13-b #3 (BH, EC). Không có throttle nào trong `modules/organizer`, `modules/tingee`, `platform/http`; `connect` cho dò như vậy từ 2.6, `preview` lặp lại cùng mức phơi bày trong 5 phút của một lần xác nhận.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-14-chuyen-quyen-owner.md`
+  summary: Job email gửi nhiều người (báo chuyển quyền Owner, cảnh báo đổi tài khoản nhận tiền mặc định) gửi lại cho mọi người mỗi lần retry khi chỉ một địa chỉ lỗi.
+  evidence: `notifyOwnershipTransferred` và `notifyDefaultPayoutChanged` ném lỗi khi có một email lỗi, pg-boss retry tới 8 lần và gửi lại cả danh sách; cần nhật ký đã gửi theo job hoặc tách job theo người nhận.

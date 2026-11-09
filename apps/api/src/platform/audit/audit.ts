@@ -20,6 +20,11 @@ export type AuditAction =
   | 'member.joined'
   /** Owner xóa một Admin khỏi BTC (đối tượng: tài khoản bị xóa). */
   | 'member.removed'
+  /**
+   * Owner chuyển quyền Owner cho một Admin (Story 2.14): Owner cũ thành Admin, Admin được chọn thành Owner (đối tượng:
+   * tài khoản Owner mới; actor: Owner cũ).
+   */
+  | 'member.ownership_transferred'
   /** CLI cấp cờ Quản trị Tingee (actor: tài khoản `--by`; đối tượng: tài khoản được cấp; không thuộc BTC nào). */
   | 'platform_admin.granted'
   /** CLI thu cờ Quản trị Tingee (actor: tài khoản `--by`; đối tượng: tài khoản bị thu). */

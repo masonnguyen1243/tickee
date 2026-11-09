@@ -304,3 +304,181 @@ test('mở BTC lần đầu đã không có quyền: giữ empty-state, không c
   await expect(page.getByText('Bạn không có quyền xem BTC này.')).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// Story 2.14: chuyển quyền Owner
+// ---------------------------------------------------------------------------------------------------------------
+
+const REAUTH_CODE = '123456';
+const TRANSFER_PATH = `/orgs/${ORG_ID}/members/${ADMIN_MEMBER_ID}/ownership-transfer`;
+const transferSection = (page: Page) =>
+  page.getByRole('region', { name: 'Chuyển quyền Owner' });
+const transferDialog = (page: Page) => page.getByRole('dialog', { name: 'Chuyển quyền Owner?' });
+const reauthDialog = (page: Page) => page.getByRole('dialog', { name: 'Xác nhận để tiếp tục' });
+
+/**
+ * Trang Thành viên với API giả cho luồng chuyển quyền: 2FA đã bật (xác nhận lại bằng TOTP, mã đúng `123456`), POST
+ * chuyển quyền đòi header `x-reauth-token` (thiếu hay đã dùng → `REAUTH_REQUIRED`). Chuyển xong thì vai của người xem
+ * thành `admin` ở mọi API. `transferReply` thay phản hồi sau khi đã qua xác nhận lại.
+ */
+async function openForTransfer(
+  page: Page,
+  {
+    withAdmin = true,
+    transferReply,
+  }: { withAdmin?: boolean; transferReply?: (demote: () => void) => Reply | null } = {},
+) {
+  const state = initialState();
+  if (!withAdmin) state.members = state.members.filter((m) => m.role === 'owner');
+  let role: 'owner' | 'admin' = 'owner';
+  const issued = new Set<string>();
+  const transferHeaders: (string | null)[] = [];
+  let grants = 0;
+  await mockIdentityApi(page, {
+    'GET /identity/me': () => me(CONSENTED, true),
+    'POST /identity/reauth': (request) => {
+      if ((request.postDataJSON() as { code: string }).code !== REAUTH_CODE) {
+        return apiError(400, 'TOTP_INVALID', { remainingAttempts: 4 });
+      }
+      grants += 1;
+      const reauthToken = `tok-${grants}`;
+      issued.add(reauthToken);
+      return { status: 200, body: { reauthToken, expiresAt: '2026-11-09T03:09:00.000Z' } };
+    },
+  });
+  const calls = await mockOrganizerApi(page, {
+    [`GET /orgs/${ORG_ID}`]: () => organization({ role }),
+    'GET /me/memberships': () => ({ status: 200, body: [{ organizationId: ORG_ID, name: ORG_NAME, role }] }),
+    [`GET /orgs/${ORG_ID}/members`]: () =>
+      role === 'owner' ? { status: 200, body: state } : apiError(403, 'FORBIDDEN_ROLE'),
+    [`POST ${TRANSFER_PATH}`]: (request) => {
+      const token = request.headers()['x-reauth-token'] ?? null;
+      transferHeaders.push(token);
+      if (!token || !issued.has(token)) return apiError(403, 'REAUTH_REQUIRED', { method: 'totp' });
+      issued.delete(token);
+      const custom = transferReply?.(() => {
+        role = 'admin';
+      });
+      if (custom) return custom;
+      role = 'admin';
+      state.members = state.members.map((m) => ({ ...m, role: m.id === ADMIN_MEMBER_ID ? 'owner' : 'admin' }));
+      return { status: 204 };
+    },
+  });
+  await page.goto(MEMBERS_PATH);
+  await expect(page.getByRole('heading', { name: 'Thành viên', level: 1 })).toBeVisible();
+  return { calls, state, transferHeaders };
+}
+
+test('chuyển quyền: BTC chưa có Admin → nút tắt kèm "Mời một Admin trước rồi chuyển quyền."', async ({ page }) => {
+  await openForTransfer(page, { withAdmin: false });
+  const section = transferSection(page);
+  await expect(section.getByRole('button', { name: 'Chuyển quyền Owner' })).toBeDisabled();
+  await expect(section.getByText('Mời một Admin trước rồi chuyển quyền.')).toBeVisible();
+  await expect(section.getByRole('combobox')).toHaveCount(0);
+});
+
+test('chuyển quyền: gõ sai tên BTC thì không gửi được; đúng tên → xác nhận lại (TOTP) → 204, toast, về trang BTC, mất mục chỉ Owner', async ({
+  page,
+}) => {
+  const { calls, transferHeaders } = await openForTransfer(page);
+  const transfers = () => callsTo(calls, 'POST', TRANSFER_PATH);
+  const section = transferSection(page);
+  await expect(section.getByRole('combobox', { name: 'Admin nhận quyền' })).toHaveValue(ADMIN_MEMBER_ID);
+  await section.getByRole('button', { name: 'Chuyển quyền Owner' }).click();
+
+  const dialog = transferDialog(page);
+  await expect(dialog).toContainText(
+    'Trần Bình sẽ là Owner, quản lý tài khoản nhận tiền và Token. Bạn sẽ thành Admin.',
+  );
+  const confirm = dialog.getByRole('button', { name: 'Chuyển quyền', exact: true });
+  const nameInput = dialog.getByRole('textbox', { name: 'Gõ tên BTC để xác nhận' });
+  await expect(confirm).toBeDisabled();
+  await expect(dialog.getByText(`Gõ đúng "${ORG_NAME}" để bật nút Chuyển quyền.`)).toBeVisible();
+
+  // Sai tên (kể cả khác hoa thường): nút vẫn tắt, Enter không gửi.
+  await nameInput.fill('clb cờ vua quận 3');
+  await expect(confirm).toBeDisabled();
+  await nameInput.press('Enter');
+  await nameInput.fill('CLB Cờ Vua');
+  await expect(confirm).toBeDisabled();
+  expect(transfers()).toHaveLength(0);
+
+  // Đúng tên (khoảng trắng đầu/cuối bỏ qua).
+  await nameInput.fill(`  ${ORG_NAME} `);
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+
+  // Api đòi xác nhận lại: Dialog chuyển quyền đóng, dialog xác nhận mở; mã đúng → tự gửi lại kèm lần xác nhận.
+  await expect(reauthDialog(page)).toBeVisible();
+  await expect(dialog).toBeHidden();
+  await reauthDialog(page).locator('[data-slot="otp-input"] input').first().fill(REAUTH_CODE);
+  await expect(reauthDialog(page)).toBeHidden();
+
+  await expect(page.getByText('Đã chuyển quyền Owner cho Trần Bình.')).toBeVisible();
+  await page.waitForURL((url) => url.pathname === base);
+  expect(transferHeaders).toEqual([null, 'tok-1']);
+  expect(transfers()).toHaveLength(2);
+
+  // Cache vai đã làm mới (chưa tải lại trang): Sheet "Thêm" không còn mục chỉ Owner.
+  await page.locator('[data-slot="bottom-tab-bar"]').getByRole('button', { name: 'Thêm' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Thêm' });
+  await expect(sheet.getByRole('link', { name: 'Token' })).toBeVisible();
+  await expect(sheet.getByRole('link', { name: 'Thành viên' })).toHaveCount(0);
+  await expect(sheet.getByRole('link', { name: 'Tài khoản nhận tiền' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  // Owner cũ (nay là Admin) mở lại trang Thành viên: empty-state, mục chỉ Owner bị ẩn.
+  await page.goto(MEMBERS_PATH);
+  await expect(page.getByText('Chỉ Owner xem được mục này.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Chuyển quyền Owner' })).toHaveCount(0);
+});
+
+test('chuyển quyền: Admin đã bị xóa giữa chừng → 404 → toast, làm mới danh sách; không rời trang', async ({ page }) => {
+  let gone = false;
+  const { calls, state } = await openForTransfer(page, {
+    transferReply: () => {
+      gone = true;
+      state.members = state.members.filter((m) => m.id !== ADMIN_MEMBER_ID);
+      return apiError(404, 'NOT_FOUND');
+    },
+  });
+  await transferSection(page).getByRole('button', { name: 'Chuyển quyền Owner' }).click();
+  await transferDialog(page).getByRole('textbox', { name: 'Gõ tên BTC để xác nhận' }).fill(ORG_NAME);
+  await transferDialog(page).getByRole('button', { name: 'Chuyển quyền', exact: true }).click();
+  await reauthDialog(page).locator('[data-slot="otp-input"] input').first().fill(REAUTH_CODE);
+
+  await expect(page.getByText('Thành viên này không còn là Admin của BTC.')).toBeVisible();
+  expect(gone).toBe(true);
+  await expect(memberRow(page, ADMIN_EMAIL)).toHaveCount(0);
+  await expect(transferSection(page).getByText('Mời một Admin trước rồi chuyển quyền.')).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe(MEMBERS_PATH);
+  expect(callsTo(calls, 'GET', `/orgs/${ORG_ID}/members`).length).toBeGreaterThanOrEqual(2);
+});
+
+test('chuyển quyền: đã chuyển ở tab khác → 403 FORBIDDEN_ROLE → toast, Dialog đóng, không banner lỗi, "Chỉ Owner xem được mục này."', async ({
+  page,
+}) => {
+  await openForTransfer(page, {
+    transferReply: (demote) => {
+      demote();
+      return apiError(403, 'FORBIDDEN_ROLE');
+    },
+  });
+  await transferSection(page).getByRole('button', { name: 'Chuyển quyền Owner' }).click();
+  await transferDialog(page).getByRole('textbox', { name: 'Gõ tên BTC để xác nhận' }).fill(ORG_NAME);
+  await transferDialog(page).getByRole('button', { name: 'Chuyển quyền', exact: true }).click();
+  await reauthDialog(page).locator('[data-slot="otp-input"] input').first().fill(REAUTH_CODE);
+
+  await expect(page.getByText('Bạn không còn là Owner của BTC này.')).toBeVisible();
+  await expect(transferDialog(page)).toHaveCount(0);
+  await expect(page.getByText('Chưa chuyển quyền được')).toHaveCount(0);
+  await expect(page.getByText('Chỉ Owner xem được mục này.')).toBeVisible();
+});
+
+test('Admin mở trang Thành viên: "Chỉ Owner xem được mục này.", không có mục "Chuyển quyền Owner"', async ({ page }) => {
+  await openAsAdmin(page, []);
+  await page.goto(MEMBERS_PATH);
+  await expect(page.getByText('Chỉ Owner xem được mục này.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Chuyển quyền Owner' })).toHaveCount(0);
+});

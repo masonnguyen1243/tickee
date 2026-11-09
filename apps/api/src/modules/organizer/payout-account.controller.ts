@@ -12,17 +12,8 @@ import {
 } from '@tickee/contracts';
 import { Access, RequirePermission, type AccessContext } from '../../platform/access/index.js';
 import { parseRequest } from '../../platform/http/index.js';
-import type { ReauthProof } from '../identity/index.js';
+import { reauthProof, type SessionRequest } from '../identity/index.js';
 import { PayoutAccountService } from './payout-account.service.js';
-
-/** Request đã qua `SessionGuard` (route không công khai nên luôn có session). */
-type SessionRequest = { session: { session: { id: string } } };
-
-/** Lần xác nhận lại mà request mang theo (header `REAUTH_HEADER`) cho đúng session đang gọi. */
-const reauthProof = (req: SessionRequest, token: string | undefined): ReauthProof => ({
-  sessionId: req.session.session.id,
-  token,
-});
 
 /**
  * Tài khoản nhận tiền của một BTC (Story 2.6): kết nối key Tingee, thêm, hủy liên kết và đặt mặc định tài khoản. Chỉ

@@ -6,13 +6,14 @@ import {
   InviteAdminRequest,
   ORGANIZATION_INVITATION_DAILY_LIMIT,
   ORGANIZATION_INVITATION_TTL_DAYS,
+  organizationDashboardPath,
   Role,
   type OrganizationInvitation,
   type OrganizationMember,
 } from '@tickee/contracts';
 import { OctagonAlert } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
-import { useId, useState, type FormEvent } from 'react';
+import { useId, useRef, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 
 import { useCurrentOrganization } from '@/components/tickee/current-organization';
@@ -25,9 +26,19 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ApiError } from '@/lib/api/errors';
 import { hasErrorCode } from '@/lib/auth/api';
+import { isReauthRequired, withReauth } from '@/lib/auth/reauth';
 import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
 import { isTotpRequired } from '@/lib/auth/totp';
-import { fetchMembers, inviteAdmin, membersQueryKey, removeMember, revokeInvitation } from '@/lib/organizer/api';
+import {
+  fetchMembers,
+  inviteAdmin,
+  MEMBERSHIPS_QUERY_KEY,
+  membersQueryKey,
+  organizationQueryKey,
+  removeMember,
+  revokeInvitation,
+  transferOwnership,
+} from '@/lib/organizer/api';
 import { roleLabel } from '@/lib/organizer/nav';
 
 const EXPIRES_FORMAT = new Intl.DateTimeFormat('vi-VN', {
@@ -257,6 +268,230 @@ function RemoveDialog({
   );
 }
 
+/** Tên hiển thị của thành viên: tên, chưa có thì email. */
+const memberLabel = (member: OrganizationMember) => member.name.trim() || member.email;
+
+/**
+ * `Dialog` chuyển quyền Owner (Story 2.14): nêu hậu quả, Owner gõ đúng tên BTC (so khớp chính xác sau trim, chỉ kiểm ở
+ * web) mới bật nút. Gửi qua `withReauth`: api trả `REAUTH_REQUIRED` thì `Dialog` này đóng, dialog "Xác nhận để tiếp tục"
+ * mở và thao tác tự gửi lại sau khi xác nhận. Xong → toast, làm mới cache vai trò và về trang tổng quan BTC.
+ */
+function TransferOwnershipDialog({
+  orgId,
+  member,
+  organizationName,
+  onClose,
+}: {
+  orgId: string;
+  member: OrganizationMember | null;
+  organizationName: string;
+  onClose: () => void;
+}) {
+  const ids = useId();
+  const inputId = `${ids}-org-name`;
+  const hintId = `${ids}-org-name-hint`;
+  const queryClient = useQueryClient();
+  const router = useRouter();
+  const goToLogin = useGoToLogin();
+  const [typed, setTyped] = useState('');
+  /** Lần bấm hiện tại đã qua dialog xác nhận lại (`Dialog` này đã đóng): lỗi báo bằng toast thay vì banner. */
+  const prompted = useRef(false);
+
+  const refreshRoles = () => {
+    void queryClient.invalidateQueries({ queryKey: organizationQueryKey(orgId) });
+    void queryClient.invalidateQueries({ queryKey: MEMBERSHIPS_QUERY_KEY });
+    void queryClient.invalidateQueries({ queryKey: membersQueryKey(orgId) });
+  };
+
+  const transfer = useMutation({
+    mutationFn: (target: OrganizationMember) => {
+      prompted.current = false;
+      return withReauth((reauthToken) => transferOwnership(orgId, target.id, reauthToken), {
+        onPrompt: () => {
+          prompted.current = true;
+          setTyped('');
+          onClose();
+        },
+      });
+    },
+    onSuccess: (_data, target) => {
+      onClose();
+      setTyped('');
+      toast.success(`Đã chuyển quyền Owner cho ${memberLabel(target)}.`);
+      refreshRoles();
+      router.push(organizationDashboardPath(orgId));
+    },
+    onError: (error) => {
+      // Đóng dialog xác nhận lại: không chuyển gì, không báo lỗi.
+      if (isReauthRequired(error)) return;
+      if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
+      else if (hasErrorCode(error, ErrorCode.NOT_FOUND)) {
+        onClose();
+        toast.info('Thành viên này không còn là Admin của BTC.');
+        void queryClient.invalidateQueries({ queryKey: membersQueryKey(orgId) });
+      } else if (hasErrorCode(error, ErrorCode.FORBIDDEN_ROLE)) {
+        // Bạn không còn là Owner (vd. đã chuyển ở tab khác): làm mới vai, `OwnerOnly` hiện empty-state.
+        onClose();
+        toast.info('Bạn không còn là Owner của BTC này.');
+        refreshRoles();
+      } else if (prompted.current && !handledElsewhere(error)) {
+        toast.error(`Chưa chuyển quyền được. ${messageOf(error)}`);
+      }
+    },
+  });
+  const failure =
+    transfer.error &&
+    !prompted.current &&
+    !handledElsewhere(transfer.error) &&
+    !isReauthRequired(transfer.error) &&
+    !hasErrorCode(transfer.error, ErrorCode.NOT_FOUND) &&
+    !hasErrorCode(transfer.error, ErrorCode.FORBIDDEN_ROLE)
+      ? transfer.error
+      : null;
+
+  const matches = typed.trim().normalize('NFC') === organizationName.trim().normalize('NFC');
+
+  const close = () => {
+    if (transfer.isPending) return;
+    transfer.reset();
+    setTyped('');
+    onClose();
+  };
+
+  return (
+    <Dialog open={member !== null} onOpenChange={(open) => !open && close()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Chuyển quyền Owner?</DialogTitle>
+          <DialogDescription className="break-words">
+            {member
+              ? `${memberLabel(member)} sẽ là Owner, quản lý tài khoản nhận tiền và Token. Bạn sẽ thành Admin.`
+              : null}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          noValidate
+          className="flex flex-col gap-stack"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (member && matches && !transfer.isPending) transfer.mutate(member);
+          }}
+        >
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={inputId}>Gõ tên BTC để xác nhận</Label>
+            <Input
+              id={inputId}
+              name="organizationName"
+              autoComplete="off"
+              spellCheck={false}
+              value={typed}
+              onChange={(event) => setTyped(event.target.value)}
+              aria-describedby={hintId}
+            />
+            <p id={hintId} className="text-meta text-muted-foreground break-words">
+              {matches ? 'Tên BTC đã khớp.' : `Gõ đúng "${organizationName}" để bật nút Chuyển quyền.`}
+            </p>
+          </div>
+          {failure ? (
+            <StatusBanner tone="danger" title="Chưa chuyển quyền được" description={messageOf(failure)} />
+          ) : null}
+          <DialogFooter>
+            <Button
+              type="submit"
+              variant="destructive"
+              className="w-full"
+              disabled={!matches}
+              loading={transfer.isPending}
+            >
+              Chuyển quyền
+            </Button>
+            <Button type="button" variant="secondary" className="w-full" onClick={close}>
+              Hủy
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Mục "Chuyển quyền Owner" (chỉ Owner thấy trang này): chọn một Admin rồi bấm nút mở `Dialog` xác nhận. Chưa có Admin
+ * thì nút tắt kèm hướng dẫn.
+ */
+function TransferOwnershipSection({
+  orgId,
+  organizationName,
+  members,
+}: {
+  orgId: string;
+  organizationName: string;
+  members: OrganizationMember[];
+}) {
+  const ids = useId();
+  const titleId = `${ids}-title`;
+  const selectId = `${ids}-admin`;
+  const hintId = `${ids}-hint`;
+  const admins = members.filter((m) => m.role === Role.ADMIN);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [target, setTarget] = useState<OrganizationMember | null>(null);
+  // Mặc định Admin đầu tiên; Admin đã chọn rời BTC thì quay về Admin đầu tiên.
+  const selected = admins.find((m) => m.id === selectedId) ?? admins[0] ?? null;
+
+  return (
+    <section aria-labelledby={titleId} className="flex flex-col gap-stack rounded-lg bg-card p-card-padding shadow-card">
+      <h2 id={titleId} className="text-title">
+        Chuyển quyền Owner
+      </h2>
+      <p className="text-meta text-muted-foreground">
+        Owner mới quản lý tài khoản nhận tiền, Token và thành viên. Sự kiện, Đơn và tài khoản nhận tiền vẫn thuộc BTC. Bạn
+        sẽ thành Admin.
+      </p>
+      {admins.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={selectId}>Admin nhận quyền</Label>
+          <select
+            id={selectId}
+            name="admin"
+            value={selected?.id ?? ''}
+            onChange={(event) => setSelectedId(event.target.value)}
+            className="h-control-height w-full min-w-0 rounded-md border border-transparent bg-muted px-3 text-foreground focus:border-ring"
+          >
+            {admins.map((admin) => (
+              <option key={admin.id} value={admin.id}>
+                {admin.name.trim() ? `${admin.name.trim()} (${admin.email})` : admin.email}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+      <div className="flex flex-col gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          className="self-start"
+          disabled={!selected}
+          aria-describedby={selected ? undefined : hintId}
+          onClick={() => selected && setTarget(selected)}
+        >
+          Chuyển quyền Owner
+        </Button>
+        {selected ? null : (
+          <p id={hintId} className="text-meta text-muted-foreground">
+            Mời một Admin trước rồi chuyển quyền.
+          </p>
+        )}
+      </div>
+      <TransferOwnershipDialog
+        orgId={orgId}
+        member={target}
+        organizationName={organizationName}
+        onClose={() => setTarget(null)}
+      />
+    </section>
+  );
+}
+
 function MemberRow({ member, onRemove }: { member: OrganizationMember; onRemove: (member: OrganizationMember) => void }) {
   return (
     <li className="flex items-center gap-3 py-3" data-slot="member-row">
@@ -327,8 +562,8 @@ function ListSkeleton() {
 }
 
 /**
- * Trang Thành viên (chỉ Owner, FR-2/FR-4): mời Admin bằng email, danh sách thành viên (xóa Admin qua `Dialog`) và lời
- * mời đang chờ (hạn hoặc "Đã hết hạn", "Thu hồi").
+ * Trang Thành viên (chỉ Owner, FR-2/FR-4): mời Admin bằng email, danh sách thành viên (xóa Admin qua `Dialog`), lời
+ * mời đang chờ (hạn hoặc "Đã hết hạn", "Thu hồi") và chuyển quyền Owner cho một Admin (Story 2.14).
  */
 export function MembersManager() {
   const organization = useCurrentOrganization();
@@ -391,6 +626,7 @@ export function MembersManager() {
             </ul>
           )}
         </section>
+        <TransferOwnershipSection orgId={orgId} organizationName={organization.name} members={members} />
       </>
     );
   } else if (list.isError && !handledElsewhere(list.error)) {

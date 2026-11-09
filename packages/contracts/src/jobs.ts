@@ -23,5 +23,13 @@ export const JobQueue = {
   ORGANIZER_NOTIFY_DEFAULT_PAYOUT_CHANGED: 'organizer.notify-default-payout-changed',
   /** Dead-letter của `ORGANIZER_NOTIFY_DEFAULT_PAYOUT_CHANGED`: job hết lượt retry được chép sang đây. */
   ORGANIZER_NOTIFY_DEFAULT_PAYOUT_CHANGED_DEAD_LETTER: 'organizer.notify-default-payout-changed.dead-letter',
+  /**
+   * Email báo quyền Owner của BTC vừa chuyển, gửi Owner cũ, Owner mới và mọi Admin khác (`organizer`, Story 2.14).
+   * Payload chỉ id (`{ organizationId, previousOwnerUserId, newOwnerUserId }`); worker đọc tên và email lúc gửi.
+   * Enqueue cùng `tx` của thay đổi.
+   */
+  ORGANIZER_NOTIFY_OWNERSHIP_TRANSFERRED: 'organizer.notify-ownership-transferred',
+  /** Dead-letter của `ORGANIZER_NOTIFY_OWNERSHIP_TRANSFERRED`: job hết lượt retry được chép sang đây. */
+  ORGANIZER_NOTIFY_OWNERSHIP_TRANSFERRED_DEAD_LETTER: 'organizer.notify-ownership-transferred.dead-letter',
 } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];
