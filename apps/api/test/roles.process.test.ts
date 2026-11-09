@@ -184,9 +184,13 @@ describe('CLI admin:grant / admin:revoke (tiến trình thật, role tickee_migr
   const cli = (args: readonly string[], env: Record<string, string> = { MIGRATION_DATABASE_URL: migrationDatabaseUrl() }) =>
     run(env, ADMIN_CLI, args);
 
-  async function createUser(): Promise<{ id: string; email: string }> {
+  /** Tài khoản mới; mặc định đã bật 2FA (`admin:grant` chỉ cấp cho tài khoản đã bật, AD-26). */
+  async function createUser({ twoFactor = true } = {}): Promise<{ id: string; email: string }> {
     const email = `cli-${randomUUID()}@vidu.vn`;
-    const { rows } = await db.pool.query<{ id: string }>('INSERT INTO users (email) VALUES ($1) RETURNING id', [email]);
+    const { rows } = await db.pool.query<{ id: string }>(
+      'INSERT INTO users (email, two_factor_enabled) VALUES ($1, $2) RETURNING id',
+      [email, twoFactor],
+    );
     return { id: rows[0]!.id, email };
   }
 
@@ -268,6 +272,28 @@ describe('CLI admin:grant / admin:revoke (tiến trình thật, role tickee_migr
     expect(output.trim()).not.toBe('');
     expect(await flagOf(user.id)).toBe(false);
     expect(await audits(user.id)).toEqual([]);
+  });
+
+  it('grant cho tài khoản chưa bật 2FA → thoát ≠ 0, báo cần bật 2FA, không đổi cờ, không audit; revoke vẫn chạy', async () => {
+    const operator = await createUser();
+    const target = await createUser({ twoFactor: false });
+    const refused = await cli(['grant', target.email, '--by', operator.email]);
+    expect(refused.code, refused.output).not.toBe(0);
+    expect(refused.output).toMatch(/chưa bật xác thực hai lớp/i);
+    expect(await flagOf(target.id)).toBe(false);
+    expect(await audits(target.id)).toEqual([]);
+
+    // Người chạy lệnh không cần bật 2FA; chỉ tài khoản được cấp.
+    const plainOperator = await createUser({ twoFactor: false });
+    const ok = await createUser();
+    expect((await cli(['grant', ok.email, '--by', plainOperator.email])).code).toBe(0);
+    expect(await flagOf(ok.id)).toBe(true);
+
+    // revoke không đổi: thu được cả khi target đã tắt 2FA.
+    await db.pool.query('UPDATE users SET two_factor_enabled = false WHERE id = $1', [ok.id]);
+    const revoked = await cli(['revoke', ok.email, '--by', operator.email]);
+    expect(revoked.code, revoked.output).toBe(0);
+    expect(await flagOf(ok.id)).toBe(false);
   });
 
   it('thiếu MIGRATION_DATABASE_URL hoặc DB không tới được → thoát ≠ 0, không in mật khẩu', async () => {

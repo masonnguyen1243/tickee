@@ -36,6 +36,18 @@ export function buildRecoveryCodeUsedEmail(): Omit<EmailMessage, 'to'> {
   );
 }
 
+/** Email báo tài khoản vừa bật xác thực hai lớp (tiếng Việt). */
+export function buildTotpEnabledEmail(): Omit<EmailMessage, 'to'> {
+  return securityEmail(
+    'Tài khoản Tickee của bạn vừa bật xác thực hai lớp',
+    [
+      'Xác thực hai lớp của tài khoản Tickee của bạn vừa được bật.',
+      'Từ giờ khi đăng nhập và trước các thao tác nhạy cảm, bạn sẽ nhập mã trong ứng dụng xác thực. Hãy cất bộ mã khôi phục ở nơi an toàn.',
+    ],
+    'Nếu không phải bạn, hãy đăng xuất khỏi mọi thiết bị và liên hệ hỗ trợ Tickee ngay.',
+  );
+}
+
 /** Email báo tài khoản vừa tắt xác thực hai lớp (tiếng Việt). */
 export function buildTotpDisabledEmail(): Omit<EmailMessage, 'to'> {
   return securityEmail(

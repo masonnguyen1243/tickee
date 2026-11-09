@@ -19,6 +19,12 @@ export async function findUserIdByEmail(db: DbExecutor, email: string): Promise<
   return row?.id ?? null;
 }
 
+/** Tài khoản `userId` đã bật xác thực hai lớp chưa (không có tài khoản → `false`). */
+export async function hasTwoFactorEnabled(db: DbExecutor, userId: string): Promise<boolean> {
+  const [row] = await db.select({ enabled: users.twoFactorEnabled }).from(users).where(eq(users.id, userId));
+  return row?.enabled ?? false;
+}
+
 /** Email và tên của các tài khoản theo id; id không tồn tại thì không có trong kết quả. */
 export async function userContacts(db: DbExecutor, ids: readonly string[]): Promise<Map<string, UserContact>> {
   if (ids.length === 0) return new Map();

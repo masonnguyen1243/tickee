@@ -14,6 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { ApiError } from '@/lib/api/errors';
 import { fetchMe, hasErrorCode, ME_QUERY_KEY } from '@/lib/auth/api';
+import { isReauthRequired, withReauth } from '@/lib/auth/reauth';
 import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
 import {
   beginTotpEnrollment,
@@ -239,7 +240,9 @@ export function EnrollForm({ returnTo }: { returnTo: string }) {
   // Luôn tải lại: `twoFactorEnabled` trong cache có thể đã cũ (vd. vừa dùng mã khôi phục, TOTP đã bị gỡ).
   const me = useQuery({ queryKey: ME_QUERY_KEY, queryFn: ({ signal }) => fetchMe(signal), refetchOnMount: 'always' });
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
-  const begin = useMutation({ mutationFn: beginTotpEnrollment });
+  // Bắt đầu đăng ký cần xác nhận lại (mã email): api trả `REAUTH_REQUIRED` thì dialog "Xác nhận để tiếp tục" mở, xác
+  // nhận xong thì tự gọi lại và hiện QR.
+  const begin = useMutation({ mutationFn: () => withReauth(beginTotpEnrollment) });
   const started = useRef(false);
 
   const fresh = me.isFetchedAfterMount && me.isSuccess;
@@ -289,6 +292,20 @@ export function EnrollForm({ returnTo }: { returnTo: string }) {
         action={
           <Button type="button" variant="link" size="sm" onClick={() => void me.refetch()}>
             Thử lại
+          </Button>
+        }
+      />
+    );
+  } else if (isReauthRequired(begin.error)) {
+    // Người dùng đóng dialog xác nhận: chưa tạo QR, cho bắt đầu lại.
+    body = (
+      <StatusBanner
+        tone="neutral"
+        title="Cần xác nhận để bật xác thực hai lớp"
+        description="Nhập mã gửi tới email của bạn để tiếp tục."
+        action={
+          <Button type="button" variant="link" size="sm" onClick={() => begin.mutate()}>
+            Xác nhận để tiếp tục
           </Button>
         }
       />

@@ -203,8 +203,9 @@ action_items:
       email bảo mật và test API; admin:grant đòi 2FA; bổ sung AD-26. Chi tiết kỹ
       thuật nằm ngoài repo (retro A1, A3)"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
+    note: "Xong qua spec-epic-2-e2-1-xac-nhan-lai-khi-bat-2fa.md"
   - id: "epic-2-retro-e2-2-huy-session-khi-doi-2fa"
     epic: 2
     action: "E2-2 (gate Epic 3): hủy session đầy đủ khi trạng thái 2FA thay đổi, có

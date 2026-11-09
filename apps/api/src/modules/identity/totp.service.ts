@@ -23,7 +23,8 @@ import type { AuthSession } from './auth.js';
 import { IDENTITY_CONFIG, type IdentityConfig } from './identity.config.js';
 import { totpRecoveryCodes } from './schema.js';
 import { TotpAttemptLimiter } from './totp-attempts.js';
-import { buildRecoveryCodeUsedEmail, buildTotpDisabledEmail } from './totp-email.js';
+import { consumeReauth, type ReauthProof } from './reauth.service.js';
+import { buildRecoveryCodeUsedEmail, buildTotpDisabledEmail, buildTotpEnabledEmail } from './totp-email.js';
 import { TotpStore, type TotpVerification } from './totp-store.js';
 
 /** 403 `TOTP_REQUIRED` `step_up`: tài khoản đã bật 2FA mà session chưa qua lớp hai (`TotpGuard`). */
@@ -80,16 +81,29 @@ export class TotpService {
     );
   }
 
-  /** Bắt đầu (hoặc bắt đầu lại) đăng ký: secret mới, URI cho QR và khóa nhập tay. Đã đăng ký → 409. */
-  async beginEnrollment(session: AuthSession, requestHeaders: Headers): Promise<TotpEnrollResponse> {
-    if (await this.store.isEnabled(session.user.id)) throw alreadyEnabled();
-    return this.store.beginEnrollment(requestHeaders);
+  /**
+   * Bắt đầu (hoặc bắt đầu lại) đăng ký: secret mới, URI cho QR và khóa nhập tay. Đã đăng ký → 409 (kiểm trước khi đòi
+   * xác nhận lại). Bật 2FA đổi cách xác nhận lại của tài khoản nên là thao tác nhạy cảm (AD-26): tiêu một lần xác nhận
+   * lại (mã email) của session này trong `tx`, rồi mới gọi plugin sinh secret; thiếu → 403 `REAUTH_REQUIRED`, không
+   * sinh secret. Plugin ghi `two_factors` bằng kết nối riêng của nó, ngoài `tx`: plugin lỗi → `tx` rollback, lần xác
+   * nhận còn dùng được; plugin xong mà commit lỗi → còn một secret đang chờ nhưng không bao giờ trả cho người gọi. Tiêu
+   * ở đây chứ không ở `enroll/verify` vì lúc verify đúng plugin xoay session và lần xác nhận (gắn session cũ) bị xóa
+   * theo.
+   */
+  async beginEnrollment(session: AuthSession, proof: ReauthProof, requestHeaders: Headers): Promise<TotpEnrollResponse> {
+    const userId = session.user.id;
+    if (await this.store.isEnabled(userId)) throw alreadyEnabled();
+    return this.db.transaction(async (tx) => {
+      await consumeReauth(tx, { userId, ...proof });
+      return this.store.beginEnrollment(requestHeaders);
+    });
   }
 
   /**
    * Bật 2FA: xác nhận đăng ký bằng mã đầu tiên. Đúng → plugin bật TOTP và xoay session; Tickee sinh bộ 10 mã khôi phục
    * mới (bộ cũ hết hiệu lực), xóa `step_up_at` của mọi session khác của user (phải nhập mã ở request kế tiếp), đặt
-   * `step_up_at = now()` cho session mới và ghi audit `totp.enrolled`.
+   * `step_up_at = now()` cho session mới và ghi audit `totp.enrolled`; sau khi commit gửi email báo (lỗi gửi chỉ ghi
+   * log).
    */
   async confirmEnrollment(session: AuthSession, code: string, requestHeaders: Headers): Promise<EnrollmentConfirmed> {
     const userId = session.user.id;
@@ -118,6 +132,7 @@ export class TotpService {
       await this.limiter.restore(userId).catch(() => undefined);
       throw err;
     }
+    await this.notify(session.user.email, buildTotpEnabledEmail(), 'Không gửi được email báo bật xác thực hai lớp');
     return { recoveryCodes: codes.map(formatRecoveryCode), headers: verified.headers };
   }
 

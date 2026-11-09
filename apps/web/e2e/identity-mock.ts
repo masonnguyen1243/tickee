@@ -33,7 +33,7 @@ export async function mockIdentityApi(page: Page, handlers: Record<string, Handl
     'access-control-allow-origin': WEB_ORIGIN,
     'access-control-allow-credentials': 'true',
     'access-control-allow-methods': 'GET, POST, OPTIONS',
-    'access-control-allow-headers': 'accept, content-type',
+    'access-control-allow-headers': 'accept, content-type, x-reauth-token',
   };
   await page.route('**/v1/identity/**', async (route) => {
     const request = route.request();

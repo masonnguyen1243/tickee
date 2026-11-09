@@ -6,6 +6,7 @@ import { OptionalAuth } from '@thallesp/nestjs-better-auth';
 import {
   Me,
   OTP_LENGTH,
+  REAUTH_HEADER,
   ReauthGrant,
   TOTP_DIGITS,
   TOTP_PERIOD_SECONDS,
@@ -187,12 +188,25 @@ export interface TotpUser {
 }
 
 /**
- * Bật 2FA cho `user` (enroll → verify bằng mã đúng). Plugin xoay session nên `user.cookie` được thay bằng cookie mới
- * (đã qua lớp hai). Trả khóa nhập tay và 10 mã khôi phục.
+ * Bắt đầu đăng ký TOTP cho session `user.cookie`: xác nhận lại bằng mã email (`reauthToken`) rồi gọi `enroll` kèm
+ * header. Trả khóa nhập tay và URI.
+ */
+export async function beginTotpEnrollment(h: Harness, user: TotpUser): Promise<TotpEnrollResponse> {
+  const token = await reauthToken(h, { cookie: user.cookie, email: user.email });
+  const started = await h.http
+    .post('/v1/identity/totp/enroll')
+    .set('cookie', user.cookie)
+    .set(REAUTH_HEADER, token)
+    .expect(200);
+  return TotpEnrollResponse.parse(started.body);
+}
+
+/**
+ * Bật 2FA cho `user` (xác nhận lại → enroll → verify bằng mã đúng). Plugin xoay session nên `user.cookie` được thay
+ * bằng cookie mới (đã qua lớp hai). Trả khóa nhập tay và 10 mã khôi phục.
  */
 export async function enrollTotp(h: Harness, user: TotpUser): Promise<{ manualKey: string; recoveryCodes: string[] }> {
-  const started = await h.http.post('/v1/identity/totp/enroll').set('cookie', user.cookie).expect(200);
-  const { manualKey } = TotpEnrollResponse.parse(started.body);
+  const { manualKey } = await beginTotpEnrollment(h, user);
   const verified = await h.http
     .post('/v1/identity/totp/enroll/verify')
     .set('cookie', user.cookie)
