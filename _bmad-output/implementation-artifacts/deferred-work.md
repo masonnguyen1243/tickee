@@ -307,3 +307,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-1-xac-nhan-lai-khi-bat-2fa.md`
   summary: Chưa có đường khôi phục khi 2FA bị người khác bật trên tài khoản (chủ thật kẹt ở bước step-up, không có "Đặt lại TOTP" hay quy trình hỗ trợ).
   evidence: Retro Epic 2 ghi "Đặt lại TOTP" chưa có; email "2FA vừa được bật" chỉ dặn liên hệ hỗ trợ. Cần trước Closed Beta (quy trình hỗ trợ) hoặc Epic 7.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-2-huy-session-khi-doi-2fa.md`
+  summary: Dialog tắt 2FA và gợi ý dùng mã khôi phục trên web chưa báo trước rằng các thiết bị khác sẽ bị đăng xuất; EXPERIENCE.md (dòng tắt 2FA) cũng chưa ghi.
+  evidence: E2-2 đăng xuất mọi session khác khi gỡ 2FA nhưng spec không đổi web; câu chữ hiện ở `security-settings.tsx` và `step-up-dialog.tsx` chỉ nói "chỉ còn được bảo vệ bằng email". Ảnh hưởng người dùng nhiều thiết bị (vd. Owner đang check-in trên vài điện thoại).

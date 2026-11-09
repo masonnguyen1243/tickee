@@ -211,8 +211,9 @@ action_items:
     action: "E2-2 (gate Epic 3): hủy session đầy đủ khi trạng thái 2FA thay đổi, có
       test (retro A2)"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
+    note: "Xong qua spec-epic-2-e2-2-huy-session-khi-doi-2fa.md"
   - id: "epic-2-retro-e2-3-guard-hang-ve-sau-mo-ban"
     epic: 2
     action: "E2-3 (gate Epic 3): Sự kiện khác nháp thì chặn tạo/sửa Hạng vé giá >

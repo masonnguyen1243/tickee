@@ -166,8 +166,9 @@ export class TotpService {
 
   /**
    * Step-up bằng mã khôi phục: mã hết hiệu lực, TOTP hiện tại bị gỡ (2FA về chưa bật; muốn bảo vệ lại thì bật lại ở
-   * trang Bảo mật), session hiện tại qua lớp hai, audit `totp.recovery_code_used`; sau khi commit gửi email báo cho
-   * user (lỗi gửi chỉ ghi log). Mã sai hoặc đã dùng → `TOTP_INVALID`, tính vào cùng bộ đếm với TOTP. Chưa bật → 409.
+   * trang Bảo mật), mọi session khác của user bị đăng xuất, session hiện tại qua lớp hai, audit
+   * `totp.recovery_code_used`; sau khi commit gửi email báo cho user (lỗi gửi chỉ ghi log). Mã sai hoặc đã dùng →
+   * `TOTP_INVALID`, tính vào cùng bộ đếm với TOTP. Chưa bật → 409.
    */
   async useRecoveryCode(session: AuthSession, recoveryCode: string): Promise<RecoveryCodeResponse> {
     const userId = session.user.id;
@@ -179,6 +180,7 @@ export class TotpService {
         if (!(await this.consumeRecoveryCode(tx, userId, recoveryCode))) return null;
         await this.limiter.succeed(tx, userId);
         await this.store.remove(tx, userId);
+        await this.store.revokeOtherSessions(tx, userId, session.session.token);
         const at = await this.store.markStepUp(tx, userId, session.session.token);
         if (!at) throw sessionGone();
         await audit.record(tx, {
@@ -200,9 +202,9 @@ export class TotpService {
 
   /**
    * Tắt 2FA bằng mã TOTP hiện tại hoặc một mã khôi phục chưa dùng (cùng bộ đếm sai với step-up). Đúng → gỡ TOTP, xóa
-   * mọi mã khôi phục và `step_up_at` của mọi session, audit `totp.disabled` (dùng mã khôi phục thì thêm
-   * `totp.recovery_code_used`); sau khi commit gửi email báo (lỗi gửi chỉ
-   * ghi log). Sai → `TOTP_INVALID`/`TOTP_LOCKED`. Chưa bật → 409. `TotpGuard` đã đòi session qua lớp hai trước.
+   * mọi mã khôi phục, đăng xuất mọi session khác của user, audit `totp.disabled` (dùng mã khôi phục thì thêm
+   * `totp.recovery_code_used`); sau khi commit gửi email báo (lỗi gửi chỉ ghi log). Sai → `TOTP_INVALID`/`TOTP_LOCKED`.
+   * Chưa bật → 409. `TotpGuard` đã đòi session qua lớp hai trước.
    */
   async disable(
     session: AuthSession,
@@ -216,7 +218,7 @@ export class TotpService {
       try {
         await this.db.transaction(async (tx) => {
           await this.limiter.succeed(tx, userId);
-          await this.removeTwoFactor(tx, userId);
+          await this.removeTwoFactor(tx, userId, session.session.token);
         });
       } catch (err) {
         await this.limiter.restore(userId).catch(() => undefined);
@@ -235,7 +237,7 @@ export class TotpService {
             action: 'totp.recovery_code_used',
             target: { type: 'user', id: userId },
           });
-          await this.removeTwoFactor(tx, userId);
+          await this.removeTwoFactor(tx, userId, session.session.token);
           return true;
         });
       } catch (err) {
@@ -248,9 +250,13 @@ export class TotpService {
     return { twoFactorEnabled: false };
   }
 
-  /** Tắt 2FA trong `tx`: gỡ TOTP (kèm `step_up_at` mọi session), xóa mọi mã khôi phục, audit `totp.disabled`. */
-  private async removeTwoFactor(tx: Tx, userId: string): Promise<void> {
+  /**
+   * Tắt 2FA trong `tx`: gỡ TOTP (kèm `step_up_at` mọi session), đăng xuất mọi session khác của user (giữ
+   * `keepSessionToken`), xóa mọi mã khôi phục, audit `totp.disabled`.
+   */
+  private async removeTwoFactor(tx: Tx, userId: string, keepSessionToken: string): Promise<void> {
     await this.store.remove(tx, userId);
+    await this.store.revokeOtherSessions(tx, userId, keepSessionToken);
     await tx.delete(totpRecoveryCodes).where(eq(totpRecoveryCodes.userId, userId));
     await audit.record(tx, {
       actorUserId: userId,

@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { AuthService } from '@thallesp/nestjs-better-auth';
 import { isAPIError } from 'better-auth/api';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
 import type { Auth } from './auth.js';
 import { sessions, twoFactors, users } from './schema.js';
@@ -128,6 +128,15 @@ export class TotpStore {
    */
   async clearStepUps(tx: Tx, userId: string): Promise<void> {
     await tx.update(sessions).set({ stepUpAt: null }).where(eq(sessions.userId, userId));
+  }
+
+  /**
+   * Xóa mọi session của user trừ session `keepSessionToken` (dùng mã khôi phục, tắt 2FA): session bị xóa nhận 401 ở
+   * request kế tiếp; `reauth_grants` của chúng xóa theo FK cascade. Chỉ đúng khi Better Auth đọc session từ DB ở mỗi
+   * request: không bật `session.cookieCache` hay `secondaryStorage` (xem `auth.ts`).
+   */
+  async revokeOtherSessions(tx: Tx, userId: string, keepSessionToken: string): Promise<void> {
+    await tx.delete(sessions).where(and(eq(sessions.userId, userId), ne(sessions.token, keepSessionToken)));
   }
 
   /**
