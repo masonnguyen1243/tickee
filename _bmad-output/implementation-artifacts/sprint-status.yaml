@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-09-2026 09:26
+last_updated: 11-09-2026 10:03
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -42,7 +42,7 @@ development_status:
   1-4-đăng-nhập-bằng-google: done
   epic-1-retrospective: done
 
-  epic-2: in-progress
+  epic-2: done
   2-1-tạo-btc-và-khung-dashboard: done
   2-2-xác-thực-hai-lớp-tự-bật-totp: done
   2-3-landing-btc: done
@@ -53,11 +53,11 @@ development_status:
   2-8-hạng-vé-và-tồn-kho: done
   2-9-cấu-hình-form-mua-vé: done
   2-10-điều-kiện-mở-bán-và-mở-bán-sự-kiện: done
-  2-11-trang-sự-kiện-công-khai: review
+  2-11-trang-sự-kiện-công-khai: done
   2-12-sửa-ẩn-và-kết-thúc-sớm-sự-kiện: done
-  2-13-đổi-tài-khoản-nhận-tiền: review
-  2-14-chuyển-quyền-owner: review
-  epic-2-retrospective: optional
+  2-13-đổi-key-tingee-và-bảo-vệ-thao-tác-đổi-nơi-nhận-tiền: done
+  2-14-chuyển-quyền-owner: done
+  epic-2-retrospective: done
 
   epic-3: backlog
   3-1-chọn-vé-và-đăng-nhập-khi-bấm-mua: backlog
@@ -118,19 +118,19 @@ development_status:
   epic-8-retrospective: optional
 action_items:
   - epic: 4
-    action: "Chốt với Tingee: API tra trạng thái theo orderId (Story 4.1); API đọc Token
-      và trạng thái dịch vụ gọi bằng key merchant (Story 4.2, 4.5); create-link với
-      vaAccountNumber ngoài \"Tài khoản cho phép thanh toán\" trả lỗi gì (Story 3.4);
-      nếu chưa có thì ghi phương án dự phòng vào story trước khi bắt đầu E4"
+    action: "Chốt với Tingee: API tra trạng thái theo orderId (Story 4.1); API đọc
+      Token và trạng thái dịch vụ gọi bằng key merchant (Story 4.2, 4.5); create-link
+      với vaAccountNumber ngoài \"Tài khoản cho phép thanh toán\" trả lỗi gì (Story
+      3.4); nếu chưa có thì ghi phương án dự phòng vào story trước khi bắt đầu E4"
     owner: "Mason"
     status: open
     ref: "_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-03.md"
   - epic: 2
-    action: "Hỏi Tingee: key merchant có gọi được Chi hộ/rút tiền không, có tạo key giới
-      hạn quyền không; nếu không thì ghi rủi ro chấp nhận vào PRD (R lộ Secret Token).
-      Chặn bán Vé có phí ở Closed Beta"
+    action: "Hỏi Tingee: key merchant có gọi được Chi hộ/rút tiền không, có tạo key
+      giới hạn quyền không; nếu không thì ghi rủi ro chấp nhận vào PRD (R lộ Secret
+      Token). Chặn bán Vé có phí ở Closed Beta"
     owner: "Mason"
-    status: open
+    status: in-progress
     ref: "_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-03.md"
   - epic: 4
     action: "Chốt nhà cung cấp hạ tầng/email/giám sát theo pháp chế NĐ 53/2022 trước
@@ -151,7 +151,8 @@ action_items:
     owner: "Mason"
     status: done
     ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
-    note: "Xong qua spec-epic-1-ai-1-bit-ro-pii-trong-log.md; log worker gửi lời mời và log khởi động chuyển sang deferred-work.md"
+    note: "Xong qua spec-epic-1-ai-1-bit-ro-pii-trong-log.md; log worker gửi lời mời
+      và log khởi động chuyển sang deferred-work.md"
   - id: "epic-1-retro-item-5-ai-2-làm-chắc-get-v1-identity-google-bắt"
     epic: 1
     action: "AI-2: Làm chắc GET /v1/identity/google: bắt lỗi rồi chuyển về /dang-nhap?error=…
@@ -194,5 +195,73 @@ action_items:
       cho OTP → đồng ý → returnTo → đăng xuất trong CI; gộp bước đăng xuất bị chép
       và sửa e2e lỗi lẻ khi từ chối đồng ý"
     owner: "Mason"
-    status: open
+    status: in-progress
     ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
+  - id: "epic-2-retro-e2-1-va-lo-hong-xac-nhan-lai"
+    epic: 2
+    action: "E2-1 (gate Epic 3): vá lỗ hổng xác nhận lại liên quan tới bật 2FA, kèm
+      email bảo mật và test API; admin:grant đòi 2FA; bổ sung AD-26. Chi tiết kỹ
+      thuật nằm ngoài repo (retro A1, A3)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
+  - id: "epic-2-retro-e2-2-huy-session-khi-doi-2fa"
+    epic: 2
+    action: "E2-2 (gate Epic 3): hủy session đầy đủ khi trạng thái 2FA thay đổi, có
+      test (retro A2)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
+  - id: "epic-2-retro-e2-3-guard-hang-ve-sau-mo-ban"
+    epic: 2
+    action: "E2-3 (gate Epic 3): Sự kiện khác nháp thì chặn tạo/sửa Hạng vé giá >
+      0 khi chưa đạt paidSalesAllowed, chặn xóa Hạng vé cuối, kiểm trần miễn phí theo
+      tổng suất miễn phí; đóng deferred-work 2.10 (retro C1)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
+  - id: "epic-2-retro-e2-4-doi-chieu-spec-truoc-epic-3"
+    epic: 2
+    action: "E2-4 (trước Epic 3): đối chiếu spec — PRD QR → Gateway (spine:558-561),
+      epics.md (2.14, sellability, 2.13 a/b), spec 2.11-a ended > hidden, AD-32/4.2
+      credential hiện hành + AC key cũ sang 4.1/3.4, AC Epic 2 chưa làm thành story
+      backlog hoặc chuyển Epic 4/7, spine:41, spec-2-2 superseded (retro E1-E5, B1,
+      C8, D1)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
+  - id: "epic-2-retro-e2-5-refactor-truoc-epic-3"
+    epic: 2
+    action: "E2-5 (trước story Epic 3 đầu tiên có UI/queue mới): gom helper web (messageOf,
+      useGoToLogin, FieldError, ConfirmDialog, đăng xuất), tách payout-account-manager.tsx,
+      helper pg-boss chung, escapeHtml/formatter ngày chung, bỏ MESSAGES chết ở error.filter.ts
+      (retro D2, D3)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
+  - id: "epic-2-retro-e2-6-checklist-san-sang-epic-3"
+    epic: 2
+    action: "E2-6: ghi checklist sẵn sàng vào spec 3.1/3.2/3.4/3.5 — sellability lúc
+      đặt Đơn (khóa Sự kiện trước, giới hạn Vé/Đơn), snapshot chính sách hoàn vé,
+      xóa Hạng vé có order_items, contract công khai, read model payout + TingeeClient
+      create-link, serverNow, câu chữ Kết thúc, nhãn dashboard theo sellability (retro
+      B2, B3, C2-C7, D4)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
+  - id: "epic-2-retro-e2-7-moi-truong-dev"
+    epic: 2
+    action: "E2-7: môi trường dev — pnpm dev tự migrate và chạy worker, seed BTC đã
+      duyệt Closed Beta + Tingee fake, khai báo NEXT_PUBLIC_API_BASE_URL trong env
+      của turbo.json, giới hạn/dọn .turbo (retro F3)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
+  - id: "epic-2-retro-e2-8-ve-sinh-quy-trinh"
+    epic: 2
+    action: "E2-8: vệ sinh quy trình — deferred-work.md thêm status, đóng mục đã ship,
+      bổ sung 5 reject có điều kiện và test webkit chập chờn; quyết giữ hay bỏ luật
+      Spec Change Log; chuyển stash 2.12 thành branch/tag (retro F4, F7, F8)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
