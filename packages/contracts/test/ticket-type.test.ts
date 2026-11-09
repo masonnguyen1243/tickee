@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { ErrorCode } from '../src/errors.js';
 import { EventDetail } from '../src/event.js';
 import {
   EventOrderLimitInput,
   exceedsFreeEventCap,
   FREE_EVENT_TICKET_CAP,
   MIN_PAID_PRICE,
+  PaidTicketTypeNotAllowedDetails,
   TicketTypeInput,
 } from '../src/ticket-type.js';
 
@@ -68,12 +70,35 @@ describe('EventOrderLimitInput', () => {
 });
 
 describe('exceedsFreeEventCap', () => {
-  it('chỉ khi mọi Hạng vé 0đ và tổng > 200', () => {
+  it('cộng số suất các Hạng vé 0đ, vượt 200 thì true; không có Hạng vé 0đ → false', () => {
     expect(FREE_EVENT_TICKET_CAP).toBe(200);
     expect(exceedsFreeEventCap([])).toBe(false);
     expect(exceedsFreeEventCap([{ price: 0, capacity: 200 }])).toBe(false);
+    expect(exceedsFreeEventCap([{ price: 0, capacity: 201 }])).toBe(true);
     expect(exceedsFreeEventCap([{ price: 0, capacity: 120 }, { price: 0, capacity: 90 }])).toBe(true);
-    expect(exceedsFreeEventCap([{ price: 0, capacity: 150 }, { price: 300_000, capacity: 100 }])).toBe(false);
-    expect(exceedsFreeEventCap([{ price: 0, capacity: 250 }])).toBe(true);
+    expect(exceedsFreeEventCap([{ price: 300_000, capacity: 100_000 }])).toBe(false);
+  });
+
+  it('Sự kiện hỗn hợp: Hạng vé có phí không tính vào trần và không làm mất trần', () => {
+    const paid = { price: 300_000, capacity: 100 };
+    // 0đ 150 + có phí: thêm 0đ 60, nâng 0đ lên 210, hoặc đổi Hạng vé có phí 100 suất thành 0đ → vượt.
+    expect(exceedsFreeEventCap([{ price: 0, capacity: 150 }, paid])).toBe(false);
+    expect(exceedsFreeEventCap([{ price: 0, capacity: 150 }, paid, { price: 0, capacity: 60 }])).toBe(true);
+    expect(exceedsFreeEventCap([{ price: 0, capacity: 210 }, paid])).toBe(true);
+    expect(exceedsFreeEventCap([{ price: 0, capacity: 150 }, { ...paid, price: 0 }])).toBe(true);
+    // Đúng 200 suất 0đ, kèm Hạng vé có phí bao nhiêu suất cũng được.
+    expect(
+      exceedsFreeEventCap([{ price: 0, capacity: 120 }, { price: 0, capacity: 80 }, { ...paid, capacity: 100_000 }]),
+    ).toBe(false);
+  });
+});
+
+describe('PaidTicketTypeNotAllowedDetails', () => {
+  it('unmet là mã điều kiện mở bán; mã lạ bị từ chối', () => {
+    expect(ErrorCode.PAID_TICKET_TYPE_NOT_ALLOWED).toBe('PAID_TICKET_TYPE_NOT_ALLOWED');
+    expect(ErrorCode.LAST_TICKET_TYPE).toBe('LAST_TICKET_TYPE');
+    const unmet = ['CLOSED_BETA_APPROVED', 'PAYOUT_ACCOUNT_LINKED'];
+    expect(PaidTicketTypeNotAllowedDetails.parse({ unmet })).toEqual({ unmet });
+    expect(PaidTicketTypeNotAllowedDetails.safeParse({ unmet: ['LẠ'] }).success).toBe(false);
   });
 });

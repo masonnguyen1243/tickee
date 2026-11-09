@@ -55,8 +55,9 @@ import { handledElsewhere } from './handled-elsewhere';
 /*
  * Trình sửa Hạng vé (Story 2.8) dùng chung cho wizard bước 2 và tab "Hạng vé": danh sách Hạng vé (tên, giá, số suất,
  * giờ bán), "Thêm Hạng vé" / "Sửa" mở `Dialog` chứa form, "Xóa" mở `Dialog` xác nhận nêu hậu quả. Ô "Giới hạn Vé/Đơn"
- * đặt cạnh danh sách. Lỗi 409 về số suất (dưới đã bán + đang giữ chỗ, trần Sự kiện miễn phí) hiện tại ô số suất. Giờ bán
- * luôn hiểu theo giờ Việt Nam (+07:00).
+ * đặt cạnh danh sách. Lỗi 409 về số suất (dưới đã bán + đang giữ chỗ, trần suất miễn phí) hiện tại ô số suất. Lỗi 409 khác
+ * (BTC chưa đủ điều kiện bán Vé có phí, xóa Hạng vé cuối của Sự kiện đã mở bán) hiện câu của server. Giờ bán luôn hiểu
+ * theo giờ Việt Nam (+07:00).
  */
 
 const messageOf = (error: unknown) => (error instanceof ApiError ? error.message : 'Đã có lỗi xảy ra. Vui lòng thử lại.');
@@ -92,7 +93,7 @@ type FieldErrors = Partial<Record<Field, string>>;
 const FIELDS: readonly Field[] = ['name', 'price', 'capacity', 'description', 'saleStartsAt', 'saleEndsAt'];
 const EMPTY: Values = { name: '', price: '', capacity: '', description: '', saleStartsAt: '', saleEndsAt: '' };
 const YEAR_OUT_OF_RANGE = `Năm phải trong khoảng ${EVENT_YEAR_MIN}–${EVENT_YEAR_MAX}.`;
-const FREE_CAP_MESSAGE = `Sự kiện miễn phí tối đa ${FREE_EVENT_TICKET_CAP} Vé — giảm số suất hoặc đặt giá có phí.`;
+const FREE_CAP_MESSAGE = `Tối đa ${FREE_EVENT_TICKET_CAP} suất miễn phí mỗi Sự kiện — giảm số suất hoặc đặt giá có phí.`;
 const UNMATCHED_SERVER_ERROR = 'Thông tin chưa hợp lệ. Kiểm tra lại các ô rồi lưu lại.';
 
 const valuesOf = (t: TicketTypeDetail): Values => ({
@@ -419,6 +420,8 @@ function DeleteDialog({
   });
 
   const inUse = hasErrorCode(remove.error, ErrorCode.TICKET_TYPE_IN_USE);
+  // Lỗi không xóa được dù bấm lại (đã có người mua; Hạng vé cuối của Sự kiện đã mở bán): tắt "Xóa".
+  const blocked = inUse || hasErrorCode(remove.error, ErrorCode.LAST_TICKET_TYPE);
   const failure =
     remove.error && !handledElsewhere(remove.error) && !hasErrorCode(remove.error, ErrorCode.TICKET_TYPE_NOT_FOUND)
       ? remove.error
@@ -462,13 +465,13 @@ function DeleteDialog({
             variant="destructive"
             className="w-full"
             loading={remove.isPending}
-            disabled={inUse}
+            disabled={blocked}
             onClick={() => target && remove.mutate(target)}
           >
             Xóa
           </Button>
           <Button type="button" variant="secondary" className="w-full" onClick={close}>
-            {inUse ? 'Đóng' : 'Hủy'}
+            {blocked ? 'Đóng' : 'Hủy'}
           </Button>
         </DialogFooter>
       </DialogContent>

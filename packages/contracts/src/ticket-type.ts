@@ -7,6 +7,7 @@ import {
   MAX_TICKETS_PER_ORDER_MIN,
   optionalText,
 } from './event.js';
+import { publishConditionCodeSchema } from './publish.js';
 
 // ---------------------------------------------------------------------------------------------------------------
 // Hạng vé và tồn kho (FR-7, Story 2.8)
@@ -18,7 +19,10 @@ export const MIN_PAID_PRICE = 2_000;
 export const TICKET_TYPE_PRICE_MAX = 100_000_000;
 /** Số suất tối đa của một Hạng vé. */
 export const TICKET_TYPE_CAPACITY_MAX = 100_000;
-/** Sự kiện miễn phí (mọi Hạng vé 0đ): tổng số suất tối đa. */
+/**
+ * Trần suất miễn phí: tổng số suất của mọi Hạng vé 0đ trong một Sự kiện, áp cho mọi Sự kiện ở mọi trạng thái (kể cả
+ * Sự kiện có cả Hạng vé có phí). Luật nằm ở `exceedsFreeEventCap`.
+ */
 export const FREE_EVENT_TICKET_CAP = 200;
 export const TICKET_TYPE_NAME_MAX = 100;
 export const TICKET_TYPE_DESCRIPTION_MAX = 2_000;
@@ -107,14 +111,22 @@ export type EventOrderLimitInput = z.infer<typeof EventOrderLimitInput>;
 export const CapacityBelowCommittedDetails = z.object({ minimum: z.number().int() });
 export type CapacityBelowCommittedDetails = z.infer<typeof CapacityBelowCommittedDetails>;
 
-/** `details` của `409 FREE_EVENT_CAPACITY_EXCEEDED`: trần Vé của Sự kiện miễn phí. */
+/** `details` của `409 FREE_EVENT_CAPACITY_EXCEEDED`: trần suất miễn phí của Sự kiện (`FREE_EVENT_TICKET_CAP`). */
 export const FreeEventCapacityExceededDetails = z.object({ limit: z.number().int() });
 export type FreeEventCapacityExceededDetails = z.infer<typeof FreeEventCapacityExceededDetails>;
 
 /**
- * Sự kiện miễn phí vượt trần: mọi Hạng vé 0đ và tổng số suất > `FREE_EVENT_TICKET_CAP`. Không có Hạng vé nào → `false`.
+ * `details` của `409 PAID_TICKET_TYPE_NOT_ALLOWED`: mã điều kiện bán Vé có phí chưa đạt (`CLOSED_BETA_APPROVED`,
+ * `PAYOUT_ACCOUNT_LINKED`), theo thứ tự của `PublishConditionCode`.
+ */
+export const PaidTicketTypeNotAllowedDetails = z.object({ unmet: z.array(publishConditionCodeSchema) });
+export type PaidTicketTypeNotAllowedDetails = z.infer<typeof PaidTicketTypeNotAllowedDetails>;
+
+/**
+ * Vượt trần suất miễn phí: tổng số suất của các Hạng vé 0đ > `FREE_EVENT_TICKET_CAP`. Hạng vé có phí không tính và
+ * không làm mất trần. Không có Hạng vé 0đ nào → `false`.
  */
 export function exceedsFreeEventCap(ticketTypes: readonly { price: number; capacity: number }[]): boolean {
-  if (ticketTypes.length === 0 || ticketTypes.some((t) => t.price > 0)) return false;
-  return ticketTypes.reduce((sum, t) => sum + t.capacity, 0) > FREE_EVENT_TICKET_CAP;
+  const free = ticketTypes.filter((t) => t.price === 0).reduce((sum, t) => sum + t.capacity, 0);
+  return free > FREE_EVENT_TICKET_CAP;
 }

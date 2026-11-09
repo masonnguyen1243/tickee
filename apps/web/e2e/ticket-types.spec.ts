@@ -6,8 +6,8 @@ import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
 
 /*
  * Hạng vé (Story 2.8): trình sửa dùng chung ở wizard bước 2 và tab "Hạng vé". Thêm/Sửa qua `Dialog` chứa form, Xóa qua
- * `Dialog` xác nhận, ô "Giới hạn Vé/Đơn" cạnh danh sách. API giả có trạng thái như api thật (sàn giá 2.000đ, trần 200 Vé
- * của Sự kiện miễn phí, số suất không dưới đã bán + đang giữ chỗ).
+ * `Dialog` xác nhận, ô "Giới hạn Vé/Đơn" cạnh danh sách. API giả có trạng thái như api thật (sàn giá 2.000đ, trần 200
+ * suất miễn phí mỗi Sự kiện, số suất không dưới đã bán + đang giữ chỗ).
  */
 
 test.use({ timezoneId: 'America/New_York' });
@@ -72,10 +72,14 @@ const ticketType = (n: number, overrides: Partial<TicketType> = {}): TicketType 
 type Body = Pick<TicketType, 'name' | 'description' | 'price' | 'capacity' | 'saleStartsAt' | 'saleEndsAt'>;
 
 const freeCapExceeded = (list: { price: number; capacity: number }[]) =>
-  list.every((t) => t.price === 0) && list.reduce((sum, t) => sum + t.capacity, 0) > 200;
+  list.filter((t) => t.price === 0).reduce((sum, t) => sum + t.capacity, 0) > 200;
 
-/** API giả có trạng thái: Sự kiện nháp + Hạng vé của nó. */
-async function openApi(page: Page, seeded: TicketType[] = []): Promise<{ calls: Call[]; ticketTypes: TicketType[] }> {
+/** API giả có trạng thái: Sự kiện nháp + Hạng vé của nó; `overrides` thay handler theo `"METHOD path"`. */
+async function openApi(
+  page: Page,
+  seeded: TicketType[] = [],
+  overrides: Record<string, Handler> = {},
+): Promise<{ calls: Call[]; ticketTypes: TicketType[] }> {
   await mockIdentityApi(page, { 'GET /identity/me': () => me(CONSENTED) });
   const ticketTypes = [...seeded];
   let limit = 10;
@@ -134,6 +138,7 @@ async function openApi(page: Page, seeded: TicketType[] = []): Promise<{ calls: 
       return { status: 201, body: created };
     },
     ...perTicketType,
+    ...overrides,
   };
   const calls = await mockOrganizerApi(page, handlers);
   return { calls, ticketTypes };
@@ -226,17 +231,37 @@ test('giá 1.500 → lỗi tại ô giá, không gọi api; giá 0 lưu được
   await expect(rows(page).first().locator('[data-slot="ticket-type-price"]')).toHaveText('Miễn phí');
 });
 
-test('409 trần Sự kiện miễn phí khi thêm → lỗi tại ô số suất, Dialog giữ dữ liệu', async ({ page }) => {
+test('409 trần suất miễn phí khi thêm → lỗi tại ô số suất, Dialog giữ dữ liệu', async ({ page }) => {
   await openApi(page, [ticketType(0, { name: 'Miễn phí', price: 0, capacity: 120 })]);
   await page.goto(`${base}?tab=hang-ve`);
   await page.getByRole('button', { name: 'Thêm Hạng vé' }).click();
   await fillTicketType(page, { name: 'Miễn phí 2', price: '0', capacity: '90' });
   await dialog(page).getByRole('button', { name: 'Thêm', exact: true }).click();
   await expect(
-    dialog(page).getByText('Sự kiện miễn phí tối đa 200 Vé — giảm số suất hoặc đặt giá có phí.'),
+    dialog(page).getByText('Tối đa 200 suất miễn phí mỗi Sự kiện — giảm số suất hoặc đặt giá có phí.'),
   ).toBeVisible();
   await expect(inDialog(page, 'Số suất')).toHaveAttribute('aria-invalid', 'true');
   await expect(inDialog(page, 'Tên Hạng vé')).toHaveValue('Miễn phí 2');
+  await expect(rows(page)).toHaveCount(1);
+});
+
+test('409 PAID_TICKET_TYPE_NOT_ALLOWED khi thêm → banner câu của server, Dialog giữ dữ liệu, ô số suất không lỗi', async ({
+  page,
+}) => {
+  await openApi(page, [ticketType(0, { name: 'Miễn phí', price: 0, capacity: 50 })], {
+    [`POST ${ticketTypesPath}`]: () =>
+      apiError(409, 'PAID_TICKET_TYPE_NOT_ALLOWED', { unmet: ['CLOSED_BETA_APPROVED', 'PAYOUT_ACCOUNT_LINKED'] }),
+  });
+  await page.goto(`${base}?tab=hang-ve`);
+  await page.getByRole('button', { name: 'Thêm Hạng vé' }).click();
+  await fillTicketType(page, { name: 'Đơn nam', price: '300000', capacity: '32' });
+  await dialog(page).getByRole('button', { name: 'Thêm', exact: true }).click();
+  await expect(dialog(page).getByText('Chưa lưu được Hạng vé')).toBeVisible();
+  await expect(dialog(page).getByText('Lỗi giả lập')).toBeVisible();
+  await expect(inDialog(page, 'Số suất')).not.toHaveAttribute('aria-invalid', 'true');
+  await expect(inDialog(page, 'Tên Hạng vé')).toHaveValue('Đơn nam');
+  await expect(inDialog(page, 'Giá (đồng)')).toHaveValue('300000');
+  await expect(inDialog(page, 'Số suất')).toHaveValue('32');
   await expect(rows(page)).toHaveCount(1);
 });
 
@@ -344,6 +369,22 @@ test('xóa qua Dialog xác nhận nêu hậu quả; Hạng vé đã có người
     `DELETE ${ticketTypesPath}/${ticketTypeId(0)}`,
     `DELETE ${ticketTypesPath}/${ticketTypeId(1)}`,
   ]);
+});
+
+test('409 LAST_TICKET_TYPE khi xóa → banner câu của server, "Xóa" tắt, hàng còn nguyên', async ({ page }) => {
+  const { calls } = await openApi(page, [ticketType(0)], {
+    [`DELETE ${ticketTypesPath}/${ticketTypeId(0)}`]: () => apiError(409, 'LAST_TICKET_TYPE'),
+  });
+  await page.goto(`${base}?tab=hang-ve`);
+  await page.getByRole('button', { name: 'Xóa Đơn nam' }).click();
+  await dialog(page).getByRole('button', { name: 'Xóa', exact: true }).click();
+  await expect(dialog(page).getByText('Chưa xóa được')).toBeVisible();
+  await expect(dialog(page).getByText('Lỗi giả lập')).toBeVisible();
+  await expect(dialog(page).getByRole('button', { name: 'Xóa', exact: true })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(dialog(page)).toHaveCount(0);
+  await expect(rows(page)).toHaveCount(1);
+  expect(writes(calls).map((c) => `${c.method} ${c.path}`)).toEqual([`DELETE ${ticketTypesPath}/${ticketTypeId(0)}`]);
 });
 
 test('giới hạn Vé/Đơn: 0 → lỗi tại ô, không gọi api; 4 → PATCH order-limit; Enter trong wizard không gửi form wizard', async ({
