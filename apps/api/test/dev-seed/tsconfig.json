@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false,
+    "rootDir": "../..",
+    "outDir": "../../node_modules/.cache/dev-seed"
+  },
+  "include": ["seed.ts", "main.ts"],
+  "exclude": []
+}

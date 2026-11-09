@@ -1,12 +1,38 @@
 {
   "$schema": "https://turborepo.com/schema.json",
+  "cacheMaxSize": "2GB",
+  "cacheMaxAge": "7d",
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "@tickee/web#build": {
+      "dependsOn": ["^build"],
       "env": ["NEXT_PUBLIC_API_BASE_URL"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "inputs": ["$TURBO_DEFAULT$", ".env.production.local", ".env.local", ".env.production", ".env"],
+      "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**"]
     },
     "dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true
+    },
+    "@tickee/api#db:migrate": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "@tickee/api#dev": {
+      "dependsOn": ["db:migrate"],
+      "cache": false,
+      "persistent": true
+    },
+    "@tickee/api#dev:worker": {
+      "dependsOn": ["db:migrate"],
+      "cache": false,
+      "persistent": true
+    },
+    "@tickee/api#dev:tingee": {
       "dependsOn": ["^build"],
       "cache": false,
       "persistent": true

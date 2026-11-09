@@ -7,6 +7,6 @@
     "rootDir": "../..",
     "outDir": "../../node_modules/.cache/tingee-fake"
   },
-  "include": ["server.ts", "main.ts"],
+  "include": ["server.ts", "demo-merchants.ts", "main.ts"],
   "exclude": []
 }

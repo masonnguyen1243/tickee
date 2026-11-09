@@ -265,8 +265,9 @@ action_items:
       duyệt Closed Beta + Tingee fake, khai báo NEXT_PUBLIC_API_BASE_URL trong env
       của turbo.json, giới hạn/dọn .turbo (retro F3)"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
+    note: "Xong qua spec-epic-2-e2-7-moi-truong-dev.md; pnpm dev migrate trước rồi chạy api + worker + Tingee fake, pnpm db:seed (BTC demo btc.demo@tickee.local), next build thiếu NEXT_PUBLIC_API_BASE_URL thì dừng, cache turbo trần 2GB/7 ngày"
   - id: "epic-2-retro-e2-8-ve-sinh-quy-trinh"
     epic: 2
     action: "E2-8: vệ sinh quy trình — deferred-work.md thêm status, đóng mục đã ship,
