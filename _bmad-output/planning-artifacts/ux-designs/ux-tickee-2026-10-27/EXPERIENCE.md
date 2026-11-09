@@ -2,7 +2,7 @@
 title: Tickee
 status: final
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-11-09
 sources:
   - ../../prds/prd-tickee-2026-10-27/prd.md
   - ../../prds/prd-tickee-2026-10-27/addendum.md
@@ -14,10 +14,12 @@ name: Tickee
 
 Spine hành vi cho Tickee MVP. Nội dung sản phẩm (FR, NFR, persona, phạm vi) nằm ở PRD và chỉ được dẫn theo mã. Hình ảnh nằm ở `DESIGN.md`; token được dẫn bằng cú pháp `{path.to.token}`. Các mock trong `mockups/` chỉ để minh họa và được link tại từng mục; **spine thắng khi mâu thuẫn với mọi mock**.
 
+**Cập nhật 09/11/2026 (Sprint Change Proposal E2-4):** thanh toán đi qua Tingee Payment Gateway, mở bằng redirect toàn trang (Architecture AD-6). Tickee không tự hiển thị QR thanh toán, không có QR tĩnh, không có Deep Link. Phần QR thanh toán trong `mockups/directions-2.html` và mục 2 của `mockups/key-success-ticket.html` là mock cũ.
+
 ## Foundation
 
 - **Đa bề mặt, một codebase web.** Không app native, không check-in offline (PRD §11.2).
-  - **Người mua** (trang Sự kiện → Checkout → QR thanh toán → Vé của tôi): mobile-first trên trình duyệt điện thoại (Safari iOS, Chrome Android bản hiện hành — NFR-9). Mở từ link Zalo/Facebook, chưa đăng nhập.
+  - **Người mua** (trang Sự kiện → Checkout → Trang Đơn → trang thanh toán của Tingee → Trang Đơn → Vé của tôi): mobile-first trên trình duyệt điện thoại (Safari iOS, Chrome Android bản hiện hành — NFR-9). Mở từ link Zalo/Facebook, chưa đăng nhập.
   - **CTV** (màn quét, tra tay): mobile-first trên trình duyệt điện thoại, camera trình duyệt.
   - **Dashboard BTC** (Owner/Admin): responsive đầy đủ — dùng tốt ngang nhau trên điện thoại (tại sự kiện) và laptop.
   - **Landing BTC** (`/`): trang marketing hướng tới BTC; CTA đưa BTC vào Flow 2 (quy tắc ở `landing-hero`).
@@ -27,7 +29,7 @@ Spine hành vi cho Tickee MVP. Nội dung sản phẩm (FR, NFR, persona, phạm
 - **Ngôn ngữ:** chỉ tiếng Việt (NFR-9). Tiền: số nguyên đồng, "300.000đ" (NFR-12). Giờ hiển thị theo giờ Việt Nam, kèm ngày đầy đủ ("Chủ nhật, 16/11/2026 · 07:00 – 17:00").
 - **Một Tài khoản Tickee cho mọi vai trò** (`[ASSUMPTION]` kế thừa PRD (§3)): một người có thể vừa là Người mua, vừa là CTV, vừa thuộc nhiều BTC — chuyển ngữ cảnh qua BTC switcher (FR-2).
 - **Mức độ:** Consumer (Closed Beta với BTC và Người mua thật). Chuẩn a11y: WCAG 2.2 AA.
-- **Hai rủi ro UX ưu tiên:** Minh bỏ ngang ở QR thanh toán → § Niềm tin khi thanh toán; Lan quét chậm ở cổng → § Check-in tại cổng.
+- **Hai rủi ro UX ưu tiên:** Minh bỏ ngang ở bước thanh toán → § Niềm tin khi thanh toán; Lan quét chậm ở cổng → § Check-in tại cổng.
 
 ## Information Architecture
 
@@ -39,9 +41,10 @@ Spine hành vi cho Tickee MVP. Nội dung sản phẩm (FR, NFR, persona, phạm
 | Trang Sự kiện | `/e/{slug}` — link Zalo/Facebook | Xem Sự kiện, chọn Hạng vé + số lượng, "Mua" (FR-7, FR-8, FR-10) |
 | Đăng nhập | Bấm "Mua", hoặc mở trang cần đăng nhập | Google hoặc OTP email; quay lại đúng lựa chọn (FR-1, FR-3) |
 | Checkout | Sau đăng nhập | Form mua vé một lần cho cả Đơn + tóm tắt Đơn (FR-9, FR-12) |
-| QR thanh toán | Gửi Đơn (Sự kiện có phí) | Trả tiền trong 15 phút Giữ chỗ (FR-14, FR-16, FR-17) |
-| Thành công | Tự chuyển từ QR thanh toán; hoặc gửi Đơn Sự kiện miễn phí | Hiện từng Vé + Mã QR vé (FR-11, FR-18, FR-22) |
-| Hết hạn | Tự chuyển khi hết 15 phút | Báo chỗ đã trả lại, mời mua lại (FR-14) |
+| Trang Đơn | `/orders/{code}` — sau khi gửi Đơn có phí; `returnUrl` khi Tingee đưa Người mua quay về; "Tiếp tục thanh toán" ở Vé của tôi | Chờ thanh toán: số tiền, đếm ngược 15 phút Giữ chỗ, BTC nhận tiền, nút "Thanh toán". Tự chuyển theo trạng thái máy chủ (FR-14, FR-16, FR-18) |
+| Trang thanh toán của Tingee | Nút "Thanh toán" (redirect toàn trang) | Ngoài Tickee: Người mua trả tiền trên trang Tingee rồi được đưa về Trang Đơn (AD-6) |
+| Thành công | Trang Đơn khi máy chủ báo đã thanh toán; hoặc gửi Đơn Sự kiện miễn phí | Hiện từng Vé + Mã QR vé (FR-11, FR-18, FR-22) |
+| Hết hạn | Trang Đơn khi máy chủ báo `expired` | Báo chỗ đã trả lại, mời mua lại (FR-14) |
 | Báo cáo Sự kiện | Link ở chân trang Sự kiện | Gửi báo cáo kèm lý do (FR-35) |
 | Không tìm thấy | `/e/{slug}` sai, hoặc Sự kiện còn Nháp | Báo không tìm thấy Sự kiện |
 
@@ -52,7 +55,7 @@ Không có trang khám phá Sự kiện (PRD §10 — không phải chợ vé). 
 | Bề mặt | Vào từ | Mục đích |
 |---|---|---|
 | Vé của tôi | Menu tài khoản; link trong email Vé; nút sau "Thành công" | Ba nhóm: Vé còn hiệu lực · Đơn đang chờ / "BTC đang kiểm tra thanh toán" (`order-card`) · Lịch sử (FR-22, FR-24) |
-| Chi tiết Vé | Hàng Vé trong Vé của tôi; link Vé được chia sẻ (quyền truy cập do Architecture quyết — Open Questions #11) | Mã QR vé, chia sẻ Vé bằng link/ảnh (FR-22), Social Ticket Card (FR-25, Should) |
+| Chi tiết Vé | Hàng Vé trong Vé của tôi; link Vé được chia sẻ (không cần đăng nhập, AD-29 — xem State Patterns › Chi tiết Vé qua link chia sẻ) | Mã QR vé, chia sẻ Vé bằng link/ảnh (FR-22), Social Ticket Card (FR-25, Should) |
 | Tài khoản | Menu tài khoản | **Bảo mật tài khoản**: bật/tắt xác thực hai lớp (FR-1); Xóa Tài khoản Tickee / rút đồng ý (FR-38). Dùng chung cho mọi vai (Người mua, Owner, Admin, CTV) vì cùng một Tài khoản Tickee. |
 
 ### BTC (dashboard)
@@ -66,11 +69,11 @@ Không có trang khám phá Sự kiện (PRD §10 — không phải chợ vé). 
 | BTC | Token | Owner (Admin chỉ xem) | Số dư, hạn mức, ngưỡng, "mua thêm Token" (FR-34) |
 | BTC | Thành viên | Owner | Mời/xóa Admin (FR-2, FR-4) |
 | BTC | Tài khoản nhận tiền | Owner | Kết nối tài khoản Tingee, chọn, đặt mặc định và hủy liên kết tài khoản nhận tiền, URL IPN và hướng dẫn cấu hình (FR-5) |
-| BTC | Cài đặt | Owner, Admin | Thông tin BTC, trạng thái Closed Beta (FR-37) |
+| BTC | Cài đặt | Owner, Admin | Thông tin BTC (tên, kênh liên hệ SĐT/email hiện cho Người mua khi cần liên hệ BTC), trạng thái Closed Beta (FR-37) |
 | Sự kiện | Tổng quan | Owner, Admin | Doanh thu, check-in, Vé theo Hạng vé, `needs-action-card`, `recent-orders-block`, cảnh báo (FR-31) |
 | Sự kiện | Đơn | Owner, Admin | Danh sách Đơn + câu trả lời form, bộ lọc "Cần xử lý", xuất CSV (FR-21, FR-31) |
 | Sự kiện | Hạng vé | Owner, Admin | Giá, số suất, mở/đóng bán, giới hạn Vé/Đơn (FR-8, FR-12) |
-| Sự kiện | Form mua | Owner, Admin | Trường mặc định, câu hỏi riêng, trường bổ sung (FR-9) |
+| Sự kiện | Form mua | Owner, Admin | Trường mặc định, câu hỏi riêng (FR-9; trường dựng sẵn khác ngoài phạm vi MVP) |
 | Sự kiện | Check-in | Owner, Admin | Check-in real-time theo Hạng vé, danh sách CTV, link mời chung (FR-26, FR-30) |
 | Sự kiện | Cài đặt | Owner, Admin | Ẩn / Hủy / "Kết thúc" sớm / Google Sheets (FR-7, FR-32, FR-33) |
 | — | Tạo Sự kiện (wizard 4 bước) | Owner, Admin | Thông tin → Hạng vé → Form mua → Xem trước & mở bán |
@@ -97,9 +100,9 @@ Duyệt Closed Beta · Báo cáo vi phạm · Khóa/mở khóa Sự kiện hoặ
 
 ## Voice and Tone
 
-Giọng thương hiệu và tư thế hình ảnh nằm ở `DESIGN.md`. Đây là microcopy. Thuật ngữ PRD giữ nguyên văn (Sự kiện, Hạng vé, Đơn, Vé, Mã QR vé, QR thanh toán, Giữ chỗ, Cần xử lý, Vé của tôi…).
+Giọng thương hiệu và tư thế hình ảnh nằm ở `DESIGN.md`. Đây là microcopy. Thuật ngữ PRD giữ nguyên văn (Sự kiện, Hạng vé, Đơn, Vé, Mã QR vé, link thanh toán, Giữ chỗ, Cần xử lý, Vé của tôi…).
 
-**Với Người mua** — thân thiện, xưng "bạn", ngắn gọn. Không dùng thuật ngữ kỹ thuật: IPN, billId, Đối soát bù, Token không bao giờ xuất hiện với Người mua.
+**Với Người mua** — thân thiện, xưng "bạn", ngắn gọn. Không dùng thuật ngữ kỹ thuật: IPN, `orderId`, Gateway, Đối soát bù, Token không bao giờ xuất hiện với Người mua.
 
 | Nên | Không nên |
 |---|---|
@@ -109,6 +112,7 @@ Giọng thương hiệu và tư thế hình ảnh nằm ở `DESIGN.md`. Đây l
 | "Tiền chuyển thẳng cho CLB ABC" | "Thanh toán qua cổng Tickee" |
 | "Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền." | "Vui lòng chờ hệ thống xác nhận IPN." |
 | "Nếu bạn đã chuyển, vé sẽ về trong vài phút — đừng chuyển lại." | "Chưa nhận được thanh toán. Vui lòng thử lại." |
+| "Đang xác nhận thanh toán. Nếu bạn đã trả, vé sẽ tự hiện." | "Hết hạn" khi máy chủ chưa báo hết hạn |
 | "Hạng vé Đôi nam vừa hết. Bạn chọn lại nhé." | "Lỗi 409: tạo Đơn thất bại." |
 | "BTC đang kiểm tra thanh toán" | "Đơn đang ở trạng thái Cần xử lý" |
 | "Tickee không giữ tiền của bạn" | Hứa hẹn về hoàn tiền (Tickee không xử lý hoàn tiền) |
@@ -121,7 +125,7 @@ Giọng thương hiệu và tư thế hình ảnh nằm ở `DESIGN.md`. Đây l
 | "3 mục Cần xử lý" | "Bạn có 3 việc đang chờ xử lý nè!" |
 | "Lệch số tiền · nhận 250.000đ / Đơn 300.000đ" | "Có vấn đề với thanh toán này" |
 | "Thiếu chính sách hoàn vé — chưa mở bán được." | "Ôi, có lỗi rồi!" |
-| "Đã ghép giao dịch vào Đơn TK8F3Q2A. Đã phát 2 Vé." | "Thành công!" |
+| "Đã ghép giao dịch vào Đơn TK8F3Q2AXM. Đã phát 2 Vé." | "Thành công!" |
 | "Chờ duyệt Closed Beta" | "Tài khoản đang chờ" |
 
 **Với CTV** — mệnh lệnh ngắn, đọc trong một cái liếc: "Thành công", "Đã check-in", "Vé không hợp lệ", "Chạm để quét tiếp", "Mất kết nối — chưa quét được".
@@ -130,7 +134,7 @@ Giọng thương hiệu và tư thế hình ảnh nằm ở `DESIGN.md`. Đây l
 
 ## Component Patterns
 
-Hành vi. Spec hình ảnh ở `DESIGN.md` › Components (hoặc mặc định shadcn khi kế thừa); nhóm theo bề mặt, cùng tên nhóm với DESIGN. Minh họa: [Màn quét](mockups/key-checkin.html) (`scanner-viewport`, `scan-result-overlay`, `offline-banner`, `manual-lookup`) · [Thành công & Vé của tôi](mockups/key-success-ticket.html) (`ticket-card`, `order-card`) · [Tổng quan Sự kiện](mockups/key-dashboard-event.html) (`dashboard-sidebar`, `bottom-tab-bar`, `stat-card`, `status-banner`) · [Hướng D · Rạp tối](mockups/directions-2.html) (`event-hero`, `ticket-tier-row`, `purchase-bar`, `payment-qr-card`).
+Hành vi. Spec hình ảnh ở `DESIGN.md` › Components (hoặc mặc định shadcn khi kế thừa); nhóm theo bề mặt, cùng tên nhóm với DESIGN. Minh họa: [Màn quét](mockups/key-checkin.html) (`scanner-viewport`, `scan-result-overlay`, `offline-banner`, `manual-lookup`) · [Thành công & Vé của tôi](mockups/key-success-ticket.html) (`ticket-card`, `order-card`) · [Tổng quan Sự kiện](mockups/key-dashboard-event.html) (`dashboard-sidebar`, `bottom-tab-bar`, `stat-card`, `status-banner`) · [Hướng D · Rạp tối](mockups/directions-2.html) (`event-hero`, `ticket-tier-row`, `purchase-bar`; phần QR thanh toán của mock này đã cũ, chưa có mock cho `payment-summary`).
 
 ### Dùng chung
 
@@ -138,9 +142,9 @@ Hành vi. Spec hình ảnh ở `DESIGN.md` › Components (hoặc mặc định 
 |---|---|---|
 | `button-primary` | Thanh mua vé, stage, sidebar, landing | Một nút chính mỗi màn. Bấm → trạng thái loading (spinner trong nút, giữ nguyên độ rộng, chặn bấm lặp) cho mọi thao tác gọi mạng. Không bao giờ disable mà không có lý do hiển thị gần đó. |
 | `button-primary-on-light` | Form dashboard, Checkout nền sáng, Tra tay, `order-card` | Hành vi như `button-primary`. Ở dark mode luôn hiển thị như `button-primary` (coral, chữ mực) — quy tắc chung ở `DESIGN.md` › Nút. |
-| `button-secondary` | "Tải ảnh QR", "Chia sẻ Vé", "Tra tay" | Hành động phụ; không bao giờ đứng một mình làm hành động chính. |
+| `button-secondary` | "Chia sẻ Vé", "Tra tay", "Thử lại" | Hành động phụ; không bao giờ đứng một mình làm hành động chính. |
 | `button-destructive` | "Hủy Sự kiện", "Từ chối", "Thu hồi" | Luôn qua `Dialog` xác nhận nêu hậu quả cụ thể ("Mọi Vé sẽ bị vô hiệu. Email gửi tới 48 Người mua."). "Hủy Sự kiện" yêu cầu gõ tên Sự kiện `[ASSUMPTION]`. |
-| `stage-block` | Hero, QR, stat-card | Không tương tác tự thân; chỉ chứa nội dung/nút. |
+| `stage-block` | Hero, Trang Đơn (`payment-summary`), stat-card | Không tương tác tự thân; chỉ chứa nội dung/nút. |
 | `event-card` | Danh sách Sự kiện (dashboard), lịch sử Vé của tôi | Chạm cả hàng → vào Sự kiện (dashboard: tab Tổng quan). |
 | `status-badge` | Mọi nơi | Không tương tác; luôn có chữ. |
 | `status-banner` | Trang Sự kiện (dưới stage), Dashboard (đầu vùng nội dung) | Banner chặn bán hoặc mức danger không đóng được; banner mang tính thông tin có nút đóng. Mỗi banner tối đa một hành động (vd. "Liên kết ngay", "Mua thêm Token", "Kết nối lại Google Sheets"). Hiện tối đa 2; còn lại gộp "+N thông báo". Quy tắc đóng, chồng và thứ tự: § Thứ tự ưu tiên `status-banner` (dưới). Banner đổi nội dung được thông báo `aria-live="polite"`. Người mua chỉ thấy banner trạng thái Sự kiện, không bao giờ thấy banner hệ thống BTC. |
@@ -162,13 +166,13 @@ Hành vi. Spec hình ảnh ở `DESIGN.md` › Components (hoặc mặc định 
 
 | Component | Dùng ở | Quy tắc hành vi |
 |---|---|---|
-| `payment-qr-card` | QR thanh toán | Tự lắng nghe trạng thái thanh toán (không cần reload, không có nút "Tôi đã chuyển khoản"). Thanh toán được xác nhận → tự chuyển "Thành công" (FR-18). "Mở app ngân hàng" dùng Deep Link; "Tải ảnh QR" lưu ảnh QR (kèm số tiền + mã Đơn trên ảnh `[ASSUMPTION]`). QR tĩnh: nút sao chép mã Đơn → toast "Đã sao chép mã Đơn". |
-| `countdown-chip` | QR thanh toán | Đếm theo giờ máy chủ (không theo đồng hồ máy). Về 0 → chuyển màn Hết hạn. Không nhấp nháy. |
-| `recipient-trust-block` | QR thanh toán | Tĩnh; hiện tên BTC + chủ tài khoản + ngân hàng ngay khi màn mở, trước cả khi QR tải xong. |
-| `reassurance-line` | QR thanh toán | Xuất hiện thay dòng "Đang chờ thanh toán" sau một khoảng chờ (`[ASSUMPTION]` ~2 phút, khớp mốc Đối soát bù FR-20 — Open Questions #14); copy ở State Patterns › Chờ lâu. Thông báo cho trình đọc màn hình (`aria-live="polite"`). |
+| `payment-summary` | Trang Đơn (Chờ thanh toán) | Stage chứa số tiền, `countdown-chip`, mã Đơn. Nút chính "Thanh toán" mở link Gateway bằng **redirect toàn trang** (không popup, không Deep Link); đang tạo link → spinner trong nút. Không tự hiển thị mã QR thanh toán; không có nút "Tôi đã chuyển khoản". Trạng thái lấy qua REST + realtime, không tin tham số trên URL quay về; thanh toán được xác nhận → tự chuyển "Thành công" (FR-16, FR-18, AD-6, AD-17). |
+| `countdown-chip` | Trang Đơn, `order-card` | Đếm tới hạn link theo `serverNow` (không theo đồng hồ máy). Về 0 mà Đơn vẫn chờ → "Đang xác nhận thanh toán", **không** tự chuyển Hết hạn; chỉ hiện Hết hạn khi máy chủ báo (AD-4). Không nhấp nháy. |
+| `recipient-trust-block` | Trang Đơn | Tĩnh; hiện "Tiền chuyển thẳng cho {BTC}" kèm tên chủ tài khoản và ngân hàng của tài khoản nhận tiền của Đơn, ngay khi màn mở. Trang Tingee hiển thị tên người nhận nào đang chờ Tingee trả lời (Architecture Open Questions); có câu trả lời thì chỉnh copy cho khớp. |
+| `reassurance-line` | Trang Đơn | Xuất hiện thay dòng "Đang chờ thanh toán" sau một khoảng chờ (`[ASSUMPTION]` ~2 phút, khớp mốc Đối soát bù FR-20 — Open Questions #14); copy ở State Patterns › Chờ lâu. Thông báo cho trình đọc màn hình (`aria-live="polite"`). |
 | `ticket-card` | Thành công, Chi tiết Vé | Mở Chi tiết Vé → tăng độ sáng màn hình nếu trình duyệt cho phép `[ASSUMPTION]`. Chia sẻ từng Vé bằng link hoặc ảnh (FR-22). |
 | `social-ticket-card` | Chi tiết Vé (nút "Tải ảnh Story") | Tạo ảnh tại chỗ rồi lưu/chia sẻ qua Web Share API (fallback tải ảnh). Ảnh **không bao giờ chứa Mã QR vé** hay thông tin check-in được (FR-25). Chỉ hiện với Vé hợp lệ; Vé Đã hủy không có nút `[ASSUMPTION]`. Đang tạo ảnh → spinner trong nút; lỗi → toast "Chưa tạo được ảnh. Thử lại." `[ASSUMPTION]`. |
-| `order-card` | Vé của tôi › Đơn đang chờ | Chờ thanh toán: đếm ngược theo giờ máy chủ; "Tiếp tục thanh toán" mở lại đúng QR thanh toán của Đơn đó (không tạo Đơn mới); về 0 → thẻ chuyển "Hết hạn" rồi rời nhóm chờ. "BTC đang kiểm tra thanh toán": không hành động chính, hiện liên hệ BTC. Đã hủy: hiện liên hệ BTC. Không bao giờ có QR. Tự cập nhật khi trạng thái Đơn đổi (Đơn được duyệt → thành Vé trong nhóm hiệu lực). |
+| `order-card` | Vé của tôi › Đơn đang chờ | Chờ thanh toán: đếm ngược theo `serverNow`; "Tiếp tục thanh toán" mở Trang Đơn của đúng Đơn đó (không tạo Đơn mới); về 0 → "Đang xác nhận thanh toán", rời nhóm chờ khi máy chủ báo Hết hạn hoặc Đã thanh toán. "BTC đang kiểm tra thanh toán": không hành động chính, hiện kênh liên hệ BTC (SĐT, email BTC đã nhập). Đã hủy: hiện kênh liên hệ BTC. Không bao giờ có QR. Tự cập nhật khi trạng thái Đơn đổi (Đơn được duyệt → thành Vé trong nhóm hiệu lực). |
 
 ### Màn quét
 
@@ -188,8 +192,8 @@ Hành vi. Spec hình ảnh ở `DESIGN.md` › Components (hoặc mặc định 
 | `stat-card` | Tổng quan, Check-in | Số check-in cập nhật liên tục không reload (FR-30); doanh thu chỉ tính Đơn Đã thanh toán (FR-31). |
 | `needs-action-card` (thẻ Cần xử lý) | Tổng quan Sự kiện | Số mục Cần xử lý của Sự kiện, cập nhật real-time; link "Mở tab Đơn, lọc Cần xử lý" → tab Đơn với bộ lọc "Cần xử lý" bật sẵn. |
 | `recent-orders-block` (khối "Đơn gần đây") | Tổng quan Sự kiện | 5 Đơn mới nhất mọi trạng thái, tự cập nhật như tab Đơn (Đơn mới hiện đầu khối, không reload); "Xem tất cả Đơn" → tab Đơn. Chỉ là lối tắt — danh sách đầy đủ, bộ lọc và xuất CSV vẫn ở tab Đơn. |
-| `wizard-stepper` | Tạo Sự kiện | 4 bước; quay lại bước trước không mất dữ liệu. Bước "Xem trước & mở bán" liệt kê mọi điều kiện còn thiếu (chính sách hoàn vé, liên kết tài khoản, Closed Beta, Token) với link sửa nhanh; "Mở bán" chỉ bật khi đủ. Có thể "Lưu nháp" ở mọi bước. Tự lưu nháp: `[ASSUMPTION]`. |
-| `needs-action-row` | Cần xử lý, tab Đơn | Mở → `Sheet` chi tiết: giao dịch, Đơn liên quan, nhật ký. Thao tác theo loại: ghép tay giao dịch với Đơn, duyệt tay phát Vé (chỉ khi còn chỗ), từ chối, đánh dấu "Đã hoàn tay" (FR-21). Sau thao tác: hàng rời hàng đợi + toast nêu kết quả. |
+| `wizard-stepper` | Tạo Sự kiện | 4 bước; quay lại bước trước không mất dữ liệu. Bước "Xem trước & mở bán" liệt kê mọi điều kiện còn thiếu theo `publishReadiness` (chính sách hoàn vé, BTC không bị khóa; với Hạng vé có phí: Closed Beta, liên kết tài khoản, giá ≥ 2.000đ — AD-34) với link sửa nhanh; "Mở bán" chỉ bật khi đủ. Có thể "Lưu nháp" ở mọi bước. Tự lưu nháp: `[ASSUMPTION]`. |
+| `needs-action-row` | Cần xử lý, tab Đơn | Mở → `Sheet` chi tiết: giao dịch, Đơn liên quan, nhật ký. Thao tác theo loại (Story 4.4): "Lệch số tiền" / "Thanh toán mồ côi" → duyệt tay phát Vé (chỉ khi còn chỗ) hoặc từ chối; "Giao dịch chưa khớp" → ghép với một Đơn hết hạn hoặc Cần xử lý cùng số tiền; "Thanh toán trùng" và giao dịch không ghép → "Đã hoàn tay" hoặc "Bỏ qua" (lý do bắt buộc); Đơn đã hủy mà khách đã trả → "Đã hoàn tay" (FR-21). Sau thao tác: hàng rời hàng đợi + toast nêu kết quả. |
 | `checkin-progress` | Tab Check-in | Theo từng Hạng vé, real-time. Dưới đó: link mời CTV chung (nút "Sao chép link") + danh sách CTV đã nhận, mỗi người có "Thu hồi" (FR-26). |
 
 **Bố cục Tổng quan Sự kiện** (đã chốt; minh họa: [Tổng quan Sự kiện](mockups/key-dashboard-event.html)):
@@ -243,25 +247,28 @@ Minh họa: [Trang Sự kiện](mockups/directions-2.html) (mục "Hướng D ·
 | Đăng nhập Google bị hủy | Đăng nhập | Ở lại màn đăng nhập, không báo lỗi đỏ. |
 | Form thiếu/sai | Checkout | Lỗi tại từng trường khi rời trường và khi gửi; cuộn + focus trường lỗi đầu tiên. Ghi rõ thông tin chia sẻ cho BTC (FR-3). |
 | Hết chỗ khi gửi Đơn | Checkout | Không tạo Đơn; báo đúng Hạng vé nào hết; quay lại trang Sự kiện với số lượng hạng đó về 0, các hạng khác giữ nguyên (FR-13). |
-| Token khả dụng không đủ | Checkout | Không tạo QR; "Sự kiện tạm ngừng bán. Bạn thử lại sau nhé." (FR-15). |
-| Gửi Đơn lỗi (mạng / máy chủ) | Checkout | Lỗi tại chỗ trên nút: "Chưa gửi được Đơn. Kiểm tra kết nối rồi thử lại." + nút "Thử lại"; form giữ nguyên dữ liệu. Thử lại dùng cùng khóa chống trùng của lần gửi đầu nên không tạo Đơn thứ hai; nếu Đơn đã được tạo ở lần trước → chuyển thẳng tới QR thanh toán của Đơn đó `[ASSUMPTION]` (copy + cơ chế, Architecture xác nhận — Open Questions #12). |
-| Không tạo được QR (Tingee lỗi, không do Token) | QR thanh toán | Đơn và Giữ chỗ vẫn còn; khung QR thay bằng "Chưa tạo được mã QR. Đang thử lại…" + nút "Thử lại" (`button-secondary`); `recipient-trust-block` và đếm ngược vẫn hiện. Thử lại tạo QR cho **cùng Đơn**, không tạo Đơn mới. Lỗi kéo dài → dòng phụ "Đơn của bạn vẫn được giữ trong Vé của tôi." `[ASSUMPTION]` (copy, số lần tự thử). |
+| Dịch vụ thanh toán của BTC đang tạm ngừng | Checkout, Trang Đơn | Tạo link bị Tingee từ chối: Đơn hết hạn, chỗ trả lại; "Sự kiện tạm ngừng bán. Bạn thử lại sau nhé." (FR-15). |
+| Gửi Đơn lỗi (mạng / máy chủ) | Checkout | Lỗi tại chỗ trên nút: "Chưa gửi được Đơn. Kiểm tra kết nối rồi thử lại." + nút "Thử lại"; form giữ nguyên dữ liệu. Thử lại dùng cùng khóa chống trùng (`Idempotency-Key`) của lần gửi đầu nên không tạo Đơn thứ hai; nếu Đơn đã được tạo ở lần trước → chuyển thẳng tới Trang Đơn của Đơn đó (AD-31). |
+| Chưa tạo được link thanh toán (Tingee báo lỗi) | Trang Đơn | Đơn và Giữ chỗ vẫn còn; nút "Thanh toán" thay bằng "Chưa tạo được link thanh toán" + nút "Thử lại" (`button-secondary`) cho **cùng Đơn** trong 60 giây; `recipient-trust-block` và đếm ngược vẫn hiện. Hết 60 giây, hoặc lỗi không rõ (timeout) → Hết hạn, mời mua lại (AD-5). |
 | Báo cáo Sự kiện | Báo cáo Sự kiện | Form chọn lý do + mô tả ngắn; yêu cầu đăng nhập Tài khoản Tickee `[ASSUMPTION]`. Đã gửi: "Cảm ơn bạn. Tingee sẽ xem xét báo cáo này." Lỗi: lỗi tại chỗ + "Thử lại", giữ nội dung đã nhập. `[ASSUMPTION]` copy. |
 
-### QR thanh toán & sau thanh toán
+### Thanh toán & Trang Đơn
 
-Minh họa: [QR thanh toán](mockups/directions-2.html) (mục "Hướng D · Rạp tối", gồm trạng thái trấn an).
+Minh họa: chưa có mock cho Trang Đơn theo Gateway; trạng thái trấn an trong [Hướng D · Rạp tối](mockups/directions-2.html) vẫn dùng được về hình ảnh. Trạng thái lấy từ `buyerStatus` của máy chủ (`awaiting_payment`, `confirming`, `paid`, `expired`, `under_review`, `cancelled_by_organizer`, `event_cancelled`), không từ tham số trên URL quay về.
 
 | Trạng thái | Bề mặt | Cách thể hiện |
 |---|---|---|
-| Đang chờ | QR thanh toán | QR + đếm ngược + `recipient-trust-block` + "Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền." |
-| Chờ lâu | QR thanh toán | `reassurance-line` (copy chuẩn): "Nếu bạn đã chuyển, vé sẽ về trong vài phút — đừng chuyển lại." |
-| Quay lại từ app ngân hàng | QR thanh toán | Kiểm tra trạng thái ngay khi tab hiển thị lại (`visibilitychange`); nếu đã thanh toán → "Thành công". `[ASSUMPTION]` |
-| QR tĩnh | QR thanh toán | Mã Đơn nổi bật + sao chép + hướng dẫn ghi đúng nội dung chuyển khoản (FR-17). |
-| Mất mạng khi đang chờ | QR thanh toán | QR vẫn hiển thị (thanh toán ở app ngân hàng không phụ thuộc trang); dòng nhỏ "Mất kết nối — vé vẫn được gửi qua email và Vé của tôi." `[ASSUMPTION]` |
-| Thành công | Thành công | Chuyển cảnh nhẹ: thẻ Vé trượt lên từ stage tối + rung nhẹ nếu thiết bị hỗ trợ. "Vé của bạn đã sẵn sàng!" + từng `ticket-card` + "Đã gửi Vé tới {email}" (FR-18, FR-22, FR-23). Bố cục (đã chốt): stage block đầu màn chứa wordmark, tên Sự kiện, "Vé của bạn đã sẵn sàng!" và "Đã gửi Vé tới {email}"; `ticket-card` đầu tiên chồng mép dưới stage (vị trí cuối của chuyển cảnh), các Vé sau xếp dưới; mỗi Vé có "Chia sẻ Vé"; cuối màn một nút chính `button-primary-on-light` "Xem Vé của tôi" → Vé của tôi. Reduced motion: hiện ngay, không trượt, không rung. Minh họa: [Thành công](mockups/key-success-ticket.html). |
-| Hết hạn | Hết hạn | "Hết thời gian giữ chỗ. Chỗ đã được trả lại." + `button-primary` "Mua lại" về trang Sự kiện (FR-14). Dòng phụ: "Nếu bạn đã chuyển tiền, đừng chuyển lại — kiểm tra Vé của tôi hoặc email." `[ASSUMPTION]` |
-| Sự kiện miễn phí | Trang Sự kiện → Checkout → Thành công | Giá "Miễn phí", nút "Đăng ký"; vẫn qua đăng nhập + form mua (FR-9); không có QR; gửi Đơn → Thành công ngay với Mã QR vé (FR-11). Nhãn nút `[ASSUMPTION]`. |
+| Chờ thanh toán | Trang Đơn | `payment-summary` (số tiền, đếm ngược, mã Đơn) + `recipient-trust-block` + link chính sách hoàn vé (mở `Sheet`) + "Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền." + nút "Thanh toán" + chân "Tickee không giữ tiền của bạn". |
+| Đang mở trang thanh toán | Trang Đơn | Bấm "Thanh toán" → spinner trong nút rồi chuyển toàn trang sang trang thanh toán của Tingee. |
+| Quay về từ Tingee / quay lại tab | Trang Đơn | Kiểm tra trạng thái ngay (REST khi tải và khi `visibilitychange`); đã thanh toán → "Thành công"; chưa → giữ Chờ thanh toán. |
+| Chờ lâu | Trang Đơn | `reassurance-line` (copy chuẩn): "Nếu bạn đã chuyển, vé sẽ về trong vài phút — đừng chuyển lại." |
+| Đang xác nhận thanh toán | Trang Đơn | Đồng hồ về 0 mà máy chủ chưa báo kết quả: "Đang xác nhận thanh toán. Nếu bạn đã trả, vé sẽ tự hiện — đừng trả lại."; ẩn nút "Thanh toán" (AD-4). |
+| Mất mạng khi đang chờ | Trang Đơn | Dòng nhỏ "Mất kết nối — vé vẫn được gửi qua email và Vé của tôi." `[ASSUMPTION]`; có mạng lại thì kiểm tra trạng thái ngay. |
+| BTC đang kiểm tra thanh toán | Trang Đơn | "BTC đang kiểm tra thanh toán" + kênh liên hệ BTC; không lộ loại Cần xử lý hay số tiền lệch (FR-21). |
+| Sự kiện đã hủy | Trang Đơn | "Sự kiện đã hủy"; Đơn đã trả tiền thì thêm "BTC sẽ liên hệ hoàn tiền." (FR-33). |
+| Thành công | Trang Đơn | Chuyển cảnh nhẹ: thẻ Vé trượt lên từ stage tối + rung nhẹ nếu thiết bị hỗ trợ. "Vé của bạn đã sẵn sàng!" + từng `ticket-card` + "Đã gửi Vé tới {email}" (FR-18, FR-22, FR-23). Bố cục (đã chốt): stage block đầu màn chứa wordmark, tên Sự kiện, "Vé của bạn đã sẵn sàng!" và "Đã gửi Vé tới {email}"; `ticket-card` đầu tiên chồng mép dưới stage (vị trí cuối của chuyển cảnh), các Vé sau xếp dưới; mỗi Vé có "Chia sẻ Vé"; cuối màn một nút chính `button-primary-on-light` "Xem Vé của tôi" → Vé của tôi. Reduced motion: hiện ngay, không trượt, không rung. Minh họa: [Thành công](mockups/key-success-ticket.html). |
+| Hết hạn | Trang Đơn | Chỉ hiện khi máy chủ báo `expired`. "Hết thời gian giữ chỗ. Chỗ đã được trả lại." + `button-primary` "Mua lại" về trang Sự kiện (FR-14). Dòng phụ: "Nếu bạn đã chuyển tiền, đừng chuyển lại — kiểm tra Vé của tôi hoặc email." `[ASSUMPTION]` |
+| Sự kiện miễn phí | Trang Sự kiện → Checkout → Thành công | Giá "Miễn phí", nút "Đăng ký"; vẫn qua đăng nhập + form mua (FR-9); không qua thanh toán; gửi Đơn → Thành công ngay với Mã QR vé (FR-11). Nhãn nút `[ASSUMPTION]`. |
 | Email Vé lỗi | — | Tự thử lại phía sau; không hiện với Người mua (FR-23). |
 
 ### Vé của tôi & Chi tiết Vé
@@ -272,8 +279,8 @@ Minh họa: [Vé của tôi](mockups/key-success-ticket.html) (mục 3).
 |---|---|---|
 | Tải lần đầu | Vé của tôi, Chi tiết Vé | `Skeleton` theo bố cục thẻ (Vé của tôi: 2 thẻ; Chi tiết Vé: `ticket-card` với ô QR xám). |
 | Trống | Vé của tôi | "Bạn chưa có vé nào. Vé bạn mua sẽ hiện ở đây." Không có nút khám phá (không chợ vé). |
-| Đơn Chờ thanh toán | Vé của tôi | `order-card` với đếm ngược + "Tiếp tục thanh toán" → QR thanh toán của cùng Đơn. |
-| "BTC đang kiểm tra thanh toán" | Vé của tôi | `order-card`. Mọi loại Cần xử lý hiện cùng một trạng thái phía Người mua (không lộ tên loại), kèm thông tin liên hệ BTC; email gửi cho mọi loại — `[ASSUMPTION]`, xem Open Questions #4. |
+| Đơn Chờ thanh toán | Vé của tôi | `order-card` với đếm ngược + "Tiếp tục thanh toán" → Trang Đơn của cùng Đơn. |
+| "BTC đang kiểm tra thanh toán" | Vé của tôi | `order-card`. Mọi loại Cần xử lý hiện cùng một trạng thái phía Người mua (không lộ tên loại), kèm kênh liên hệ BTC; email gửi cho mọi loại — `[ASSUMPTION]`, xem Open Questions #4. |
 | Đơn Đã hủy (BTC từ chối) | Vé của tôi | `order-card` badge "Đã hủy" + liên hệ BTC. `[ASSUMPTION]` hiển thị Đơn bị từ chối cho Người mua. |
 | Vé hợp lệ | Chi tiết Vé | `ticket-card` + Mã QR vé đầy đủ. |
 | Vé Đã check-in | Chi tiết Vé | QR mờ + badge "Đã check-in". |
@@ -283,13 +290,12 @@ Minh họa: [Vé của tôi](mockups/key-success-ticket.html) (mục 3).
 
 ### Chi tiết Vé qua link chia sẻ
 
-Ai được mở link, có phải đăng nhập không, và có thấy Mã QR vé không chờ Architecture quyết (Open Questions #11, liên quan PRD OQ #10 — chuyển nhượng Vé); UX chỉ chốt các trạng thái phải có và mức tối thiểu:
+Đã chốt theo Architecture AD-29 (đóng Open Questions #11):
 
-- **Người nhận chưa đăng nhập** (Chi tiết Vé qua link chia sẻ) — xem thẳng Vé, hay đăng nhập trước rồi quay lại đúng link như FR-3.
-- **Người mở không phải chủ Vé (đã đăng nhập)** — có thấy Mã QR vé hay chỉ thông tin Vé; Vé có vào Vé của tôi của người nhận không.
-- **Vé đã check-in** — tối thiểu nhất quán với chủ Vé: QR mờ + badge "Đã check-in".
-- **Vé Đã hủy / hết hiệu lực** (Sự kiện hủy hoặc đã kết thúc) — tối thiểu: không có Mã QR vé dùng được + badge trạng thái.
-- **Link không hợp lệ** (sai, bị thu hồi, Vé không tồn tại) — tối thiểu: `empty-state` không lộ thông tin Vé hay Người mua.
+- **Ai có link đều xem được, không cần đăng nhập.** Người nhận thấy Mã QR vé, tên Sự kiện, Hạng vé, số thứ tự Vé và trạng thái; không thấy SĐT, email hay tên Người mua. Vé không vào Vé của tôi của người nhận (không có chuyển nhượng Vé, PRD OQ #10).
+- **Vé đã check-in** — nhất quán với chủ Vé: QR mờ + badge "Đã check-in".
+- **Vé Đã hủy, quá mốc Sự kiện kết thúc, link sai hoặc link cũ đã bị tạo lại** — cùng một `empty-state`, không lộ thông tin Vé hay Người mua.
+- **Chủ Vé tạo lại link được**; link cũ mất hiệu lực ngay.
 
 ### Dashboard BTC
 
@@ -331,7 +337,7 @@ Ai được mở link, có phải đăng nhập không, và có thấy Mã QR v�
 | Nhập mã sau đăng nhập | Mọi trang | API trả `TOTP_REQUIRED` → `Dialog` "Xác thực hai lớp": mã 6 số, link "Dùng mã khôi phục", nút "Đăng xuất"; đúng → tiếp tục thao tác dở; sai → lỗi tại ô; bị khóa → "Thử lại sau N phút". |
 | Tắt 2FA | Bảo mật tài khoản | `Dialog` nêu hậu quả "Tài khoản chỉ còn được bảo vệ bằng email." + ô mã TOTP hoặc mã khôi phục; xong → toast "Đã tắt xác thực hai lớp", email báo. |
 | Đã dùng mã khôi phục | Bảo mật tài khoản | `status-banner` warning "Xác thực hai lớp cũ đã được gỡ. Bật lại với thiết bị mới." |
-| Xác nhận lại (`REAUTH_REQUIRED`) | Đổi key Tingee, Đặt làm mặc định, Hủy liên kết tài khoản nhận tiền, Chuyển quyền Owner (Story 2.13) | `Dialog` "Xác nhận để tiếp tục": đã bật 2FA → mã TOTP; chưa bật → "Gửi mã tới {email}" + ô OTP; đúng → thực hiện thao tác, giữ dữ liệu đã nhập. |
+| Xác nhận lại (`REAUTH_REQUIRED`) | Bật 2FA, Đổi key Tingee, Đặt làm mặc định, Hủy liên kết tài khoản nhận tiền, Chuyển quyền Owner (Story 2.13, AD-26) | `Dialog` "Xác nhận để tiếp tục": đã bật 2FA → mã TOTP; chưa bật → "Gửi mã tới {email}" + ô OTP; đúng → thực hiện thao tác, giữ dữ liệu đã nhập. |
 
 ### Landing BTC
 
@@ -377,10 +383,10 @@ Minh họa: [Màn quét](mockups/key-checkin.html).
 
 - **Chạm để hành động**; không có thao tác chỉ-hover. Một hành động chính mỗi màn, đặt trong vùng ngón cái (nửa dưới) trên điện thoại.
 - **Thanh mua vé dính đáy** trên trang Sự kiện và Checkout.
-- **Không reload để biết kết quả**: QR thanh toán, Check-in real-time, badge Cần xử lý đều tự cập nhật.
-- **Deep Link** sang app ngân hàng; quay lại trình duyệt tự kiểm tra trạng thái.
+- **Không reload để biết kết quả**: Trang Đơn, Check-in real-time, badge Cần xử lý đều tự cập nhật.
+- **Thanh toán bằng redirect toàn trang** sang trang của Tingee; quay về Tickee tự kiểm tra trạng thái. Không popup, không Deep Link (AD-6).
 - **Web Share API** cho chia sẻ Sự kiện và Vé; fallback sao chép link + toast "Đã sao chép".
-- **Sao chép**: mã Đơn (QR tĩnh), link Sự kiện, link mời CTV — luôn kèm toast xác nhận.
+- **Sao chép**: link Sự kiện, link Vé, link mời CTV — luôn kèm toast xác nhận.
 - **Phản hồi xúc giác**: rung nhẹ khi "Thành công" (Người mua) nếu thiết bị hỗ trợ. Rung trên Màn quét: `[ASSUMPTION]` chưa quyết.
 - **Âm thanh**: chỉ trên Màn quét — kết quả đỏ luôn có âm thanh (FR-27); kết quả xanh: `[ASSUMPTION]` một tiếng "bíp" ngắn, nhẹ, khác hẳn tiếng đỏ.
 - **Phím tắt dashboard**: không có ở MVP `[ASSUMPTION]`; dashboard dùng tốt bằng bàn phím (Tab/Enter/Esc).
@@ -396,8 +402,8 @@ Hành vi. Tương phản hình ảnh nằm ở `DESIGN.md` › Colors (mọi c�
 - **Không chỉ dựa vào màu**: kết quả quét = màu + chữ lớn + hình icon khác nhau + âm thanh (đỏ); badge trạng thái luôn có chữ; Hạng vé hết dùng nhãn chữ + viền nét đứt.
 - **Trình đọc màn hình**:
   - Kết quả quét thông báo `aria-live="assertive"`: "Thành công. Minh, vé 2 trên 2, Đôi nam." / "Dừng lại. Vé đã check-in lúc 7 giờ 42."
-  - QR thanh toán: ảnh QR có nhãn "Mã QR thanh toán 300.000 đồng cho CLB ABC"; đếm ngược không đọc mỗi giây — chỉ thông báo ở mốc 5 phút và 1 phút còn lại (`aria-live="polite"`).
-  - Chuyển "Thành công" và `reassurance-line` thông báo `polite`.
+  - Trang Đơn: đếm ngược không đọc mỗi giây — chỉ thông báo ở mốc 5 phút và 1 phút còn lại (`aria-live="polite"`).
+  - Chuyển "Đang xác nhận thanh toán", "Thành công" và `reassurance-line` thông báo `polite`.
   - Stepper: nút có nhãn "Giảm/Tăng số vé Đơn nam" (Đơn nam là tên Hạng vé), giá trị đọc dạng "2 vé".
 - **Chuyển động**: tôn trọng `prefers-reduced-motion` — bỏ trượt thẻ Vé, bỏ rung, kết quả quét hiện tức thì không fade.
 - **Thời gian**: đếm ngược 15 phút là giới hạn bắt buộc của nghiệp vụ Giữ chỗ (ngoại lệ 2.2.1 "real-time"); luôn hiển thị thời gian còn lại. Kết quả xanh tự đóng sau ~1.5s, không chứa thông tin chỉ có ở đó (số check-in vẫn cập nhật trên màn quét).
@@ -407,19 +413,19 @@ Hành vi. Tương phản hình ảnh nằm ở `DESIGN.md` › Colors (mọi c�
 
 ## Niềm tin khi thanh toán
 
-Minh họa: [QR thanh toán](mockups/directions-2.html) (mục "Hướng D · Rạp tối").
+Minh họa: chưa có mock cho Trang Đơn theo Gateway (phần QR thanh toán của [Hướng D · Rạp tối](mockups/directions-2.html) đã cũ).
 
-Rủi ro UX số 1: Minh (Người mua, UJ-1) bỏ ngang ở bước VietQR vì **không tin / sợ mất tiền**, không phải vì thao tác quét. Mọi quyết định trên màn QR thanh toán phục vụ niềm tin:
+Rủi ro UX số 1: Minh (Người mua, UJ-1) bỏ ngang ở bước thanh toán vì **không tin / sợ mất tiền**, không phải vì thao tác. Tickee không điều khiển trang thanh toán của Tingee, nên mọi tín hiệu tin cậy dồn vào Trang Đơn trước khi Minh rời Tickee:
 
-1. **Tên người nhận là tín hiệu chính.** `recipient-trust-block` hiện tên BTC + chủ tài khoản + ngân hàng **khớp đúng thứ app ngân hàng sẽ hiển thị** khi Minh quét. Minh đối chiếu được trước khi bấm chuyển.
+1. **Tên người nhận là tín hiệu chính.** `recipient-trust-block` hiện tên BTC + chủ tài khoản + ngân hàng của tài khoản nhận tiền. Trang Tingee và app ngân hàng hiển thị tên gì đang chờ Tingee trả lời (Architecture Open Questions); khi có câu trả lời, copy phải khớp thứ Minh sẽ thấy ở đó.
 2. **"Tiền chuyển thẳng cho [tên BTC]"** và "Tickee không giữ tiền của bạn" (FR-16) luôn thấy mà không cần cuộn trên màn 375×667.
-3. **Chính sách hoàn vé** có link ngay trên màn QR (FR-16), mở trong `Sheet` — không rời màn QR.
-4. **Không có nút "Tôi đã chuyển khoản".** Xác nhận tự động; màn hình giữ nguyên QR.
+3. **Chính sách hoàn vé** có link ngay trên Trang Đơn (FR-16), mở trong `Sheet` — không rời Trang Đơn.
+4. **Không có nút "Tôi đã chuyển khoản".** Xác nhận tự động; quay về Tickee là trạng thái tự cập nhật.
 5. **Dòng trấn an** (`reassurance-line`) sau khoảng chờ ngăn chuyển lặp; copy ở State Patterns › Chờ lâu.
-6. **Không bao giờ để Minh mất dấu Đơn**: nếu rời trang, Đơn đang chờ nằm trong Vé của tôi; nếu Đơn vào Cần xử lý, Minh thấy "BTC đang kiểm tra thanh toán" + liên hệ BTC + email.
-7. **Đồng hồ bình tĩnh**: đếm ngược coral, không đỏ, không nhấp nháy.
+6. **Không bao giờ để Minh mất dấu Đơn**: nếu rời trang, Đơn đang chờ nằm trong Vé của tôi; nếu Đơn vào Cần xử lý, Minh thấy "BTC đang kiểm tra thanh toán" + kênh liên hệ BTC + email.
+7. **Đồng hồ bình tĩnh**: đếm ngược coral, không đỏ, không nhấp nháy; về 0 thì "Đang xác nhận thanh toán", không dọa "Hết hạn".
 
-Thứ tự trên màn (trên xuống): số tiền + đếm ngược → QR → mã Đơn → khối người nhận → trạng thái chờ → "Mở app ngân hàng" / "Tải ảnh QR" → chân trang niềm tin.
+Thứ tự trên màn (trên xuống): số tiền + đếm ngược + mã Đơn (stage) → khối người nhận → link chính sách hoàn vé → trạng thái chờ → nút "Thanh toán" → chân trang niềm tin.
 
 ## Check-in tại cổng
 
@@ -439,7 +445,7 @@ Rủi ro UX số 2: Lan (CTV, UJ-3) quét chậm vì **đọc kết quả chậm
 
 ### Flow 1 — Minh mua Vé giải Pickleball qua link (UJ-1)
 
-Minh họa: [Trang Sự kiện, QR thanh toán](mockups/directions-2.html) (bước 1–7) · [Thành công & Vé của tôi](mockups/key-success-ticket.html) (bước 8–9).
+Minh họa: [Trang Sự kiện](mockups/directions-2.html) (bước 1–4; phần QR thanh toán của mock đã cũ) · [Thành công & Vé của tôi](mockups/key-success-ticket.html) (bước 8–9).
 
 Minh chơi Pickleball phong trào, mở link CLB ABC đăng trong nhóm Zalo, trên điện thoại, muốn mua vé cho mình và bạn đánh đôi.
 
@@ -447,16 +453,17 @@ Minh chơi Pickleball phong trào, mở link CLB ABC đăng trong nhóm Zalo, tr
 2. Minh thấy "Đơn nam · 300.000đ · Còn 12 vé" và "Đôi nam". Minh tăng `quantity-stepper` mỗi hạng lên 1. `purchase-bar` cập nhật tổng.
 3. Minh bấm "Mua" → màn đăng nhập: "Tiếp tục với Google" (một chạm) hoặc OTP email. Đăng nhập xong quay lại Checkout với đúng 1 vé Đơn nam + 1 vé Đôi nam (FR-3).
 4. Checkout: email tự điền; SĐT tự điền nếu tài khoản đã có, không thì Minh nhập; Minh nhập Tên, trả lời câu hỏi "Trình độ" của BTC — một lần cho cả Đơn. Dòng ghi rõ thông tin chia sẻ cho BTC. Minh bấm "Gửi Đơn".
-5. Màn QR thanh toán: số tiền, "Giữ chỗ còn 14:59", QR trên tấm trắng giữa stage tối. Ngay dưới: "Tiền chuyển thẳng cho CLB ABC · Chủ tài khoản NGUYEN VAN TUAN · Vietcombank".
-6. Minh bấm "Mở app ngân hàng", quét/xác nhận; app ngân hàng hiện đúng tên chủ tài khoản như Tickee đã báo — Minh yên tâm chuyển.
-7. Minh quay lại trình duyệt; màn kiểm tra trạng thái ngay.
-8. **Cao trào:** màn QR tự chuyển sang "Thành công" — hai thẻ Vé trượt lên từ sân khấu tối, điện thoại rung nhẹ: "Vé của bạn đã sẵn sàng!" Mỗi Vé một Mã QR vé riêng; email Vé đến cùng lúc.
+5. Trang Đơn: số tiền, "Giữ chỗ còn 14:59", mã Đơn trên stage tối. Ngay dưới: "Tiền chuyển thẳng cho CLB ABC · Chủ tài khoản NGUYEN VAN TUAN · Vietcombank".
+6. Minh bấm "Thanh toán" → trình duyệt chuyển sang trang thanh toán của Tingee; Minh trả tiền ở đó.
+7. Tingee đưa Minh về Trang Đơn; màn kiểm tra trạng thái ngay.
+8. **Cao trào:** Trang Đơn tự chuyển sang "Thành công" — hai thẻ Vé trượt lên từ sân khấu tối, điện thoại rung nhẹ: "Vé của bạn đã sẵn sàng!" Mỗi Vé một Mã QR vé riêng; email Vé đến cùng lúc.
 9. Minh bấm "Chia sẻ Vé" trên Vé thứ hai, gửi link cho bạn đánh đôi qua Zalo. Cả hai Vé nằm trong Vé của tôi.
 
 Nhánh lỗi:
-- Hết 15 phút chưa trả → màn Hết hạn: "Hết thời gian giữ chỗ. Chỗ đã được trả lại." + "Mua lại" (FR-14).
-- Minh chuyển rồi nhưng chưa thấy xác nhận → sau khoảng chờ hiện `reassurance-line`; Minh không chuyển lại.
-- Minh chuyển thiếu tiền / ghi sai nội dung (QR tĩnh) → không phát Vé; Vé của tôi hiện "BTC đang kiểm tra thanh toán" + liên hệ BTC; Minh nhận email (FR-21; email mọi loại — Open Questions #4).
+- Hết 15 phút chưa trả → đồng hồ về 0 hiện "Đang xác nhận thanh toán"; khi máy chủ báo hết hạn → màn Hết hạn: "Hết thời gian giữ chỗ. Chỗ đã được trả lại." + "Mua lại" (FR-14).
+- Minh trả rồi nhưng chưa thấy xác nhận → sau khoảng chờ hiện `reassurance-line`; Minh không trả lại.
+- Tingee báo số tiền nhận khác số tiền của Đơn → không phát Vé; Vé của tôi hiện "BTC đang kiểm tra thanh toán" + kênh liên hệ BTC; Minh nhận email (FR-21; email mọi loại — Open Questions #4).
+- Chưa tạo được link thanh toán → "Thử lại" cho cùng Đơn trong 60 giây; quá thời gian → Hết hạn, mua lại (FR-16).
 - Gửi Đơn khi "Đôi nam" vừa hết → không tạo Đơn: "Hạng vé Đôi nam vừa hết. Bạn chọn lại nhé." (FR-13).
 - Gửi Đơn lỗi mạng → "Chưa gửi được Đơn…" + "Thử lại"; thử lại không tạo Đơn trùng.
 - Đến cổng không mở được Vé → Minh đọc SĐT hoặc email của tài khoản; CTV tra tay theo thông tin đó (`manual-lookup`, Flow 3).
@@ -467,10 +474,10 @@ Minh họa: [Tổng quan Sự kiện](mockups/key-dashboard-event.html) (bước
 
 Anh Tuấn, chủ nhiệm CLB ABC, trước đây thu tiền bằng Google Forms rồi dò sao kê; mở Tickee từ link giới thiệu của Tingee, trên laptop buổi tối.
 
-1. Anh đăng ký Tài khoản Tickee bằng email (OTP), đồng ý điều khoản dữ liệu cá nhân, tạo BTC "CLB ABC" — anh là Owner. Dashboard gợi ý bật xác thực hai lớp; anh bật ngay (quét QR bằng Google Authenticator, lưu 10 mã khôi phục). Nếu để sau, anh vẫn làm tiếp được.
+1. Anh đăng ký Tài khoản Tickee bằng email (OTP), đồng ý điều khoản dữ liệu cá nhân, tạo BTC "CLB ABC" kèm kênh liên hệ (SĐT, email) để Người mua liên hệ khi cần — anh là Owner. Dashboard gợi ý bật xác thực hai lớp; anh bật ngay (quét QR bằng Google Authenticator, lưu 10 mã khôi phục). Nếu để sau, anh vẫn làm tiếp được.
 2. Banner trên dashboard dẫn anh tới **Tài khoản nhận tiền**: dán Client ID và Secret Token lấy trên Tingee, chọn tài khoản CLB trong danh sách, rồi sao chép URL IPN dán vào portal Tingee. CLB đã được duyệt Closed Beta nên không có banner "Chờ duyệt Closed Beta".
 3. Anh bấm "Tạo Sự kiện" → `wizard-stepper` bước 1 **Thông tin**: tên, thời gian, địa điểm, mô tả, ảnh, chính sách hoàn vé.
-4. Bước 2 **Hạng vé**: "Đơn nam" 300.000đ, 32 suất, giờ mở/đóng bán; thêm "Đôi nam".
+4. Bước 2 **Hạng vé**: "Đơn nam" 300.000đ, 32 suất, giờ mở/đóng bán; thêm "Đôi nam". Giá có phí dưới 2.000đ báo lỗi tại trường (AD-6).
 5. Bước 3 **Form mua**: giữ trường mặc định, thêm câu hỏi "Trình độ" (lựa chọn, bắt buộc).
 6. Bước 4 **Xem trước & mở bán**: xem trang Sự kiện như Người mua sẽ thấy; mọi điều kiện đã đủ. Anh bấm "Mở bán" → nhận link + "Sao chép link"; dán vào nhóm Zalo và Facebook (preview đúng ảnh, tên, thời gian — FR-10).
 7. Anh mở Tổng quan Sự kiện trên điện thoại.
@@ -478,7 +485,7 @@ Anh Tuấn, chủ nhiệm CLB ABC, trước đây thu tiền bằng Google Forms
 9. Những ngày sau, anh theo dõi doanh thu, Vé theo Hạng vé, xuất CSV hoặc kết nối Google Sheets ở Cài đặt Sự kiện.
 
 Nhánh lỗi:
-- Một Người mua chuyển thiếu tiền → badge "Cần xử lý" trên sidebar/tab bar tăng lên 1. Anh mở hàng: `needs-action-row` "Lệch số tiền · nhận 250.000đ / Đơn 300.000đ". Anh chọn "Từ chối" (Đơn → Đã hủy) hoặc "Duyệt tay phát Vé" nếu còn chỗ; sau khi tự hoàn tiền ngoài hệ thống, đánh dấu "Đã hoàn tay". Mọi thao tác ghi nhật ký (FR-21).
+- Tingee báo một Đơn nhận thiếu tiền → badge "Cần xử lý" trên sidebar/tab bar tăng lên 1. Anh mở hàng: `needs-action-row` "Lệch số tiền · nhận 250.000đ / Đơn 300.000đ". Anh chọn "Từ chối" (Đơn → Đã hủy) hoặc "Duyệt tay phát Vé" nếu còn chỗ; sau khi tự hoàn tiền ngoài hệ thống, đánh dấu "Đã hoàn tay". Mọi thao tác ghi nhật ký (FR-21).
 - Thiếu chính sách hoàn vé ở bước 4 → "Mở bán" tắt, danh sách nêu "Thiếu chính sách hoàn vé" kèm link về bước 1.
 - Token dưới ngưỡng → banner warning + email; Owner bấm "mua thêm Token" sang luồng Tingee (FR-34).
 - Liên kết tài khoản nhận tiền thất bại ở bước 2 → lỗi tại chỗ + "Thử lại", `status-banner` "Chưa liên kết tài khoản nhận tiền" vẫn còn; anh vẫn tạo được Sự kiện nháp, nhưng "Mở bán" Sự kiện có phí tắt ở bước 4 (FR-5).
@@ -514,7 +521,7 @@ Sân thi đấu báo hỏng mái ba ngày trước giải; anh Tuấn phải h�
 
 1. Anh vào Sự kiện › Cài đặt → "Hủy Sự kiện" (`button-destructive`).
 2. `Dialog` nêu hậu quả cụ thể: "Ngừng bán ngay. Mọi Vé (48) sẽ bị vô hiệu. Email gửi tới 48 Người mua. Bạn tự hoàn tiền ngoài Tickee." Anh gõ tên Sự kiện để xác nhận (`[ASSUMPTION]`, như `button-destructive`) rồi bấm "Hủy Sự kiện".
-3. Hệ thống ngừng bán, vô hiệu mọi Vé, gửi email cho mọi Người mua; Đơn đang Chờ thanh toán hết hiệu lực (Người mua thấy "Sự kiện đã hủy" trên QR thanh toán / `order-card`) `[ASSUMPTION]` (xử lý Đơn đang chờ — Open Questions #8). Trang Sự kiện hiện `status-banner` danger "Sự kiện đã hủy".
+3. Hệ thống ngừng bán, vô hiệu mọi Vé, gửi email cho mọi Người mua; Đơn đang Chờ thanh toán hết hiệu lực (Người mua thấy "Sự kiện đã hủy" trên Trang Đơn / `order-card`) `[ASSUMPTION]` (xử lý Đơn đang chờ — Open Questions #8). Trang Sự kiện hiện `status-banner` danger "Sự kiện đã hủy".
 4. Tổng quan Sự kiện: badge "Đã hủy" + `status-banner` "Sự kiện đã hủy · 48 Đơn cần hoàn tiền" + nút "Xuất danh sách hoàn tiền".
 5. Anh xuất danh sách (CSV: Người mua, SĐT, email, số tiền đã trả, mã Đơn — FR-33) và chuyển khoản hoàn từng người từ app ngân hàng.
 6. Trong tab Đơn (lọc sẵn Đơn Đã thanh toán chưa "Đã hoàn tay"), anh đánh dấu từng Đơn "Đã hoàn tay"; chọn nhiều Đơn để đánh dấu cùng lúc `[ASSUMPTION]`. Mỗi thao tác ghi nhật ký; bộ đếm "còn N Đơn" giảm dần.
@@ -542,12 +549,12 @@ Nhánh lỗi:
 | Bề mặt | < `md` (< 768px) | `md`–`lg` | ≥ `lg` (≥ 1024px) |
 |---|---|---|---|
 | Trang Sự kiện | Một cột, `purchase-bar` nổi đáy | Cột căn giữa tối đa `{spacing.content-max-buyer}` `[ASSUMPTION]` | 2 cột: trái ảnh bìa + mô tả, phải thẻ chọn vé dính khi cuộn (đã chốt) |
-| Checkout, QR, Vé của tôi | Một cột, `purchase-bar` nổi đáy | Cột căn giữa tối đa `{spacing.content-max-buyer}` `[ASSUMPTION]` | Như `md` `[ASSUMPTION]` |
+| Checkout, Trang Đơn, Vé của tôi | Một cột, `purchase-bar` nổi đáy | Cột căn giữa tối đa `{spacing.content-max-buyer}` `[ASSUMPTION]` | Như `md` `[ASSUMPTION]` |
 | Dashboard BTC | `bottom-tab-bar`; bảng Đơn thành danh sách thẻ; `Dialog` → `Sheet` toàn màn | Sidebar thu icon `[ASSUMPTION]` | `dashboard-sidebar` đầy đủ; bảng Đơn dạng `Table` |
 | Màn quét CTV | Toàn màn, dọc | Như điện thoại | Như điện thoại (không tối ưu desktop) |
 | Landing BTC | Một cột, CTA xếp chồng | 2 cột | 2–3 cột |
 
-Nền tảng (trình duyệt: xem Foundation): camera qua `getUserMedia` (HTTPS, NFR-6). Rung qua Vibration API (Safari iOS không hỗ trợ — chỉ là tính năng bổ sung). Deep Link mở app ngân hàng trên điện thoại; trên desktop ẩn nút "Mở app ngân hàng", chỉ còn QR để quét bằng điện thoại `[ASSUMPTION]`. OG preview cho Zalo/Facebook (FR-10). Safe-area inset cho thanh dính đáy.
+Nền tảng (trình duyệt: xem Foundation): camera qua `getUserMedia` (HTTPS, NFR-6). Rung qua Vibration API (Safari iOS không hỗ trợ — chỉ là tính năng bổ sung). Thanh toán mở trang Tingee bằng redirect toàn trang, giống nhau trên điện thoại và desktop (không popup, AD-6). OG preview cho Zalo/Facebook (FR-10). Safe-area inset cho thanh dính đáy.
 
 ## Open Questions
 
@@ -558,7 +565,7 @@ Nhóm theo người quyết; số thứ tự liên tục để dẫn chiếu ("O
 1. **Phòng chờ** khi Sự kiện đông (NFR-3, PRD OQ #5): Người mua thấy gì.
 2. ~~**2FA Owner**~~ — **Đã chốt (30/10/2026):** TOTP tự bật cho mọi tài khoản (PRD FR-1); UI ở State Patterns "Tài khoản (mọi vai)".
 3. **Tra tay theo tên + số cuối SĐT** vượt phạm vi FR-29 (SĐT/email đầy đủ là bắt buộc, đã có) — PM/Architecture xác nhận (quyền riêng tư: CTV thấy danh sách tên khớp). Đây là nơi theo dõi chính của `[ASSUMPTION]` này.
-4. **Email + liên hệ BTC cho mọi loại Cần xử lý** — PM xác nhận kênh liên hệ BTC. Đây là nơi theo dõi chính của `[ASSUMPTION]` này.
+4. **Email + liên hệ BTC cho mọi loại Cần xử lý** — kênh liên hệ BTC đã có: SĐT và email BTC nhập khi tạo BTC (Story 2.1). Còn chờ PM xác nhận việc gửi email cho mọi loại. Đây là nơi theo dõi chính của `[ASSUMPTION]` này.
 5. **Hàng "Cần xử lý" gộp cấp BTC** vượt phạm vi FR-31 — PM xác nhận.
 6. ~~**Người mua thấy gì với QR tĩnh khi BTC bị ngắt dịch vụ** (PRD OQ #4).~~ Đã chốt 03/11/2026: thanh toán chỉ qua Gateway (AD-6), không dùng QR tĩnh.
 7. **Thứ tự ưu tiên `status-banner`** (đề xuất ở Component Patterns › Thứ tự ưu tiên `status-banner`) và banner nào đóng được — PM xác nhận.
@@ -568,13 +575,13 @@ Nhóm theo người quyết; số thứ tự liên tục để dẫn chiếu ("O
 
 **Architecture**
 
-11. **Chi tiết Vé qua link chia sẻ** — **Architecture quyết**: người nhận có phải đăng nhập không, có thấy Mã QR vé không, xử lý người lạ cầm link, Vé đã check-in / Đã hủy / hết hiệu lực và link không hợp lệ (State Patterns › Chi tiết Vé qua link chia sẻ). Liên quan PRD OQ #10 (chuyển nhượng Vé).
-12. **Retry an toàn khi Gửi Đơn / tạo QR lỗi** — Architecture xác nhận khóa chống trùng Đơn (State Patterns › Trang Sự kiện & mua vé).
+11. ~~**Chi tiết Vé qua link chia sẻ**~~ — **Đã chốt (Architecture AD-29):** không cần đăng nhập, thấy Mã QR vé, không thấy thông tin cá nhân của Người mua; chi tiết ở State Patterns › Chi tiết Vé qua link chia sẻ.
+12. ~~**Retry an toàn khi Gửi Đơn / tạo link lỗi**~~ — **Đã chốt:** khóa chống trùng `Idempotency-Key` (AD-31); thử lại tạo link cho cùng Đơn trong 60 giây (AD-5).
 13. **Vé khi mất mạng ở cổng**: Chi tiết Vé có cần lưu sẵn để mở offline không (hiện dựa vào tra tay FR-29).
 
 **UX**
 
-14. **Khoảng chờ hiện `reassurance-line`** — đề xuất ~2 phút.
+14. **Khoảng chờ hiện `reassurance-line`** trên Trang Đơn — đề xuất ~2 phút.
 15. **Âm thanh/rung cho kết quả xanh** trên Màn quét.
 
 `[ASSUMPTION]` inline không có trong danh sách trên là mặc định UX (copy, nhãn nút, chi tiết tương tác), không chặn triển khai; chúng nằm ở Foundation, Component Patterns, State Patterns (mọi nhóm), Interaction Primitives, Responsive & Platform và Flow 4.

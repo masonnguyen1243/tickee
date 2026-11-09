@@ -15,7 +15,7 @@ inputDocuments:
 
 Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là các yêu cầu trong PRD, UX Design (DESIGN.md + EXPERIENCE.md) và Architecture Spine. Mỗi story phải đủ cụ thể để Dev agent implement được.
 
-**Thứ tự hiệu lực khi các nguồn khác nhau:** Architecture Spine (28/10) được viết sau PRD và UX (27/10), và đã chủ động thay đổi một số điểm. Hai thay đổi chính là chuyển sang **Tingee Payment Gateway (redirect)** thay cho QR động/tĩnh tự render, và **không cho chọn tài khoản VietinBank làm tài khoản nhận tiền**. Khi PRD hoặc UX mâu thuẫn với Architecture về cơ chế kỹ thuật, story theo Architecture. Hành vi sản phẩm không bị Architecture đổi thì vẫn theo PRD/UX. Các điểm bị thay đổi được ghi ở mục "Điều chỉnh do Architecture" bên dưới.
+**Thứ tự hiệu lực khi các nguồn khác nhau:** Architecture Spine (28/10) được viết sau PRD và UX (27/10), và đã chủ động thay đổi một số điểm. Hai thay đổi chính là chuyển sang **Tingee Payment Gateway (redirect)** thay cho QR động/tĩnh tự render, và **không cho chọn tài khoản VietinBank làm tài khoản nhận tiền**. Khi PRD hoặc UX mâu thuẫn với Architecture về cơ chế kỹ thuật, story theo Architecture. Hành vi sản phẩm không bị Architecture đổi thì vẫn theo PRD/UX. Các điểm bị thay đổi được ghi ở mục "Điều chỉnh do Architecture" bên dưới. Từ 09/11/2026, PRD và UX đã được cập nhật theo các điểm này (Sprint Change Proposal 09/11/2026, E2-4).
 
 ## Requirements Inventory
 
@@ -39,7 +39,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 
 - FR-7: Owner/Admin tạo, sửa, ẩn, hủy Sự kiện (tên, thời gian bắt đầu/kết thúc, địa điểm, mô tả, ảnh, chính sách hoàn vé). Thiếu chính sách hoàn vé thì không mở bán được. Sự kiện "Ẩn" vẫn mở được bằng link nhưng không nhận Đơn mới. Sửa thời gian hoặc địa điểm sau khi đã phát Vé thì gửi email cho Người mua. Mọi thay đổi được ghi nhật ký. Sự kiện tự kết thúc vào mốc muộn hơn của hai mốc: 23:59 ngày kết thúc, hoặc giờ kết thúc + 6 giờ. Owner/Admin bấm "Kết thúc" sớm được. Trước mốc này, check-in vẫn hoạt động.
 - FR-8: Mỗi Sự kiện có nhiều Hạng vé (tên, giá, số suất, thời gian mở/đóng bán). Ngoài thời gian bán, Hạng vé hiện "Chưa mở bán" hoặc "Đã đóng bán". Số suất không được giảm dưới số đã bán + số đang Giữ chỗ. Giá được chốt vào Đơn lúc đặt.
-- FR-9: Owner/Admin cấu hình form mua vé gồm trường mặc định (Tên, SĐT nếu tài khoản chưa có, email tự điền), câu hỏi riêng (văn bản hoặc lựa chọn, bắt buộc hoặc không) và trường bổ sung. Form điền một lần cho mỗi Đơn. Còn trường bắt buộc trống thì không gửi được. Câu trả lời hiện ở danh sách Đơn, CSV và Sheets.
+- FR-9: Owner/Admin cấu hình form mua vé gồm trường mặc định (Tên, SĐT nếu tài khoản chưa có, email tự điền), câu hỏi riêng (văn bản hoặc lựa chọn, bắt buộc hoặc không); trường dựng sẵn khác (Ngày sinh, CCCD…) ngoài phạm vi MVP. Form điền một lần cho mỗi Đơn. Còn trường bắt buộc trống thì không gửi được. Câu trả lời hiện ở danh sách Đơn, CSV và Sheets.
 - FR-10: Trang Sự kiện công khai không cần đăng nhập, tối ưu cho điện thoại, tải dưới 2 giây trên 4G. Chia sẻ lên Facebook/Zalo hiện đúng ảnh, tên và thời gian (OG). Mỗi Hạng vé hiện số chỗ còn lại chính xác hoặc "Hết vé".
 - FR-11: Sự kiện miễn phí (mọi Hạng vé 0đ): không thanh toán, không tiêu Token, vẫn bắt đăng nhập, phát Vé ngay khi gửi Đơn. Trần cứng 200 suất miễn phí mỗi Sự kiện: tổng số suất của mọi Hạng vé 0đ ≤ 200, áp cho mọi Sự kiện ở mọi trạng thái, kể cả Sự kiện có cả Hạng vé có phí.
 
@@ -91,7 +91,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 
 ### NonFunctional Requirements
 
-- NFR-1 (Hiệu năng): Trang Sự kiện tải dưới 2 giây trên 4G. Tạo link/QR thanh toán dưới 2 giây.
+- NFR-1 (Hiệu năng): Trang Sự kiện tải dưới 2 giây trên 4G. Tạo link thanh toán dưới 2 giây.
 - NFR-2 (Hiệu năng): Từ lúc nhận IPN đến lúc Vé hiện trên trình duyệt dưới 3 giây. Quét check-in phản hồi dưới 1 giây.
 - NFR-3 (Chịu tải): 5.000 người cùng mua một Sự kiện 300 Vé mà không bán quá số suất. Phòng chờ đang hoãn; tạm dựa vào giới hạn tốc độ và cache trang (AD-31, AD-37).
 - NFR-4 (Sẵn sàng): Uptime 99,9%/tháng cho Checkout, IPN và check-in.
@@ -250,16 +250,16 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 
 | FR | Epic | Ghi chú |
 |---|---|---|
-| FR-1 | E1 | Đăng ký/đăng nhập Google + OTP email |
+| FR-1 | E1 | Đăng ký/đăng nhập Google + OTP email; 2FA ở E2; Đặt lại TOTP ở E7 (Story 7.7) |
 | FR-2 | E2 | BTC, Owner, Admin, chuyển BTC |
 | FR-3 | E3 | Đăng nhập khi bấm Mua, giữ lựa chọn |
-| FR-4 | E2 | Ma trận quyền; áp dụng xuyên suốt mọi epic |
+| FR-4 | E2 | Ma trận quyền; áp dụng xuyên suốt mọi epic; giới hạn IP `/admin` ở Story 4.7 |
 | FR-5 | E2 | Kết nối tài khoản Tingee của BTC, chọn tài khoản nhận tiền |
 | FR-6 | — | BTC làm KYC trực tiếp với Tingee, Tickee không tham gia; không có story |
-| FR-7 | E2 | Tạo/sửa/ẩn Sự kiện, kết thúc (hủy ở E7) |
+| FR-7 | E2 | Tạo/sửa/ẩn Sự kiện, kết thúc (hủy ở E7); ảnh Sự kiện ở Story 4.8 |
 | FR-8 | E2 | Hạng vé |
-| FR-9 | E2 | Form mua vé |
-| FR-10 | E2 | Trang Sự kiện công khai, OG |
+| FR-9 | E2 | Form mua vé; trường dựng sẵn ngoài MVP |
+| FR-10 | E2 | Trang Sự kiện công khai, OG; OG đúng ảnh ở Story 4.8, đo 4G ở Story 5.8 |
 | FR-11 | E3 | Sự kiện miễn phí |
 | FR-12 | E3 | Đơn nhiều Vé, nhiều Hạng vé |
 | FR-13 | E3 | Không bán quá số suất |
@@ -318,9 +318,9 @@ Người mua chọn Vé, đăng nhập, điền form, thanh toán qua Gateway, t
 **UX-DR chính:** UX-DR15–22, UX-DR35 (một phần)
 
 ### Epic 4: Thanh toán đáng tin khi có sự cố
-Đối soát bù khi IPN trễ/mất; Sự kiện tự "Tạm ngừng bán" khi BTC hết Token hoặc bị ngắt dịch vụ và tự mở lại; BTC xử lý hàng Cần xử lý; Owner theo dõi Token và nhận cảnh báo; cảnh báo giám sát NFR-10; staging/production, deploy an toàn và diễn tập khôi phục (NFR-4, NFR-5). Xong E4 là đạt tiêu chí hoàn thành Phase 1.
-**FRs covered:** FR-15, FR-20, FR-21, FR-34
-**UX-DR chính:** UX-DR38, UX-DR40 (Token, Closed Beta bị thu hồi)
+Đối soát bù khi IPN trễ/mất; Sự kiện tự "Tạm ngừng bán" khi BTC hết Token hoặc bị ngắt dịch vụ và tự mở lại; BTC xử lý hàng Cần xử lý; Owner theo dõi Token và nhận cảnh báo; cảnh báo giám sát NFR-10; staging/production, deploy an toàn và diễn tập khôi phục (NFR-4, NFR-5); giới hạn IP cho `/admin` và ảnh Sự kiện trên object storage (chuyển từ Epic 2, E2-4). Xong E4 là đạt tiêu chí hoàn thành Phase 1.
+**FRs covered:** FR-15, FR-20, FR-21, FR-34; FR-4, FR-7, FR-10 (một phần)
+**UX-DR chính:** UX-DR38, UX-DR40 (Token, Closed Beta bị thu hồi), UX-DR7 và UX-DR10 (ảnh Sự kiện, Story 4.8)
 
 ### Epic 5: Check-in tại cổng
 CTV nhận link mời, quét Vé xanh/đỏ dưới 1 giây, tra tay; Owner/Admin theo dõi check-in realtime và thu hồi CTV. Story cuối: kiểm thử tải NFR-3 trên staging.
@@ -333,8 +333,8 @@ Tab Đơn đầy đủ (câu trả lời form, bộ lọc, phân trang, Vé theo
 **UX-DR chính:** UX-DR35, UX-DR37, UX-DR40 (Google Sheets)
 
 ### Epic 7: Niềm tin, an toàn và vòng đời dữ liệu *(bắt buộc trước Closed Beta)*
-Người mua báo cáo Sự kiện; Quản trị Tingee khóa/mở khóa Sự kiện hoặc BTC và vô hiệu Vé; BTC hủy Sự kiện kèm danh sách hoàn tiền; người dùng xóa tài khoản hoặc rút đồng ý.
-**FRs covered:** FR-33, FR-35, FR-38
+Người mua báo cáo Sự kiện; Quản trị Tingee khóa/mở khóa Sự kiện hoặc BTC và vô hiệu Vé; BTC hủy Sự kiện kèm danh sách hoàn tiền; người dùng xóa tài khoản hoặc rút đồng ý; Quản trị Tingee đặt lại TOTP cho người mất thiết bị (chuyển từ Epic 2, E2-4).
+**FRs covered:** FR-33, FR-35, FR-38; FR-1 (một phần)
 **UX-DR chính:** UX-DR24, UX-DR25, UX-DR40 (khóa, đã hủy), UX-DR41 (hủy), UX-DR44
 
 ### Epic 8: Lan truyền *(Should/Could, cắt được)*
@@ -621,13 +621,12 @@ So that chỉ BTC được tin cậy mới bán được Vé có phí khi chưa 
 
 **Given** tài khoản có cờ `platform_admin`
 **When** truy cập `/v1/admin/*` hoặc `/admin` của web
-**Then** API chỉ nhận request từ dải IP cho phép (cấu hình trusted proxy để lấy đúng IP) và yêu cầu step-up TOTP cho mỗi session (tài khoản Quản trị Tingee chưa bật 2FA thì phải bật trước khi vào `/admin`); mọi lần đọc dữ liệu qua `platformAdminScope` đều ghi audit (FR-4, AD-26)
+**Then** API yêu cầu step-up TOTP cho mỗi session (tài khoản Quản trị Tingee chưa bật 2FA thì phải bật trước khi vào `/admin`); mọi lần đọc dữ liệu qua `platformAdminScope` đều ghi audit (FR-4, AD-26)
 **And** tài khoản không có cờ nhận `FORBIDDEN_ROLE`
 
 **Given** cần cấp hoặc thu hồi quyền Quản trị Tingee
 **When** người vận hành chạy lệnh CLI `pnpm --filter api admin:grant <email>` hoặc `admin:revoke <email>` (chạy bằng role DB `migrate`, không có trên web)
 **Then** cờ `platform_admin` được bật/tắt cho đúng user theo email; audit ghi người chạy lệnh, thời điểm, user bị đổi; không có UI hay API nào tự cấp quyền này
-**And** dải IP cho phép đọc từ biến env `ADMIN_ALLOWED_CIDRS`, được kiểm bằng schema Zod khi khởi động; thiếu hoặc sai định dạng thì api không khởi động ở production
 
 **Given** BTC mới tạo
 **When** xem trạng thái
@@ -643,9 +642,7 @@ So that chỉ BTC được tin cậy mới bán được Vé có phí khi chưa 
 **When** Quản trị Tingee bấm "Thu hồi" và xác nhận trong `Dialog` "Sự kiện có phí của {BTC} sẽ Tạm ngừng bán."
 **Then** `closed_beta_status` = đã thu hồi; dashboard BTC hiện banner danger không đóng được; audit ghi lại (FR-37)
 
-**Given** người dùng mất cả thiết bị TOTP lẫn mã khôi phục
-**When** liên hệ Tingee
-**Then** Quản trị Tingee (đã step-up) có thao tác "Đặt lại TOTP" cho một user ở `/admin`, bắt buộc ghi lý do; TOTP và mã khôi phục cũ bị xóa, mọi phiên của user bị hủy, 2FA của user về trạng thái chưa bật; audit ghi lại và email báo cho user và các Owner/Admin của BTC liên quan (chuyển từ Story 2.2, Sprint Change Proposal 30/10/2026)
+*(E2-4, 09/11/2026: giới hạn dải IP `ADMIN_ALLOWED_CIDRS` và trusted proxy chuyển sang Story 4.7; "Đặt lại TOTP" chuyển sang Story 7.7.)*
 
 ### Story 2.6: Liên kết tài khoản nhận tiền
 
@@ -710,11 +707,9 @@ So that tôi chuẩn bị trang bán vé cho giải đấu.
 
 **Given** tôi bấm "Tạo Sự kiện"
 **When** mở `wizard-stepper` bước 1 "Thông tin"
-**Then** tôi nhập tên, thời gian bắt đầu/kết thúc, địa điểm, mô tả, ảnh và chính sách hoàn vé; "Lưu nháp" ở mọi bước; quay lại bước trước không mất dữ liệu; mobile hiện "Bước 1/4 · Thông tin" (FR-7, UX-DR36)
+**Then** tôi nhập tên, thời gian bắt đầu/kết thúc, địa điểm, mô tả và chính sách hoàn vé; "Lưu nháp" ở mọi bước; quay lại bước trước không mất dữ liệu; mobile hiện "Bước 1/4 · Thông tin" (FR-7, UX-DR36)
 
-**Given** tôi chọn ảnh Sự kiện
-**When** upload
-**Then** web upload thẳng lên object storage S3 bằng presigned URL do API cấp; bucket ảnh bật CORS `GET` cho origin web (AD-22)
+*(E2-4: ảnh Sự kiện, tách thành 2.7-b khi build, chuyển sang Story 4.8.)*
 
 **Given** lưu Sự kiện
 **When** dữ liệu được ghi
@@ -723,7 +718,7 @@ So that tôi chuẩn bị trang bán vé cho giải đấu.
 
 **Given** danh sách Sự kiện của BTC
 **When** đã có Sự kiện
-**Then** mỗi Sự kiện là `event-card` (thumbnail, tên, ngày-giờ, `status-badge` "Nháp"); chạm cả hàng vào tab Tổng quan của Sự kiện (UX-DR7)
+**Then** mỗi Sự kiện là `event-card` (tên, ngày-giờ, `status-badge` "Nháp"; thumbnail có từ Story 4.8); chạm cả hàng vào tab Tổng quan của Sự kiện (UX-DR7)
 
 **Given** Sự kiện đang `draft` hoặc slug sai
 **When** ai đó gọi API công khai theo slug
@@ -805,10 +800,7 @@ So that tôi không bao giờ mở bán một Sự kiện chưa sẵn sàng.
 **Then** lệnh gọi lại đúng `publishReadiness` ở server; đạt thì `events.status` `draft` → `published` bằng compare-and-set; audit ghi lại
 **And** web hiện link Sự kiện + "Sao chép link" (toast "Đã sao chép")
 
-**Given** `ordering.sellability(eventId)`
-**When** gọi cho một Sự kiện
-**Then** trả trạng thái bán theo từng Hạng vé và một `eventReason` (Đang bán / Chưa mở bán / Đã đóng bán / Hết vé / Tạm ngừng bán / Ẩn / Bị khóa / Đã hủy / Đã kết thúc), xét: trạng thái và khóa Sự kiện, khóa BTC, Closed Beta và liên kết tài khoản (chỉ Hạng vé > 0đ), chính sách hoàn vé, cửa sổ bán, tồn kho, `payment_service_status` (chỉ Hạng vé > 0đ, mặc định `active`), giới hạn Vé/Đơn (AD-21)
-**And** Closed Beta bị thu hồi làm Hạng vé có phí trả "Tạm ngừng bán", Hạng vé 0đ vẫn bán (FR-37)
+*(`ordering.sellability` làm ở Story 2.11, spec 2.11-a; xem AC ở đó.)*
 
 ### Story 2.11: Trang Sự kiện công khai
 
@@ -818,9 +810,15 @@ So that tôi quyết định mua ngay.
 
 **Acceptance Criteria:**
 
+**Given** `ordering.sellability(eventId)` (spec 2.11-a)
+**When** gọi cho một Sự kiện không còn nháp
+**Then** trả trạng thái bán theo từng Hạng vé (`on_sale` / `not_started` / `closed` / `sold_out` / `paused` / `unavailable`, kèm số còn lại) và một `eventReason` theo thứ tự ưu tiên Đã hủy > Bị khóa > Đã kết thúc > Ẩn > Tạm ngừng bán; xét: trạng thái và khóa Sự kiện, khóa BTC, Closed Beta và liên kết tài khoản (chỉ Hạng vé > 0đ), chính sách hoàn vé, cửa sổ bán, tồn kho, `payment_service_status` (chỉ Hạng vé > 0đ; stub `active` tới Epic 4) (AD-21)
+**And** dùng chung luật điều kiện với `publishReadiness`, không chép luật; Closed Beta bị thu hồi làm Hạng vé có phí "Tạm ngừng bán", Hạng vé 0đ vẫn bán (FR-37)
+**And** giới hạn Vé/Đơn không nằm trong `sellability` của trang công khai; tạo Đơn kiểm ở Story 3.2
+
 **Given** Sự kiện đã mở bán
 **When** mở `/e/{slug}` trên điện thoại, chưa đăng nhập
-**Then** phần nội dung tĩnh SSR có cache (revalidate 30 giây, revalidate ngay khi BTC sửa Sự kiện); trang tải dưới 2 giây trên 4G (FR-10, NFR-1, AD-37)
+**Then** phần nội dung tĩnh SSR có cache (revalidate 30 giây, revalidate ngay khi BTC sửa Sự kiện); mục tiêu tải dưới 2 giây trên 4G (FR-10, NFR-1, AD-37; đo ở Story 5.8)
 **And** `event-hero` dạng stage: ảnh hoặc nền fallback gradient coral, eyebrow, tên, hàng icon ngày-giờ ("Chủ nhật, 16/11/2026 · 07:00 – 17:00") và địa điểm (chạm mở bản đồ); dưới stage là hàng BTC; nút chia sẻ dùng Web Share API, fallback sao chép link (UX-DR10)
 
 **Given** trang đã tải
@@ -833,7 +831,7 @@ So that tôi quyết định mua ngay.
 
 **Given** chia sẻ link lên Facebook hoặc Zalo
 **When** nền tảng đọc OG
-**Then** preview hiện đúng ảnh, tên và thời gian Sự kiện; ảnh OG do `apps/web` sinh (FR-10, AD-11)
+**Then** preview hiện đúng tên và thời gian Sự kiện; ảnh OG do `apps/web` sinh, dùng nền gradient tới khi có ảnh Sự kiện (Story 4.8) (FR-10, AD-11)
 
 **Given** desktop ≥ `lg`
 **When** mở trang
@@ -873,6 +871,10 @@ So that tiền vé về đúng tài khoản khi CLB thay key, và phiên đăng 
 
 **Acceptance Criteria:**
 
+*Làm thành hai spec: 2.13-a (xác nhận lại và email cảnh báo cho "Đặt làm mặc định" / "Hủy liên kết", `spec-2-13-a-xac-nhan-lai-doi-noi-nhan-tien.md`) và 2.13-b (Đổi key Tingee, `spec-2-13-b-doi-key-tingee.md`).*
+
+**2.13-b — Đổi key Tingee:**
+
 **Given** BTC đã từng liên kết tài khoản nhận tiền
 **When** Owner bấm "Đổi key Tingee"
 **Then** yêu cầu xác nhận lại ngay lúc thao tác (`REAUTH_REQUIRED`): TOTP nếu đã bật 2FA, chưa bật thì OTP email; rồi form key → danh sách tài khoản của key mới như Story 2.6; cùng quy tắc VietinBank và lỗi tại chỗ (FR-5, AD-6, AD-26)
@@ -887,13 +889,15 @@ So that tiền vé về đúng tài khoản khi CLB thay key, và phiên đăng 
 **When** lưu
 **Then** key và các tài khoản cũ vẫn là hiện hành, không gián đoạn bán Vé
 
+**2.13-a — Xác nhận lại khi đổi nơi nhận tiền:**
+
 **Given** BTC có tài khoản nhận tiền
 **When** Owner bấm "Đặt làm mặc định" hoặc "Hủy liên kết" (Story 2.6)
 **Then** yêu cầu xác nhận lại như trên trước khi thực hiện; đổi tài khoản mặc định (kể cả do hủy tài khoản mặc định) gửi email cảnh báo Owner và mọi Admin kèm 4 số cuối cũ và mới
 
-**Given** BTC đã thu hồi key cũ trên Tingee mà còn Đơn `pending` dùng nó
-**When** Đối soát bù gọi Tingee bằng key cũ
-**Then** nhận `TINGEE_CREDENTIAL_INVALID` → Đơn đi luồng hết hạn và cảnh báo vận hành; IPN đã ký vẫn kiểm được bằng secret cũ; không chặn BTC bán bằng key mới
+*(E2-4, 09/11/2026: AC "Đối soát bù bằng key cũ đã bị thu hồi" chuyển sang Story 4.1; "link luôn ký bằng credential hiện hành" ghi ở Story 3.4; điều kiện bật "Tạm ngừng bán" ở Story 4.2 và AD-32.)*
+
+**Cả hai:**
 
 **Given** Admin
 **When** mở các thao tác trên
@@ -912,8 +916,8 @@ So that BTC vẫn có người chịu trách nhiệm khi tôi rời CLB hoặc m
 **Then** yêu cầu xác nhận lại như Story 2.13; `Dialog` nêu hậu quả ("{tên} sẽ là Owner, quản lý tài khoản nhận tiền và Token. Bạn sẽ thành Admin.") và yêu cầu gõ tên BTC để xác nhận (FR-2, AD-26)
 
 **Given** đã xác nhận
-**When** gọi `flows.transferOwnership(orgId, toUserId)`
-**Then** trong một transaction: Owner cũ → `admin`, Admin được chọn → `owner`; unique index "mỗi BTC đúng một Owner" vẫn đúng sau commit (đổi thứ tự cập nhật hoặc dùng ràng buộc deferrable); audit ghi lại (FR-2, AD-26)
+**When** gọi `MembersService.transferOwnership` của `organizer` (chỉ ghi bảng `members` của một mô-đun nên không qua `flows`, AD-25)
+**Then** trong một transaction, dưới khóa BTC và sau khi kiểm lại vai trò: Owner cũ → `admin` trước, rồi Admin được chọn → `owner`; unique index "mỗi BTC đúng một Owner" vẫn đúng sau commit; audit ghi lại (FR-2, AD-26)
 **And** email báo cho cả hai người và mọi Admin còn lại
 
 **Given** BTC không có Admin nào
@@ -1060,6 +1064,11 @@ So that tôi yên tâm chuyển tiền.
 **Given** tạo link trả `MERCHANT_SUSPENDED` hoặc `TINGEE_CREDENTIAL_INVALID`
 **When** xử lý
 **Then** Đơn chuyển `expired`, nhả chỗ, Người mua thấy "Sự kiện tạm ngừng bán. Bạn thử lại sau nhé." (FR-15; bật cờ `payment_service_status` làm ở Epic 4)
+
+**Given** BTC đã đổi key Tingee hoặc đổi tài khoản mặc định (Story 2.13)
+**When** tạo link cho Đơn mới
+**Then** link luôn ký bằng credential hiện hành, vì tài khoản mặc định luôn thuộc credential hiện hành: đổi key gỡ mọi tài khoản của credential cũ
+**And** Đơn đã có link giữ `orders.payout_account_id` đã chụp, nên IPN (Story 3.5) và Đối soát bù (Story 4.1) của Đơn đó vẫn dùng credential cũ (AD-35) *(chuyển từ Story 2.13, E2-4)*
 
 ### Story 3.5: Nhận IPN và phát Vé đúng một lần
 
@@ -1325,6 +1334,11 @@ So that tôi không bao giờ trả tiền mà không có Vé.
 **When** xử lý
 **Then** `payment` gọi `ordering.markExpired(tx, …)`, Đơn → `expired`, nhả chỗ (AD-4 (b))
 
+**Given** BTC đã thu hồi key cũ trên Tingee, và còn Đơn `pending` có link tạo bằng key đó
+**When** Đối soát bù gọi Tingee bằng credential đã chụp và nhận `TINGEE_CREDENTIAL_INVALID`
+**Then** job dừng tra Đơn đó và cảnh báo vận hành kèm mã Đơn (Story 4.6); Đơn hết hạn theo trần cứng AD-4 (c)
+**And** không bật `payment_service_status`, vì lời gọi không dùng credential hiện hành (AD-32), nên BTC vẫn bán bằng key mới; IPN đã ký bằng secret cũ vẫn kiểm được (Story 3.5) *(chuyển từ Story 2.13, E2-4)*
+
 **Given** Tingee fake giả lập IPN không bao giờ tới
 **When** chạy test tích hợp
 **Then** Vé vẫn được phát qua Đối soát bù; giả lập IPN và Đối soát bù đến đồng thời thì chỉ một lần phát Vé
@@ -1338,7 +1352,7 @@ So that không ai trả tiền vào lúc tôi không nhận được thông báo
 **Acceptance Criteria:**
 
 **Given** `organizer` sở hữu `payment_service_status` (`active` | `suspended`, `reason` `token` | `tingee_disabled` | `credential_invalid`, `since`, `last_checked_at`)
-**When** tạo link trả `MERCHANT_SUSPENDED`, hoặc một lời gọi bằng key của BTC trả `TINGEE_CREDENTIAL_INVALID`
+**When** tạo link trả `MERCHANT_SUSPENDED`, hoặc một lời gọi bằng credential hiện hành của BTC trả `TINGEE_CREDENTIAL_INVALID` (lời gọi bằng credential cũ không bật cờ, xem Story 4.1)
 **Then** trong transaction bù sau lời gọi, cờ chuyển `suspended` (lý do `credential_invalid` với trường hợp sau); phát `org_status_changed` (FR-15, AD-32)
 **And** `sellability` trả "Tạm ngừng bán" cho mọi Hạng vé > 0đ của BTC; Hạng vé 0đ vẫn bán; trang Sự kiện hiện banner warning "Tạm ngừng bán", stepper và "Mua" tắt
 
@@ -1486,6 +1500,11 @@ So that Checkout, IPN và check-in luôn chạy, và một sự cố DB không l
 **When** cấu hình
 **Then** mỗi nơi một `TINGEE_BASE_URL` và một bộ `TINGEE_CREDENTIAL_KEYS` riêng; credential Tingee là của từng BTC; secret tiêm từ secret store của nền tảng, danh sách biến khớp schema Zod của `config`; local không nhận IPN thật (AD-36)
 
+**Given** `/v1/admin/*` trên staging và production
+**When** api khởi động và nhận request
+**Then** chỉ nhận request từ dải IP trong env `ADMIN_ALLOWED_CIDRS`, kiểm bằng schema Zod khi khởi động; thiếu hoặc sai định dạng ở production thì api không khởi động (FR-4, AD-26)
+**And** IP client lấy qua trusted proxy (`TRUST_PROXY_HOPS` đúng số proxy thật trước api); có test *(chuyển từ Story 2.5, E2-4)*
+
 **Given** PR được merge vào `main`
 **When** CI xanh (thêm Playwright với Tingee fake và bộ test cách ly vào pipeline của Story 1.1)
 **Then** staging tự deploy image tag theo commit SHA: vai `migrate` chạy trước, rồi đổi phiên bản `api`/`worker`; migration luôn tương thích ngược (AD-36)
@@ -1508,6 +1527,34 @@ So that Checkout, IPN và check-in luôn chạy, và một sự cố DB không l
 **And** trước Closed Beta có một lần diễn tập khôi phục về một thời điểm sang môi trường riêng, đo thời gian thực tế và ghi biên bản trong `docs/`; không đạt RTO thì Closed Beta chưa mở
 
 **And** uptime của Checkout, IPN và check-in được đo bằng kiểm tra từ bên ngoài, báo cáo theo tháng so với mục tiêu 99,9% (NFR-4, NFR-10)
+
+### Story 4.8: Ảnh Sự kiện trên object storage
+
+*(Thêm 09/11/2026, E2-4: gộp AC ảnh của Story 2.7, AC OG "đúng ảnh" của Story 2.11 và mục 2.7-b trong `deferred-work.md`.)*
+
+As a Owner hoặc Admin,
+I want tải ảnh bìa cho Sự kiện,
+So that trang Sự kiện và preview khi chia sẻ lên Zalo/Facebook hiện đúng ảnh của giải.
+
+**Acceptance Criteria:**
+
+**Given** hạ tầng ảnh
+**When** cấu hình ở local, staging và production
+**Then** dùng object storage tương thích S3 (MinIO trong docker-compose ở local), biến `S3_*` kiểm bằng Zod, `@aws-sdk/client-s3` cùng presigner; bucket ảnh bật CORS `GET` cho origin web; không dùng dịch vụ độc quyền của cloud nào (AD-22)
+
+**Given** wizard bước 1 "Thông tin" hoặc Cài đặt Sự kiện
+**When** tôi chọn ảnh
+**Then** API cấp presigned PUT (JPEG/PNG/WebP ≤ 5 MB, key `orgs/{orgId}/events/{uuid}.{ext}`); web upload thẳng lên object storage; lưu Sự kiện chỉ nhận key đúng tiền tố BTC, lưu vào `events.image_key`; audit ghi lại (FR-7, AD-13, AD-22)
+**And** sai định dạng hoặc quá dung lượng → lỗi tại chỗ; upload lỗi → giữ dữ liệu đã nhập, kèm "Thử lại"
+
+**Given** Sự kiện có ảnh
+**When** hiển thị
+**Then** `event-card` có thumbnail; `event-hero` dùng ảnh thay nền fallback gradient (UX-DR7, UX-DR10)
+
+**Given** chia sẻ link lên Facebook hoặc Zalo
+**When** nền tảng đọc OG
+**Then** ảnh OG do `apps/web` sinh, dùng ảnh Sự kiện; không có ảnh thì giữ nền gradient (FR-10, AD-11)
+**And** Story 8.1 (Social Ticket Card) dùng lại ảnh này
 
 ## Epic 5: Check-in tại cổng
 
@@ -1724,6 +1771,7 @@ So that chúng tôi biết không bán quá số suất và biết khi nào ph�
 **Given** cùng lượt chạy
 **When** đo
 **Then** báo cáo p95 trang công khai, availability, tạo Đơn, tạo link Gateway (< 2 giây) và IPN → Vé hiện trên trình duyệt (< 3 giây); tỉ lệ lỗi 5xx; số request bị giới hạn tốc độ (NFR-1, NFR-2, AD-31, AD-37)
+**And** đo thời gian tải `/e/{slug}` với mạng 4G giả lập (throttling) trên cấu hình thiết bị di động tầm trung, mục tiêu dưới 2 giây; kết quả ghi trong cùng báo cáo (FR-10, NFR-1) *(chuyển từ Story 2.11, E2-4)*
 
 **Given** kịch bản check-in song song (vd. 20 CTV quét 300 Vé, có quét trùng)
 **When** chạy
@@ -2062,6 +2110,27 @@ So that dữ liệu cá nhân của tôi không còn được dùng, đúng quy�
 **Then** hệ quả giống "Xóa tài khoản" ở MVP: đăng nhập bị vô hiệu, dữ liệu cá nhân bị ẩn danh theo cùng các quy tắc trên; `Dialog` nói rõ điều này; thời điểm rút đồng ý được lưu (FR-38, NFR-8)
 
 **And** có test kiểm mỗi cột cá nhân trong danh mục đều có handler ẩn danh; thiếu thì test fail
+
+### Story 7.7: Quản trị Tingee đặt lại TOTP
+
+*(Thêm 09/11/2026, E2-4: chuyển AC "Đặt lại TOTP" từ Story 2.5; gộp hai mục "Đặt lại TOTP" trong `deferred-work.md`.)*
+
+As a Quản trị Tingee,
+I want đặt lại xác thực hai lớp cho người dùng mất cả thiết bị TOTP lẫn mã khôi phục,
+So that họ lấy lại được tài khoản mà không phải tạo tài khoản mới.
+
+**Acceptance Criteria:**
+
+**Given** người dùng mất cả thiết bị TOTP lẫn mã khôi phục và liên hệ Tingee
+**When** Quản trị Tingee (đã step-up) mở `/admin`, tìm user theo email và chọn "Đặt lại TOTP"
+**Then** `Dialog` nêu hậu quả và bắt buộc ghi lý do; user chưa bật 2FA thì không có thao tác này (UX-DR44)
+
+**Given** đã xác nhận
+**When** thực hiện
+**Then** trong một transaction: TOTP và mã khôi phục bị xóa, mọi session của user bị hủy, 2FA về trạng thái chưa bật; audit ghi người làm, user và lý do, không ghi giá trị cá nhân (FR-1, AD-18, AD-26)
+**And** email báo cho user và Owner/Admin của các BTC user thuộc
+
+**And** quy trình hỗ trợ (cách Tingee xác minh người yêu cầu) ghi ở `docs/` trước Closed Beta
 
 ## Epic 8: Lan truyền *(Should/Could, cắt được)*
 

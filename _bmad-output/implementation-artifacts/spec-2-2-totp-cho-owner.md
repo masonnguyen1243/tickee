@@ -3,6 +3,7 @@ title: 'Story 2.2: TOTP cho Owner (đăng ký, step-up, mã khôi phục)'
 type: 'feature'
 created: '2026-10-30'
 status: 'done'
+superseded_by: '{project-root}/_bmad-output/implementation-artifacts/spec-2-2-xac-thuc-hai-lop-tu-bat.md'
 route: 'dispatch'
 review_loop_iteration: 0
 baseline_commit: '5467d951524ce1cccfb833370e8cd66c44e22cf6'

@@ -2,13 +2,13 @@
 title: Tickee
 status: final
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-11-09
 sources:
   - ../../prds/prd-tickee-2026-10-27/prd.md
   - ../../prds/prd-tickee-2026-10-27/addendum.md
   - .working/reference-sites.md
 name: Tickee
-description: Bán vé sự kiện nhỏ qua VietQR — hướng "Rạp tối" (Hướng D). shadcn/ui + Tailwind; DESIGN.md này chỉ định lớp thương hiệu (delta) trên nền shadcn, sáng/tối theo hệ thống hoặc nút chuyển giao diện (đổi 02/11/2026).
+description: Bán vé sự kiện nhỏ qua Tingee Payment Gateway — hướng "Rạp tối" (Hướng D). shadcn/ui + Tailwind; DESIGN.md này chỉ định lớp thương hiệu (delta) trên nền shadcn, sáng/tối theo hệ thống hoặc nút chuyển giao diện (đổi 02/11/2026).
 colors:
   # --- Thương hiệu (dùng chung hai chế độ) ---
   brand: '#FF4D6A'              # coral — CHỈ đặt trên nền tối (stage / bar / page-dark / card-dark)
@@ -143,7 +143,7 @@ typography:
 rounded:
   sm: 10px       # nút con trong stepper
   md: 12px       # control: nút, input, icon button, khung ảnh trong stage
-  lg: 18px       # thẻ, stage block, thẻ Hạng vé, thẻ QR + tấm QR
+  lg: 18px       # thẻ, stage block, thẻ Hạng vé, thẻ Vé + tấm Mã QR vé
   xl: 20px       # thanh mua vé nổi, bottom sheet
   full: 9999px   # badge trạng thái, chip đếm ngược, avatar BTC
 spacing:
@@ -231,12 +231,11 @@ components:
     radius: '{rounded.xl}'
     total: '{typography.total}'
     action: '{components.button-primary}'
-  payment-qr-card:
+  payment-summary:              # thay payment-qr-card (09/11/2026): không có QR, thanh toán trên trang Tingee
     container: '{components.stage-block}'
     amount: '{typography.amount}'
-    plate: '{colors.qr-plate}'
-    module: '{colors.qr-module}'
-    plate-radius: '{rounded.lg}'
+    code: '{typography.code}'
+    action: '{components.button-primary}'
   countdown-chip:
     foreground: '{colors.brand}'
     border: '1px solid {colors.brand-border}'
@@ -377,13 +376,13 @@ components:
 
 > Các mock trong `mockups/` chỉ để minh họa và được link tại từng mục. Khi mock và spine mâu thuẫn, **spine thắng**.
 
-Tickee là cửa bán vé cho các BTC nhỏ — giải Pickleball phong trào, workshop, phòng trà, livehouse — và cho những người trẻ mua vé từ một link trong nhóm Zalo. Hướng thiết kế được chọn là **"Rạp tối" (Hướng D)**: ngay cả ở light mode, phần "sân khấu" đầu trang (thông tin Sự kiện, QR thanh toán) và thanh mua vé là khối gần đen, như đèn rạp vừa tắt trước giờ diễn. Nền trang ấm, thẻ trắng nổi bằng bóng mềm, không viền. Coral `#FF4D6A` chỉ xuất hiện trên nền tối nên trông như ánh đèn sân khấu, không như một mảng sơn.
+Tickee là cửa bán vé cho các BTC nhỏ — giải Pickleball phong trào, workshop, phòng trà, livehouse — và cho những người trẻ mua vé từ một link trong nhóm Zalo. Hướng thiết kế được chọn là **"Rạp tối" (Hướng D)**: ngay cả ở light mode, phần "sân khấu" đầu trang (thông tin Sự kiện, số tiền cần trả trên Trang Đơn) và thanh mua vé là khối gần đen, như đèn rạp vừa tắt trước giờ diễn. Nền trang ấm, thẻ trắng nổi bằng bóng mềm, không viền. Coral `#FF4D6A` chỉ xuất hiện trên nền tối nên trông như ánh đèn sân khấu, không như một mảng sơn.
 
 Cảm giác chủ đạo là **dễ dùng**; cảm xúc phụ là hồi hộp nhẹ kiểu "tối nay đi chơi". Đơn giản, hợp người trẻ, ít màu mè: một màu thương hiệu, một họ font, và để ảnh/nội dung của BTC mang màu sắc riêng.
 
 Ba bề mặt, cùng một bộ token:
 
-- **Bề mặt Người mua** (trang Sự kiện, Checkout, QR thanh toán, Vé của tôi) và **landing BTC**: đậm chất "Rạp tối" — stage block đầu màn hình, thanh mua vé tối dính đáy, CTA coral.
+- **Bề mặt Người mua** (trang Sự kiện, Checkout, Trang Đơn, Vé của tôi) và **landing BTC**: đậm chất "Rạp tối" — stage block đầu màn hình, thanh mua vé tối dính đáy, CTA coral.
 - **Dashboard BTC**: **tiết chế hơn** — nền chủ yếu sáng/tối theo theme đang dùng (mặc định theo hệ thống; đổi 02/11/2026); stage block chỉ dùng cho sidebar/header hoặc thẻ số liệu nổi bật. Không có stage block trang trí trong bảng Đơn hay form.
 - **Màn quét của CTV**: theo theme đang dùng, mặc định theo hệ thống (không ép tối; đổi 02/11/2026); chỉ kết quả quét phủ toàn màn hình xanh/đỏ.
 
@@ -391,7 +390,7 @@ Tickee kế thừa shadcn/ui. DESIGN.md này chỉ định lớp thương hiệu
 
 Chưa có logo; wordmark tạm "tickee" chữ thường weight 700, kèm một ô vuông coral xoay 45° (theo mock Hướng D). Tên "Tickee" là tên làm việc, chưa chốt (PRD). `[ASSUMPTION]` wordmark tạm cho tới khi có logo.
 
-Tham chiếu hình ảnh: [Hướng D · Rạp tối](mockups/directions-2.html) — chỉ mục "Hướng D · Rạp tối" là hướng được chọn; gồm trang Sự kiện, QR thanh toán, trạng thái trấn an, sáng và tối.
+Tham chiếu hình ảnh: [Hướng D · Rạp tối](mockups/directions-2.html) — chỉ mục "Hướng D · Rạp tối" là hướng được chọn; gồm trang Sự kiện, QR thanh toán (mock cũ — từ 09/11/2026 thanh toán trên trang Tingee, xem `payment-summary`), trạng thái trấn an, sáng và tối.
 
 ## Colors
 
@@ -417,7 +416,7 @@ Thêm biến riêng Tickee: `--stage`, `--stage-foreground`, `--stage-muted`, `-
 - **Coral `{colors.brand}`** — ánh đèn sân khấu. Dùng cho: nền nút chính (`button-primary`), eyebrow và icon trong stage, chip đếm ngược, mục đang chọn của sidebar/tab bar. **Chỉ đặt trên nền tối** (`stage`, `bar`, `page-dark`, `card-dark`). Không dùng làm chữ hay nền nút trên nền sáng (không đạt AA — xem bảng tương phản).
 - **Mực `{colors.on-brand}`** — chữ trên mọi nền coral. Không bao giờ chữ trắng trên coral (không đạt AA — xem bảng).
 - **Coral-700 `{colors.brand-text}`** — khi cần chữ mang màu thương hiệu trên nền sáng ("Còn 3 vé" sắp hết, link "Chính sách hoàn vé", chấm "đang chờ thanh toán"). Đạt AA trên cả `card` trắng và `page` (xem bảng).
-- **Stage `{colors.stage}` / Bar `{colors.bar}`** — khối gần đen có mặt ở cả hai chế độ: hero Sự kiện, thẻ QR thanh toán, dòng trấn an, thanh mua vé, sidebar dashboard, thẻ số liệu nổi bật, hero landing. Ở dark mode `stage` trùng màu `card-dark`; phân biệt bằng vị trí và nội dung, không cần khác màu.
+- **Stage `{colors.stage}` / Bar `{colors.bar}`** — khối gần đen có mặt ở cả hai chế độ: hero Sự kiện, `payment-summary` trên Trang Đơn, dòng trấn an, thanh mua vé, sidebar dashboard, thẻ số liệu nổi bật, hero landing. Ở dark mode `stage` trùng màu `card-dark`; phân biệt bằng vị trí và nội dung, không cần khác màu.
 - **Page / Card** — nền ấm `#F7F3F2` + thẻ trắng nổi bằng bóng. Dark: `#0B0809` + `#1C1416` (cách tạo chiều sâu: § Elevation & Depth).
 - **Trạng thái (success / warning / danger / neutral)** — chỉ cho badge trạng thái, banner hệ thống và chữ trạng thái. Không dùng trang trí. Danger (#8F3F3F) là đỏ gạch trầm, đủ khác coral về sắc độ. Toàn bộ màu trạng thái được làm dịu (độ bão hòa thấp) theo yêu cầu "bớt sặc sỡ"; không bao giờ dùng coral để báo lỗi.
 - **Scan success / danger** — hai màu phủ toàn màn hình cho kết quả quét. Giống nhau ở light mode và dark mode để CTV học một lần là nhớ. Luôn kèm chữ lớn và biểu tượng (✓ tròn / ✕ bát giác); kết quả đỏ kèm thêm âm thanh — không chỉ dựa vào màu. Vì màu dịu, xanh/đỏ khó phân biệt hơn khi liếc ngoài trời nên các tín hiệu này là bắt buộc. Minh họa: [Màu quét](mockups/scan-colors-2.html).
@@ -484,7 +483,7 @@ Một họ font: **Be Vietnam Pro** (Google Fonts, đủ dấu tiếng Việt), 
 | Meta | `{typography.meta}` | Địa chỉ, ghi chú, dòng phụ |
 | Eyebrow | `{typography.eyebrow}` | Danh mục trên tên Sự kiện ("Thể thao · Pickleball") |
 | Button | `{typography.button}` | Nhãn nút |
-| Amount | `{typography.amount}` | Số tiền trên thẻ QR thanh toán ("300.000đ") |
+| Amount | `{typography.amount}` | Số tiền trên `payment-summary` ("300.000đ") |
 | Total | `{typography.total}` | Tổng tiền trên thanh mua vé |
 | Scan result | `{typography.scan-result}` / `{typography.scan-detail}` | Kết quả quét toàn màn hình — đọc được bằng một cái liếc ở khoảng cách cánh tay |
 | Code | `{typography.code}` | Mã Đơn, số tài khoản — luôn `tabular-nums` |
@@ -507,7 +506,7 @@ Thang 4px của Tailwind kế thừa nguyên vẹn. Token có tên trong frontma
 - `{spacing.section}` (24px) — giữa các khối ("Chọn vé", "Về sự kiện").
 - `{spacing.control-height}` (50px) — nút chính/phụ toàn chiều rộng.
 
-**Bề mặt Người mua**: một cột, mobile-first. Trang Sự kiện trên desktop (≥ `lg`): **2 cột** — trái ảnh bìa + mô tả, phải thẻ chọn vé dính khi cuộn (đã chốt). Checkout, QR thanh toán, Vé của tôi trên màn rộng: cột căn giữa tối đa `{spacing.content-max-buyer}` (480px) `[ASSUMPTION]`. Thanh mua vé nổi cách mép 10px, dính đáy, chừa `env(safe-area-inset-bottom)`.
+**Bề mặt Người mua**: một cột, mobile-first. Trang Sự kiện trên desktop (≥ `lg`): **2 cột** — trái ảnh bìa + mô tả, phải thẻ chọn vé dính khi cuộn (đã chốt). Checkout, Trang Đơn, Vé của tôi trên màn rộng: cột căn giữa tối đa `{spacing.content-max-buyer}` (480px) `[ASSUMPTION]`. Thanh mua vé nổi cách mép 10px, dính đáy, chừa `env(safe-area-inset-bottom)`.
 
 **Dashboard BTC**: responsive đầy đủ. ≥ `lg` (1024px): `dashboard-sidebar` cố định `{spacing.sidebar-width}` + vùng nội dung. < `md` (768px): sidebar ẩn, thay bằng `bottom-tab-bar`. Khoảng `md–lg`: `[ASSUMPTION]` sidebar thu thành icon. Bảng Đơn ở < `md` chuyển thành danh sách thẻ.
 
@@ -525,7 +524,7 @@ Lớp phủ (`Dialog`, `Sheet`) kế thừa shadcn. Kết quả quét là lớp 
 
 ## Shapes
 
-- `{rounded.lg}` (18px) — thẻ (card), stage block, thẻ Hạng vé, thẻ QR thanh toán và tấm QR trong thẻ, thẻ Vé.
+- `{rounded.lg}` (18px) — thẻ (card), stage block, thẻ Hạng vé, `payment-summary`, thẻ Vé và tấm Mã QR vé trong thẻ.
 - `{rounded.md}` (12px) — mọi control: nút, input, icon button `{spacing.icon-button}`, khung ảnh trong stage.
 - `{rounded.sm}` (10px) — nút con trong `quantity-stepper`.
 - `{rounded.xl}` (20px) — thanh mua vé nổi, bottom sheet.
@@ -543,13 +542,13 @@ shadcn dùng nguyên trạng: `Dialog`, `Sheet`, `DropdownMenu`, `Tabs`, `Table`
 
 - **button-primary** — nền `{colors.brand}`, chữ `{colors.on-brand}` (5.88:1), `{rounded.md}`, cao `{spacing.control-height}`, `{typography.button}`. Chỉ đặt trên stage, `purchase-bar`, `dashboard-sidebar`, hero landing, hoặc nền dark mode. Pressed: tối hơn 8% (`brightness(.92)`); disabled: opacity .45, không đổi màu chữ.
 - **button-primary-on-light** — nút chính khi nằm trên nền sáng (form dashboard, Checkout light mode, Tra tay, `order-card`): nền `{colors.stage}`, chữ `{colors.stage-foreground}` (17.15:1). **Quy tắc chung cho dark mode:** mọi `button-primary-on-light` ở dark mode trở thành `button-primary` — nền `{colors.brand}`, chữ `{colors.on-brand}` (5.88:1) — vì nền stage trùng `card-dark` (1.0:1) và coral được phép trên nền tối. Áp dụng ở mọi nơi dùng component này, không cần ghi lại từng chỗ.
-- **button-secondary** — nền `{colors.card}` + bóng mềm (dark mode: `{colors.card-dark}`; chiều sâu theo § Elevation & Depth), chữ `{colors.text}`, cùng kích thước. Ví dụ "Tải ảnh QR".
+- **button-secondary** — nền `{colors.card}` + bóng mềm (dark mode: `{colors.card-dark}`; chiều sâu theo § Elevation & Depth), chữ `{colors.text}`, cùng kích thước. Ví dụ "Chia sẻ Vé".
 - **button-destructive** — `{colors.destructive}` / `{colors.destructive-foreground}` (6.57:1). Dùng cho "Hủy Sự kiện", "Từ chối", "Thu hồi".
 - Ghost/link kế thừa shadcn; link mang màu thương hiệu trên nền sáng dùng `{colors.brand-text}` (đạt AA trên cả `card` và `page`).
 
 #### stage-block
 
-Khối gần đen `{colors.stage}`, chữ `{colors.stage-foreground}`, chữ phụ `{colors.stage-muted}`, điểm nhấn `{colors.brand}`, `{rounded.lg}`, padding `{spacing.gutter-mobile}`. Có thể chứa một vùng ảnh `{rounded.md}`. Là nền cho `event-hero`, `payment-qr-card`, `reassurance-line`, `stat-card`, `landing-hero`. Mỗi màn Người mua tối đa một stage block lớn; dashboard chỉ dùng stage cho sidebar/header và tối đa 1–2 `stat-card`.
+Khối gần đen `{colors.stage}`, chữ `{colors.stage-foreground}`, chữ phụ `{colors.stage-muted}`, điểm nhấn `{colors.brand}`, `{rounded.lg}`, padding `{spacing.gutter-mobile}`. Có thể chứa một vùng ảnh `{rounded.md}`. Là nền cho `event-hero`, `payment-summary`, `reassurance-line`, `stat-card`, `landing-hero`. Mỗi màn Người mua tối đa một stage block lớn; dashboard chỉ dùng stage cho sidebar/header và tối đa 1–2 `stat-card`.
 
 #### event-card
 
@@ -613,32 +612,34 @@ Dòng giới thiệu Tickee (FR-36, Could) — cuối trang Sự kiện và emai
 
 ### Thanh toán & Vé
 
-#### payment-qr-card
+#### payment-summary
 
-Thẻ QR thanh toán — trái tim màn thanh toán. Stage block căn giữa: nhãn "Quét bằng app ngân hàng để trả" (`{colors.stage-muted}`) → số tiền `{typography.amount}` → `countdown-chip` "Giữ chỗ còn 14:32" → tấm QR trắng `{colors.qr-plate}` `{rounded.lg}` padding `{spacing.qr-plate-padding}`, module đen → "Mã Đơn" + mã `{typography.code}`. (Với QR tĩnh: mã Đơn to hơn, kèm nút sao chép và hướng dẫn ghi nội dung chuyển khoản — FR-17.)
+*(Thay `payment-qr-card` từ 09/11/2026: thanh toán diễn ra trên trang Tingee Payment Gateway, Tickee không hiển thị QR thanh toán — Architecture AD-6.)*
 
-- **countdown-chip** — viền 1px `{colors.brand-border}` (coral 50%), chữ `{colors.brand}`, `{rounded.full}`, tabular. Không đổi sang đỏ khi sắp hết (tránh gây hoảng — giữ niềm tin).
-- **recipient-trust-block** — thẻ trắng ngay dưới stage: icon khiên trong ô stage `{spacing.icon-button}` (icon coral) + "Tiền chuyển thẳng cho **CLB ABC**" (`{typography.title}`); các hàng khóa–giá trị cách nhau bằng đường chia `{colors.line}`: "Chủ tài khoản — NGUYEN VAN TUAN", "Ngân hàng — Vietcombank". Nhãn `{colors.muted}`, giá trị `{colors.text}` weight 500. Tên phải khớp đúng tên mà app ngân hàng sẽ hiển thị.
+Khối thanh toán trên Trang Đơn (`/orders/{code}`), phần Tickee còn kiểm soát trước khi Người mua rời sang trang Tingee. Stage block căn giữa: nhãn "Số tiền cần trả" (`{colors.stage-muted}`) → số tiền `{typography.amount}` → `countdown-chip` "Giữ chỗ còn 14:32" → "Mã Đơn" + mã `{typography.code}` (ví dụ `TK8F3Q2AXM`). Không có tấm QR.
+
+- **countdown-chip** — viền 1px `{colors.brand-border}` (coral 50%), chữ `{colors.brand}`, `{rounded.full}`, tabular. Không đổi sang đỏ khi sắp hết (tránh gây hoảng — giữ niềm tin). Về 0 thì đổi thành "Đang xác nhận thanh toán" (EXPERIENCE › Thanh toán & Trang Đơn).
+- **recipient-trust-block** — thẻ trắng ngay dưới stage: icon khiên trong ô stage `{spacing.icon-button}` (icon coral) + "Tiền chuyển thẳng cho **CLB ABC**" (`{typography.title}`); các hàng khóa–giá trị cách nhau bằng đường chia `{colors.line}`: "Chủ tài khoản — NGUYEN VAN TUAN", "Ngân hàng — Vietcombank". Nhãn `{colors.muted}`, giá trị `{colors.text}` weight 500. Trang Tingee hiển thị tên người nhận nào đang chờ Tingee trả lời; có câu trả lời thì chỉnh cho khớp.
 - **Trạng thái chờ** — dòng `{typography.meta}` "Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền." Chữ `{colors.muted}`; chấm 8px `{colors.brand-text}` #CF2147 (dark mode: `{colors.brand-text-dark}`). Không có ngoại lệ coral trên nền sáng (đã chốt).
 - **reassurance-line** — khi đã chờ lâu (ngưỡng thời gian: xem EXPERIENCE): stage block `{rounded.lg}` padding 14px, icon coral, chữ `{colors.stage-foreground}` weight 500: "Nếu bạn đã chuyển, vé sẽ về trong vài phút — đừng chuyển lại."
-- Nút: `button-primary` "Mở app ngân hàng" khi nằm trong vùng tối; `button-primary-on-light` khi đặt trên page sáng. `button-secondary` "Tải ảnh QR". Chân: "Tickee không giữ tiền của bạn · Chính sách hoàn vé".
+- Nút: `button-primary` "Thanh toán" khi nằm trong vùng tối; `button-primary-on-light` khi đặt trên page sáng. Lỗi tạo link: `button-secondary` "Thử lại". Chân: "Tickee không giữ tiền của bạn · Chính sách hoàn vé".
 
 #### ticket-card
 
-Thẻ Vé (Mã QR vé) phải **khác hẳn** thẻ QR thanh toán (PRD §3) — Người mua không được nhầm, CTV không được nhận nhầm:
+Thẻ Vé (Mã QR vé) phải **khác hẳn** khối thanh toán (PRD §3) — Người mua không được nhầm, CTV không được nhận nhầm:
 
-| | `payment-qr-card` (QR thanh toán) | `ticket-card` (Mã QR vé) |
+| | `payment-summary` (thanh toán) | `ticket-card` (Mã QR vé) |
 |---|---|---|
 | Nền khối | Stage tối | Thẻ sáng `{colors.card}` (dark mode: `{colors.card-dark}`) |
-| Nhãn trên QR | "Quét bằng app ngân hàng để trả" + số tiền | "Mã QR vé · đưa cho CTV ở cổng" |
-| Đi kèm | Đếm ngược, người nhận tiền | Tên Sự kiện, Hạng vé, "Vé 1/2", tên Người mua, ngày-giờ |
+| QR | Không có (QR thanh toán, nếu có, nằm trên trang Tingee) | "Mã QR vé · đưa cho CTV ở cổng" |
+| Đi kèm | Số tiền, đếm ngược, người nhận tiền, nút "Thanh toán" | Tên Sự kiện, Hạng vé, "Vé 1/2", tên Người mua, ngày-giờ |
 | Hình khối | Thẻ liền | Thẻ có đường xé nét đứt + hai khuyết bán nguyệt tách phần thông tin và phần QR (dáng cuống vé) |
 
 `[ASSUMPTION]` hình dáng cuống vé và nhãn "Mã QR vé · đưa cho CTV ở cổng" do bước distill đề xuất (đã render trong mock Thành công nhưng chưa được duyệt riêng). Tấm QR trắng, module đen, luôn tối thiểu 200×200px để camera quét nhanh. Thẻ Vé đã check-in / Đã hủy: QR mờ (opacity .25) + `status-badge` phủ giữa. Nút "Chia sẻ Vé" (`button-secondary`).
 
-Trên màn Thành công, `ticket-card` đầu tiên **chồng lên mép dưới stage block ~30px** — vị trí cuối của chuyển cảnh "thẻ Vé trượt lên từ sân khấu tối"; chữ phụ trong stage dùng `{colors.stage-muted}`. Bố cục màn: EXPERIENCE › State Patterns › QR thanh toán & sau thanh toán (Thành công).
+Trên màn Thành công, `ticket-card` đầu tiên **chồng lên mép dưới stage block ~30px** — vị trí cuối của chuyển cảnh "thẻ Vé trượt lên từ sân khấu tối"; chữ phụ trong stage dùng `{colors.stage-muted}`. Bố cục màn: EXPERIENCE › State Patterns › Thanh toán & Trang Đơn (Thành công).
 
-Minh họa: [Thành công & Vé của tôi](mockups/key-success-ticket.html) (mục 1–2: màn Thành công, phân biệt QR thanh toán / Mã QR vé).
+Minh họa: [Thành công & Vé của tôi](mockups/key-success-ticket.html) (mục 1: màn Thành công; mục 2 so với QR thanh toán là mock cũ).
 
 #### social-ticket-card
 
@@ -649,7 +650,7 @@ Minh họa: [Thành công & Vé của tôi](mockups/key-success-ticket.html) (m�
 Thẻ cho Đơn chưa thành Vé — Chờ thanh toán, "BTC đang kiểm tra thanh toán", Đã hủy — trong nhóm "Đơn đang chờ" của Vé của tôi. Khác `event-card` (Sự kiện) và `ticket-card` (Vé, có QR): **không bao giờ có QR nào**. Nền `{colors.card}` (dark mode `{colors.card-dark}`) + bóng mềm, `{rounded.lg}`, padding `{spacing.card-padding}`. Hàng trên: tên Sự kiện `{typography.title}` + `status-badge` bên phải. Hàng giữa: ngày-giờ (`{typography.meta}`) · Hạng vé × số lượng (`{typography.meta}`) · số tiền (`{typography.label}`) · mã Đơn (`{typography.code}`). Hàng dưới theo trạng thái:
 
 - **Chờ thanh toán** — "Giữ chỗ còn 08:12" `{typography.label}` tabular màu `{colors.brand-text}` (dark mode `{colors.brand-text-dark}`) + nút "Tiếp tục thanh toán" `button-primary-on-light` toàn chiều rộng.
-- **"BTC đang kiểm tra thanh toán"** — badge warning; khối liên hệ BTC (tên BTC + kênh liên hệ `[ASSUMPTION]` — EXPERIENCE Open Questions #4) `{typography.meta}` `{colors.muted}`; không có nút chính.
+- **"BTC đang kiểm tra thanh toán"** — badge warning; khối liên hệ BTC (tên BTC + SĐT/email liên hệ BTC đã nhập khi tạo BTC) `{typography.meta}` `{colors.muted}`; không có nút chính.
 - **Đã hủy** — badge neutral "Đã hủy"; dòng liên hệ BTC; thẻ mờ nhẹ (chữ `{colors.muted}`).
 
 Minh họa: nhóm "Đơn đang chờ" của [Vé của tôi](mockups/key-success-ticket.html) (mục 3).
@@ -713,7 +714,7 @@ Minh họa: [Tổng quan Sự kiện](mockups/key-dashboard-event.html) (desktop
 | Tối đa một stage block lớn mỗi màn Người mua; dashboard chỉ dùng stage cho sidebar/header và tối đa 1–2 `stat-card` | Rải stage tối khắp dashboard, trong bảng hay form |
 | Thẻ sáng nổi bằng bóng mềm ấm, không viền | Viền 1px quanh thẻ ở light mode; bóng ở dark mode |
 | QR luôn module đen trên tấm trắng, mọi chế độ | Đảo màu QR ở dark mode hay đặt QR thẳng trên nền tối |
-| QR thanh toán trong stage tối; Mã QR vé trong thẻ sáng dáng cuống vé | Hai loại QR trông giống nhau |
+| Khối thanh toán (`payment-summary`) trong stage tối, không có QR; Mã QR vé trong thẻ sáng dáng cuống vé | Khối thanh toán và thẻ Vé trông giống nhau |
 | Kết quả quét: màu + chữ lớn + hình icon khác nhau (+ âm thanh khi đỏ) | Báo kết quả chỉ bằng màu hay toast nhỏ |
 | Badge trạng thái luôn có chữ | Chấm màu không chữ |
 | Danger đỏ gạch `{colors.danger-text}` cho lỗi | Dùng coral thương hiệu để báo lỗi |
@@ -728,4 +729,4 @@ Minh họa: [Tổng quan Sự kiện](mockups/key-dashboard-event.html) (desktop
 3. **Token bóng đổ** — chuỗi bóng ở § Elevation & Depth đang là giá trị literal; cân nhắc đặt tên (`shadow-card`, `shadow-ring-dark`) khi spec định dạng hỗ trợ nhóm token bóng.
 4. **Token hóa kích thước pixel lẻ** còn lại (padding 3px stepper, icon 96px, vòng 28px, thumbnail 56px) — hiện chỉ token hóa giá trị lặp (40px, 12px).
 
-`[ASSUMPTION]` inline còn lại (mặc định UX, không chặn triển khai; chưa quyết thì giữ như ghi): Brand & Style — wordmark tạm · Typography — Display 56px desktop · Layout — cột 480px, sidebar thu icon ở `md–lg` · Components › Dùng chung — ánh xạ tone `status-badge`, tone "Liên kết thất bại" · Người mua — nhắc "Chọn vé để tiếp tục", copy `tickee-referral-line` · Thanh toán & Vé — dáng cuống vé + nhãn Mã QR vé, `social-ticket-card` 9:16 + không tên Người mua (#2), kênh liên hệ BTC trên `order-card` (EXPERIENCE Open Questions #4) · Màn quét — mở rộng tìm của `manual-lookup` (EXPERIENCE Open Questions #3) · Dashboard — nền `bar` cho `bottom-tab-bar` · Landing — `value-tile`.
+`[ASSUMPTION]` inline còn lại (mặc định UX, không chặn triển khai; chưa quyết thì giữ như ghi): Brand & Style — wordmark tạm · Typography — Display 56px desktop · Layout — cột 480px, sidebar thu icon ở `md–lg` · Components › Dùng chung — ánh xạ tone `status-badge`, tone "Liên kết thất bại" · Người mua — nhắc "Chọn vé để tiếp tục", copy `tickee-referral-line` · Thanh toán & Vé — dáng cuống vé + nhãn Mã QR vé, `social-ticket-card` 9:16 + không tên Người mua (#2) · Màn quét — mở rộng tìm của `manual-lookup` (EXPERIENCE Open Questions #3) · Dashboard — nền `bar` cho `bottom-tab-bar` · Landing — `value-tile`.

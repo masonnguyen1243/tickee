@@ -7,13 +7,13 @@ paradigm: 'Modular monolith (NestJS) — một codebase, ba vai chạy: api, wor
 scope: 'Toàn bộ Tickee MVP v1: trang mua Vé, dashboard BTC, check-in CTV, Quản trị Tingee, tích hợp Tingee Payment Gateway'
 status: final
 created: '2026-10-28'
-updated: '2026-11-03'
+updated: '2026-11-09'
 binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37, FR-38, NFR-1, NFR-2, NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-8, NFR-9, NFR-10, NFR-11, NFR-12]
 sources:
   - _bmad-output/planning-artifacts/prds/prd-tickee-2026-10-27/prd.md
   - _bmad-output/planning-artifacts/prds/prd-tickee-2026-10-27/addendum.md
-  - _bmad-output/planning-artifacts/ux-designs/ux-tickee-2026-10-27/DESIGN.md (nhánh docs/ux-tickee-mvp, commit 1bec95c, chưa merge vào main)
-  - _bmad-output/planning-artifacts/ux-designs/ux-tickee-2026-10-27/EXPERIENCE.md (nhánh docs/ux-tickee-mvp, commit 1bec95c, chưa merge vào main)
+  - _bmad-output/planning-artifacts/ux-designs/ux-tickee-2026-10-27/DESIGN.md
+  - _bmad-output/planning-artifacts/ux-designs/ux-tickee-2026-10-27/EXPERIENCE.md
   - _bmad-output/planning-artifacts/brd-data-model-notes.md
   - https://developers.tingee.vn/docs (Payment Gateway, Webhook, Tài khoản & Định danh (get-va-paging), Lưu ý quan trọng — đọc 28/10/2026)
 companions:
@@ -38,7 +38,7 @@ companions:
 | `checkin` | Lời mời CTV, phân công CTV theo Sự kiện, màn quét, tra tay |
 | `reporting` | Dashboard, CSV, danh sách hoàn tiền, thông báo trạng thái (`notices`) — chỉ đọc |
 | `integration` | Gửi email (`EmailTransport`), kết nối Google Sheets và ánh xạ dòng, danh mục thông báo |
-| `admin` | Báo cáo vi phạm; endpoint của Quản trị Tingee (ghi qua `flows`) |
+| `admin` | Báo cáo vi phạm; endpoint của Quản trị Tingee. Ghi dữ liệu của mô-đun khác bằng service công khai của mô-đun đó (vd. Closed Beta qua `organizer`); chỉ luồng ghi từ hai mô-đun trở lên mới qua `flows` (AD-25: `lockEvent`/`lockOrganization`, `voidTickets`) |
 | `tingee` | Adapter Tingee — không sở hữu bảng |
 | `platform` (shared kernel) | DB và transaction, cổng `AccessResolver` và guard quyền, `orgScope`, `audit_events`, hàng đợi job, realtime (SSE/NOTIFY), config, log |
 
@@ -339,7 +339,7 @@ Client dùng một hook duy nhất: gọi REST khi kết nối, khi nhận tín 
 
 - **Binds:** FR-15, FR-20, FR-34, FR-37; `organizer`, `tingee`, `payment`
 - **Prevents:** "Tạm ngừng bán" kẹt mãi vì không ai tắt; Đối soát bù sau khi mở lại dịch vụ không bao giờ chạy.
-- **Rule:** `organizer` sở hữu `payment_service_status` của BTC (`active` | `suspended`, `reason` `token` | `tingee_disabled` | `credential_invalid`, `since`, `last_checked_at`) và `token_alert_threshold`. Bật `suspended` khi adapter trả `MERCHANT_SUSPENDED` (trong transaction bù của AD-5); bật với `reason` `credential_invalid` khi lời gọi bằng key của BTC trả `TINGEE_CREDENTIAL_INVALID`. Tắt bằng: job dò `tingee.getMerchantServiceStatus(credential)` mỗi 5 phút khi đang `suspended`, nút "Kiểm tra lại" của Owner, hoặc Quản trị Tingee; riêng `credential_invalid` tắt khi Owner lưu credential mới hợp lệ, hoặc bấm "Kiểm tra lại" mà Tingee chấp nhận key. Tắt cờ → enqueue Đối soát bù cho mọi Đơn còn mở của BTC (AD-8). Thu hồi Closed Beta là trường riêng (`closed_beta_status`), không dùng cờ này. Số dư và hạn mức Token đọc trực tiếp từ Tingee bằng credential của BTC mỗi lần xem (timeout 3 giây, lỗi → "Chưa đọc được số dư"), không lưu.
+- **Rule:** `organizer` sở hữu `payment_service_status` của BTC (`active` | `suspended`, `reason` `token` | `tingee_disabled` | `credential_invalid`, `since`, `last_checked_at`) và `token_alert_threshold`. Bật `suspended` khi adapter trả `MERCHANT_SUSPENDED` (trong transaction bù của AD-5); bật với `reason` `credential_invalid` khi lời gọi bằng credential hiện hành của BTC trả `TINGEE_CREDENTIAL_INVALID`. Lời gọi bằng credential cũ, tức tra trạng thái hoặc Đối soát bù cho Đơn có link tạo trước khi đổi key (AD-35), trả mã này thì không bật cờ: Đơn đó hết hạn theo AD-4 (c) và vận hành được cảnh báo. Tắt bằng: job dò `tingee.getMerchantServiceStatus(credential)` mỗi 5 phút khi đang `suspended`, nút "Kiểm tra lại" của Owner, hoặc Quản trị Tingee; riêng `credential_invalid` tắt khi Owner lưu credential mới hợp lệ, hoặc bấm "Kiểm tra lại" mà Tingee chấp nhận key. Tắt cờ → enqueue Đối soát bù cho mọi Đơn còn mở của BTC (AD-8). Thu hồi Closed Beta là trường riêng (`closed_beta_status`), không dùng cờ này. Số dư và hạn mức Token đọc trực tiếp từ Tingee bằng credential của BTC mỗi lần xem (timeout 3 giây, lỗi → "Chưa đọc được số dư"), không lưu.
 
 ### AD-33 — Read model cho đọc chéo mô-đun
 
@@ -557,7 +557,7 @@ Câu hỏi sản phẩm (PM/UX):
 - Vé đã phát của Sự kiện bị khóa (PRD Câu hỏi mở #7): mặc định vẫn hợp lệ, Quản trị Tingee có thể vô hiệu (AD-28).
 - Xóa tài khoản: xác nhận với pháp chế rằng ẩn danh hóa và giữ Vé hợp lệ theo mã là đủ (AD-24).
 
-Cập nhật tài liệu nguồn:
+Cập nhật tài liệu nguồn — **đã làm xong ngày 09/11/2026** (`sprint-change-proposal-2026-11-09-doi-chieu-spec.md`, retro Epic 2 E2-4). Danh sách gốc giữ lại để truy vết:
 
 - **PRD:** §3 (mã Đơn ≠ `billId`; Giữ chỗ và QR thanh toán chuyển sang link Gateway; Token khả dụng do Tingee lo), §6 (QR động/tĩnh, Deep Link → Payment Gateway), FR-5 (không cho chọn tài khoản VietinBank), FR-14 (nhả chỗ theo xác nhận Tingee hoặc trần cứng), FR-15 (phát hiện tạm ngừng khi tạo link thay vì tính Token trước), FR-16/FR-17 (Gateway), FR-21 (loại `review_item` mới), FR-22 (link chia sẻ có token), NFR-1 ("tạo link" thay cho "tạo QR"), SM-2 (bỏ tách QR động/tĩnh), giá Hạng vé có phí tối thiểu 2.000đ.
 - **UX:** bỏ `payment-qr-card` và luồng chọn app ngân hàng; thêm màn xác nhận rồi redirect sang Gateway; trạng thái "Đang xác nhận thanh toán"; màn đăng ký và step-up TOTP; trường liên hệ BTC; ví dụ mã Đơn 10 ký tự (`TK8F3Q2AXM`). Danh sách chi tiết ở `reviews/reconcile-ux.md`.
