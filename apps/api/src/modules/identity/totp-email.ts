@@ -22,17 +22,24 @@ ${paragraphs.map((p) => `      <p style="margin:0 0 16px;font-size:15px;line-hei
 }
 
 /**
+ * Lời dặn của email gỡ 2FA (dùng mã khôi phục, tắt): các thiết bị khác đã bị đăng xuất, nên nếu không phải chủ tài
+ * khoản làm thì session còn lại là của người khác. Bật lại 2FA buộc mọi session khác nhập mã (`confirmEnrollment`).
+ */
+const SIGNED_OUT_WARNING =
+  'Nếu không phải bạn, hãy đăng nhập lại ngay, bật lại xác thực hai lớp trong Bảo mật tài khoản để chặn thiết bị lạ và liên hệ hỗ trợ Tickee.';
+
+/**
  * Email báo tài khoản vừa dùng một mã khôi phục TOTP (tiếng Việt). Không chứa mã nào: chỉ báo sự việc, việc 2FA cũ đã
- * bị gỡ và cách bật lại.
+ * bị gỡ, các thiết bị khác đã bị đăng xuất và cách bật lại.
  */
 export function buildRecoveryCodeUsedEmail(): Omit<EmailMessage, 'to'> {
   return securityEmail(
     'Tài khoản Tickee của bạn vừa dùng mã khôi phục',
     [
       'Tài khoản Tickee của bạn vừa xác thực hai lớp bằng một mã khôi phục.',
-      'Xác thực hai lớp cũ đã được gỡ. Hãy vào Bảo mật tài khoản để bật lại với thiết bị mới và nhận bộ mã khôi phục mới.',
+      'Xác thực hai lớp cũ đã được gỡ và mọi thiết bị khác đang đăng nhập (nếu có) đã bị đăng xuất. Hãy vào Bảo mật tài khoản để bật lại với thiết bị mới và nhận bộ mã khôi phục mới.',
     ],
-    'Nếu không phải bạn, hãy đăng xuất khỏi mọi thiết bị và liên hệ hỗ trợ Tickee ngay.',
+    SIGNED_OUT_WARNING,
   );
 }
 
@@ -48,14 +55,14 @@ export function buildTotpEnabledEmail(): Omit<EmailMessage, 'to'> {
   );
 }
 
-/** Email báo tài khoản vừa tắt xác thực hai lớp (tiếng Việt). */
+/** Email báo tài khoản vừa tắt xác thực hai lớp (tiếng Việt), kèm việc các thiết bị khác đã bị đăng xuất. */
 export function buildTotpDisabledEmail(): Omit<EmailMessage, 'to'> {
   return securityEmail(
     'Tài khoản Tickee của bạn vừa tắt xác thực hai lớp',
     [
-      'Xác thực hai lớp của tài khoản Tickee của bạn vừa được tắt. Mã khôi phục cũ không còn dùng được.',
+      'Xác thực hai lớp của tài khoản Tickee của bạn vừa được tắt. Mã khôi phục cũ không còn dùng được và mọi thiết bị khác đang đăng nhập (nếu có) đã bị đăng xuất.',
       'Từ giờ tài khoản chỉ còn được bảo vệ bằng email. Bạn có thể bật lại bất cứ lúc nào trong Bảo mật tài khoản.',
     ],
-    'Nếu không phải bạn, hãy đăng xuất khỏi mọi thiết bị, bật lại xác thực hai lớp và liên hệ hỗ trợ Tickee ngay.',
+    SIGNED_OUT_WARNING,
   );
 }

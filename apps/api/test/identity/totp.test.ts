@@ -42,6 +42,13 @@ beforeEach(() => {
 });
 
 const errorOf = (body: unknown) => ErrorResponse.parse(body).error;
+/** `reauth_grants.token_hash` của một token xác nhận lại. */
+const sha256 = (v: string) => createHash('sha256').update(v, 'utf8').digest('hex');
+/** Session đã bị xóa: 401 `UNAUTHENTICATED`. */
+function expectUnauthenticated(res: { status: number; body: unknown }): void {
+  expect(res.status).toBe(401);
+  expect(errorOf(res.body).code).toBe('UNAUTHENTICATED');
+}
 const enroll = (cookie: string, reauth?: string) => {
   const req = h.http.post('/v1/identity/totp/enroll').set('cookie', cookie);
   return reauth ? req.set(REAUTH_HEADER, reauth) : req;
@@ -52,7 +59,7 @@ const stepUp = (cookie: string, code: string) => h.http.post('/v1/identity/totp/
 const recover = (cookie: string, recoveryCode: string) =>
   h.http.post('/v1/identity/totp/recovery').set('cookie', cookie).send({ recoveryCode });
 const disable = (cookie: string, body: unknown) => h.http.post('/v1/identity/totp/disable').set('cookie', cookie).send(body as object);
-const rowCount = async (table: 'two_factors' | 'totp_recovery_codes', userId: string) =>
+const rowCount = async (table: 'two_factors' | 'totp_recovery_codes' | 'sessions' | 'reauth_grants', userId: string) =>
   (await h.db.pool.query(`SELECT 1 FROM ${table} WHERE user_id = $1`, [userId])).rows.length;
 const ENABLED_SUBJECT = 'Tài khoản Tickee của bạn vừa bật xác thực hai lớp';
 const enabledMailsTo = (email: string) => h.email.sent.filter((m) => m.to === email && m.subject === ENABLED_SUBJECT);
@@ -219,7 +226,6 @@ describe('đăng ký TOTP', () => {
 });
 
 describe('bật 2FA đòi xác nhận lại (AD-26)', () => {
-  const sha256 = (v: string) => createHash('sha256').update(v, 'utf8').digest('hex');
   const grantUsed = async (token: string) =>
     (await h.db.pool.query<{ used: boolean }>('SELECT used_at IS NOT NULL AS used FROM reauth_grants WHERE token_hash = $1', [
       sha256(token),
@@ -372,15 +378,20 @@ describe('step-up', () => {
 });
 
 describe('mã khôi phục', () => {
-  it('mã chưa dùng → qua lớp hai, mã hết hiệu lực, TOTP bị gỡ, audit + email; bật lại sinh bộ mới, bộ cũ hết hiệu lực', async () => {
+  it('mã chưa dùng → qua lớp hai, mã hết hiệu lực, TOTP bị gỡ, session khác bị đăng xuất, audit + email; bật lại sinh bộ mới, bộ cũ hết hiệu lực', async () => {
     const user = await signUp(h);
     const first = await enrollTotp(h, user);
     await h.db.orm.execute(sql`UPDATE sessions SET step_up_at = NULL WHERE token = ${tokenOf(user.cookie)}`);
     await h.http.get('/v1/test-protected').set('cookie', user.cookie).expect(403);
-    // Một session khác của cùng user đã step-up: dùng mã khôi phục phải xóa step-up của nó.
+    // Hai session khác của cùng user: một đã step-up (kèm một lần xác nhận lại), một đang bị chặn ở bước TOTP và chỉ
+    // gọi route miễn. Dùng mã khôi phục phải đăng xuất cả hai.
     const other = { cookie: await signIn(h, user.email) };
     await stepUp(other.cookie, totpCode(first.manualKey)).expect(200);
-    expect(await stepUpAtOf(other.cookie)).not.toBeNull();
+    await reauthToken(h, { cookie: other.cookie, email: user.email, manualKey: first.manualKey });
+    const blocked = await signIn(h, user.email);
+    await h.http.get('/v1/identity/me').set('cookie', blocked).expect(200);
+    await h.http.get('/v1/test-protected').set('cookie', blocked).expect(403);
+    const bystander = await signUp(h);
     const sentBefore = h.email.sent.length;
 
     const res = await recover(user.cookie, first.recoveryCodes[0]!.toLowerCase()).expect(200);
@@ -388,12 +399,18 @@ describe('mã khôi phục', () => {
     expect(body.reenrollRequired).toBe(true);
     expect((await stepUpAtOf(user.cookie))?.toISOString()).toBe(body.stepUpAt);
     expect((await me(user.cookie)).twoFactorEnabled).toBe(false);
-    expect(await stepUpAtOf(other.cookie)).toBeNull();
     const { rows } = await h.db.pool.query('SELECT 1 FROM two_factors WHERE user_id = $1', [user.userId]);
     expect(rows).toHaveLength(0);
-    // 2FA đã gỡ: không session nào của user bị đòi TOTP nữa.
+    // Chỉ còn session đang gọi; session khác nhận 401 ở request kế tiếp, lần xác nhận lại của chúng mất theo.
     await h.http.get('/v1/test-protected').set('cookie', user.cookie).expect(200);
-    await h.http.get('/v1/test-protected').set('cookie', other.cookie).expect(200);
+    for (const cookie of [other.cookie, blocked]) {
+      expectUnauthenticated(await h.http.get('/v1/identity/me').set('cookie', cookie));
+      expectUnauthenticated(await h.http.get('/v1/test-protected').set('cookie', cookie));
+    }
+    expect(await rowCount('sessions', user.userId)).toBe(1);
+    expect(await rowCount('reauth_grants', user.userId)).toBe(0);
+    // Chỉ session của chính user: tài khoản khác không bị đụng.
+    await h.http.get('/v1/test-protected').set('cookie', bystander.cookie).expect(200);
 
     const actions = await auditActions(user.userId);
     expect(actions.at(-1)).toEqual({ action: 'totp.recovery_code_used', organization_id: null, changed_fields: [] });
@@ -401,6 +418,7 @@ describe('mã khôi phục', () => {
     expect(mail).toHaveLength(1);
     expect(mail[0]!.to).toBe(user.email);
     expect(mail[0]!.subject).toContain('mã khôi phục');
+    expect(mail[0]!.text).toContain('mọi thiết bị khác đang đăng nhập (nếu có) đã bị đăng xuất');
     for (const code of first.recoveryCodes) expect(mail[0]!.text).not.toContain(code);
 
     // Đã gỡ TOTP: dùng tiếp mã khôi phục → 409 chưa bật.
@@ -450,13 +468,17 @@ describe('mã khôi phục', () => {
 });
 
 describe('tắt 2FA', () => {
-  it('mã TOTP đúng → tắt, xóa secret + mã khôi phục + step_up_at mọi session, audit + email; request sau không đòi TOTP', async () => {
+  it('mã TOTP đúng → tắt, xóa secret + mã khôi phục, đăng xuất session khác, audit + email; session đang gọi không bị đòi TOTP', async () => {
     const user = await signUp(h);
     const { manualKey, recoveryCodes } = await enrollTotp(h, user);
     const other = await signIn(h, user.email);
     await stepUp(other, totpCode(manualKey)).expect(200);
     const fresh = await signIn(h, user.email);
     await h.http.get('/v1/test-protected').set('cookie', fresh).expect(403);
+    // Lần xác nhận lại của session đang gọi còn nguyên; của session khác mất theo session.
+    const keptGrant = await reauthToken(h, { cookie: user.cookie, email: user.email, manualKey });
+    await reauthToken(h, { cookie: other, email: user.email, manualKey });
+    const bystander = await signUp(h);
     const sentBefore = h.email.sent.length;
 
     const res = await disable(user.cookie, { code: totpCode(manualKey) }).expect(200);
@@ -465,11 +487,19 @@ describe('tắt 2FA', () => {
     expect((await me(user.cookie)).twoFactorEnabled).toBe(false);
     expect(await rowCount('two_factors', user.userId)).toBe(0);
     expect(await rowCount('totp_recovery_codes', user.userId)).toBe(0);
-    for (const cookie of [user.cookie, other, fresh]) {
-      expect(await stepUpAtOf(cookie)).toBeNull();
-      // Không còn 2FA: mọi session của user (kể cả session chưa từng qua lớp hai) dùng tiếp được.
-      await h.http.get('/v1/test-protected').set('cookie', cookie).expect(200);
+    // Không còn 2FA: session đang gọi dùng tiếp được; mọi session khác (kể cả session chưa từng qua lớp hai) bị đăng xuất.
+    await h.http.get('/v1/test-protected').set('cookie', user.cookie).expect(200);
+    for (const cookie of [other, fresh]) {
+      expectUnauthenticated(await h.http.get('/v1/identity/me').set('cookie', cookie));
+      expectUnauthenticated(await h.http.get('/v1/test-protected').set('cookie', cookie));
     }
+    expect(await rowCount('sessions', user.userId)).toBe(1);
+    const { rows: grants } = await h.db.pool.query<{ token_hash: string }>(
+      'SELECT token_hash FROM reauth_grants WHERE user_id = $1',
+      [user.userId],
+    );
+    expect(grants.map((g) => g.token_hash)).toEqual([sha256(keptGrant)]);
+    await h.http.get('/v1/test-protected').set('cookie', bystander.cookie).expect(200);
     expect((await auditActions(user.userId)).at(-1)).toEqual({
       action: 'totp.disabled',
       organization_id: null,
@@ -479,6 +509,7 @@ describe('tắt 2FA', () => {
     expect(mail).toHaveLength(1);
     expect(mail[0]!.to).toBe(user.email);
     expect(mail[0]!.subject).toContain('tắt xác thực hai lớp');
+    expect(mail[0]!.text).toContain('mọi thiết bị khác đang đăng nhập (nếu có) đã bị đăng xuất');
 
     // Mã khôi phục cũ hết hiệu lực; tắt lần nữa → 409; bật lại được với bộ mã mới.
     expect((await recover(user.cookie, recoveryCodes[0]!)).status).toBe(409);
@@ -488,9 +519,10 @@ describe('tắt 2FA', () => {
     await stepUp(user.cookie, totpCode(again.manualKey)).expect(200);
   });
 
-  it('mã khôi phục đúng → tắt; sai (khôi phục hay TOTP) → TOTP_INVALID cùng bộ đếm; sai dạng → VALIDATION_FAILED', async () => {
+  it('mã khôi phục đúng → tắt, đăng xuất session khác; sai (khôi phục hay TOTP) → TOTP_INVALID cùng bộ đếm; sai dạng → VALIDATION_FAILED', async () => {
     const user = await signUp(h);
     const { manualKey, recoveryCodes } = await enrollTotp(h, user);
+    const other = await signIn(h, user.email);
 
     const wrongRecovery = await disable(user.cookie, { recoveryCode: 'AAAAA-AAAAA' });
     expect(wrongRecovery.status).toBe(400);
@@ -506,6 +538,7 @@ describe('tắt 2FA', () => {
 
     await disable(user.cookie, { recoveryCode: recoveryCodes[3]!.toLowerCase() }).expect(200);
     expect((await me(user.cookie)).twoFactorEnabled).toBe(false);
+    expectUnauthenticated(await h.http.get('/v1/identity/me').set('cookie', other));
     expect(await rowCount('two_factors', user.userId)).toBe(0);
     expect(await rowCount('totp_recovery_codes', user.userId)).toBe(0);
     expect((await auditActions(user.userId)).map((a) => a.action)).toEqual(

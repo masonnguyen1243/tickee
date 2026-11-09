@@ -85,7 +85,7 @@ flowchart TD
 
 - **Binds:** FR-8, FR-11, FR-12, FR-13, FR-14, FR-21, NFR-3; `ordering`
 - **Prevents:** Bán quá số suất; trừ `held` hai lần; hai nguồn đếm lệch nhau.
-- **Rule:** Tồn kho ở `ticket_type_inventory(capacity, sold, held)` với `CHECK (held >= 0 AND sold >= 0 AND sold + held <= capacity)`, chỉ `ordering` ghi. Phép "giữ có điều kiện" là `UPDATE … SET held = held + :n WHERE ticket_type_id = :id AND sold + held + :n <= capacity`; phép "bán có điều kiện" tương tự với `sold`. Đơn nhiều Hạng vé cập nhật theo `ticket_type_id` tăng dần; một dòng trả 0 → rollback cả Đơn, lỗi nêu rõ Hạng vé hết. Không dùng Redis hay cache làm bộ đếm. Đổi số suất là `UPDATE … SET capacity = :c WHERE ticket_type_id = :id AND sold + held <= :c`. Kiểm trần 200 Vé của Sự kiện miễn phí: khóa mọi dòng tồn kho của Sự kiện `FOR UPDATE` theo thứ tự id rồi mới cộng tổng. Job đối chiếu định kỳ so `held` với số Vé của Đơn `pending` và `sold` với số Vé đã phát; lệch → cảnh báo, không tự sửa.
+- **Rule:** Tồn kho ở `ticket_type_inventory(capacity, sold, held)` với `CHECK (held >= 0 AND sold >= 0 AND sold + held <= capacity)`, chỉ `ordering` ghi. Phép "giữ có điều kiện" là `UPDATE … SET held = held + :n WHERE ticket_type_id = :id AND sold + held + :n <= capacity`; phép "bán có điều kiện" tương tự với `sold`. Đơn nhiều Hạng vé cập nhật theo `ticket_type_id` tăng dần; một dòng trả 0 → rollback cả Đơn, lỗi nêu rõ Hạng vé hết. Không dùng Redis hay cache làm bộ đếm. Đổi số suất là `UPDATE … SET capacity = :c WHERE ticket_type_id = :id AND sold + held <= :c`. Kiểm trần 200 suất miễn phí (tổng số suất các Hạng vé 0đ của Sự kiện, mọi trạng thái, kể cả Sự kiện có Hạng vé có phí): khóa mọi dòng tồn kho của Sự kiện `FOR UPDATE` theo thứ tự id rồi mới cộng tổng. Job đối chiếu định kỳ so `held` với số Vé của Đơn `pending` và `sold` với số Vé đã phát; lệch → cảnh báo, không tự sửa.
 
 | Chuyển trạng thái Đơn | Phép tồn kho (cùng transaction) | Khi phép tồn kho thất bại |
 | --- | --- | --- |
@@ -286,7 +286,7 @@ Client dùng một hook duy nhất: gọi REST khi kết nối, khi nhận tín 
 
 - **Binds:** FR-8, FR-33, FR-35, FR-38; `apps/api/src/flows`
 - **Prevents:** Phụ thuộc vòng; mỗi người build tự lách ranh giới mô-đun theo một kiểu khi một luồng phải ghi nhiều mô-đun trong một transaction.
-- **Rule:** Luồng ghi chạm từ hai mô-đun trở lên trong một transaction nằm ở `flows/`, mở `tx` và gọi service công khai của từng mô-đun. Mô-đun không bao giờ gọi `flows`. Danh sách flow MVP: `createTicketType` (event + tồn kho ordering, kiểm trần 200 Vé với Sự kiện miễn phí), `changeCapacity`, `cancelEvent` (AD-28), `lockEvent`/`lockOrganization` và `voidTickets` (AD-28), `deleteAccount` (AD-24), `acceptCheckerInvite` (AD-30).
+- **Rule:** Luồng ghi chạm từ hai mô-đun trở lên trong một transaction nằm ở `flows/`, mở `tx` và gọi service công khai của từng mô-đun. Mô-đun không bao giờ gọi `flows`. Danh sách flow MVP: `createTicketType` (event + tồn kho ordering, kiểm trần 200 suất miễn phí; Sự kiện đã mở bán: tạo Hạng vé có phí hoặc đổi 0đ → có phí cần `paidSalesAllowed`, không thì `409 PAID_TICKET_TYPE_NOT_ALLOWED`; Sự kiện không còn nháp không xóa được Hạng vé cuối, `409 LAST_TICKET_TYPE`), `changeCapacity`, `cancelEvent` (AD-28), `lockEvent`/`lockOrganization` và `voidTickets` (AD-28), `deleteAccount` (AD-24), `acceptCheckerInvite` (AD-30).
 
 ### AD-26 — Kiểm soát truy cập
 
@@ -298,6 +298,7 @@ Client dùng một hook duy nhất: gọi REST khi kết nối, khi nhận tín 
   - Mỗi BTC có đúng một Owner: unique index một phần `members(organization_id) WHERE role='owner'`.
   - 2FA (TOTP, Better Auth `twoFactor`, `allowPasswordless: true`) là tính năng mọi tài khoản tự bật/tắt (`users.two_factor_enabled`). Tài khoản đã bật: session mới (Google hoặc OTP email) chưa qua lớp hai (`sessions.step_up_at` rỗng); mọi request ngoài danh sách miễn trả `TOTP_REQUIRED` cho tới khi nhập TOTP hoặc mã khôi phục; hiệu lực hết session. Luật này nằm ở một guard toàn cục của `identity`, chạy ngay sau `SessionGuard`, không nằm trong `PermissionGuard`. Danh sách miễn khai báo một chỗ trong `packages/contracts`. Step-up do `identity` tự dựng vì Better Auth không hỏi TOTP khi đăng nhập bằng Google hay OTP email.
   - Tắt 2FA: endpoint riêng, đòi mã TOTP hoặc mã khôi phục hiện tại; email báo; audit.
+  - Gỡ 2FA (tắt, hoặc step-up bằng mã khôi phục) xóa mọi session khác của user trong cùng transaction, chỉ giữ session đang gọi; lần xác nhận lại của các session đó mất theo. Email báo nói rõ các thiết bị khác đã bị đăng xuất.
   - Bật 2FA: bắt đầu đăng ký TOTP (sinh secret) là thao tác nhạy cảm, tiêu một lần xác nhận lại bằng OTP email như mục dưới; bật xong gửi email báo; audit.
   - Quản trị Tingee: bắt buộc đã bật 2FA (`admin:grant` từ chối tài khoản chưa bật); mọi request `/v1/admin/*` cần step-up trong session hiện tại.
   - Xác nhận lại cho thao tác nhạy cảm (bật 2FA, đổi key Tingee, đổi tài khoản nhận tiền mặc định, hủy liên kết tài khoản nhận tiền, chuyển quyền Owner): `identity` cấp một lần xác nhận ngắn hạn, dùng một lần (hiệu lực 5 phút), sau khi nhập TOTP (nếu đã bật 2FA) hoặc OTP email (nếu chưa). Thiếu → `REAUTH_REQUIRED`. Không dùng `step_up_at` cho việc này.

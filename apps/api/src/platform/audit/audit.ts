@@ -8,9 +8,9 @@ export type AuditAction =
   | 'totp.enrolled'
   /** Sai TOTP/mã khôi phục đủ ngưỡng: khóa xác minh. */
   | 'totp.locked'
-  /** Step-up bằng mã khôi phục: mã hết hiệu lực và TOTP bị gỡ. */
+  /** Step-up bằng mã khôi phục: mã hết hiệu lực, TOTP bị gỡ và mọi session khác của user bị đăng xuất. */
   | 'totp.recovery_code_used'
-  /** Người dùng tự tắt 2FA (bằng TOTP hoặc mã khôi phục): secret và mã khôi phục bị xóa. */
+  /** Người dùng tự tắt 2FA (bằng TOTP hoặc mã khôi phục): secret và mã khôi phục bị xóa, mọi session khác bị đăng xuất. */
   | 'totp.disabled'
   /** Owner mời một email làm Admin (đối tượng: lời mời; không ghi email). */
   | 'member.invited'

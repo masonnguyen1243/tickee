@@ -41,7 +41,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 - FR-8: Mỗi Sự kiện có nhiều Hạng vé (tên, giá, số suất, thời gian mở/đóng bán). Ngoài thời gian bán, Hạng vé hiện "Chưa mở bán" hoặc "Đã đóng bán". Số suất không được giảm dưới số đã bán + số đang Giữ chỗ. Giá được chốt vào Đơn lúc đặt.
 - FR-9: Owner/Admin cấu hình form mua vé gồm trường mặc định (Tên, SĐT nếu tài khoản chưa có, email tự điền), câu hỏi riêng (văn bản hoặc lựa chọn, bắt buộc hoặc không) và trường bổ sung. Form điền một lần cho mỗi Đơn. Còn trường bắt buộc trống thì không gửi được. Câu trả lời hiện ở danh sách Đơn, CSV và Sheets.
 - FR-10: Trang Sự kiện công khai không cần đăng nhập, tối ưu cho điện thoại, tải dưới 2 giây trên 4G. Chia sẻ lên Facebook/Zalo hiện đúng ảnh, tên và thời gian (OG). Mỗi Hạng vé hiện số chỗ còn lại chính xác hoặc "Hết vé".
-- FR-11: Sự kiện miễn phí (mọi Hạng vé 0đ): không thanh toán, không tiêu Token, vẫn bắt đăng nhập, phát Vé ngay khi gửi Đơn. Trần cứng 200 Vé mỗi Sự kiện.
+- FR-11: Sự kiện miễn phí (mọi Hạng vé 0đ): không thanh toán, không tiêu Token, vẫn bắt đăng nhập, phát Vé ngay khi gửi Đơn. Trần cứng 200 suất miễn phí mỗi Sự kiện: tổng số suất của mọi Hạng vé 0đ ≤ 200, áp cho mọi Sự kiện ở mọi trạng thái, kể cả Sự kiện có cả Hạng vé có phí.
 
 **4.4 Checkout và Giữ chỗ**
 
@@ -746,9 +746,13 @@ So that Người mua chọn đúng loại vé tôi muốn bán.
 **When** giá > 0 và < 2.000đ
 **Then** không lưu được, lỗi tại trường (AD-6, UX-DR41)
 
-**Given** mọi Hạng vé của Sự kiện có giá 0đ
-**When** tổng số suất vượt 200
-**Then** không lưu được, báo trần 200 Vé cho Sự kiện miễn phí; phép kiểm khóa mọi dòng tồn kho của Sự kiện `FOR UPDATE` theo thứ tự id rồi mới cộng tổng (FR-11, AD-2)
+**Given** Sự kiện ở bất kỳ trạng thái nào, kể cả có Hạng vé có phí
+**When** tổng số suất của các Hạng vé 0đ vượt 200 (thêm, nâng số suất, hoặc đổi Hạng vé có phí thành 0đ)
+**Then** không lưu được, báo "Tối đa 200 suất miễn phí mỗi Sự kiện"; phép kiểm khóa mọi dòng tồn kho của Sự kiện `FOR UPDATE` theo thứ tự id rồi mới cộng tổng (FR-11, AD-2)
+
+**Given** Sự kiện đã mở bán (không còn nháp)
+**When** tôi tạo Hạng vé có phí hoặc đổi Hạng vé 0đ thành có phí mà BTC chưa đạt `paidSalesAllowed` (Closed Beta, tài khoản nhận tiền); hoặc xóa Hạng vé cuối cùng
+**Then** không lưu được: `409 PAID_TICKET_TYPE_NOT_ALLOWED` (`details.unmet`) hoặc `409 LAST_TICKET_TYPE` (E2-3, AD-21)
 
 **Given** Hạng vé đã có
 **When** tôi đổi số suất

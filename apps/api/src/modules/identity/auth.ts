@@ -56,6 +56,8 @@ export function createAuth(config: IdentityConfig, db: Database, emailTransport:
       },
     },
     session: {
+      // Không bật `cookieCache` hay `secondaryStorage`: Tickee hủy session bằng cách xóa dòng `sessions`
+      // (`TotpStore.revokeOtherSessions`), nên mỗi request phải đọc session từ DB.
       additionalFields: {
         // Chỉ `TotpService` (qua `TotpStore`) ghi cột này. Plugin `twoFactor` xoay session lúc xác nhận đăng ký và
         // chép mọi trường của session cũ sang session mới (test `totp-store.test.ts` ghim hành vi này).

@@ -229,6 +229,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-10-dieu-kien-mo-ban-va-mo-ban-su-kien.md`
   summary: Sau khi mở bán, API sửa Sự kiện/Hạng vé/form vẫn chạy không xét `status`. Có thể xóa chính sách hoàn vé, hoặc thêm Hạng vé có phí khi BTC chưa duyệt Closed Beta hoặc chưa có tài khoản nhận tiền. Story 2.12 thêm guard; `ordering.sellability` phải xét lại chính sách hoàn vé, Closed Beta và tài khoản theo từng Hạng vé.
   evidence: Triage 2.10 #2 (BH, EC). `EventService.update` và `lockEventForTicketTypes` không kiểm `status`; `publishReadiness` chỉ chạy lúc `draft` → `published`. Wizard "Lưu nháp" vẫn PATCH được Sự kiện đã mở bán.
+- Đã xử lý (09/11/2026): phần Hạng vé của mục trên (retro Epic 2 C1) được giải quyết bằng `_bmad-output/implementation-artifacts/spec-epic-2-e2-3-guard-hang-ve-sau-mo-ban.md`. Sự kiện khác nháp: tạo Hạng vé có phí hoặc đổi Hạng vé 0đ sang có phí khi BTC chưa đạt `paidSalesAllowed` → `409 PAID_TICKET_TYPE_NOT_ALLOWED`; xóa Hạng vé cuối → `409 LAST_TICKET_TYPE`. Trần miễn phí tính theo tổng suất các Hạng vé 0đ ở mọi Sự kiện. Phần sửa Sự kiện và form không thuộc spec này (không đổi `EventService.update`), đã ghi lại thành mục hoãn riêng ở cuối file; `ordering.sellability` (2.11-a) đã xét lại chính sách hoàn vé, Closed Beta và tài khoản nhận tiền khi bán.
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-10-dieu-kien-mo-ban-va-mo-ban-su-kien.md`
   summary: Link công khai sau khi mở bán dựng từ `window.location.origin`. Nếu deploy tách host dashboard và trang Sự kiện công khai, cần biến cấu hình origin công khai (gắn Story 4.7 / 2.11).
   evidence: Triage 2.10 #13 (BH). `publish-panel.tsx` `useOrigin()`; hiện chỉ có `NEXT_PUBLIC_API_BASE_URL`.
@@ -307,3 +308,17 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-1-xac-nhan-lai-khi-bat-2fa.md`
   summary: Chưa có đường khôi phục khi 2FA bị người khác bật trên tài khoản (chủ thật kẹt ở bước step-up, không có "Đặt lại TOTP" hay quy trình hỗ trợ).
   evidence: Retro Epic 2 ghi "Đặt lại TOTP" chưa có; email "2FA vừa được bật" chỉ dặn liên hệ hỗ trợ. Cần trước Closed Beta (quy trình hỗ trợ) hoặc Epic 7.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-2-huy-session-khi-doi-2fa.md`
+  summary: Dialog tắt 2FA và gợi ý dùng mã khôi phục trên web chưa báo trước rằng các thiết bị khác sẽ bị đăng xuất; EXPERIENCE.md (dòng tắt 2FA) cũng chưa ghi.
+  evidence: E2-2 đăng xuất mọi session khác khi gỡ 2FA nhưng spec không đổi web; câu chữ hiện ở `security-settings.tsx` và `step-up-dialog.tsx` chỉ nói "chỉ còn được bảo vệ bằng email". Ảnh hưởng người dùng nhiều thiết bị (vd. Owner đang check-in trên vài điện thoại).
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-3-guard-hang-ve-sau-mo-ban.md`
+  summary: Sự kiện đã hủy vẫn thêm, sửa, xóa được Hạng vé (flow Hạng vé không chặn `cancelled` như `EventService.update`); câu `LAST_TICKET_TYPE` cũng không hợp với Sự kiện đã hủy.
+  evidence: Review E2-3 #8. Spec 2.12 đã hoãn việc chặn sửa Hạng vé và câu hỏi form của Sự kiện đã hủy; nên làm cùng Story 7.1 (Hủy sự kiện) hoặc trước Epic 3 nếu checkout đọc Hạng vé của Sự kiện đã hủy.
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-3-guard-hang-ve-sau-mo-ban.md`
+  summary: Chưa quyết Hạng vé 0đ trong Sự kiện hỗn hợp được mua theo đường nào (miễn phí: không Token, phát Vé ngay; hay theo đường có phí), và giỏ trộn dòng 0đ với dòng có phí.
+  evidence: Review E2-3 #9. Từ E2-3 trần 200 suất áp cho cả Sự kiện hỗn hợp, nhưng Story 3.3 (epics) vẫn chỉ nói "Sự kiện miễn phí". Phải ghi vào spec 3.2/3.3/3.4 (checklist E2-6) trước khi làm checkout.
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-3-guard-hang-ve-sau-mo-ban.md`
+  summary: Nửa còn lại của deferred 2.10: sau mở bán vẫn sửa được thông tin Sự kiện (kể cả xóa chính sách hoàn vé) và câu hỏi form mua.
+  evidence: Review E2-3 #10. E2-3 chỉ đóng phần Hạng vé. Người nhận đề xuất: E2-6 (checklist sẵn sàng Epic 3, mục "snapshot chính sách hoàn vé") hoặc một story Epic 3 có tên trước 3.2.
