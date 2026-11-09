@@ -10,6 +10,7 @@ import { MembersService } from './members.service.js';
 import { MembershipsController } from './memberships.controller.js';
 import { OrganizationsController } from './organizations.controller.js';
 import { OrganizerService } from './organizer.service.js';
+import { OwnershipTransferQueues } from './ownership-transfer-jobs.js';
 import { PayoutAccountController } from './payout-account.controller.js';
 import { PAYOUT_ACCOUNT_SETTINGS, PayoutAccountService, payoutAccountSettings } from './payout-account.service.js';
 import { DefaultPayoutQueues } from './payout-default-jobs.js';
@@ -23,8 +24,8 @@ export type OrganizerConfig = Pick<ApiConfig, 'API_PUBLIC_URL' | 'TINGEE_BASE_UR
 /**
  * BTC và thành viên (FR-4). Cài cổng `AccessResolver` và đăng ký `PermissionGuard` làm guard toàn cục số 3 —
  * phải import sau `IdentityModule` để chạy sau `SessionGuard` và `ConsentGuard`. Cần `DbModule` và `JobsModule`
- * (enqueue email mời Admin, Story 2.4; email cảnh báo đổi tài khoản nhận tiền mặc định, Story 2.13-a) và
- * `TingeeModule` (đọc danh sách tài khoản Tingee của BTC, Story 2.6) ở gốc DI.
+ * (enqueue email mời Admin, Story 2.4; email cảnh báo đổi tài khoản nhận tiền mặc định, Story 2.13-a; email báo chuyển
+ * quyền Owner, Story 2.14) và `TingeeModule` (đọc danh sách tài khoản Tingee của BTC, Story 2.6) ở gốc DI.
  */
 @Module({})
 export class OrganizerModule {
@@ -45,6 +46,7 @@ export class OrganizerModule {
         { provide: PAYOUT_ACCOUNT_SETTINGS, useFactory: () => payoutAccountSettings(config) },
         AdminInvitationQueues,
         DefaultPayoutQueues,
+        OwnershipTransferQueues,
         { provide: ACCESS_RESOLVER, useClass: MemberAccessResolver },
         { provide: APP_GUARD, useClass: PermissionGuard },
       ],

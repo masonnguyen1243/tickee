@@ -52,6 +52,8 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('POST /v1/orgs/:orgId/invitations');
     expect(guarded).toContain('DELETE /v1/orgs/:orgId/invitations/:invitationId');
     expect(guarded).toContain('DELETE /v1/orgs/:orgId/members/:memberId');
+    // Story 2.14: chuyển quyền Owner.
+    expect(guarded).toContain('POST /v1/orgs/:orgId/members/:memberId/ownership-transfer');
     // Story 2.5: thông báo trạng thái của `reporting`.
     expect(guarded).toContain('GET /v1/orgs/:orgId/notices');
     // Story 2.6: tài khoản nhận tiền (chỉ Owner).
@@ -118,7 +120,7 @@ describe('cách ly BTC', () => {
     }
   });
 
-  it('route đòi xác nhận lại (Story 2.13-a, 2.13-b): lần xác nhận hợp lệ của Owner A không mở được BTC B, và không bị tiêu', async () => {
+  it('route đòi xác nhận lại (Story 2.13-a, 2.13-b, 2.14): lần xác nhận hợp lệ của Owner A không mở được BTC B, và không bị tiêu', async () => {
     // Mã lỗi trên chính BTC A khi thiếu header (sau kiểm quyền, không bao giờ NOT_A_MEMBER): id ngẫu nhiên →
     // REAUTH_REQUIRED; đổi key trên BTC chưa từng liên kết → 409 (bước 1) hoặc body `{}` → 400 (bước 2, 3).
     const reauthRoutes: Record<string, string> = {
@@ -127,6 +129,7 @@ describe('cách ly BTC', () => {
       'POST /v1/orgs/:orgId/payout-account/credential/replacement/begin': 'PAYOUT_ACCOUNT_NOT_LINKED_YET',
       'POST /v1/orgs/:orgId/payout-account/credential/replacement/preview': 'VALIDATION_FAILED',
       'POST /v1/orgs/:orgId/payout-account/credential/replacement': 'VALIDATION_FAILED',
+      'POST /v1/orgs/:orgId/members/:memberId/ownership-transfer': 'REAUTH_REQUIRED',
     };
     const guarded = routes.filter((r) => r.permission && `${r.method} ${r.path}` in reauthRoutes);
     expect(guarded).toHaveLength(Object.keys(reauthRoutes).length);

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   AcceptedInvitation,
   ErrorResponse,
@@ -6,6 +6,7 @@ import {
   MemberList,
   ORGANIZATION_INVITATION_DAILY_LIMIT,
   OrganizationInvitation,
+  REAUTH_HEADER,
 } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
@@ -14,7 +15,16 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { sendAdminInvitation } from '../../src/modules/organizer/invitation-jobs.js';
 import { BOSS } from '../../src/platform/jobs/index.js';
 import { TEST_WEB_ORIGIN } from '../helpers.js';
-import { createHarness, newEmail, signIn, signUp, signUpWithTotp, totpCode, type Harness } from '../identity/harness.js';
+import {
+  createHarness,
+  newEmail,
+  reauthToken,
+  signIn,
+  signUp,
+  signUpWithTotp,
+  totpCode,
+  type Harness,
+} from '../identity/harness.js';
 
 /*
  * Story 2.4: Owner mời Admin bằng email (job pg-boss gửi email), thu hồi, xóa Admin; người được mời xem trước và nhận
@@ -434,8 +444,156 @@ describe('quyền', () => {
       invite(admin.cookie, newEmail()),
       h.http.delete(`/v1/orgs/${orgId}/invitations/${pending.id}`).set('cookie', admin.cookie),
       h.http.delete(`/v1/orgs/${orgId}/members/${ownerRow.id}`).set('cookie', admin.cookie),
+      h.http.post(`/v1/orgs/${orgId}/members/${ownerRow.id}/ownership-transfer`).set('cookie', admin.cookie),
     ];
     for (const res of await Promise.all(calls)) expectError(res, 403, 'FORBIDDEN_ROLE');
     expect((await listMembers()).invitations.map((i) => i.id)).toContain(pending.id);
+  });
+});
+
+describe('chuyển quyền Owner', () => {
+  const OWNERSHIP_QUEUE = JobQueue.ORGANIZER_NOTIFY_OWNERSHIP_TRANSFERRED;
+
+  const transfer = (memberId: string, token?: string, cookie = owner.cookie, org = orgId) => {
+    const req = h.http.post(`/v1/orgs/${org}/members/${memberId}/ownership-transfer`).set('cookie', cookie);
+    return token ? req.set(REAUTH_HEADER, token) : req;
+  };
+
+  /** Mời, gửi và nhận lời mời → Admin mới của `org` kèm id dòng `members`. */
+  async function addAdmin(org = orgId, cookie = owner.cookie) {
+    const email = newEmail();
+    const { token } = await inviteAndDeliver(email, org, cookie);
+    const user = await signUp(h, email);
+    await accept(user.cookie, token).expect(200);
+    const [row] = await memberRows(org, user.userId);
+    return { ...user, memberId: row!.id };
+  }
+
+  async function rolesOf(org = orgId) {
+    const { rows } = await h.db.pool.query<{ user_id: string; role: string }>(
+      'SELECT user_id, role FROM members WHERE organization_id = $1 ORDER BY user_id',
+      [org],
+    );
+    return rows;
+  }
+
+  async function grantUsedAt(token: string) {
+    const hash = createHash('sha256').update(token, 'utf8').digest('hex');
+    const { rows } = await h.db.pool.query<{ used_at: Date | null }>(
+      'SELECT used_at FROM reauth_grants WHERE token_hash = $1',
+      [hash],
+    );
+    return rows[0]?.used_at;
+  }
+
+  it('204: Owner cũ → admin, Admin → owner, đúng một Owner; audit; job chỉ id; vai mới có hiệu lực ở request kế tiếp', async () => {
+    const admin = await addAdmin();
+    const other = await addAdmin();
+    const token = await reauthToken(h, owner);
+
+    await transfer(admin.memberId, token).expect(204);
+
+    const roles = await rolesOf();
+    expect(roles.filter((r) => r.role === 'owner')).toEqual([{ user_id: admin.userId, role: 'owner' }]);
+    expect(roles).toContainEqual({ user_id: owner.userId, role: 'admin' });
+    expect(roles).toContainEqual({ user_id: other.userId, role: 'admin' });
+    expect(await grantUsedAt(token)).not.toBeNull();
+
+    expect(await auditRows(orgId, 'member.ownership_transferred')).toEqual([
+      { actor_user_id: owner.userId, target_type: 'user', target_id: admin.userId, changed_fields: ['role'] },
+    ]);
+    const jobs = await boss().findJobs(OWNERSHIP_QUEUE, { data: { organizationId: orgId } });
+    expect(jobs.map((j) => j.data)).toEqual([
+      { organizationId: orgId, previousOwnerUserId: owner.userId, newOwnerUserId: admin.userId },
+    ]);
+
+    // Owner cũ: mục chỉ Owner → FORBIDDEN_ROLE; vẫn là thành viên.
+    expectError(await h.http.get(`/v1/orgs/${orgId}/members`).set('cookie', owner.cookie), 403, 'FORBIDDEN_ROLE');
+    await h.http.get(`/v1/orgs/${orgId}`).set('cookie', owner.cookie).expect(200);
+    const memberships = await h.http.get('/v1/me/memberships').set('cookie', owner.cookie).expect(200);
+    expect(memberships.body).toContainEqual(expect.objectContaining({ organizationId: orgId, role: 'admin' }));
+    // Owner mới: thao tác chỉ Owner được phép ngay.
+    expect((await listMembers(admin.cookie)).members[0]).toMatchObject({ userId: admin.userId, role: 'owner' });
+    await invited(newEmail(), orgId, admin.cookie);
+    await h.http.get(`/v1/orgs/${orgId}/payout-account`).set('cookie', admin.cookie).expect(200);
+  });
+
+  it('thiếu xác nhận, token đã tiêu, token quá 5 phút, token của session khác → 403 REAUTH_REQUIRED; không đổi gì', async () => {
+    const admin = await addAdmin();
+    const before = await rolesOf();
+
+    const missing = await transfer(admin.memberId);
+    expectError(missing, 403, 'REAUTH_REQUIRED');
+    expect(errorOf(missing).details).toEqual({ method: 'email_otp' });
+
+    const used = await reauthToken(h, owner);
+    await h.db.pool.query('UPDATE reauth_grants SET used_at = now() WHERE token_hash = $1', [
+      createHash('sha256').update(used, 'utf8').digest('hex'),
+    ]);
+    expectError(await transfer(admin.memberId, used), 403, 'REAUTH_REQUIRED');
+
+    const expired = await reauthToken(h, owner);
+    await h.db.pool.query("UPDATE reauth_grants SET expires_at = now() - interval '1 second' WHERE token_hash = $1", [
+      createHash('sha256').update(expired, 'utf8').digest('hex'),
+    ]);
+    expectError(await transfer(admin.memberId, expired), 403, 'REAUTH_REQUIRED');
+
+    const otherSession = { ...owner, cookie: await signIn(h, owner.email) };
+    const foreign = await reauthToken(h, otherSession);
+    expectError(await transfer(admin.memberId, foreign), 403, 'REAUTH_REQUIRED');
+
+    expect(await rolesOf()).toEqual(before);
+    expect(await auditRows(orgId, 'member.ownership_transferred')).toEqual([]);
+    expect(await boss().findJobs(OWNERSHIP_QUEUE, { data: { organizationId: orgId } })).toEqual([]);
+  });
+
+  it('đích sai dạng, lạ, của BTC khác, là chính Owner, Admin vừa bị xóa → 404; token không bị tiêu, dùng tiếp được', async () => {
+    const admin = await addAdmin();
+    const removed = await addAdmin();
+    await h.http.delete(`/v1/orgs/${orgId}/members/${removed.memberId}`).set('cookie', owner.cookie).expect(204);
+    const otherOwner = await signUp(h);
+    const otherOrg = await createOrg(otherOwner.cookie);
+    const foreignAdmin = await addAdmin(otherOrg, otherOwner.cookie);
+    const [ownerRow] = await memberRows(orgId, owner.userId);
+    const before = await rolesOf();
+
+    const token = await reauthToken(h, owner);
+    for (const id of ['khong-phai-uuid', randomUUID(), foreignAdmin.memberId, ownerRow!.id, removed.memberId]) {
+      const res = await transfer(id, token);
+      expectError(res, 404, 'NOT_FOUND');
+      expect(errorOf(res).message, id).toBe('Không tìm thấy thành viên.');
+    }
+    expect(await rolesOf()).toEqual(before);
+    expect(await rolesOf(otherOrg)).toContainEqual({ user_id: foreignAdmin.userId, role: 'admin' });
+    expect(await grantUsedAt(token)).toBeNull();
+    expect(await auditRows(orgId, 'member.ownership_transferred')).toEqual([]);
+
+    await transfer(admin.memberId, token).expect(204);
+  });
+
+  it('hai lần gửi song song (2 token): một lần 204, lần kia 403 FORBIDDEN_ROLE; đúng một Owner, một audit, một job', async () => {
+    const first = await addAdmin();
+    const second = await addAdmin();
+    const tokenA = await reauthToken(h, owner);
+    const tokenB = await reauthToken(h, owner);
+
+    const results = await Promise.all([transfer(first.memberId, tokenA), transfer(second.memberId, tokenB)]);
+    expect(results.map((r) => r.status).sort()).toEqual([204, 403]);
+    expect(errorOf(results.find((r) => r.status === 403)!).code).toBe('FORBIDDEN_ROLE');
+
+    const owners = (await rolesOf()).filter((r) => r.role === 'owner');
+    expect(owners).toHaveLength(1);
+    expect([first.userId, second.userId]).toContain(owners[0]!.user_id);
+    expect(await auditRows(orgId, 'member.ownership_transferred')).toHaveLength(1);
+    expect(await boss().findJobs(OWNERSHIP_QUEUE, { data: { organizationId: orgId } })).toHaveLength(1);
+  });
+
+  it('Admin gọi → 403 FORBIDDEN_ROLE trước khi xét xác nhận lại; token của Admin không bị tiêu', async () => {
+    const admin = await addAdmin();
+    const peer = await addAdmin();
+    const token = await reauthToken(h, admin);
+    expectError(await transfer(peer.memberId, token, admin.cookie), 403, 'FORBIDDEN_ROLE');
+    expect(await grantUsedAt(token)).toBeNull();
+    expect((await rolesOf()).filter((r) => r.role === 'owner')).toEqual([{ user_id: owner.userId, role: 'owner' }]);
   });
 });

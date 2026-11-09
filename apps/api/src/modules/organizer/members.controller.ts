@@ -1,7 +1,14 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post } from '@nestjs/common';
-import { InviteAdminRequest, Permission, type MemberList, type OrganizationInvitation } from '@tickee/contracts';
+import { Body, Controller, Delete, Get, Headers, HttpCode, Inject, Param, Post, Req } from '@nestjs/common';
+import {
+  InviteAdminRequest,
+  Permission,
+  REAUTH_HEADER,
+  type MemberList,
+  type OrganizationInvitation,
+} from '@tickee/contracts';
 import { Access, RequirePermission, type AccessContext } from '../../platform/access/index.js';
 import { parseRequest } from '../../platform/http/index.js';
+import { reauthProof, type SessionRequest } from '../identity/index.js';
 import { MembersService } from './members.service.js';
 
 /**
@@ -39,5 +46,21 @@ export class MembersController {
   @RequirePermission(Permission.MEMBERS_MANAGE)
   async remove(@Access() ctx: AccessContext, @Param('memberId') memberId: string): Promise<void> {
     await this.members.removeMember(ctx, memberId);
+  }
+
+  /**
+   * Chuyển quyền Owner cho Admin `memberId` (Story 2.14): cần lần xác nhận lại trong header `REAUTH_HEADER` (kiểm sau
+   * quyền, thiếu → `REAUTH_REQUIRED`); email báo gửi qua job.
+   */
+  @Post('members/:memberId/ownership-transfer')
+  @HttpCode(204)
+  @RequirePermission(Permission.MEMBERS_MANAGE)
+  async transferOwnership(
+    @Access() ctx: AccessContext,
+    @Param('memberId') memberId: string,
+    @Headers(REAUTH_HEADER) reauthToken: string | undefined,
+    @Req() req: SessionRequest,
+  ): Promise<void> {
+    await this.members.transferOwnership(ctx, memberId, reauthProof(req, reauthToken));
   }
 }

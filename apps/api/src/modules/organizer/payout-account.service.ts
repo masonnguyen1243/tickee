@@ -36,6 +36,7 @@ import {
 } from '../tingee/index.js';
 import type { DefaultPayoutChangeReason } from './payout-default-email.js';
 import { DefaultPayoutQueues, enqueueDefaultPayoutChanged } from './payout-default-jobs.js';
+import { lockOrganization } from './organization-lock.js';
 import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
 
 /*
@@ -191,7 +192,7 @@ export class PayoutAccountService {
     const secretTokenCiphertext = this.settings.secretBox.seal(input.secretToken);
 
     const saved = await this.db.transaction(async (tx) => {
-      await this.lockOrganization(tx, ctx);
+      await lockOrganization(tx, ctx);
       if (await this.hasEverLinked(tx, ctx)) throw keyLocked();
       const retired = await tx
         .update(cred)
@@ -260,7 +261,7 @@ export class PayoutAccountService {
     let row: AccountRow;
     try {
       row = await this.db.transaction(async (tx) => {
-        await this.lockOrganization(tx, ctx);
+        await lockOrganization(tx, ctx);
         const current = await this.currentCredential(tx, ctx);
         if (current?.id !== credential.id) throw unavailable();
         const linkedVas = await this.linkedVas(tx, ctx);
@@ -322,7 +323,7 @@ export class PayoutAccountService {
     // pg-boss đã start và queue đã có (ngoài transaction): `boss.send` cần cả hai.
     await this.defaultPayoutQueues.ready();
     return this.db.transaction(async (tx) => {
-      await this.lockOrganization(tx, ctx);
+      await lockOrganization(tx, ctx);
       await consumeReauth(tx, { userId: ctx.userId, ...reauth });
       const target = await this.currentAccount(tx, ctx, accountId);
       if (!target) throw accountNotFound();
@@ -361,7 +362,7 @@ export class PayoutAccountService {
     if (!UUID.test(accountId)) throw accountNotFound();
     await this.defaultPayoutQueues.ready();
     return this.db.transaction(async (tx) => {
-      await this.lockOrganization(tx, ctx);
+      await lockOrganization(tx, ctx);
       await consumeReauth(tx, { userId: ctx.userId, ...reauth });
       const target = await this.currentAccount(tx, ctx, accountId);
       if (!target) throw accountNotFound();
@@ -433,7 +434,7 @@ export class PayoutAccountService {
 
     try {
       return await this.db.transaction(async (tx) => {
-        await this.lockOrganization(tx, ctx);
+        await lockOrganization(tx, ctx);
         await consumeReauth(tx, { userId: ctx.userId, ...reauth });
         if (!(await this.hasEverLinked(tx, ctx))) throw notLinkedYet();
 
@@ -600,16 +601,6 @@ export class PayoutAccountService {
       ipnUrl: org.ipnKey ? tingeeIpnUrl(this.settings.apiPublicUrl, org.ipnKey) : null,
       tingeePortalUrl: this.settings.tingeePortalUrl,
     };
-  }
-
-  /** Khóa dòng BTC tới hết transaction: mọi lần ghi tài khoản nhận tiền của một BTC chạy lần lượt. */
-  private async lockOrganization(tx: Tx, ctx: AccessContext): Promise<void> {
-    const [org] = await tx
-      .select({ id: organizations.id })
-      .from(organizations)
-      .where(orgScope(ctx)({ organizationId: organizations.id }))
-      .for('update');
-    if (!org) throw notAMember();
   }
 
   private async currentCredential(db: DbExecutor, ctx: AccessContext): Promise<CredentialRow | undefined> {

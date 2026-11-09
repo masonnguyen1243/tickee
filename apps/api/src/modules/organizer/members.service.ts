@@ -11,16 +11,18 @@ import {
   type MemberList,
   type OrganizationInvitation,
 } from '@tickee/contracts';
-import { and, asc, count, desc, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, isNull, ne, sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import { audit } from '../../platform/audit/index.js';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
-import { findUserIdByEmail, userContacts } from '../identity/index.js';
+import { consumeReauth, findUserIdByEmail, userContacts, type ReauthProof } from '../identity/index.js';
 import { AdminInvitationQueues, enqueueAdminInvitation } from './invitation-jobs.js';
 import { hashInvitationToken } from './invitation-token.js';
+import { lockOrganization } from './organization-lock.js';
+import { enqueueOwnershipTransferred, OwnershipTransferQueues } from './ownership-transfer-jobs.js';
 import { members, organizationInvitations, organizations } from './schema.js';
 
 const inv = organizationInvitations;
@@ -71,6 +73,7 @@ export class MembersService {
     @Inject(DATABASE) private readonly db: Database,
     @Inject(BOSS) private readonly boss: PgBoss,
     @Inject(AdminInvitationQueues) private readonly queues: AdminInvitationQueues,
+    @Inject(OwnershipTransferQueues) private readonly ownershipQueues: OwnershipTransferQueues,
   ) {}
 
   /** Thành viên (Owner trước, rồi Admin theo thời điểm tham gia) và lời mời đang chờ (mới nhất trước). */
@@ -204,6 +207,56 @@ export class MembersService {
         action: 'member.removed',
         target: { type: 'user', id: removed.userId },
         changedFields: ['role'],
+      });
+    });
+  }
+
+  /**
+   * Chuyển quyền Owner cho Admin `memberId` (Story 2.14). Một transaction: khóa dòng BTC → tiêu lần xác nhận lại
+   * (`REAUTH_REQUIRED`) → hạ Owner đang gọi thành `admin` (không còn là Owner, vd. lần gửi song song đã chuyển xong →
+   * `FORBIDDEN_ROLE`) → nâng Admin được chọn thành `owner` (id sai định dạng, lạ, của BTC khác, không phải Admin → 404)
+   * → audit → enqueue email. Hạ trước rồi nâng sau vì unique index "mỗi BTC một Owner" không deferrable. Lỗi bất kỳ
+   * → rollback, lần xác nhận còn dùng được. `AccessResolver` không cache vai nên request kế tiếp thấy vai mới.
+   */
+  async transferOwnership(ctx: AccessContext, memberId: string, reauth: ReauthProof): Promise<void> {
+    // Id sai định dạng: 404 trước khi mở transaction (không tiêu lần xác nhận).
+    if (!UUID.test(memberId)) throw memberNotFound();
+    // pg-boss đã start và queue đã có (ngoài transaction): `boss.send` cần cả hai.
+    await this.ownershipQueues.ready();
+    await this.db.transaction(async (tx) => {
+      await lockOrganization(tx, ctx);
+      await consumeReauth(tx, { userId: ctx.userId, ...reauth });
+      const [demoted] = await tx
+        .update(members)
+        .set({ role: Role.ADMIN })
+        .where(and(orgScope(ctx)(members), eq(members.userId, ctx.userId), eq(members.role, Role.OWNER)))
+        .returning({ userId: members.userId });
+      if (!demoted) throw new AppError(ErrorCode.FORBIDDEN_ROLE, 'Chỉ Owner mới chuyển được quyền Owner.');
+      const [promoted] = await tx
+        .update(members)
+        .set({ role: Role.OWNER })
+        .where(
+          and(
+            orgScope(ctx)(members),
+            eq(members.id, memberId),
+            eq(members.role, Role.ADMIN),
+            // Dòng của chính Owner vừa bị hạ cũng khớp `role='admin'`: loại riêng.
+            ne(members.userId, ctx.userId),
+          ),
+        )
+        .returning({ userId: members.userId });
+      if (!promoted) throw memberNotFound();
+      await audit.record(tx, {
+        actorUserId: ctx.userId,
+        organizationId: ctx.organizationId,
+        action: 'member.ownership_transferred',
+        target: { type: 'user', id: promoted.userId },
+        changedFields: ['role'],
+      });
+      await enqueueOwnershipTransferred(this.boss, tx, {
+        organizationId: ctx.organizationId,
+        previousOwnerUserId: ctx.userId,
+        newOwnerUserId: promoted.userId,
       });
     });
   }

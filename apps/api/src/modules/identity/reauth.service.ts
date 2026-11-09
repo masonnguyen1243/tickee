@@ -26,8 +26,8 @@ import { TotpStore } from './totp-store.js';
 
 /*
  * Xác nhận lại trước thao tác nhạy cảm (Story 2.13): đổi tài khoản nhận tiền mặc định, hủy liên kết tài khoản nhận
- * tiền, đổi key Tingee (2.13-b); sau này chuyển quyền Owner (2.14). Tài khoản đã bật 2FA nhập mã TOTP (không nhận mã
- * khôi phục, cùng bộ đếm sai `TotpAttemptLimiter`); chưa bật thì nhập mã 6 số gửi qua email (cùng giới hạn gửi và khóa
+ * tiền, đổi key Tingee (2.13-b), chuyển quyền Owner (2.14). Tài khoản đã bật 2FA nhập mã TOTP (không nhận mã khôi
+ * phục, cùng bộ đếm sai `TotpAttemptLimiter`); chưa bật thì nhập mã 6 số gửi qua email (cùng giới hạn gửi và khóa
  * sai theo ngày `OtpRateLimiter` của đăng nhập). Đúng → một lần xác nhận gắn user + session, hết hạn sau
  * `REAUTH_TTL_SECONDS`, dùng một lần. Thao tác nhạy cảm tiêu lần xác nhận bằng `consumeReauth` trong chính transaction
  * của nó (thao tác lỗi thì rollback, lần xác nhận còn dùng được); bước đầu của thao tác nhiều bước chỉ kiểm bằng
@@ -75,6 +75,15 @@ export interface ReauthProof {
   /** Giá trị header `REAUTH_HEADER` (thiếu → `undefined`). */
   token: string | null | undefined;
 }
+
+/** Request đã qua `SessionGuard` (route không công khai nên luôn có session). */
+export type SessionRequest = { session: { session: { id: string } } };
+
+/** Lần xác nhận lại mà request mang theo (header `REAUTH_HEADER`) cho đúng session đang gọi; dùng ở controller. */
+export const reauthProof = (req: SessionRequest, token: string | undefined): ReauthProof => ({
+  sessionId: req.session.session.id,
+  token,
+});
 
 /** Điều kiện của một lần xác nhận còn dùng được: `token` của đúng user và session, chưa dùng, chưa hết hạn. */
 const usableGrant = (token: string, input: { userId: string } & ReauthProof) =>
