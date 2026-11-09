@@ -93,12 +93,20 @@ export const ErrorCode = {
    */
   CAPACITY_BELOW_COMMITTED: 'CAPACITY_BELOW_COMMITTED',
   /**
-   * Sau thay đổi, mọi Hạng vé của Sự kiện đều 0đ và tổng số suất vượt trần Vé của Sự kiện miễn phí
-   * (`FREE_EVENT_TICKET_CAP`, `details`: `FreeEventCapacityExceededDetails`). Không lưu gì.
+   * Sau thay đổi, tổng số suất của các Hạng vé 0đ trong Sự kiện vượt trần suất miễn phí (`FREE_EVENT_TICKET_CAP`), ở mọi
+   * trạng thái Sự kiện, kể cả Sự kiện có cả Hạng vé có phí (`details`: `FreeEventCapacityExceededDetails`). Không lưu gì.
    */
   FREE_EVENT_CAPACITY_EXCEEDED: 'FREE_EVENT_CAPACITY_EXCEEDED',
   /** Hạng vé đã có Vé bán ra hoặc đang Giữ chỗ (đã bán + đang giữ chỗ > 0): không xóa được. */
   TICKET_TYPE_IN_USE: 'TICKET_TYPE_IN_USE',
+  /**
+   * Sự kiện không còn nháp: tạo Hạng vé giá > 0, hoặc sửa Hạng vé mà giá sau khi sửa > 0, khi BTC chưa đủ điều kiện bán
+   * Vé có phí (chưa được duyệt Closed Beta hoặc không còn tài khoản nhận tiền). `details.unmet`: mã điều kiện chưa đạt
+   * (`PaidTicketTypeNotAllowedDetails`). Sự kiện nháp không bị chặn (điều kiện kiểm lúc mở bán). Không lưu gì.
+   */
+  PAID_TICKET_TYPE_NOT_ALLOWED: 'PAID_TICKET_TYPE_NOT_ALLOWED',
+  /** Xóa Hạng vé cuối cùng của Sự kiện không còn nháp: Sự kiện đã mở bán phải còn ít nhất một Hạng vé. Không xóa gì. */
+  LAST_TICKET_TYPE: 'LAST_TICKET_TYPE',
   /** Không tìm thấy câu hỏi của form mua: id lạ, sai dạng hoặc thuộc Sự kiện khác. */
   FORM_QUESTION_NOT_FOUND: 'FORM_QUESTION_NOT_FOUND',
   /**

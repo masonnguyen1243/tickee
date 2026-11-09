@@ -287,7 +287,7 @@ Owner và Admin tạo Sự kiện miễn phí. Người mua đăng ký Vé mà k
 - Không tạo QR thanh toán và không tiêu Token.
 - Người mua vẫn phải đăng nhập Tài khoản Tickee. `[ASSUMPTION: Sự kiện miễn phí vẫn bắt buộc đăng nhập]`
 - Vé được phát ngay khi gửi Đơn.
-- Mỗi Sự kiện miễn phí có trần 200 Vé. `[ASSUMPTION: BRD ghi 200 là "tham khảo" — PRD coi là trần cứng ở MVP]`
+- Mỗi Sự kiện có tối đa 200 suất miễn phí: tổng số suất của mọi Hạng vé 0đ ≤ 200, áp cho mọi Sự kiện ở mọi trạng thái, kể cả Sự kiện có cả Hạng vé có phí. `[ASSUMPTION: BRD ghi 200 là "tham khảo" — PRD coi là trần cứng ở MVP]` *(Quyết định Mason 09/11/2026, E2-3.)*
 
 ### 4.4 Checkout và Giữ chỗ
 
@@ -690,7 +690,7 @@ Các mã trong cột BRD (FR-xx, BR-xx, R-xx) là mã của BRD, không phải m
 - FR-4: Quản trị Tingee dùng SSO nội bộ, 2FA, giới hạn IP, và là ngoại lệ duy nhất được xem dữ liệu nhiều BTC.
 - FR-7: "Ẩn" nghĩa là tạm dừng nhận Đơn. Có báo email khi sửa thời gian hoặc địa điểm.
 - FR-10: Cách hiện số chỗ còn lại do UX quyết.
-- FR-11: Sự kiện miễn phí vẫn phải đăng nhập. Trần 200 Vé là giới hạn cứng.
+- FR-11: Sự kiện miễn phí vẫn phải đăng nhập. Trần 200 suất miễn phí mỗi Sự kiện (tổng số suất các Hạng vé 0đ, kể cả trong Sự kiện có phí) là giới hạn cứng.
 - FR-12: Mặc định tối đa 10 Vé/Đơn, BTC chỉnh được.
 - FR-20: Bắt đầu Đối soát bù sau 2 phút.
 - FR-22: Không có chuyển nhượng Vé sang Tài khoản Tickee khác.
