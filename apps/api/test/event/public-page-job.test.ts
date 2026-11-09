@@ -140,14 +140,34 @@ describe('enqueue khi BTC sửa', () => {
     expect(await jobCount(event.slug)).toBe(++expected);
   });
 
-  it('đổi giới hạn Vé/Đơn và form mua vé (không có trên trang) → không job', async () => {
+  it('Sự kiện đang bán: đổi giới hạn Vé/Đơn (có trên trang, Story 3.1) → 1 job; giữ nguyên giá trị → không job', async () => {
     const { event } = await publishedEvent();
     const before = await jobCount(event.slug);
+    const orderLimit = (maxTicketsPerOrder: number) =>
+      h.http
+        .patch(`${eventPath(event.id)}/order-limit`)
+        .set('cookie', owner.cookie)
+        .send({ maxTicketsPerOrder })
+        .expect(200);
+    await orderLimit(4);
+    expect(await jobCount(event.slug)).toBe(before + 1);
+    await orderLimit(4);
+    expect(await jobCount(event.slug)).toBe(before + 1);
+  });
+
+  it('Sự kiện nháp: đổi giới hạn Vé/Đơn → không job', async () => {
+    const event = await newEvent();
     await h.http
       .patch(`${eventPath(event.id)}/order-limit`)
       .set('cookie', owner.cookie)
       .send({ maxTicketsPerOrder: 4 })
       .expect(200);
+    expect(await jobCount(event.slug)).toBe(0);
+  });
+
+  it('form mua vé (không có trên trang) → không job', async () => {
+    const { event } = await publishedEvent();
+    const before = await jobCount(event.slug);
     await h.http
       .post(`${eventPath(event.id)}/form/questions`)
       .set('cookie', owner.cookie)

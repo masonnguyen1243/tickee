@@ -219,10 +219,13 @@ export class EventService {
 
   /**
    * Đổi giới hạn Vé/Đơn (Story 2.8). Khóa dòng Sự kiện như mọi thao tác Hạng vé; audit `event.updated` với
-   * `changedFields: ['maxTicketsPerOrder']` chỉ khi giá trị đổi.
+   * `changedFields: ['maxTicketsPerOrder']` chỉ khi giá trị đổi. Trang Sự kiện công khai hiện giới hạn này (Story 3.1)
+   * nên Sự kiện đã mở bán mà giá trị đổi thì enqueue revalidate `/e/{slug}` trong cùng transaction.
    */
   async updateOrderLimit(ctx: AccessContext, eventId: string, input: EventOrderLimitInput): Promise<EventDetail> {
     if (!UUID.test(eventId)) throw notFound();
+    // pg-boss đã start và queue đã có (ngoài transaction): `boss.send` cần cả hai.
+    await this.publicPageQueues.ready();
     const row = await this.db.transaction(async (tx) => {
       const [current] = await tx
         .select()
@@ -244,6 +247,7 @@ export class EventService {
         target: { type: 'event', id: updated.id },
         changedFields: ['maxTicketsPerOrder'],
       });
+      if (updated.status !== 'draft') await enqueuePublicPageRevalidation(this.boss, tx, updated.slug);
       return updated;
     });
     return detailOf(row);

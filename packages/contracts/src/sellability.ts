@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { EventDateTime, eventStatusSchema } from './event.js';
+import { EventDateTime, eventStatusSchema, MAX_TICKETS_PER_ORDER_MAX, MAX_TICKETS_PER_ORDER_MIN } from './event.js';
 import { PublicTicketType } from './ticket-type.js';
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -23,6 +23,8 @@ export const PublicEvent = z.object({
   refundPolicy: z.string().nullable(),
   /** Tên BTC. */
   organizationName: z.string(),
+  /** Giới hạn Vé/Đơn (Story 2.8): trần tổng số Vé chọn được ở trang Sự kiện và Checkout (Story 3.1). */
+  maxTicketsPerOrder: z.number().int().min(MAX_TICKETS_PER_ORDER_MIN).max(MAX_TICKETS_PER_ORDER_MAX),
   /** Hạng vé, tạo trước đứng trước. */
   ticketTypes: z.array(PublicTicketType),
 });

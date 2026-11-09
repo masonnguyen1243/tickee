@@ -52,7 +52,7 @@ const tierRow = (page: Page, name: string) =>
   page.locator('[data-slot^="ticket-tier-row"]').filter({ has: page.getByRole('heading', { name }) });
 
 test.beforeEach(async ({ page }) => {
-  await mockIdentityApi(page);
+  await mockIdentityApi(page, {}, { origin: ORIGIN });
 });
 
 test('đang bán: hero, hàng BTC, Hạng vé "Còn N vé", không banner', async ({ page }) => {
@@ -69,13 +69,17 @@ test('đang bán: hero, hàng BTC, Hạng vé "Còn N vé", không banner', asyn
   await expect(page.getByRole('heading', { name: 'Chính sách hoàn vé' })).toBeVisible();
 
   const free = tierRow(page, 'Vé phổ thông');
-  await expect(free).toContainText('0đ');
+  await expect(free).toContainText('Miễn phí');
   await expect(free).toContainText('Còn 50 vé');
   await expect(free).toHaveAttribute('data-slot', 'ticket-tier-row');
   await expect(tierRow(page, 'Vé VIP')).toContainText('300.000đ');
   await expect(tierRow(page, 'Vé VIP')).toContainText('Còn 120 vé');
   await expect(page.locator('[data-slot="status-banner"]')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /Mua/ })).toHaveCount(0);
+  // Story 3.1: Hạng vé đang bán có stepper; chưa chọn thì nút "Mua" tắt kèm lời nhắc.
+  await expect(page.getByRole('group', { name: 'Số vé Vé VIP' })).toBeVisible();
+  const bar = page.locator('[data-slot="purchase-bar"]');
+  await expect(bar).toContainText('Chọn vé để tiếp tục');
+  await expect(bar.getByRole('button', { name: 'Mua' })).toBeDisabled();
 });
 
 test('sắp hết: "Còn 7 vé" đậm màu thương hiệu', async ({ page }) => {

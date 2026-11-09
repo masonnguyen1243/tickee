@@ -27,6 +27,7 @@ const publicEvent = {
   description: null,
   refundPolicy: 'Không hoàn vé.',
   organizationName: 'CLB Chạy',
+  maxTicketsPerOrder: 10,
   ticketTypes: [],
 };
 

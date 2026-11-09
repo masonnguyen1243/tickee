@@ -26,6 +26,17 @@ export const TIER_PAID_ID = '019a3b2c-0800-7abc-8def-000000000002';
 export const SLUG_ON_SALE = 'giai-chay-ho-guom-a1b2';
 export const SLUG_HIDDEN = 'dem-nhac-an-c3d4';
 export const SLUG_DRAFT = 'su-kien-nhap-e5f6';
+/**
+ * Sự kiện cho luồng mua (Story 3.1), diễn ra năm 2099: Checkout kiểm mốc tự kết thúc theo giờ thật nên không dùng
+ * `SLUG_ON_SALE` (kết thúc 15/11/2026). `SLUG_BUY` có cùng hai Hạng vé với `SLUG_ON_SALE`; `SLUG_FREE` là Sự kiện miễn
+ * phí (mọi Hạng vé 0đ: "Miễn phí" + "Đăng ký").
+ */
+export const SLUG_BUY = 'giai-chay-dem-i9j0';
+export const SLUG_FREE = 'workshop-mien-phi-g7h8';
+export const TIER_FREE_ONLY_ID = '019a3b2c-0800-7abc-8def-000000000003';
+
+/** Giới hạn Vé/Đơn của mọi Sự kiện giả (Story 3.1). */
+export const MAX_TICKETS_PER_ORDER = 4;
 
 const event = (slug: string, status: 'published' | 'hidden') => ({
   slug,
@@ -37,6 +48,7 @@ const event = (slug: string, status: 'published' | 'hidden') => ({
   description: 'Cung đường 5 km quanh hồ.\nNhận bib tại nhà văn hóa phường.',
   refundPolicy: 'Hoàn 100% nếu hủy trước 7 ngày.',
   organizationName: 'CLB Chạy Bộ Phố Cổ',
+  maxTicketsPerOrder: MAX_TICKETS_PER_ORDER,
   ticketTypes: [
     {
       id: TIER_FREE_ID,
@@ -57,9 +69,29 @@ const event = (slug: string, status: 'published' | 'hidden') => ({
   ],
 });
 
+const FAR_FUTURE = { startsAt: '2099-11-15T07:00:00+07:00', endsAt: '2099-11-15T17:00:00+07:00' };
+
+const freeEvent = (slug: string) => ({
+  ...event(slug, 'published'),
+  ...FAR_FUTURE,
+  name: 'Workshop pha cà phê miễn phí',
+  ticketTypes: [
+    {
+      id: TIER_FREE_ONLY_ID,
+      name: 'Vé tham dự',
+      description: null,
+      price: 0,
+      saleStartsAt: null,
+      saleEndsAt: null,
+    },
+  ],
+});
+
 export const PUBLIC_EVENTS: Record<string, unknown> = {
   [SLUG_ON_SALE]: event(SLUG_ON_SALE, 'published'),
   [SLUG_HIDDEN]: event(SLUG_HIDDEN, 'hidden'),
+  [SLUG_BUY]: { ...event(SLUG_BUY, 'published'), ...FAR_FUTURE },
+  [SLUG_FREE]: freeEvent(SLUG_FREE),
 };
 
 function start(): void {

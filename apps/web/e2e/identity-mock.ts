@@ -26,11 +26,20 @@ export const me = (consentedAt: string | null, twoFactorEnabled = false): Reply 
   body: { id: USER_ID, email: EMAIL, consentedAt, twoFactorEnabled },
 });
 
+export type MockIdentityOptions = {
+  /** Origin của server web đang chạy trang (CORS); mặc định server chính `WEB_ORIGIN`. */
+  origin?: string;
+};
+
 /** Giả lập `/v1/identity/*`; mặc định `me` → 401 (chưa đăng nhập). Trả về danh sách lời gọi để kiểm. */
-export async function mockIdentityApi(page: Page, handlers: Record<string, Handler> = {}): Promise<Call[]> {
+export async function mockIdentityApi(
+  page: Page,
+  handlers: Record<string, Handler> = {},
+  { origin = WEB_ORIGIN }: MockIdentityOptions = {},
+): Promise<Call[]> {
   const calls: Call[] = [];
   const cors = {
-    'access-control-allow-origin': WEB_ORIGIN,
+    'access-control-allow-origin': origin,
     'access-control-allow-credentials': 'true',
     'access-control-allow-methods': 'GET, POST, OPTIONS',
     'access-control-allow-headers': 'accept, content-type, x-reauth-token',
