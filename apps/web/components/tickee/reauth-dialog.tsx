@@ -2,12 +2,12 @@
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { ErrorCode, OTP_LENGTH, REAUTH_TTL_SECONDS, ReauthMethod, TOTP_DIGITS } from '@tickee/contracts';
-import { OctagonAlert } from 'lucide-react';
 import { useEffect, useId, useState, useSyncExternalStore } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ApiError } from '@/lib/api/errors';
+import { messageOf } from '@/lib/api/message-of';
 import {
   fetchMe,
   hasErrorCode,
@@ -29,9 +29,9 @@ import {
 } from '@/lib/auth/reauth';
 import { totpErrorMessage } from '@/lib/auth/totp';
 
+import { FieldError } from './field-error';
 import { OtpInput } from './otp-input';
 
-const GENERIC_ERROR = 'Đã có lỗi xảy ra. Vui lòng thử lại.';
 /** Lời báo khi api cho biết cách xác nhận đã đổi (2FA vừa bật/tắt ở nơi khác). */
 const SWITCHED_TO: Readonly<Record<ReauthMethod, string>> = {
   [ReauthMethod.TOTP]: 'Tài khoản đã bật xác thực hai lớp. Nhập mã trong ứng dụng xác thực.',
@@ -46,7 +46,7 @@ const hasUsableEmailCode = () => {
 };
 
 /** Lỗi tại chỗ; `newCode` = kèm nút "Gửi mã mới" (mã email hết hạn/hết lượt). */
-type FieldError = { message: string; newCode?: boolean };
+type FieldFailure = { message: string; newCode?: boolean };
 
 const isOtpError = (error: unknown) =>
   error instanceof ApiError &&
@@ -57,17 +57,17 @@ const isOtpError = (error: unknown) =>
 const isTotpError = (error: unknown) =>
   error instanceof ApiError && (error.code === ErrorCode.TOTP_INVALID || error.code === ErrorCode.TOTP_LOCKED);
 
-function sendErrorOf(error: unknown): FieldError {
+function sendErrorOf(error: unknown): FieldFailure {
   if (hasErrorCode(error, ErrorCode.OTP_LOCKED)) {
     return { message: `Bạn đã nhập sai quá nhiều lần. Thử lại sau ${retryAfterHours(error)} giờ.` };
   }
   if (hasErrorCode(error, ErrorCode.OTP_RATE_LIMITED)) {
     return { message: `Bạn đã yêu cầu quá nhiều mã. Thử lại sau ${retryAfterMinutes(error)} phút.` };
   }
-  return { message: error instanceof ApiError ? error.message : GENERIC_ERROR };
+  return { message: messageOf(error) };
 }
 
-function emailCodeErrorOf(error: unknown): FieldError {
+function emailCodeErrorOf(error: unknown): FieldFailure {
   if (hasErrorCode(error, ErrorCode.OTP_LOCKED)) {
     return { message: `Bạn đã nhập sai quá nhiều lần. Thử lại sau ${retryAfterHours(error)} giờ.` };
   }
@@ -78,20 +78,7 @@ function emailCodeErrorOf(error: unknown): FieldError {
   if (hasErrorCode(error, ErrorCode.OTP_EXPIRED)) return { message: 'Mã đã hết hạn.', newCode: true };
   if (hasErrorCode(error, ErrorCode.OTP_ATTEMPTS_EXCEEDED)) return { message: 'Mã đã hết hiệu lực.', newCode: true };
   if (hasErrorCode(error, ErrorCode.VALIDATION_FAILED)) return { message: `Mã gồm ${OTP_LENGTH} số.` };
-  return { message: error instanceof ApiError ? error.message : GENERIC_ERROR };
-}
-
-function FieldErrorText({ id, error }: { id: string; error: FieldError | null }) {
-  return (
-    <p id={id} role="alert" className="flex min-h-0 items-start gap-1.5 text-meta text-danger-text empty:hidden">
-      {error ? (
-        <>
-          <OctagonAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          <span>{error.message}</span>
-        </>
-      ) : null}
-    </p>
-  );
+  return { message: messageOf(error) };
 }
 
 function useSecondsUntil(deadline: number | null): number {
@@ -123,7 +110,7 @@ function ReauthForm({ promptId, method: requested }: { promptId: number; method:
    */
   const [codeSent, setCodeSent] = useState(hasUsableEmailCode);
   const [resendAt, setResendAt] = useState<number | null>(() => lastEmailCode()?.resendAt ?? null);
-  const [error, setError] = useState<FieldError | null>(null);
+  const [error, setError] = useState<FieldFailure | null>(null);
   const [partial, setPartial] = useState('');
   const [otpKey, setOtpKey] = useState(0);
   const secondsLeft = useSecondsUntil(resendAt);
@@ -216,7 +203,7 @@ function ReauthForm({ promptId, method: requested }: { promptId: number; method:
             Bạn vừa nhận một mã. Gửi được mã mới sau {secondsLeft} giây.
           </p>
         ) : null}
-        <FieldErrorText id={errorId} error={error} />
+        <FieldError id={errorId} message={error?.message} />
         <DialogFooter>
           <Button
             type="button"
@@ -269,7 +256,7 @@ function ReauthForm({ promptId, method: requested }: { promptId: number; method:
         onChange={setPartial}
         onComplete={submit}
       />
-      <FieldErrorText id={errorId} error={error} />
+      <FieldError id={errorId} message={error?.message} />
       {method === ReauthMethod.EMAIL_OTP ? (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           {secondsLeft > 0 ? (

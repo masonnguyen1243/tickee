@@ -199,6 +199,9 @@ action_items:
     owner: "Mason"
     status: in-progress
     ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
+    note: "E2E lỗi lẻ khi từ chối đồng ý đã sửa ở 3cfbe52 (PR #20); bước đăng xuất đã gom
+      vào lib/auth/use-sign-out.ts qua spec-epic-2-e2-5-refactor-web.md. Chỉ còn e2e
+      smoke full-stack (web + API thật + Mailpit) trong CI"
   - id: "epic-2-retro-e2-1-va-lo-hong-xac-nhan-lai"
     epic: 2
     action: "E2-1 (gate Epic 3): vá lỗ hổng xác nhận lại liên quan tới bật 2FA, kèm

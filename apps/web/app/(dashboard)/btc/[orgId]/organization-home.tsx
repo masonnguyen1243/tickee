@@ -20,12 +20,12 @@ import { PageHeading } from '@/components/tickee/page-heading';
 import { StatusBadge } from '@/components/tickee/status-badge';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
-import { ApiError } from '@/lib/api/errors';
+import { handledElsewhere } from '@/lib/api/handled-elsewhere';
+import { messageOf } from '@/lib/api/message-of';
 import { fetchMe, ME_QUERY_KEY } from '@/lib/auth/api';
 import { eventsQueryKey, fetchEvents } from '@/lib/event/api';
 
 import { eventBadge } from './su-kien/event-status';
-import { handledElsewhere } from './su-kien/handled-elsewhere';
 
 /** Khóa `localStorage` ghi nhớ Owner đã đóng thẻ gợi ý bật 2FA, theo từng tài khoản trên trình duyệt này. */
 const hintDismissedKey = (userId: string) => `tickee:goi-y-2fa:da-dong:${userId}`;
@@ -164,7 +164,7 @@ function EventListSection() {
       <StatusBanner
         tone="danger"
         title="Chưa tải được danh sách Sự kiện"
-        description={events.error instanceof ApiError ? events.error.message : 'Đã có lỗi xảy ra. Vui lòng thử lại.'}
+        description={messageOf(events.error)}
         action={
           <Button type="button" variant="link" size="sm" onClick={() => void events.refetch()}>
             Thử lại

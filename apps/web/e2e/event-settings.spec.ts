@@ -251,6 +251,29 @@ test('Kết thúc qua Dialog nêu hậu quả: "Hủy" không gọi api; xác nh
   await expect(page.locator('[data-slot="event-card"] [data-slot="status-badge"]')).toHaveText('Đã kết thúc');
 });
 
+test('Kết thúc đang chạy: Esc và "Hủy" không đóng Dialog, không gửi lặp; xong thì Dialog đóng', async ({ page }) => {
+  let release = () => {};
+  const { calls } = await openApi(page, { hold: new Promise<void>((resolve) => (release = resolve)) });
+  await page.goto(settings);
+  await statusSection(page).getByRole('button', { name: 'Kết thúc', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'Kết thúc Sự kiện?' })).toBeVisible();
+
+  const confirm = dialog.getByRole('button', { name: /^Kết thúc/ });
+  await confirm.click();
+  await expect(confirm).toHaveAttribute('aria-busy', 'true');
+  await page.keyboard.press('Escape');
+  await dialog.getByRole('button', { name: 'Hủy' }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Kết thúc Sự kiện?' })).toBeVisible();
+  expect(callsTo(calls, 'end')).toHaveLength(1);
+
+  release();
+  await expect(page.getByText('Đã kết thúc Sự kiện.')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(callsTo(calls, 'end')).toHaveLength(1);
+});
+
 test('chưa bắt đầu: "Kết thúc" tắt, lý do nối bằng aria-describedby; Ẩn vẫn bấm được', async ({ page }) => {
   await openApi(page, { startsAt: '2099-11-16T07:00:00+07:00' });
   await page.goto(settings);

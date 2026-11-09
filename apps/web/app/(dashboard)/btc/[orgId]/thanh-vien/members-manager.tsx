@@ -11,24 +11,24 @@ import {
   type OrganizationInvitation,
   type OrganizationMember,
 } from '@tickee/contracts';
-import { OctagonAlert } from 'lucide-react';
-import { usePathname, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 
+import { ConfirmDialog } from '@/components/tickee/confirm-dialog';
 import { useCurrentOrganization } from '@/components/tickee/current-organization';
+import { FieldError } from '@/components/tickee/field-error';
 import { PageHeading } from '@/components/tickee/page-heading';
 import { StatusBadge } from '@/components/tickee/status-badge';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ApiError } from '@/lib/api/errors';
+import { handledElsewhere } from '@/lib/api/handled-elsewhere';
+import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
 import { isReauthRequired, withReauth } from '@/lib/auth/reauth';
-import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
-import { isTotpRequired } from '@/lib/auth/totp';
+import { useGoToLogin } from '@/lib/auth/use-go-to-login';
 import {
   fetchMembers,
   inviteAdmin,
@@ -49,38 +49,6 @@ const EXPIRES_FORMAT = new Intl.DateTimeFormat('vi-VN', {
   month: '2-digit',
   year: 'numeric',
 });
-
-/**
- * Lỗi do nơi khác xử lý: 2FA (`Providers` mở dialog rồi gửi lại), đồng ý NĐ 13 (`Providers` chuyển trang), 401 (sang
- * đăng nhập), `NOT_A_MEMBER` (`DashboardShell` mở `Dialog` bị xóa khỏi BTC giữa phiên).
- */
-const handledElsewhere = (error: unknown) =>
-  isTotpRequired(error) ||
-  hasErrorCode(error, ErrorCode.CONSENT_REQUIRED) ||
-  hasErrorCode(error, ErrorCode.UNAUTHENTICATED) ||
-  hasErrorCode(error, ErrorCode.NOT_A_MEMBER);
-
-const messageOf = (error: unknown) => (error instanceof ApiError ? error.message : 'Đã có lỗi xảy ra. Vui lòng thử lại.');
-
-function FieldError({ id, message }: { id: string; message: string | null }) {
-  return (
-    <p id={id} role="alert" className="flex min-h-0 items-start gap-1.5 text-meta text-danger-text empty:hidden">
-      {message ? (
-        <>
-          <OctagonAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          <span>{message}</span>
-        </>
-      ) : null}
-    </p>
-  );
-}
-
-/** 401 khi đang thao tác: sang đăng nhập rồi quay lại đúng trang này. */
-function useGoToLogin() {
-  const router = useRouter();
-  const pathname = usePathname();
-  return () => router.replace(withReturnTo(LOGIN_PATH, pathname));
-}
 
 /**
  * Form mời Admin bằng email. Xử lý kết quả đặt trên `useMutation` (không `mutateAsync`): session chưa qua lớp hai thì
@@ -221,50 +189,26 @@ function RemoveDialog({
       : null;
 
   return (
-    <Dialog
+    <ConfirmDialog
       open={member !== null}
       onOpenChange={(open) => {
-        if (!open && !remove.isPending) {
-          remove.reset();
-          onClose();
-        }
+        if (open) return;
+        remove.reset();
+        onClose();
       }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Xóa Admin khỏi BTC?</DialogTitle>
-          <DialogDescription className="break-words">
-            {member
-              ? `${member.email} sẽ không còn quản lý Sự kiện, Đơn và các mục khác của ${organizationName}. Muốn họ quay lại thì mời lại.`
-              : null}
-          </DialogDescription>
-        </DialogHeader>
-        {failure ? <StatusBanner tone="danger" title="Chưa xóa được" description={messageOf(failure)} /> : null}
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="destructive"
-            className="w-full"
-            loading={remove.isPending}
-            onClick={() => member && remove.mutate(member)}
-          >
-            Xóa
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            className="w-full"
-            onClick={() => {
-              if (remove.isPending) return;
-              remove.reset();
-              onClose();
-            }}
-          >
-            Hủy
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      title="Xóa Admin khỏi BTC?"
+      descriptionClassName="break-words"
+      description={
+        member
+          ? `${member.email} sẽ không còn quản lý Sự kiện, Đơn và các mục khác của ${organizationName}. Muốn họ quay lại thì mời lại.`
+          : null
+      }
+      confirmLabel="Xóa"
+      onConfirm={() => member && remove.mutate(member)}
+      pending={remove.isPending}
+      failureTitle="Chưa xóa được"
+      failure={failure && messageOf(failure)}
+    />
   );
 }
 
@@ -359,59 +303,38 @@ function TransferOwnershipDialog({
   };
 
   return (
-    <Dialog open={member !== null} onOpenChange={(open) => !open && close()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Chuyển quyền Owner?</DialogTitle>
-          <DialogDescription className="break-words">
-            {member
-              ? `${memberLabel(member)} sẽ là Owner, quản lý tài khoản nhận tiền và Token. Bạn sẽ thành Admin.`
-              : null}
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          noValidate
-          className="flex flex-col gap-stack"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (member && matches && !transfer.isPending) transfer.mutate(member);
-          }}
-        >
-          <div className="flex flex-col gap-2">
-            <Label htmlFor={inputId}>Gõ tên BTC để xác nhận</Label>
-            <Input
-              id={inputId}
-              name="organizationName"
-              autoComplete="off"
-              spellCheck={false}
-              value={typed}
-              onChange={(event) => setTyped(event.target.value)}
-              aria-describedby={hintId}
-            />
-            <p id={hintId} className="text-meta text-muted-foreground break-words">
-              {matches ? 'Tên BTC đã khớp.' : `Gõ đúng "${organizationName}" để bật nút Chuyển quyền.`}
-            </p>
-          </div>
-          {failure ? (
-            <StatusBanner tone="danger" title="Chưa chuyển quyền được" description={messageOf(failure)} />
-          ) : null}
-          <DialogFooter>
-            <Button
-              type="submit"
-              variant="destructive"
-              className="w-full"
-              disabled={!matches}
-              loading={transfer.isPending}
-            >
-              Chuyển quyền
-            </Button>
-            <Button type="button" variant="secondary" className="w-full" onClick={close}>
-              Hủy
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDialog
+      open={member !== null}
+      onOpenChange={(open) => !open && close()}
+      title="Chuyển quyền Owner?"
+      descriptionClassName="break-words"
+      description={
+        member ? `${memberLabel(member)} sẽ là Owner, quản lý tài khoản nhận tiền và Token. Bạn sẽ thành Admin.` : null
+      }
+      asForm
+      confirmLabel="Chuyển quyền"
+      confirmDisabled={!matches}
+      onConfirm={() => member && transfer.mutate(member)}
+      pending={transfer.isPending}
+      failureTitle="Chưa chuyển quyền được"
+      failure={failure && messageOf(failure)}
+    >
+      <div className="flex flex-col gap-2">
+        <Label htmlFor={inputId}>Gõ tên BTC để xác nhận</Label>
+        <Input
+          id={inputId}
+          name="organizationName"
+          autoComplete="off"
+          spellCheck={false}
+          value={typed}
+          onChange={(event) => setTyped(event.target.value)}
+          aria-describedby={hintId}
+        />
+        <p id={hintId} className="text-meta text-muted-foreground break-words">
+          {matches ? 'Tên BTC đã khớp.' : `Gõ đúng "${organizationName}" để bật nút Chuyển quyền.`}
+        </p>
+      </div>
+    </ConfirmDialog>
   );
 }
 

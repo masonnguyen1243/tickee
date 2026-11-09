@@ -8,15 +8,16 @@ import {
   ORGANIZATION_NAME_MAX,
   organizationDashboardPath,
 } from '@tickee/contracts';
-import { OctagonAlert } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useId, useState, type ChangeEvent, type FormEvent } from 'react';
 
+import { FieldError } from '@/components/tickee/field-error';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ApiError } from '@/lib/api/errors';
+import { messageOf } from '@/lib/api/message-of';
 import { fetchMe, hasErrorCode, ME_QUERY_KEY } from '@/lib/auth/api';
 import { CONSENT_PATH, LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
 import { createOrganization, MEMBERSHIPS_QUERY_KEY } from '@/lib/organizer/api';
@@ -48,19 +49,6 @@ function fieldErrorsOf(paths: readonly unknown[], values: Values): FieldErrors {
 function serverIssuePaths(error: ApiError): string[] {
   const issues = (error.details as { issues?: { path?: unknown }[] } | null)?.issues;
   return Array.isArray(issues) ? issues.map((i) => String(i.path ?? '').split('.')[0] ?? '') : [];
-}
-
-function FieldError({ id, message }: { id: string; message: string | undefined }) {
-  return (
-    <p id={id} role="alert" className="flex min-h-0 items-start gap-1.5 text-meta text-danger-text empty:hidden">
-      {message ? (
-        <>
-          <OctagonAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          <span>{message}</span>
-        </>
-      ) : null}
-    </p>
-  );
 }
 
 /** Form tạo BTC: tên (bắt buộc) + kênh liên hệ tùy chọn. Lỗi tại ô; lỗi mạng/máy chủ có "Thử lại", giữ dữ liệu. */
@@ -200,7 +188,7 @@ export function CreateOrganizationForm() {
         <StatusBanner
           tone="danger"
           title="Chưa tạo được BTC"
-          description={failure instanceof ApiError ? failure.message : 'Đã có lỗi xảy ra. Vui lòng thử lại.'}
+          description={messageOf(failure)}
           action={
             <Button type="button" variant="link" size="sm" onClick={submit}>
               Thử lại

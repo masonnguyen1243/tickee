@@ -2,16 +2,17 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EventDraftInput, ErrorCode, eventPath, type EventDetail } from '@tickee/contracts';
-import { usePathname, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { WizardStepper } from '@/components/tickee/wizard-stepper';
 import { Button } from '@/components/ui/button';
-import { ApiError } from '@/lib/api/errors';
+import { handledElsewhere } from '@/lib/api/handled-elsewhere';
+import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
-import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
+import { useGoToLogin } from '@/lib/auth/use-go-to-login';
 import { createEvent, eventQueryKey, eventsQueryKey, updateEvent } from '@/lib/event/api';
 
 import {
@@ -25,7 +26,6 @@ import {
   type EventInfoField,
   type EventInfoValues,
 } from './event-info-form';
-import { handledElsewhere } from './handled-elsewhere';
 import { PublishPanel } from './publish-panel';
 import { PurchaseFormEditor, PurchaseFormReview } from './purchase-form-editor';
 import { TicketTypesEditor } from './ticket-types-editor';
@@ -55,7 +55,7 @@ type EventWizardProps = {
 
 export function EventWizard({ orgId, event, initialStep = 0 }: EventWizardProps) {
   const router = useRouter();
-  const pathname = usePathname();
+  const goToLogin = useGoToLogin();
   const queryClient = useQueryClient();
   const [step, setStep] = useState(() => Math.min(Math.max(initialStep, 0), event ? LAST_STEP : 0));
   const [values, setValues] = useState<EventInfoValues>(() => (event ? valuesOf(event) : EMPTY_EVENT_INFO));
@@ -81,7 +81,7 @@ export function EventWizard({ orgId, event, initialStep = 0 }: EventWizardProps)
       setStep(intent.next);
     },
     onError: (error) => {
-      if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) router.replace(withReturnTo(LOGIN_PATH, pathname));
+      if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
       else if (hasErrorCode(error, ErrorCode.VALIDATION_FAILED)) {
         setErrors(serverFieldErrors(error, values));
         setStep(0);
@@ -148,7 +148,7 @@ export function EventWizard({ orgId, event, initialStep = 0 }: EventWizardProps)
         <StatusBanner
           tone="danger"
           title="Chưa lưu được Sự kiện"
-          description={failure instanceof ApiError ? failure.message : 'Đã có lỗi xảy ra. Vui lòng thử lại.'}
+          description={messageOf(failure)}
           action={
             <Button
               type="button"

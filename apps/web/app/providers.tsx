@@ -101,11 +101,13 @@ export function Providers({ children }: { children: ReactNode }) {
     routerRef.current.push(RECOVERY_USED_PATH);
   };
 
-  /** Đăng xuất từ dialog: bỏ thao tác dở và cache của tài khoản, về màn đăng nhập (đăng nhập lại thì quay về đây). */
+  /**
+   * Đăng xuất từ dialog (`useSignOut` đã xóa cache của tài khoản): bỏ thao tác dở, về màn đăng nhập (đăng nhập lại thì
+   * quay về đây).
+   */
   const onSignedOut = () => {
     const here = currentLocation();
     closeStepUp();
-    queryClient.clear();
     routerRef.current.replace(withReturnTo(LOGIN_PATH, here));
   };
 

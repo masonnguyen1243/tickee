@@ -2,10 +2,10 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EmailAddress, ErrorCode, GoogleSignInError, OTP_LENGTH } from '@tickee/contracts';
-import { OctagonAlert } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 
+import { FieldError } from '@/components/tickee/field-error';
 import { OtpInput } from '@/components/tickee/otp-input';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { ApiError } from '@/lib/api/errors';
+import { messageOf } from '@/lib/api/message-of';
 import {
   hasErrorCode,
   ME_QUERY_KEY,
@@ -27,9 +28,7 @@ import { CONSENT_PATH, LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
 type Step = { kind: 'email' } | { kind: 'code'; email: string; resendAt: number };
 
 /** Lỗi hiển thị cạnh ô nhập; `newCode` = kèm nút "Gửi mã mới". */
-type FieldError = { message: string; newCode?: boolean };
-
-const GENERIC_ERROR = 'Đã có lỗi xảy ra. Vui lòng thử lại.';
+type FieldFailure = { message: string; newCode?: boolean };
 
 function rateLimitedMessage(error: ApiError): string {
   return `Bạn đã yêu cầu quá nhiều mã. Thử lại sau ${retryAfterMinutes(error)} phút.`;
@@ -40,14 +39,14 @@ function lockedMessage(error: ApiError): string {
   return `Bạn đã nhập sai quá nhiều lần. Thử lại sau ${retryAfterHours(error)} giờ.`;
 }
 
-function sendErrorOf(error: unknown): FieldError {
+function sendErrorOf(error: unknown): FieldFailure {
   if (hasErrorCode(error, ErrorCode.OTP_LOCKED)) return { message: lockedMessage(error) };
   if (hasErrorCode(error, ErrorCode.OTP_RATE_LIMITED)) return { message: rateLimitedMessage(error) };
   if (hasErrorCode(error, ErrorCode.VALIDATION_FAILED)) return { message: 'Email chưa đúng định dạng.' };
-  return { message: error instanceof ApiError ? error.message : GENERIC_ERROR };
+  return { message: messageOf(error) };
 }
 
-function verifyErrorOf(error: unknown): FieldError {
+function verifyErrorOf(error: unknown): FieldFailure {
   if (hasErrorCode(error, ErrorCode.OTP_LOCKED)) return { message: lockedMessage(error) };
   if (hasErrorCode(error, ErrorCode.OTP_INVALID)) {
     const left = remainingAttempts(error);
@@ -56,7 +55,7 @@ function verifyErrorOf(error: unknown): FieldError {
   if (hasErrorCode(error, ErrorCode.OTP_EXPIRED)) return { message: 'Mã đã hết hạn', newCode: true };
   if (hasErrorCode(error, ErrorCode.OTP_ATTEMPTS_EXCEEDED)) return { message: 'Mã đã hết hiệu lực', newCode: true };
   if (hasErrorCode(error, ErrorCode.VALIDATION_FAILED)) return { message: `Mã gồm ${OTP_LENGTH} số.` };
-  return { message: error instanceof ApiError ? error.message : GENERIC_ERROR };
+  return { message: messageOf(error) };
 }
 
 type GoogleBanner = { tone: 'warning' | 'danger'; title: string };
@@ -75,20 +74,6 @@ function googleBannerOf(code: string | undefined): GoogleBanner | null {
   }
   // `start_failed`, `state_mismatch`, `invalid_code`…
   return { tone: 'danger', title: 'Chưa đăng nhập được bằng Google. Thử lại hoặc dùng mã qua email.' };
-}
-
-function ErrorText({ id, error }: { id: string; error: FieldError | null }) {
-  // Vùng luôn có mặt để trình đọc màn hình thông báo khi lỗi xuất hiện.
-  return (
-    <p id={id} role="alert" className="flex min-h-0 items-start gap-1.5 text-meta text-danger-text empty:hidden">
-      {error ? (
-        <>
-          <OctagonAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          <span>{error.message}</span>
-        </>
-      ) : null}
-    </p>
-  );
 }
 
 function useSecondsUntil(deadline: number | null): number {
@@ -126,8 +111,8 @@ export function LoginForm({ returnTo, alternativeSignIn, googleError }: LoginFor
 
   const [step, setStep] = useState<Step>({ kind: 'email' });
   const [email, setEmail] = useState('');
-  const [emailError, setEmailError] = useState<FieldError | null>(null);
-  const [codeError, setCodeError] = useState<FieldError | null>(null);
+  const [emailError, setEmailError] = useState<FieldFailure | null>(null);
+  const [codeError, setCodeError] = useState<FieldFailure | null>(null);
   const [partialCode, setPartialCode] = useState('');
   const [otpKey, setOtpKey] = useState(0);
   const lastSubmitted = useRef<string | null>(null);
@@ -243,7 +228,7 @@ export function LoginForm({ returnTo, alternativeSignIn, googleError }: LoginFor
             aria-invalid={emailError ? true : undefined}
             aria-describedby={emailErrorId}
           />
-          <ErrorText id={emailErrorId} error={emailError} />
+          <FieldError id={emailErrorId} message={emailError?.message} />
           <Button type="submit" className="mt-2 w-full" loading={send.isPending}>
             Gửi mã
           </Button>
@@ -281,7 +266,7 @@ export function LoginForm({ returnTo, alternativeSignIn, googleError }: LoginFor
           onChange={setPartialCode}
           onComplete={submitCode}
         />
-        <ErrorText id={codeErrorId} error={codeError} />
+        <FieldError id={codeErrorId} message={codeError?.message} />
         {codeError?.newCode ? (
           <Button type="button" variant="secondary" className="w-full" loading={send.isPending} onClick={resend}>
             Gửi mã mới
