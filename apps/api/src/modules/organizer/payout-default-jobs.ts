@@ -8,13 +8,13 @@ import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
 import { EMAIL_TRANSPORT, type EmailTransport } from '../../platform/email/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
 import { userContacts } from '../identity/index.js';
-import { buildDefaultPayoutChangedEmail } from './payout-default-email.js';
+import { buildDefaultPayoutChangedEmail, DEFAULT_PAYOUT_CHANGE_REASONS } from './payout-default-email.js';
 import { members, organizations, payoutAccounts } from './schema.js';
 
 /*
  * Email cảnh báo đổi tài khoản nhận tiền mặc định (Story 2.13-a): mỗi lần tài khoản mặc định của BTC đổi (Owner đặt
- * tài khoản khác làm mặc định, hoặc hủy liên kết tài khoản mặc định, kể cả tài khoản cuối cùng), service enqueue một
- * job bằng chính `tx` của thay đổi; worker gửi email cho Owner và mọi Admin của BTC.
+ * tài khoản khác làm mặc định, hủy liên kết tài khoản mặc định, kể cả tài khoản cuối cùng, hoặc đổi key Tingee ở
+ * 2.13-b), service enqueue một job bằng chính `tx` của thay đổi; worker gửi email cho Owner và mọi Admin của BTC.
  */
 
 const QUEUE = JobQueue.ORGANIZER_NOTIFY_DEFAULT_PAYOUT_CHANGED;
@@ -36,16 +36,26 @@ export const DEFAULT_PAYOUT_QUEUE_OPTIONS = {
 const WORK_OPTIONS = { batchSize: 10, burstWhenBatchFull: true, perJobResults: true } as const satisfies WorkOptions;
 
 /** Payload của job: chỉ id và mốc giờ, không PII (4 số cuối và email người nhận đọc lúc gửi). */
-export const DefaultPayoutChangedPayload = z.object({
-  organizationId: z.uuid(),
-  /** Tài khoản thôi là mặc định (dòng đã hủy liên kết vẫn còn nên luôn đọc được). */
-  previousAccountId: z.uuid(),
-  /** Tài khoản mới là mặc định; `null`: BTC không còn tài khoản nhận tiền. */
-  nextAccountId: z.uuid().nullable(),
-  actorUserId: z.uuid(),
-  changedAt: z.iso.datetime({ offset: true }),
-});
-export type DefaultPayoutChangedPayload = z.infer<typeof DefaultPayoutChangedPayload>;
+export const DefaultPayoutChangedPayload = z
+  .object({
+    organizationId: z.uuid(),
+    /**
+     * Tài khoản thôi là mặc định (dòng đã hủy liên kết vẫn còn nên luôn đọc được); `null`: trước đó BTC không có tài
+     * khoản nhận tiền nào (đã hủy hết rồi mới đổi key Tingee).
+     */
+    previousAccountId: z.uuid().nullable(),
+    /** Tài khoản mới là mặc định; `null`: BTC không còn tài khoản nhận tiền. */
+    nextAccountId: z.uuid().nullable(),
+    actorUserId: z.uuid(),
+    changedAt: z.iso.datetime({ offset: true }),
+    /** Vì sao mặc định đổi; thiếu (job tạo trước 2.13-b) → `default_changed`. */
+    reason: z.enum(DEFAULT_PAYOUT_CHANGE_REASONS).default('default_changed'),
+  })
+  .refine((p) => p.previousAccountId !== null || p.nextAccountId !== null, {
+    message: 'Cần ít nhất một trong previousAccountId, nextAccountId',
+  });
+/** Dạng gửi vào (`reason` không bắt buộc); worker nhận dạng đã parse, luôn có `reason`. */
+export type DefaultPayoutChangedPayload = z.input<typeof DefaultPayoutChangedPayload>;
 
 /**
  * Tạo queue cảnh báo và dead-letter của nó (gọi lại không sao). Cả vai `api` (gửi job) lẫn `worker` (xử lý) gọi lúc
@@ -80,10 +90,11 @@ const errorName = (err: unknown): string =>
   (err as { constructor?: { name?: string } } | null)?.constructor?.name ?? 'Unknown';
 
 /**
- * Handler của job: đọc tên BTC, tên ngân hàng + 4 số cuối của hai tài khoản (kể cả dòng đã hủy liên kết), người đổi và
- * danh sách Owner + Admin hiện tại, rồi gửi mỗi người một email. BTC hay tài khoản không còn → `skipped` (job vẫn hoàn
- * tất). Có email gửi lỗi → ném lỗi để pg-boss retry (lần retry gửi lại cho mọi người: thà trùng còn hơn mất cảnh báo);
- * lỗi chỉ mang tên lớp (message của lỗi SMTP có thể chứa địa chỉ email, mà job lưu lỗi vào DB).
+ * Handler của job: đọc tên BTC, tên ngân hàng + 4 số cuối của hai tài khoản (kể cả dòng đã hủy liên kết; phía `null`
+ * là "chưa có / không còn tài khoản nhận tiền"), người đổi và danh sách Owner + Admin hiện tại, rồi gửi mỗi người một
+ * email. BTC hay tài khoản không còn → `skipped` (job vẫn hoàn tất). Có email gửi lỗi → ném lỗi để pg-boss retry (lần
+ * retry gửi lại cho mọi người: thà trùng còn hơn mất cảnh báo); lỗi chỉ mang tên lớp (message của lỗi SMTP có thể chứa
+ * địa chỉ email, mà job lưu lỗi vào DB).
  * @returns số email đã gửi, hoặc `skipped`.
  */
 export async function notifyDefaultPayoutChanged(
@@ -98,14 +109,16 @@ export async function notifyDefaultPayoutChanged(
     .where(scope({ organizationId: organizations.id }));
   if (!org) return 'skipped';
 
-  const accountIds = [payload.previousAccountId, ...(payload.nextAccountId ? [payload.nextAccountId] : [])];
+  const accountIds = [payload.previousAccountId, payload.nextAccountId].filter((id): id is string => id !== null);
   const accounts = await db.orm
     .select({ id: payoutAccounts.id, bankName: payoutAccounts.bankName, accountLast4: payoutAccounts.accountLast4 })
     .from(payoutAccounts)
     .where(and(scope(payoutAccounts), inArray(payoutAccounts.id, accountIds)));
-  const previous = accounts.find((a) => a.id === payload.previousAccountId);
-  const next = payload.nextAccountId ? accounts.find((a) => a.id === payload.nextAccountId) : null;
-  if (!previous || next === undefined) return 'skipped';
+  // `undefined`: id có trong payload nhưng không còn (hoặc của BTC khác); `null`: không có tài khoản ở phía đó.
+  const accountOf = (id: string | null) => (id === null ? null : accounts.find((a) => a.id === id));
+  const previous = accountOf(payload.previousAccountId);
+  const next = accountOf(payload.nextAccountId);
+  if (previous === undefined || next === undefined) return 'skipped';
 
   const recipients = await db.orm
     .select({ userId: members.userId })
@@ -116,6 +129,7 @@ export async function notifyDefaultPayoutChanged(
   const actor = contacts.get(payload.actorUserId);
   const message = buildDefaultPayoutChangedEmail({
     organizationName: org.name,
+    reason: payload.reason ?? 'default_changed',
     previous,
     next,
     actor: actor ? actor.name.trim() || actor.email : 'Không rõ',

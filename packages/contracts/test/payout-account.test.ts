@@ -9,10 +9,12 @@ import {
   PayoutAccount,
   PayoutAccountOption,
   PayoutAccountOverview,
+  ReplaceTingeeKeyRequest,
   SelectPayoutAccountRequest,
   TINGEE_IPN_PATH,
   TINGEE_KEY_MAX_LENGTH,
   TingeeCredentialSummary,
+  TingeeKeyPreview,
   tingeeIpnUrl,
 } from '../src/organizer.js';
 import { STATUS_NOTICE_PRIORITY, StatusNoticeCode } from '../src/reporting.js';
@@ -44,6 +46,20 @@ describe('tài khoản nhận tiền: BTC dùng key Tingee của mình (Story 2.
     expect(SelectPayoutAccountRequest.parse({ vaAccountNumber: ' 9600000001 ' })).toEqual({ vaAccountNumber: '9600000001' });
     expect(SelectPayoutAccountRequest.safeParse({ vaAccountNumber: '' }).success).toBe(false);
     expect(SelectPayoutAccountRequest.safeParse({}).success).toBe(false);
+  });
+
+  it('đổi key Tingee (Story 2.13-b): key mới như form kết nối + vaAccountNumber; xem trước không có Client ID đầy đủ', () => {
+    expect(
+      ReplaceTingeeKeyRequest.parse({ clientId: ' abc ', secretToken: ' def ', vaAccountNumber: ' 9600000001 ' }),
+    ).toEqual({ clientId: 'abc', secretToken: 'def', vaAccountNumber: '9600000001' });
+    for (const missing of ['clientId', 'secretToken', 'vaAccountNumber'] as const) {
+      const body = { clientId: 'abc', secretToken: 'def', vaAccountNumber: '9600000001', [missing]: ' ' };
+      const result = ReplaceTingeeKeyRequest.safeParse(body);
+      expect(result.success, missing).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual([missing]);
+    }
+    expect(Object.keys(TingeeKeyPreview.shape).sort()).toEqual(['accounts', 'clientIdMasked']);
+    expect(ErrorCode.PAYOUT_ACCOUNT_NOT_LINKED_YET).toBe('PAYOUT_ACCOUNT_NOT_LINKED_YET');
   });
 
   it('Client ID che còn 4 ký tự cuối; Client ID quá ngắn không lộ ký tự nào', () => {

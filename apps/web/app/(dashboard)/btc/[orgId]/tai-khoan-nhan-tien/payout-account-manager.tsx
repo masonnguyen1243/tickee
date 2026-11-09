@@ -9,6 +9,7 @@ import {
   type PayoutAccountOptions,
   type PayoutAccountOverview,
   type TingeeCredentialSummary,
+  type TingeeKeyPreview,
 } from '@tickee/contracts';
 import { ExternalLink, Landmark, OctagonAlert } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
@@ -31,11 +32,14 @@ import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
 import { isTotpRequired } from '@/lib/auth/totp';
 import { copyWithToast } from '@/lib/clipboard';
 import {
+  beginTingeeKeyReplacement,
   connectTingee,
   fetchPayoutAccount,
   fetchPayoutAccountOptions,
   payoutAccountOptionsQueryKey,
   payoutAccountQueryKey,
+  previewTingeeKeyReplacement,
+  replaceTingeeKey,
   selectPayoutAccount,
   setDefaultPayoutAccount,
   unlinkPayoutAccount,
@@ -52,6 +56,11 @@ import { cn } from '@/lib/utils';
  * giờ quay lại trình duyệt. "Đặt làm mặc định" và "Hủy liên kết" đổi nơi nhận tiền nên api đòi xác nhận lại (Story
  * 2.13-a): gọi qua `withReauth`, gặp `REAUTH_REQUIRED` thì dialog "Xác nhận để tiếp tục" mở, xác nhận xong thao tác tự
  * chạy tiếp; đóng dialog đó thì không làm gì.
+ *
+ * "Đổi key Tingee" (Story 2.13-b, BTC đã từng liên kết tài khoản): bấm nút thì dialog xác nhận lại hiện ngay; xác nhận
+ * xong thì form nhập key mới mở (giữ lần xác nhận) → danh sách tài khoản của key mới → chọn một tài khoản → "Lưu". Tới
+ * lúc lưu, key và tài khoản cũ vẫn hiện hành (api không lưu gì ở bước xem trước); Secret Token chỉ nằm trong state của
+ * luồng này. Lưu quá 5 phút sau khi xác nhận thì dialog hiện lại và lần lưu tự chạy tiếp.
  */
 
 type Draft = { clientId: string; secretToken: string };
@@ -61,8 +70,11 @@ type FieldErrors = Partial<Record<Field, string>>;
 const PROVIDER_DOWN = 'Tingee tạm lỗi, thử lại sau ít phút.';
 const CREDENTIAL_INVALID = 'Client ID hoặc Secret Token không đúng.';
 const CREDENTIAL_REVOKED = 'Client ID hoặc Secret Token không còn đúng. Bấm “Dùng key khác” để nhập key mới.';
-/** Key bị thu hồi khi BTC đã từng liên kết tài khoản: không đổi key ở trang này được (Story 2.13). */
-const CREDENTIAL_REVOKED_LOCKED = 'Client ID hoặc Secret Token không còn đúng. Kiểm tra API key trên portal Tingee.';
+/** Key bị thu hồi khi BTC đã từng liên kết tài khoản: nhập key mới qua luồng "Đổi key Tingee" (Story 2.13-b). */
+const CREDENTIAL_REVOKED_LOCKED = 'Client ID hoặc Secret Token không còn đúng. Bấm “Đổi key Tingee” để nhập key mới.';
+const CHANGE_KEY = 'Đổi key Tingee';
+/** Lưu đổi key thất bại: không có gì đổi. */
+const KEY_UNCHANGED = 'Key và tài khoản nhận tiền hiện tại vẫn giữ nguyên.';
 const ACCOUNT_ALREADY_LINKED = 'Tài khoản này đã được liên kết.';
 const PORTAL_UNSELECT_HINT =
   'Không dùng tài khoản này nữa thì bỏ chọn nó trong “Các Tài khoản cho phép thanh toán” trên portal Tingee.';
@@ -100,7 +112,7 @@ function refreshOverview(queryClient: QueryClient, orgId: string) {
 }
 
 /**
- * Tổng quan mới do api trả (hủy liên kết, đặt mặc định) thay cache; dải banner đọc lại. Hủy lần đọc tổng quan đang chạy
+ * Tổng quan mới do api trả (hủy liên kết, đặt mặc định, đổi key Tingee) thay cache; dải banner đọc lại. Hủy lần đọc tổng quan đang chạy
  * trước: nó có thể về sau và ghi đè bằng dữ liệu cũ.
  */
 async function applyOverview(queryClient: QueryClient, orgId: string, overview: PayoutAccountOverview) {
@@ -161,41 +173,45 @@ function TingeeGuide({ portalUrl }: { portalUrl: string }) {
   );
 }
 
-function ConnectForm({
-  orgId,
-  replacing,
-  onConnected,
+/**
+ * Form Client ID / Secret Token dùng chung cho kết nối lần đầu ("Dùng key khác") và "Đổi key Tingee": kiểm tại ô (không
+ * gọi api), gửi key đã bỏ khoảng trắng qua `onSubmit`, báo lỗi của lần gửi (`failure`) tại form, dữ liệu đã nhập được
+ * giữ. Sửa key khi đang báo key sai thì `onEdited` (người gọi bỏ lỗi cũ).
+ */
+function TingeeKeyForm({
+  title,
+  description,
+  slot,
+  submitLabel,
+  failureTitle,
+  initial,
+  pending,
+  failure,
+  onSubmit,
+  onEdited,
   onCancel,
 }: {
-  orgId: string;
-  /** Đã có credential, Owner đang nhập key khác. */
-  replacing: boolean;
-  onConnected: (options: PayoutAccountOptions) => void;
+  title: string;
+  description?: string;
+  slot: string;
+  submitLabel: string;
+  failureTitle: string;
+  /** Giá trị ban đầu (quay lại form từ bước sau). */
+  initial?: Draft;
+  pending: boolean;
+  /** Lỗi của lần gửi gần nhất mà form phải báo (người gọi đã lọc lỗi do nơi khác xử lý). */
+  failure: unknown;
+  onSubmit: (key: ConnectTingeeRequest) => void;
+  onEdited: () => void;
   onCancel?: () => void;
 }) {
   const ids = useId();
   const id = (field: Field) => `${ids}-${field}`;
-  const queryClient = useQueryClient();
-  const goToLogin = useGoToLogin();
-  const [draft, setDraft] = useState<Draft>({ clientId: '', secretToken: '' });
+  const [draft, setDraft] = useState<Draft>(initial ?? { clientId: '', secretToken: '' });
   const [errors, setErrors] = useState<FieldErrors>({});
 
-  const connect = useMutation({
-    mutationFn: (body: ConnectTingeeRequest) => connectTingee(orgId, body),
-    // Không toast: trang chuyển ngay sang danh sách tài khoản (toast ở 375px còn đè lên nút "Dùng tài khoản này").
-    onSuccess: (options) => onConnected(options),
-    onError: (error) => {
-      if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
-      else if (hasErrorCode(error, ErrorCode.PAYOUT_ACCOUNT_ALREADY_LINKED)) {
-        // Tab khác vừa liên kết tài khoản: từ đó không nhập key khác ở đây được nữa.
-        toast.info('BTC đã liên kết tài khoản nhận tiền nên không đổi key ở đây được.');
-        refreshOverview(queryClient, orgId);
-      }
-    },
-  });
-
   const submit = () => {
-    if (connect.isPending) return;
+    if (pending) return;
     const parsed = ConnectTingeeRequest.safeParse(draft);
     if (!parsed.success) {
       const next: FieldErrors = {};
@@ -205,11 +221,11 @@ function ConnectForm({
         next[field] = draft[field].trim() === '' ? EMPTY_MESSAGES[field] : INVALID_MESSAGES[field];
       }
       setErrors(next);
-      connect.reset();
+      onEdited();
       return;
     }
     setErrors({});
-    connect.mutate(parsed.data);
+    onSubmit(parsed.data);
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -217,12 +233,6 @@ function ConnectForm({
     submit();
   };
 
-  const failure =
-    connect.error &&
-    !handledElsewhere(connect.error) &&
-    !hasErrorCode(connect.error, ErrorCode.PAYOUT_ACCOUNT_ALREADY_LINKED)
-      ? connect.error
-      : null;
   const credentialInvalid = hasErrorCode(failure, ErrorCode.TINGEE_CREDENTIAL_INVALID);
   const providerDown = hasErrorCode(failure, ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE);
 
@@ -230,7 +240,7 @@ function ConnectForm({
     setDraft((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
     // Đã sửa key: bỏ câu "không đúng" của lần gửi trước.
-    if (credentialInvalid) connect.reset();
+    if (credentialInvalid) onEdited();
   };
 
   const input = (field: Field) => ({
@@ -252,8 +262,11 @@ function ConnectForm({
 
   return (
     <section className={cardClass}>
-      <h2 className="text-title">{replacing ? 'Nhập key Tingee khác' : 'Kết nối tài khoản Tingee'}</h2>
-      <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-stack" data-slot="tingee-connect-form">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-title">{title}</h2>
+        {description ? <p className="text-meta text-muted-foreground">{description}</p> : null}
+      </div>
+      <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-stack" data-slot={slot}>
         <div className="flex flex-col gap-2">
           <Label htmlFor={id('clientId')}>Client ID</Label>
           <Input {...input('clientId')} />
@@ -273,7 +286,7 @@ function ConnectForm({
         {failure ? (
           <StatusBanner
             tone="danger"
-            title="Chưa kết nối được Tingee"
+            title={failureTitle}
             description={credentialInvalid ? CREDENTIAL_INVALID : providerDown ? PROVIDER_DOWN : messageOf(failure)}
             action={
               credentialInvalid ? undefined : (
@@ -285,8 +298,8 @@ function ConnectForm({
           />
         ) : null}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Button type="submit" loading={connect.isPending}>
-            Kết nối
+          <Button type="submit" loading={pending}>
+            {submitLabel}
           </Button>
           {onCancel ? (
             <Button type="button" variant="link" size="sm" onClick={onCancel}>
@@ -296,6 +309,57 @@ function ConnectForm({
         </div>
       </form>
     </section>
+  );
+}
+
+function ConnectForm({
+  orgId,
+  replacing,
+  onConnected,
+  onCancel,
+}: {
+  orgId: string;
+  /** Đã có credential, Owner đang nhập key khác. */
+  replacing: boolean;
+  onConnected: (options: PayoutAccountOptions) => void;
+  onCancel?: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const goToLogin = useGoToLogin();
+
+  const connect = useMutation({
+    mutationFn: (body: ConnectTingeeRequest) => connectTingee(orgId, body),
+    // Không toast: trang chuyển ngay sang danh sách tài khoản (toast ở 375px còn đè lên nút "Dùng tài khoản này").
+    onSuccess: (options) => onConnected(options),
+    onError: (error) => {
+      if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
+      else if (hasErrorCode(error, ErrorCode.PAYOUT_ACCOUNT_ALREADY_LINKED)) {
+        // Tab khác vừa liên kết tài khoản: từ đó không nhập key khác ở đây được nữa.
+        toast.info('BTC đã liên kết tài khoản nhận tiền nên không đổi key ở đây được.');
+        refreshOverview(queryClient, orgId);
+      }
+    },
+  });
+
+  const failure =
+    connect.error &&
+    !handledElsewhere(connect.error) &&
+    !hasErrorCode(connect.error, ErrorCode.PAYOUT_ACCOUNT_ALREADY_LINKED)
+      ? connect.error
+      : null;
+
+  return (
+    <TingeeKeyForm
+      title={replacing ? 'Nhập key Tingee khác' : 'Kết nối tài khoản Tingee'}
+      slot="tingee-connect-form"
+      submitLabel="Kết nối"
+      failureTitle="Chưa kết nối được Tingee"
+      pending={connect.isPending}
+      failure={failure}
+      onSubmit={(key) => connect.mutate(key)}
+      onEdited={() => connect.reset()}
+      onCancel={onCancel}
+    />
   );
 }
 
@@ -357,6 +421,8 @@ function AccountChooser({
   linkedVas,
   adding,
   onReplaceKey,
+  onChangeKey,
+  changeKeyPending = false,
   onLinked,
   onClose,
 }: {
@@ -372,6 +438,10 @@ function AccountChooser({
   adding: boolean;
   /** "Dùng key khác": chỉ có khi BTC chưa từng liên kết tài khoản nào (`canReplaceKey`). */
   onReplaceKey?: () => void;
+  /** "Đổi key Tingee" (có xác nhận lại): khi BTC đã từng liên kết tài khoản. */
+  onChangeKey?: () => void;
+  /** Đang kiểm lần xác nhận lại của "Đổi key Tingee". */
+  changeKeyPending?: boolean;
   onLinked: () => void;
   /** Đóng danh sách khi đang thêm tài khoản. */
   onClose?: () => void;
@@ -421,9 +491,14 @@ function AccountChooser({
       Dùng key khác
     </Button>
   ) : null;
-  // Key bị thu hồi trên Tingee: đổi key được thì mở form, không thì chỉ đường sang portal.
+  const changeKeyAction = onChangeKey ? (
+    <Button type="button" variant="link" size="sm" loading={changeKeyPending} onClick={onChangeKey}>
+      {CHANGE_KEY}
+    </Button>
+  ) : null;
+  // Key bị thu hồi trên Tingee: "Dùng key khác" (chưa từng liên kết) hoặc "Đổi key Tingee" mở form nhập key mới.
   const revokedDescription = onReplaceKey ? CREDENTIAL_REVOKED : CREDENTIAL_REVOKED_LOCKED;
-  const revokedAction = otherKeyAction ?? <TingeeLink href={portalUrl}>Mở portal Tingee</TingeeLink>;
+  const revokedAction = otherKeyAction ?? changeKeyAction ?? <TingeeLink href={portalUrl}>Mở portal Tingee</TingeeLink>;
 
   const selectFailure =
     select.error &&
@@ -545,7 +620,8 @@ function AccountChooser({
           <span>
             Đã kết nối Tingee · Client ID <span className="tabular-nums">{credential.clientIdMasked}</span>
           </span>
-          {otherKeyAction}
+          {/* Đang thêm tài khoản: "Đổi key Tingee" đã có ở thẻ tài khoản nhận tiền phía trên. */}
+          {otherKeyAction ?? (adding ? null : changeKeyAction)}
         </div>
       </div>
       {selectBanner}
@@ -719,8 +795,8 @@ function UnlinkDialog({
 }
 
 /**
- * Đã liên kết: danh sách tài khoản (mặc định, đặt mặc định, hủy liên kết), "Thêm tài khoản", URL IPN để dán vào portal
- * Tingee và checklist hai bước.
+ * Đã liên kết: Client ID (che) + "Đổi key Tingee", danh sách tài khoản (mặc định, đặt mặc định, hủy liên kết), "Thêm
+ * tài khoản", URL IPN để dán vào portal Tingee và checklist hai bước.
  */
 function LinkedView({
   orgId,
@@ -731,6 +807,8 @@ function LinkedView({
   adding,
   onAdd,
   onAddDone,
+  onChangeKey,
+  changeKeyPending,
 }: {
   orgId: string;
   credential: TingeeCredentialSummary | null;
@@ -740,6 +818,8 @@ function LinkedView({
   adding: boolean;
   onAdd: () => void;
   onAddDone: () => void;
+  onChangeKey: () => void;
+  changeKeyPending: boolean;
 }) {
   const ipnInputId = useId();
   const queryClient = useQueryClient();
@@ -780,6 +860,19 @@ function LinkedView({
         <p className="text-meta text-muted-foreground">
           Đơn mới nhận tiền vào tài khoản mặc định, chuyển thẳng qua Tingee. Tickee không giữ tiền của BTC.
         </p>
+        {credential ? (
+          <div
+            className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-muted-foreground"
+            data-slot="tingee-key"
+          >
+            <span>
+              Key Tingee · Client ID <span className="tabular-nums">{credential.clientIdMasked}</span>
+            </span>
+            <Button type="button" variant="link" size="sm" loading={changeKeyPending} onClick={onChangeKey}>
+              {CHANGE_KEY}
+            </Button>
+          </div>
+        ) : null}
         <ul className="flex flex-col divide-y divide-border" data-slot="payout-account-list">
           {accounts.map((account) => (
             <AccountRow
@@ -807,6 +900,8 @@ function LinkedView({
           portalUrl={portalUrl}
           linkedVas={new Set(accounts.map((a) => a.vaAccountNumber))}
           adding
+          onChangeKey={onChangeKey}
+          changeKeyPending={changeKeyPending}
           onLinked={onAddDone}
           onClose={onAddDone}
         />
@@ -862,6 +957,265 @@ function LinkedView({
   );
 }
 
+/**
+ * Luồng "Đổi key Tingee" sau khi Owner đã xác nhận lại (`reauthToken`): nhập key mới → api đọc danh sách tài khoản của
+ * key mới (không lưu gì) → chọn một tài khoản → "Lưu" (api đọc lại danh sách rồi mới lưu). Secret Token chỉ nằm trong
+ * state của luồng tới lúc lưu. Mọi lời gọi mang lần xác nhận đang giữ; api báo `REAUTH_REQUIRED` (quá 5 phút) thì dialog
+ * xác nhận hiện lại, lần mới được giữ thay và thao tác tự chạy tiếp; đóng dialog thì không làm gì. "Hủy" quay về màn cũ.
+ */
+function ReplaceKeyFlow({
+  orgId,
+  reauthToken,
+  portalUrl,
+  onDone,
+  onCancel,
+}: {
+  orgId: string;
+  /** Lần xác nhận của bước "Đổi key Tingee" (không có thì lời gọi đầu tiên tự mở dialog xác nhận). */
+  reauthToken: string | undefined;
+  portalUrl: string;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const ids = useId();
+  const queryClient = useQueryClient();
+  const goToLogin = useGoToLogin();
+  const held = useRef(reauthToken);
+  /** Key đã qua bước xem trước (giữ khi quay lại form bằng "Nhập key khác"). */
+  const [key, setKey] = useState<Draft | null>(null);
+  /** Danh sách tài khoản của `key`; `null`: đang ở form nhập key. */
+  const [preview, setPreview] = useState<TingeeKeyPreview | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [missingChoice, setMissingChoice] = useState(false);
+
+  const withHeld = <T,>(call: (token: string | undefined) => Promise<T>) =>
+    withReauth((fresh) => {
+      if (fresh) held.current = fresh;
+      return call(held.current);
+    });
+
+  /** Lỗi do nơi khác xử lý, hoặc đã xử lý trong `onError` (dialog xác nhận vừa đóng, BTC chưa từng liên kết). */
+  const handled = (error: unknown) =>
+    handledElsewhere(error) || isReauthRequired(error) || hasErrorCode(error, ErrorCode.PAYOUT_ACCOUNT_NOT_LINKED_YET);
+  const onFlowError = (error: unknown) => {
+    if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
+    else if (hasErrorCode(error, ErrorCode.PAYOUT_ACCOUNT_NOT_LINKED_YET)) {
+      // Không xảy ra từ nút của trang này; dữ liệu đã lệch (vd. tab khác): đọc lại và quay về màn cũ.
+      refreshOverview(queryClient, orgId);
+      onCancel();
+    }
+  };
+
+  const load = useMutation({
+    mutationFn: (next: Draft) => withHeld((token) => previewTingeeKeyReplacement(orgId, next, token)),
+    onSuccess: (result, next) => {
+      setKey(next);
+      setPreview(result);
+    },
+    onError: onFlowError,
+  });
+
+  const save = useMutation({
+    mutationFn: ({ next, vaAccountNumber }: { next: Draft; vaAccountNumber: string }) =>
+      withHeld((token) => replaceTingeeKey(orgId, { ...next, vaAccountNumber }, token)),
+    onSuccess: async (overview) => {
+      await applyOverview(queryClient, orgId, overview);
+      const account = overview.accounts.find((a) => a.isDefault);
+      toast.success('Đã đổi key Tingee.', {
+        description: account ? `${accountLabel(account)} là tài khoản mặc định.` : undefined,
+      });
+      onDone();
+    },
+    onError: onFlowError,
+  });
+
+  const loadFailure = load.error && !handled(load.error) ? load.error : null;
+  const saveFailure = save.error && !handled(save.error) ? save.error : null;
+
+  if (!preview || !key) {
+    return (
+      <TingeeKeyForm
+        title={CHANGE_KEY}
+        description="Nhập API key mới lấy trên portal Tingee. Tới lúc bạn lưu, key và tài khoản nhận tiền hiện tại vẫn được dùng."
+        slot="tingee-replace-key-form"
+        submitLabel="Tiếp tục"
+        failureTitle="Chưa đọc được tài khoản của key mới"
+        initial={key ?? undefined}
+        pending={load.isPending}
+        failure={loadFailure}
+        onSubmit={(next) => load.mutate(next)}
+        onEdited={() => load.reset()}
+        onCancel={onCancel}
+      />
+    );
+  }
+
+  const options = preview.accounts;
+  const chosen = options.find((o) => o.selectable && o.vaAccountNumber === selected)?.vaAccountNumber ?? null;
+  const reload = () => {
+    save.reset();
+    load.mutate(key);
+  };
+  const otherKey = () => {
+    save.reset();
+    load.reset();
+    setPreview(null);
+    // Tài khoản đã chọn thuộc key cũ: danh sách của key sau phải chọn lại từ đầu.
+    setSelected(null);
+    setMissingChoice(false);
+  };
+  const submit = () => {
+    if (save.isPending) return;
+    if (!chosen) {
+      setMissingChoice(true);
+      return;
+    }
+    save.mutate({ next: key, vaAccountNumber: chosen });
+  };
+
+  let saveBanner: ReactNode = null;
+  if (saveFailure) {
+    const action = (label: string, onClick: () => void) => (
+      <Button type="button" variant="link" size="sm" disabled={save.isPending} onClick={onClick}>
+        {label}
+      </Button>
+    );
+    const [description, button] = hasErrorCode(saveFailure, ErrorCode.TINGEE_CREDENTIAL_INVALID)
+      ? ['Client ID hoặc Secret Token của key mới không còn đúng.', action('Nhập key khác', otherKey)]
+      : hasErrorCode(saveFailure, ErrorCode.PAYOUT_ACCOUNT_UNAVAILABLE)
+        ? [UNAVAILABLE, action('Tải lại', reload)]
+        : hasErrorCode(saveFailure, ErrorCode.BANK_NOT_SUPPORTED)
+          ? [`${VIETINBANK}. Chọn tài khoản ở ngân hàng khác.`, action('Tải lại', reload)]
+          : hasErrorCode(saveFailure, ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE)
+            ? [PROVIDER_DOWN, action('Thử lại', submit)]
+            : [messageOf(saveFailure), action('Thử lại', submit)];
+    saveBanner = (
+      <StatusBanner
+        tone="danger"
+        title="Chưa đổi được key Tingee"
+        description={`${description} ${KEY_UNCHANGED}`}
+        action={button}
+      />
+    );
+  }
+
+  return (
+    <section className={cardClass} data-slot="tingee-replace-key-accounts">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-title">Chọn tài khoản nhận tiền của key mới</h2>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-muted-foreground">
+          <span>
+            Key mới · Client ID <span className="tabular-nums">{preview.clientIdMasked}</span>
+          </span>
+          {/* Đang lưu: server có thể đang ghi, không cho rời bước này. */}
+          <Button type="button" variant="link" size="sm" disabled={save.isPending} onClick={otherKey}>
+            Nhập key khác
+          </Button>
+        </div>
+      </div>
+      <p className="text-body" data-slot="replace-key-consequences">
+        Lưu xong, mọi tài khoản nhận tiền hiện tại bị hủy liên kết và tài khoản bạn chọn thành tài khoản mặc định: Đơn mới
+        nhận tiền vào tài khoản này. URL IPN giữ nguyên; nếu key mới thuộc một tài khoản merchant Tingee khác, dán URL IPN
+        vào “Cấu hình thanh toán (Payment Gateway)” trên portal Tingee của merchant đó. Thêm tài khoản khác sau bằng “Thêm
+        tài khoản”.
+      </p>
+      {saveBanner}
+      {loadFailure ? (
+        <StatusBanner
+          tone="danger"
+          title="Chưa tải được danh sách tài khoản"
+          description={
+            hasErrorCode(loadFailure, ErrorCode.TINGEE_CREDENTIAL_INVALID)
+              ? 'Client ID hoặc Secret Token của key mới không còn đúng.'
+              : hasErrorCode(loadFailure, ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE)
+                ? PROVIDER_DOWN
+                : messageOf(loadFailure)
+          }
+          action={
+            // Key mới bị từ chối: gửi lại đúng key đó vô ích, phải nhập key khác.
+            hasErrorCode(loadFailure, ErrorCode.TINGEE_CREDENTIAL_INVALID) ? (
+              <Button type="button" variant="link" size="sm" disabled={save.isPending} onClick={otherKey}>
+                Nhập key khác
+              </Button>
+            ) : (
+              <Button type="button" variant="link" size="sm" onClick={reload}>
+                Thử lại
+              </Button>
+            )
+          }
+        />
+      ) : null}
+      {options.length === 0 ? (
+        <EmptyState
+          icon={Landmark}
+          title="Key mới chưa liên kết tài khoản ngân hàng nào trên Tingee."
+          description="Liên kết tài khoản ngân hàng của CLB trên portal Tingee rồi bấm “Tải lại”, hoặc nhập key khác."
+          action={
+            <div className="flex flex-col items-center gap-3">
+              <Button type="button" variant="secondary" loading={load.isPending} onClick={reload}>
+                Tải lại
+              </Button>
+              <TingeeLink href={portalUrl}>Mở portal Tingee</TingeeLink>
+            </div>
+          }
+        />
+      ) : (
+        <fieldset className="flex min-w-0 flex-col gap-2" aria-describedby={`${ids}-choice-error`}>
+          <legend className="text-label">Tài khoản nhận tiền mặc định mới</legend>
+          <ul className="flex flex-col divide-y divide-border" data-slot="replace-key-options">
+            {options.map((option) => (
+              <li key={option.vaAccountNumber} data-slot="replace-key-option" data-selectable={option.selectable}>
+                <label
+                  className={cn(
+                    'flex min-h-11 min-w-0 items-center gap-3 py-3',
+                    option.selectable ? 'cursor-pointer' : 'cursor-not-allowed',
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name={`${ids}-va`}
+                    value={option.vaAccountNumber}
+                    checked={chosen === option.vaAccountNumber}
+                    disabled={!option.selectable}
+                    onChange={() => {
+                      setSelected(option.vaAccountNumber);
+                      setMissingChoice(false);
+                      save.reset();
+                    }}
+                    className="size-5 shrink-0 cursor-pointer accent-btn-on-light disabled:cursor-not-allowed"
+                  />
+                  <span className={cn('min-w-0 flex-1', !option.selectable && 'opacity-50')}>
+                    <span className="block text-label">{option.bankName}</span>
+                    <span className="block text-body tabular-nums">•••• {option.accountLast4}</span>
+                    <span className="block text-meta break-words text-muted-foreground uppercase">
+                      {option.accountName}
+                    </span>
+                  </span>
+                  {option.selectable ? null : <span className="text-meta text-muted-foreground">{VIETINBANK}</span>}
+                </label>
+              </li>
+            ))}
+          </ul>
+          <FieldError
+            id={`${ids}-choice-error`}
+            message={missingChoice && !chosen ? 'Chọn một tài khoản nhận tiền.' : undefined}
+          />
+        </fieldset>
+      )}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        {options.length > 0 ? (
+          <Button type="button" loading={save.isPending} onClick={submit}>
+            Lưu
+          </Button>
+        ) : null}
+        <Button type="button" variant="link" size="sm" disabled={save.isPending} onClick={onCancel}>
+          Hủy
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 function PageSkeleton() {
   return (
     <div role="status" aria-busy="true" className="flex flex-col gap-stack">
@@ -875,10 +1229,13 @@ export function PayoutAccountManager() {
   const organization = useCurrentOrganization();
   const orgId = organization.id;
   const queryClient = useQueryClient();
+  const goToLogin = useGoToLogin();
   /** Owner bấm "Dùng key khác" khi đã kết nối nhưng BTC chưa từng liên kết tài khoản nào. */
   const [replacingKey, setReplacingKey] = useState(false);
   /** Owner bấm "Thêm tài khoản" khi BTC đã có tài khoản nhận tiền. */
   const [adding, setAdding] = useState(false);
+  /** "Đổi key Tingee" đã qua xác nhận lại: lần xác nhận mà luồng đổi key giữ. */
+  const [changingKey, setChangingKey] = useState<{ reauthToken: string | undefined } | null>(null);
 
   const overview = useQuery({
     queryKey: payoutAccountQueryKey(orgId),
@@ -889,6 +1246,35 @@ export function PayoutAccountManager() {
   useEffect(() => {
     if (noAccounts) setAdding(false);
   }, [noAccounts]);
+
+  // "Đổi key Tingee": dialog xác nhận lại hiện ngay (api trả `REAUTH_REQUIRED` cho lời gọi không mang lần xác nhận);
+  // xác nhận xong api kiểm lần xác nhận (không tiêu) rồi luồng đổi key mở và giữ nó.
+  const beginChangeKey = useMutation({
+    mutationFn: () =>
+      withReauth(async (reauthToken) => {
+        await beginTingeeKeyReplacement(orgId, reauthToken);
+        return reauthToken;
+      }),
+    onSuccess: (reauthToken) => {
+      setAdding(false);
+      setChangingKey({ reauthToken });
+    },
+    onError: (error) => {
+      // Đóng dialog xác nhận: không làm gì.
+      if (isReauthRequired(error)) return;
+      if (handledElsewhere(error)) {
+        if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
+        return;
+      }
+      if (hasErrorCode(error, ErrorCode.PAYOUT_ACCOUNT_NOT_LINKED_YET)) {
+        toast.info('BTC chưa liên kết tài khoản nhận tiền nào: nhập key Tingee ở form kết nối.');
+        refreshOverview(queryClient, orgId);
+      } else toast.error(messageOf(error));
+    },
+  });
+  const changeKey = () => {
+    if (!beginChangeKey.isPending) beginChangeKey.mutate();
+  };
 
   const onConnected = (options: PayoutAccountOptions) => {
     // Danh sách vừa đọc từ Tingee dùng luôn, không gọi Tingee lần nữa; tổng quan đọc lại để có URL IPN.
@@ -918,6 +1304,16 @@ export function PayoutAccountManager() {
     );
   } else if (!overview.data) {
     body = <PageSkeleton />;
+  } else if (changingKey && !overview.data.canReplaceKey) {
+    body = (
+      <ReplaceKeyFlow
+        orgId={orgId}
+        reauthToken={changingKey.reauthToken}
+        portalUrl={overview.data.tingeePortalUrl}
+        onDone={() => setChangingKey(null)}
+        onCancel={() => setChangingKey(null)}
+      />
+    );
   } else {
     const { credential, accounts, ipnUrl, tingeePortalUrl, canReplaceKey } = overview.data;
     if (accounts.length > 0) {
@@ -931,10 +1327,13 @@ export function PayoutAccountManager() {
           adding={adding}
           onAdd={() => setAdding(true)}
           onAddDone={() => setAdding(false)}
+          onChangeKey={changeKey}
+          changeKeyPending={beginChangeKey.isPending}
         />
       );
     } else if (credential && !(replacingKey && canReplaceKey)) {
-      // Chưa có tài khoản (hoặc đã hủy hết): chọn tài khoản. "Dùng key khác" chỉ khi BTC chưa từng liên kết tài khoản.
+      // Chưa có tài khoản (hoặc đã hủy hết): chọn tài khoản. "Dùng key khác" chỉ khi BTC chưa từng liên kết tài khoản;
+      // từ đó về sau là "Đổi key Tingee" (có xác nhận lại).
       body = (
         <AccountChooser
           key={credential.id}
@@ -944,6 +1343,8 @@ export function PayoutAccountManager() {
           linkedVas={new Set()}
           adding={false}
           onReplaceKey={canReplaceKey ? () => setReplacingKey(true) : undefined}
+          onChangeKey={canReplaceKey ? undefined : changeKey}
+          changeKeyPending={beginChangeKey.isPending}
           onLinked={() => setAdding(false)}
         />
       );

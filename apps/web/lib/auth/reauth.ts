@@ -12,10 +12,10 @@ import { apiRequest } from '@/lib/api/client';
 import { ApiError } from '@/lib/api/errors';
 
 /*
- * Xác nhận lại trước thao tác nhạy cảm (Story 2.13): đổi tài khoản nhận tiền mặc định, hủy liên kết tài khoản nhận tiền
- * (sau này đổi key Tingee, chuyển quyền Owner). Web không đoán trước thao tác nào cần xác nhận: gọi bình thường, api trả
- * `REAUTH_REQUIRED` thì `withReauth` mở dialog "Xác nhận để tiếp tục" (`ReauthDialog`, gắn một lần trong `Providers`),
- * lấy lần xác nhận rồi gọi lại đúng thao tác đó kèm header `REAUTH_HEADER`.
+ * Xác nhận lại trước thao tác nhạy cảm (Story 2.13): đổi tài khoản nhận tiền mặc định, hủy liên kết tài khoản nhận
+ * tiền, đổi key Tingee (sau này chuyển quyền Owner). Web không đoán trước thao tác nào cần xác nhận: gọi bình thường, api
+ * trả `REAUTH_REQUIRED` thì `withReauth` mở dialog "Xác nhận để tiếp tục" (`ReauthDialog`, gắn một lần trong
+ * `Providers`), lấy lần xác nhận rồi gọi lại đúng thao tác đó kèm header `REAUTH_HEADER`.
  */
 
 const post = (body?: unknown): RequestInit =>

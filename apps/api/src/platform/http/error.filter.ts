@@ -33,6 +33,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   BANK_NOT_SUPPORTED: 'Ngân hàng này chưa được hỗ trợ.',
   PAYOUT_ACCOUNT_UNAVAILABLE: 'Tài khoản này không còn dùng được trên Tingee.',
   PAYOUT_ACCOUNT_ALREADY_LINKED: 'Tài khoản này đã được liên kết.',
+  PAYOUT_ACCOUNT_NOT_LINKED_YET: 'BTC chưa liên kết tài khoản nhận tiền nào.',
   MERCHANT_SUSPENDED: 'Tài khoản Tingee của BTC đang tạm khóa.',
   PAYMENT_PROVIDER_UNAVAILABLE: 'Tingee tạm lỗi, thử lại sau ít phút.',
   EVENT_NOT_FOUND: 'Không tìm thấy Sự kiện này.',

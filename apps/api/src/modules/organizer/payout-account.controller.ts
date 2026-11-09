@@ -3,10 +3,12 @@ import {
   ConnectTingeeRequest,
   Permission,
   REAUTH_HEADER,
+  ReplaceTingeeKeyRequest,
   SelectPayoutAccountRequest,
   type PayoutAccount,
   type PayoutAccountOptions,
   type PayoutAccountOverview,
+  type TingeeKeyPreview,
 } from '@tickee/contracts';
 import { Access, RequirePermission, type AccessContext } from '../../platform/access/index.js';
 import { parseRequest } from '../../platform/http/index.js';
@@ -24,9 +26,9 @@ const reauthProof = (req: SessionRequest, token: string | undefined): ReauthProo
 
 /**
  * Tài khoản nhận tiền của một BTC (Story 2.6): kết nối key Tingee, thêm, hủy liên kết và đặt mặc định tài khoản. Chỉ
- * Owner (`payout_account.manage`): Admin nhận `FORBIDDEN_ROLE`. Hủy liên kết và đặt mặc định còn cần lần xác nhận lại
- * trong header `REAUTH_HEADER` (Story 2.13-a; kiểm sau quyền, thiếu → `REAUTH_REQUIRED`).
- * Mọi route mang `@RequirePermission` nên tự rơi vào bộ test cách ly.
+ * Owner (`payout_account.manage`): Admin nhận `FORBIDDEN_ROLE`. Hủy liên kết, đặt mặc định (Story 2.13-a) và ba bước
+ * đổi key Tingee (Story 2.13-b) còn cần lần xác nhận lại trong header `REAUTH_HEADER` (kiểm sau quyền, thiếu →
+ * `REAUTH_REQUIRED`). Mọi route mang `@RequirePermission` nên tự rơi vào bộ test cách ly.
  */
 @Controller('orgs/:orgId/payout-account')
 export class PayoutAccountController {
@@ -45,6 +47,44 @@ export class PayoutAccountController {
   @RequirePermission(Permission.PAYOUT_ACCOUNT_MANAGE)
   connect(@Access() ctx: AccessContext, @Body() body: unknown): Promise<PayoutAccountOptions> {
     return this.payout.connect(ctx, parseRequest(ConnectTingeeRequest, body));
+  }
+
+  /** Đổi key Tingee, bước 1: kiểm BTC đã từng liên kết tài khoản và lần xác nhận lại còn hiệu lực (không tiêu); 204. */
+  @Post('credential/replacement/begin')
+  @HttpCode(204)
+  @RequirePermission(Permission.PAYOUT_ACCOUNT_MANAGE)
+  beginReplacement(
+    @Access() ctx: AccessContext,
+    @Headers(REAUTH_HEADER) reauthToken: string | undefined,
+    @Req() req: SessionRequest,
+  ): Promise<void> {
+    return this.payout.beginReplacement(ctx, reauthProof(req, reauthToken));
+  }
+
+  /** Đổi key Tingee, bước 2: danh sách tài khoản của key mới; không lưu gì, không tiêu lần xác nhận. */
+  @Post('credential/replacement/preview')
+  @HttpCode(200)
+  @RequirePermission(Permission.PAYOUT_ACCOUNT_MANAGE)
+  previewReplacement(
+    @Access() ctx: AccessContext,
+    @Body() body: unknown,
+    @Headers(REAUTH_HEADER) reauthToken: string | undefined,
+    @Req() req: SessionRequest,
+  ): Promise<TingeeKeyPreview> {
+    return this.payout.previewReplacement(ctx, parseRequest(ConnectTingeeRequest, body), reauthProof(req, reauthToken));
+  }
+
+  /** Đổi key Tingee, bước 3: lưu key mới và tài khoản mặc định mới (tiêu lần xác nhận); trả tổng quan mới. */
+  @Post('credential/replacement')
+  @HttpCode(200)
+  @RequirePermission(Permission.PAYOUT_ACCOUNT_MANAGE)
+  replaceKey(
+    @Access() ctx: AccessContext,
+    @Body() body: unknown,
+    @Headers(REAUTH_HEADER) reauthToken: string | undefined,
+    @Req() req: SessionRequest,
+  ): Promise<PayoutAccountOverview> {
+    return this.payout.replaceKey(ctx, parseRequest(ReplaceTingeeKeyRequest, body), reauthProof(req, reauthToken));
   }
 
   /** Đọc lại danh sách tài khoản bằng credential hiện hành; chưa kết nối → 404. */

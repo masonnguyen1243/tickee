@@ -61,6 +61,10 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account');
     expect(guarded).toContain('DELETE /v1/orgs/:orgId/payout-account/:accountId');
     expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/:accountId/default');
+    // Story 2.13-b: đổi key Tingee.
+    expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/credential/replacement/begin');
+    expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/credential/replacement/preview');
+    expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/credential/replacement');
     // Story 2.7: Sự kiện (Owner và Admin).
     expect(guarded).toContain('POST /v1/orgs/:orgId/events');
     expect(guarded).toContain('GET /v1/orgs/:orgId/events');
@@ -114,21 +118,25 @@ describe('cách ly BTC', () => {
     }
   });
 
-  it('route đòi xác nhận lại (Story 2.13-a): lần xác nhận hợp lệ của Owner A không mở được BTC B, và không bị tiêu', async () => {
-    const reauthRoutes = [
-      'DELETE /v1/orgs/:orgId/payout-account/:accountId',
-      'POST /v1/orgs/:orgId/payout-account/:accountId/default',
-    ];
-    const guarded = routes.filter((r) => r.permission && reauthRoutes.includes(`${r.method} ${r.path}`));
-    expect(guarded).toHaveLength(reauthRoutes.length);
+  it('route đòi xác nhận lại (Story 2.13-a, 2.13-b): lần xác nhận hợp lệ của Owner A không mở được BTC B, và không bị tiêu', async () => {
+    // Mã lỗi trên chính BTC A khi thiếu header (sau kiểm quyền, không bao giờ NOT_A_MEMBER): id ngẫu nhiên →
+    // REAUTH_REQUIRED; đổi key trên BTC chưa từng liên kết → 409 (bước 1) hoặc body `{}` → 400 (bước 2, 3).
+    const reauthRoutes: Record<string, string> = {
+      'DELETE /v1/orgs/:orgId/payout-account/:accountId': 'REAUTH_REQUIRED',
+      'POST /v1/orgs/:orgId/payout-account/:accountId/default': 'REAUTH_REQUIRED',
+      'POST /v1/orgs/:orgId/payout-account/credential/replacement/begin': 'PAYOUT_ACCOUNT_NOT_LINKED_YET',
+      'POST /v1/orgs/:orgId/payout-account/credential/replacement/preview': 'VALIDATION_FAILED',
+      'POST /v1/orgs/:orgId/payout-account/credential/replacement': 'VALIDATION_FAILED',
+    };
+    const guarded = routes.filter((r) => r.permission && `${r.method} ${r.path}` in reauthRoutes);
+    expect(guarded).toHaveLength(Object.keys(reauthRoutes).length);
     const token = await reauthToken(h, ownerA);
     for (const route of guarded) {
       const res = await call(route, orgB, ownerA.cookie).set(REAUTH_HEADER, token);
       expect(res.status, label(route)).toBe(403);
       expect(ErrorResponse.parse(res.body).error.code, label(route)).toBe('NOT_A_MEMBER');
-      // Trên BTC A mà thiếu header: REAUTH_REQUIRED (sau kiểm quyền), không phải NOT_A_MEMBER.
       const own = await call(route, orgA, ownerA.cookie);
-      expect(ErrorResponse.parse(own.body).error.code, label(route)).toBe('REAUTH_REQUIRED');
+      expect(ErrorResponse.parse(own.body).error.code, label(route)).toBe(reauthRoutes[`${route.method} ${route.path}`]);
     }
     const hash = createHash('sha256').update(token, 'utf8').digest('hex');
     const { rows } = await h.db.pool.query('SELECT used_at FROM reauth_grants WHERE token_hash = $1', [hash]);

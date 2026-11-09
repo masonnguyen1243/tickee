@@ -286,6 +286,22 @@ export const SelectPayoutAccountRequest = z.object({
 });
 export type SelectPayoutAccountRequest = z.input<typeof SelectPayoutAccountRequest>;
 
+/**
+ * Đổi key Tingee (Story 2.13-b, chỉ Owner, BTC đã từng liên kết tài khoản nhận tiền; chưa từng →
+ * `PAYOUT_ACCOUNT_NOT_LINKED_YET`). Mọi route đòi lần xác nhận lại trong header `REAUTH_HEADER`:
+ * - `POST …/payout-account/credential/replacement/begin` → 204: chỉ kiểm lần xác nhận còn hiệu lực (không tiêu).
+ * - `POST …/payout-account/credential/replacement/preview` (`ConnectTingeeRequest`) → `TingeeKeyPreview`: đọc danh
+ *   sách tài khoản bằng key mới, không lưu gì, không tiêu lần xác nhận.
+ * - `POST …/payout-account/credential/replacement` (`ReplaceTingeeKeyRequest`) → `PayoutAccountOverview`: đọc lại danh
+ *   sách bằng key mới rồi lưu trong một transaction (tiêu lần xác nhận): credential mới hiện hành, credential cũ
+ *   `retired_at`, mọi tài khoản hiện hành bị hủy liên kết, tài khoản `vaAccountNumber` thành mặc định. `ipnKey` không
+ *   đổi.
+ */
+export const ReplaceTingeeKeyRequest = ConnectTingeeRequest.extend({
+  vaAccountNumber: SelectPayoutAccountRequest.shape.vaAccountNumber,
+});
+export type ReplaceTingeeKeyRequest = z.input<typeof ReplaceTingeeKeyRequest>;
+
 /** Credential Tingee hiện hành của BTC. Không bao giờ có Client ID đầy đủ hay Secret Token. */
 export const TingeeCredentialSummary = z.object({
   id: z.uuid(),
@@ -324,6 +340,17 @@ export const PayoutAccountOptions = z.object({
 export type PayoutAccountOptions = z.infer<typeof PayoutAccountOptions>;
 
 /**
+ * Kết quả `POST …/payout-account/credential/replacement/preview`: danh sách tài khoản đọc từ Tingee bằng key mới (chưa
+ * lưu nên không có id credential). Mọi dòng `linked: false`: đổi key xong, các tài khoản hiện hành đều bị hủy liên kết.
+ */
+export const TingeeKeyPreview = z.object({
+  /** `maskTingeeClientId` của Client ID mới. */
+  clientIdMasked: z.string(),
+  accounts: z.array(PayoutAccountOption),
+});
+export type TingeeKeyPreview = z.infer<typeof TingeeKeyPreview>;
+
+/**
  * Một tài khoản nhận tiền hiện hành của BTC (một VA trong tài khoản Tingee của BTC). Chỉ 4 số cuối số tài khoản. BTC
  * còn ít nhất một tài khoản thì có đúng một tài khoản `isDefault`: Đơn mới nhận tiền vào VA của tài khoản này (AD-6).
  */
@@ -350,7 +377,7 @@ export const PayoutAccountOverview = z.object({
   accounts: z.array(PayoutAccount),
   /**
    * Gửi key Tingee (lần đầu hoặc "Dùng key khác") còn được nhận: chỉ khi BTC chưa từng liên kết tài khoản nào, kể cả
-   * tài khoản đã hủy. Từ đó về sau đổi key là thao tác riêng (Story 2.13).
+   * tài khoản đã hủy. Từ đó về sau đổi key là thao tác riêng có xác nhận lại (`…/credential/replacement`, 2.13-b).
    */
   canReplaceKey: z.boolean(),
   /** URL IPN riêng của BTC (`tingeeIpnUrl`); `null` khi BTC chưa từng kết nối Tingee. */

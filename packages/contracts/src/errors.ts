@@ -68,9 +68,14 @@ export const ErrorCode = {
   PAYOUT_ACCOUNT_UNAVAILABLE: 'PAYOUT_ACCOUNT_UNAVAILABLE',
   /**
    * VA này đã là tài khoản nhận tiền hiện hành của BTC; hoặc gửi key Tingee khi BTC đã từng liên kết tài khoản (kể cả
-   * đã hủy hết), vì đổi key là luồng riêng (Story 2.13).
+   * đã hủy hết), vì đổi key là luồng riêng có xác nhận lại (`…/credential/replacement`, Story 2.13-b).
    */
   PAYOUT_ACCOUNT_ALREADY_LINKED: 'PAYOUT_ACCOUNT_ALREADY_LINKED',
+  /**
+   * Đổi key Tingee (`…/credential/replacement`) khi BTC chưa từng liên kết tài khoản nhận tiền nào: dùng form kết nối
+   * (`POST …/payout-account/credential`), không cần xác nhận lại. Không đổi gì.
+   */
+  PAYOUT_ACCOUNT_NOT_LINKED_YET: 'PAYOUT_ACCOUNT_NOT_LINKED_YET',
   /** Tài khoản merchant Tingee của BTC đang bị Tingee tạm khóa. */
   MERCHANT_SUSPENDED: 'MERCHANT_SUSPENDED',
   /** Tingee tạm lỗi (timeout, lỗi mạng, lỗi hệ thống hoặc mã lỗi không lường trước): thử lại sau ít phút. */
@@ -122,9 +127,10 @@ export const ErrorCode = {
   /** "Kết thúc" Sự kiện chưa tới giờ bắt đầu: dùng Ẩn để dừng nhận Đơn. Không đổi gì. */
   EVENT_NOT_STARTED: 'EVENT_NOT_STARTED',
   /**
-   * Thao tác nhạy cảm (đặt mặc định, hủy liên kết tài khoản nhận tiền; Story 2.13) cần một lần xác nhận lại còn hiệu lực
-   * của chính session trong header `REAUTH_HEADER`: thiếu, sai, đã dùng, hết hạn hoặc của session khác. Luôn sau kiểm
-   * quyền (Admin nhận `FORBIDDEN_ROLE`). `details.method`: cách xác nhận (`ReauthRequiredDetails`). Không đổi gì.
+   * Thao tác nhạy cảm (đặt mặc định, hủy liên kết tài khoản nhận tiền, đổi key Tingee; Story 2.13) cần một lần xác
+   * nhận lại còn hiệu lực của chính session trong header `REAUTH_HEADER`: thiếu, sai, đã dùng, hết hạn hoặc của session
+   * khác. Luôn sau kiểm quyền (Admin nhận `FORBIDDEN_ROLE`). `details.method`: cách xác nhận (`ReauthRequiredDetails`).
+   * Không đổi gì.
    */
   REAUTH_REQUIRED: 'REAUTH_REQUIRED',
   /**
