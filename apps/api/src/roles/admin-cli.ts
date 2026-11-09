@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { EmailAddress } from '@tickee/contracts';
-import { findUserIdByEmail, setPlatformAdmin } from '../modules/identity/index.js';
+import { findUserIdByEmail, hasTwoFactorEnabled, setPlatformAdmin } from '../modules/identity/index.js';
 import { audit } from '../platform/audit/index.js';
 import { ConfigError, loadConfig, type MigrateConfig } from '../platform/config/index.js';
 import { Database } from '../platform/db/index.js';
@@ -13,7 +13,8 @@ import { Database } from '../platform/db/index.js';
  *   pnpm --filter @tickee/api admin:revoke <email> --by <email người chạy>
  * Chạy bằng role `tickee_migrator` (`MIGRATION_DATABASE_URL`, như vai `migrate`): `tickee_app` không có UPDATE trên
  * cột này. `--by` là email một Tài khoản Tickee có sẵn (lần đầu thì tự cấp cho chính mình): `audit_events` chỉ có
- * `actor_user_id`, nên người vận hành phải là một tài khoản.
+ * `actor_user_id`, nên người vận hành phải là một tài khoản. `grant` chỉ cấp cho tài khoản đã bật xác thực hai lớp
+ * (AD-26).
  */
 
 type Command = 'grant' | 'revoke';
@@ -79,7 +80,7 @@ const errorCode = (err: unknown): string => {
 
 /**
  * Chạy CLI; trả mã thoát (0 = xong, kể cả "không đổi"; ≠ 0 = không đổi gì trong DB). Email không tồn tại, thiếu
- * `--by` hoặc lỗi DB đều rollback toàn bộ và không ghi audit.
+ * `--by`, `grant` cho tài khoản chưa bật 2FA hoặc lỗi DB đều rollback toàn bộ và không ghi audit.
  */
 export async function runAdminCli(
   argv: readonly string[],
@@ -114,6 +115,7 @@ export async function runAdminCli(
       if (!actorUserId) return { status: 'missing', email: args.by } as const;
       const targetUserId = await findUserIdByEmail(tx, args.email);
       if (!targetUserId) return { status: 'missing', email: args.email } as const;
+      if (value && !(await hasTwoFactorEnabled(tx, targetUserId))) return { status: 'no_2fa' } as const;
       if (!(await setPlatformAdmin(tx, targetUserId, value))) return { status: 'unchanged' } as const;
       await audit.record(tx, {
         actorUserId,
@@ -128,6 +130,9 @@ export async function runAdminCli(
     switch (result.status) {
       case 'missing':
         io.err(`Không có Tài khoản Tickee nào với email ${result.email}. Không đổi gì.`);
+        return 1;
+      case 'no_2fa':
+        io.err(`${args.email} chưa bật xác thực hai lớp. Quản trị Tingee bắt buộc bật 2FA trước khi cấp quyền. Không đổi gì.`);
         return 1;
       case 'unchanged':
         io.out(

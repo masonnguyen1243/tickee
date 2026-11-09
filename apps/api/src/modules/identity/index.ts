@@ -10,4 +10,4 @@ export {
   type ReauthProof,
   type SessionRequest,
 } from './reauth.service.js';
-export { findUserIdByEmail, setPlatformAdmin, userContacts, type UserContact } from './user-directory.js';
+export { findUserIdByEmail, hasTwoFactorEnabled, setPlatformAdmin, userContacts, type UserContact } from './user-directory.js';

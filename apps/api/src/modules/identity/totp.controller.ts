@@ -1,5 +1,6 @@
-import { Body, Controller, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
 import {
+  REAUTH_HEADER,
   RecoveryCodeRequest,
   TotpCodeRequest,
   TotpDisableRequest,
@@ -14,6 +15,7 @@ import type { Response } from 'express';
 import { parseRequest } from '../../platform/http/index.js';
 import { ConsentExempt } from './consent.guard.js';
 import { forwardSetCookies } from './cookies.js';
+import { reauthProof } from './reauth.service.js';
 import type { RequestWithSession } from './session.guard.js';
 import { TotpService } from './totp.service.js';
 
@@ -26,14 +28,22 @@ import { TotpService } from './totp.service.js';
 export class TotpController {
   constructor(@Inject(TotpService) private readonly totp: TotpService) {}
 
-  /** Bắt đầu đăng ký: URI cho QR và khóa nhập tay. */
+  /**
+   * Bắt đầu đăng ký: URI cho QR và khóa nhập tay. Cần lần xác nhận lại (mã email) trong header `REAUTH_HEADER`; thiếu
+   * → 403 `REAUTH_REQUIRED`.
+   */
   @Post('enroll')
   @HttpCode(200)
   @ConsentExempt()
-  enroll(@Req() req: RequestWithSession, @Res({ passthrough: true }) res: Response): Promise<TotpEnrollResponse> {
+  enroll(
+    @Req() req: RequestWithSession,
+    @Headers(REAUTH_HEADER) reauthToken: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<TotpEnrollResponse> {
     // Response chứa secret TOTP: không cho cache.
     res.setHeader('cache-control', 'no-store');
-    return this.totp.beginEnrollment(req.session!, fromNodeHeaders(req.headers));
+    const session = req.session!;
+    return this.totp.beginEnrollment(session, reauthProof({ session }, reauthToken), fromNodeHeaders(req.headers));
   }
 
   /**

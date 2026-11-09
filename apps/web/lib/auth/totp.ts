@@ -14,13 +14,17 @@ import {
 
 import { apiRequest } from '@/lib/api/client';
 import { ApiError } from '@/lib/api/errors';
+import { withReauthHeader } from '@/lib/auth/reauth';
 
 const post = (body?: unknown): RequestInit =>
   body === undefined ? { method: 'POST' } : { method: 'POST', body: JSON.stringify(body) };
 
-/** Bắt đầu đăng ký TOTP: URI cho QR và khóa nhập tay. */
-export const beginTotpEnrollment = () =>
-  apiRequest('/identity/totp/enroll', { schema: TotpEnrollResponse, init: post() });
+/**
+ * Bắt đầu đăng ký TOTP: URI cho QR và khóa nhập tay. Bật 2FA là thao tác nhạy cảm (AD-26): cần lần xác nhận lại
+ * (`reauthToken`), gọi qua `withReauth`.
+ */
+export const beginTotpEnrollment = (reauthToken?: string) =>
+  apiRequest('/identity/totp/enroll', { schema: TotpEnrollResponse, init: withReauthHeader(post(), reauthToken) });
 
 /** Xác nhận đăng ký bằng mã đầu tiên → 10 mã khôi phục (api đặt cookie session mới đã step-up). */
 export const confirmTotpEnrollment = (code: string) =>

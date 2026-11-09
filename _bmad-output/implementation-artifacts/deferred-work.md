@@ -303,3 +303,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-14-chuyen-quyen-owner.md`
   summary: Job email gửi nhiều người (báo chuyển quyền Owner, cảnh báo đổi tài khoản nhận tiền mặc định) gửi lại cho mọi người mỗi lần retry khi chỉ một địa chỉ lỗi.
   evidence: `notifyOwnershipTransferred` và `notifyDefaultPayoutChanged` ném lỗi khi có một email lỗi, pg-boss retry tới 8 lần và gửi lại cả danh sách; cần nhật ký đã gửi theo job hoặc tách job theo người nhận.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-1-xac-nhan-lai-khi-bat-2fa.md`
+  summary: Chưa có đường khôi phục khi 2FA bị người khác bật trên tài khoản (chủ thật kẹt ở bước step-up, không có "Đặt lại TOTP" hay quy trình hỗ trợ).
+  evidence: Retro Epic 2 ghi "Đặt lại TOTP" chưa có; email "2FA vừa được bật" chỉ dặn liên hệ hỗ trợ. Cần trước Closed Beta (quy trình hỗ trợ) hoặc Epic 7.

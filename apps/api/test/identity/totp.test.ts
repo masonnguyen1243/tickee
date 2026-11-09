@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
 import {
   ErrorResponse,
   Me,
+  REAUTH_HEADER,
   RecoveryCodeResponse,
   RECOVERY_CODE_COUNT,
   StepUpResponse,
@@ -14,8 +16,10 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TotpStore } from '../../src/modules/identity/totp-store.js';
 import {
+  beginTotpEnrollment,
   createHarness,
   enrollTotp,
+  reauthToken,
   sessionCookie,
   signIn,
   signUp,
@@ -38,7 +42,10 @@ beforeEach(() => {
 });
 
 const errorOf = (body: unknown) => ErrorResponse.parse(body).error;
-const enroll = (cookie: string) => h.http.post('/v1/identity/totp/enroll').set('cookie', cookie);
+const enroll = (cookie: string, reauth?: string) => {
+  const req = h.http.post('/v1/identity/totp/enroll').set('cookie', cookie);
+  return reauth ? req.set(REAUTH_HEADER, reauth) : req;
+};
 const verifyEnroll = (cookie: string, code: string) =>
   h.http.post('/v1/identity/totp/enroll/verify').set('cookie', cookie).send({ code });
 const stepUp = (cookie: string, code: string) => h.http.post('/v1/identity/totp/step-up').set('cookie', cookie).send({ code });
@@ -47,6 +54,8 @@ const recover = (cookie: string, recoveryCode: string) =>
 const disable = (cookie: string, body: unknown) => h.http.post('/v1/identity/totp/disable').set('cookie', cookie).send(body as object);
 const rowCount = async (table: 'two_factors' | 'totp_recovery_codes', userId: string) =>
   (await h.db.pool.query(`SELECT 1 FROM ${table} WHERE user_id = $1`, [userId])).rows.length;
+const ENABLED_SUBJECT = 'Tài khoản Tickee của bạn vừa bật xác thực hai lớp';
+const enabledMailsTo = (email: string) => h.email.sent.filter((m) => m.to === email && m.subject === ENABLED_SUBJECT);
 const me = async (cookie: string) => Me.parse((await h.http.get('/v1/identity/me').set('cookie', cookie).expect(200)).body);
 
 const tokenOf = (cookie: string) => decodeURIComponent(cookie.split('=')[1]!).split('.')[0]!;
@@ -88,7 +97,7 @@ describe('đăng ký TOTP', () => {
     const user = await signUp(h);
     expect((await me(user.cookie)).twoFactorEnabled).toBe(false);
 
-    const enrollRes = await enroll(user.cookie).expect(200);
+    const enrollRes = await enroll(user.cookie, await reauthToken(h, user)).expect(200);
     expect(enrollRes.headers['cache-control']).toBe('no-store');
     const started = TotpEnrollResponse.parse(enrollRes.body);
     expect(started.totpUri).toContain(`secret=${started.manualKey}`);
@@ -113,6 +122,8 @@ describe('đăng ký TOTP', () => {
     expect(await auditActions(user.userId)).toEqual([
       { action: 'totp.enrolled', organization_id: null, changed_fields: [] },
     ]);
+    const enabledMail = h.email.sent.findLast((m) => m.to === user.email);
+    expect(enabledMail?.subject).toBe('Tài khoản Tickee của bạn vừa bật xác thực hai lớp');
 
     // DB không chứa secret hay mã khôi phục dạng rõ; audit không chứa mã.
     const dump = await totpDump(user.userId);
@@ -139,23 +150,24 @@ describe('đăng ký TOTP', () => {
   it('xác nhận khi chưa bắt đầu đăng ký → 409, không tính vào bộ đếm', async () => {
     const user = await signUp(h);
     for (let i = 0; i < 6; i++) expect((await verifyEnroll(user.cookie, '123456')).status).toBe(409);
-    const started = TotpEnrollResponse.parse((await enroll(user.cookie).expect(200)).body);
+    const started = await beginTotpEnrollment(h, user);
     await verifyEnroll(user.cookie, totpCode(started.manualKey)).expect(200);
   });
 
   it('mã sai ở bước xác nhận → 400 TOTP_INVALID; mã sai dạng → 400 VALIDATION_FAILED', async () => {
     const user = await signUp(h);
-    const started = TotpEnrollResponse.parse((await enroll(user.cookie).expect(200)).body);
+    const started = await beginTotpEnrollment(h, user);
     const res = await verifyEnroll(user.cookie, wrongTotpCode(started.manualKey));
     expect(res.status).toBe(400);
     expect(errorOf(res.body)).toMatchObject({ code: 'TOTP_INVALID', details: { remainingAttempts: 4 } });
     const malformed = await verifyEnroll(user.cookie, '12ab');
     expect(errorOf(malformed.body).code).toBe('VALIDATION_FAILED');
+    expect(enabledMailsTo(user.email)).toEqual([]);
   });
 
   it('sai 5 lần ở bước xác nhận cũng khóa', async () => {
     const user = await signUp(h);
-    const started = TotpEnrollResponse.parse((await enroll(user.cookie).expect(200)).body);
+    const started = await beginTotpEnrollment(h, user);
     for (let i = 0; i < 4; i++) await verifyEnroll(user.cookie, wrongTotpCode(started.manualKey)).expect(400);
     const locked = await verifyEnroll(user.cookie, wrongTotpCode(started.manualKey));
     expect(locked.status).toBe(429);
@@ -165,7 +177,7 @@ describe('đăng ký TOTP', () => {
 
   it('xác nhận đúng nhưng transaction của Tickee lỗi → gỡ lại TOTP, không để user bật mà thiếu mã khôi phục', async () => {
     const user = await signUp(h);
-    const started = TotpEnrollResponse.parse((await enroll(user.cookie).expect(200)).body);
+    const started = await beginTotpEnrollment(h, user);
     const spy = vi.spyOn(h.app.get(TotpStore), 'markStepUp').mockResolvedValueOnce(null);
     try {
       const res = await verifyEnroll(user.cookie, totpCode(started.manualKey));
@@ -185,11 +197,96 @@ describe('đăng ký TOTP', () => {
       [user.userId],
     );
     expect(counter[0]?.failed_count ?? 0).toBe(0);
+    expect(enabledMailsTo(user.email)).toEqual([]);
+  });
+
+  it('gửi email báo bật lỗi → vẫn 200, 2FA đã bật, chỉ ghi log', async () => {
+    const user = await signUp(h);
+    const started = await beginTotpEnrollment(h, user);
+    h.email.failWith = new Error(`SMTP từ chối ${user.email}`);
+    const res = await verifyEnroll(user.cookie, totpCode(started.manualKey)).expect(200);
+    h.email.failWith = null;
+    expect(TotpEnrollVerifyResponse.parse(res.body).recoveryCodes).toHaveLength(RECOVERY_CODE_COUNT);
+    expect((await me(sessionCookie(res.headers['set-cookie']))).twoFactorEnabled).toBe(true);
+    expect(h.logs.text).toContain('Không gửi được email báo bật xác thực hai lớp');
+    expect(h.logs.text).not.toContain(user.email);
   });
 
   it('chưa đăng nhập → 401', async () => {
     expect((await h.http.post('/v1/identity/totp/enroll')).status).toBe(401);
     expect((await h.http.post('/v1/identity/totp/step-up').send({ code: '123456' })).status).toBe(401);
+  });
+});
+
+describe('bật 2FA đòi xác nhận lại (AD-26)', () => {
+  const sha256 = (v: string) => createHash('sha256').update(v, 'utf8').digest('hex');
+  const grantUsed = async (token: string) =>
+    (await h.db.pool.query<{ used: boolean }>('SELECT used_at IS NOT NULL AS used FROM reauth_grants WHERE token_hash = $1', [
+      sha256(token),
+    ])).rows[0]?.used;
+
+  function expectReauthRequired(res: { status: number; body: unknown }): void {
+    expect(res.status).toBe(403);
+    expect(errorOf(res.body)).toMatchObject({ code: 'REAUTH_REQUIRED', details: { method: 'email_otp' } });
+  }
+
+  it('enroll thiếu xác nhận → 403 REAUTH_REQUIRED {method: email_otp}, không tạo secret', async () => {
+    const user = await signUp(h);
+    expectReauthRequired(await enroll(user.cookie));
+    expectReauthRequired(await enroll(user.cookie, 'khong-phai-token'));
+    expect(await rowCount('two_factors', user.userId)).toBe(0);
+  });
+
+  it('lần xác nhận bị tiêu ở enroll; đã dùng, hết hạn hay của session khác → REAUTH_REQUIRED, không tạo secret', async () => {
+    const user = await signUp(h);
+    const token = await reauthToken(h, user);
+    await enroll(user.cookie, token).expect(200);
+    expect(await grantUsed(token)).toBe(true);
+    await h.db.orm.execute(sql`DELETE FROM two_factors WHERE user_id = ${user.userId}`);
+    expectReauthRequired(await enroll(user.cookie, token));
+
+    const expired = await reauthToken(h, user);
+    await h.db.pool.query(`UPDATE reauth_grants SET expires_at = now() - interval '1 second' WHERE token_hash = $1`, [
+      sha256(expired),
+    ]);
+    expectReauthRequired(await enroll(user.cookie, expired));
+
+    const otherCookie = await signIn(h, user.email);
+    const otherToken = await reauthToken(h, { cookie: otherCookie, email: user.email });
+    expectReauthRequired(await enroll(user.cookie, otherToken));
+    expect(await grantUsed(otherToken)).toBe(false);
+    expect(await rowCount('two_factors', user.userId)).toBe(0);
+  });
+
+  it('plugin lỗi khi sinh secret → rollback, lần xác nhận còn dùng được', async () => {
+    const user = await signUp(h);
+    const token = await reauthToken(h, user);
+    const spy = vi.spyOn(h.app.get(TotpStore), 'beginEnrollment').mockRejectedValueOnce(new Error('plugin lỗi'));
+    try {
+      expect((await enroll(user.cookie, token)).status).toBe(500);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await grantUsed(token)).toBe(false);
+    await enroll(user.cookie, token).expect(200);
+  });
+
+  it('không xác nhận thì không bật được 2FA, nên xác nhận lại của tài khoản vẫn đòi mã email', async () => {
+    const user = await signUp(h);
+    expectReauthRequired(await enroll(user.cookie));
+    // Không có secret nào để lấy mã: enroll/verify với mã bất kỳ → 409 chưa bắt đầu, 2FA vẫn tắt.
+    expect((await verifyEnroll(user.cookie, '123456')).status).toBe(409);
+    expect((await me(user.cookie)).twoFactorEnabled).toBe(false);
+    // Xác nhận lại vẫn là mã email: mã 6 số tự đặt bị từ chối, chưa có lần xác nhận nào được cấp.
+    const res = await h.http.post('/v1/identity/reauth').set('cookie', user.cookie).send({ code: '123456' });
+    expect(res.status).toBe(400);
+    expect(errorOf(res.body).code).toBe('OTP_ATTEMPTS_EXCEEDED');
+    const grants = async () =>
+      (await h.db.pool.query('SELECT 1 FROM reauth_grants WHERE user_id = $1', [user.userId])).rows.length;
+    expect(await grants()).toBe(0);
+    // Mã email đúng thì được.
+    await reauthToken(h, user);
+    expect(await grants()).toBe(1);
   });
 });
 

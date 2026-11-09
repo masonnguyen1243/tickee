@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import type { Page } from '@playwright/test';
 
 import { expect, test } from './fixtures';
-import { apiError, EMAIL, me, mockIdentityApi, unauthenticated, USER_ID, type Call, type Reply } from './identity-mock';
+import { apiError, EMAIL, me, mockIdentityApi, unauthenticated, USER_ID, type Call, type Handler, type Reply } from './identity-mock';
 import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
 
 /*
@@ -27,6 +27,48 @@ const verified = (): Reply => ({ status: 200, body: { recoveryCodes: RECOVERY_CO
 const steppedUp = (): Reply => ({ status: 200, body: { stepUpAt: '2026-10-30T03:00:00.000Z' } });
 const disabled = (): Reply => ({ status: 200, body: { twoFactorEnabled: false } });
 
+const REAUTH_CODE = '654321';
+
+/**
+ * `enroll` đòi lần xác nhận lại (header `x-reauth-token`, dùng một lần; thiếu → `REAUTH_REQUIRED` `{method:
+ * email_otp}`), kèm `reauth/email-code` và `reauth` (mã email `REAUTH_CODE`). `headers`: header của từng lần `enroll`.
+ */
+function enrollWithReauth() {
+  const issued = new Set<string>();
+  const headers: (string | null)[] = [];
+  let grants = 0;
+  const handlers: Record<string, Handler> = {
+    'POST /identity/reauth/email-code': () => ({ status: 200, body: { resendAfterSeconds: 60 } }),
+    'POST /identity/reauth': (request) => {
+      if ((request.postDataJSON() as { code: string }).code !== REAUTH_CODE) {
+        return apiError(400, 'OTP_INVALID', { remainingAttempts: 4 });
+      }
+      grants += 1;
+      const reauthToken = `tok-${grants}`;
+      issued.add(reauthToken);
+      return { status: 200, body: { reauthToken, expiresAt: '2026-11-09T03:09:00.000Z' } };
+    },
+    'POST /identity/totp/enroll': (request) => {
+      const token = request.headers()['x-reauth-token'] ?? null;
+      headers.push(token);
+      if (!token || !issued.has(token)) return apiError(403, 'REAUTH_REQUIRED', { method: 'email_otp' });
+      issued.delete(token);
+      return enrolled();
+    },
+  };
+  return { handlers, headers };
+}
+
+const reauthDialog = (page: Page) => page.getByRole('dialog', { name: 'Xác nhận để tiếp tục' });
+
+/** Trong dialog "Xác nhận để tiếp tục": gửi mã email rồi nhập mã đúng. */
+async function confirmByEmail(page: Page): Promise<void> {
+  await expect(reauthDialog(page)).toBeVisible();
+  await reauthDialog(page).getByRole('button', { name: `Gửi mã tới ${EMAIL}` }).click();
+  await reauthDialog(page).locator('[data-slot="otp-input"] input').first().fill(REAUTH_CODE);
+  await expect(reauthDialog(page)).toBeHidden();
+}
+
 const enrollBoxes = (page: Page) => page.getByRole('group', { name: /Nhập mã 6 số/ }).locator('input');
 const stepUpDialog = (page: Page) => page.getByRole('dialog', { name: 'Xác thực hai lớp' });
 const dialogBoxes = (page: Page) => stepUpDialog(page).getByRole('group', { name: /Mã 6 số/ }).locator('input');
@@ -44,9 +86,10 @@ test('bật từ trang Bảo mật: QR + khóa nhập tay; mã sai báo tại ô
   // Chromium headless chặn clipboard nếu không cấp quyền; WebKit cho phép sau thao tác người dùng.
   if (browserName === 'chromium') await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   let isEnabled = false;
+  const reauth = enrollWithReauth();
   const identityCalls = await mockIdentityApi(page, {
     'GET /identity/me': () => me(CONSENTED, isEnabled),
-    'POST /identity/totp/enroll': enrolled,
+    ...reauth.handlers,
     'POST /identity/totp/enroll/verify': (request) => {
       if ((request.postDataJSON() as { code: string }).code !== '123456') {
         return apiError(400, 'TOTP_INVALID', { remainingAttempts: 4 });
@@ -64,9 +107,13 @@ test('bật từ trang Bảo mật: QR + khóa nhập tay; mã sai báo tại ô
 
   await page.waitForURL(`**${ENROLL}`);
   await expect(page.getByRole('heading', { name: 'Bật xác thực hai lớp' })).toBeVisible();
+  // Bật 2FA cần xác nhận lại bằng mã email trước khi có QR; xác nhận xong QR hiện mà không phải bấm lại.
+  await expect(page.getByRole('img', { name: /Mã QR/ })).toHaveCount(0);
+  await confirmByEmail(page);
   await expect(page.getByRole('img', { name: /Mã QR/ })).toBeVisible();
   await expect(page.getByTestId('manual-key')).toHaveText('JBSW Y3DP EHPK 3PXP');
-  expect(callsTo(identityCalls, '/identity/totp/enroll')).toHaveLength(1);
+  expect(reauth.headers).toEqual([null, 'tok-1']);
+  expect(callsTo(identityCalls, '/identity/reauth/email-code')).toHaveLength(1);
 
   await enrollBoxes(page).first().fill('111111');
   await expect(page.getByText('Mã chưa đúng, còn 4 lần.')).toBeVisible();
@@ -101,6 +148,26 @@ test('bật từ trang Bảo mật: QR + khóa nhập tay; mã sai báo tại ô
   await page.waitForURL(`**${SECURITY}`);
   await expect(twoFactorSection(page)).toContainText('Đang bật');
   await expect(twoFactorSection(page).getByRole('button', { name: 'Tắt' })).toBeVisible();
+});
+
+test('đóng dialog xác nhận ở màn đăng ký → chưa có QR, báo cần xác nhận; bấm lại thì dialog mở, xác nhận xong hiện QR', async ({
+  page,
+}) => {
+  const reauth = enrollWithReauth();
+  await mockIdentityApi(page, { 'GET /identity/me': () => me(CONSENTED, false), ...reauth.handlers });
+  await mockOrganizerApi(page);
+
+  await page.goto(ENROLL);
+  await expect(reauthDialog(page)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(reauthDialog(page)).toBeHidden();
+  await expect(page.getByText('Cần xác nhận để bật xác thực hai lớp')).toBeVisible();
+  await expect(page.getByRole('img', { name: /Mã QR/ })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Xác nhận để tiếp tục' }).click();
+  await confirmByEmail(page);
+  await expect(page.getByTestId('manual-key')).toBeVisible();
+  expect(reauth.headers).toEqual([null, null, 'tok-1']);
 });
 
 test('đã bật mà session chưa qua lớp hai: dialog tại chỗ có "Dùng mã khôi phục" và "Đăng xuất", không đóng bằng Esc; mã sai giữ dialog; đúng → tải lại trang dở', async ({
@@ -410,7 +477,7 @@ test('320px không cuộn ngang: trang Bảo mật, màn đăng ký, mã khôi p
   let requireStepUp = false;
   await mockIdentityApi(page, {
     'GET /identity/me': () => me(CONSENTED, isEnabled),
-    'POST /identity/totp/enroll': enrolled,
+    ...enrollWithReauth().handlers,
     'POST /identity/totp/enroll/verify': () => {
       isEnabled = true;
       return verified();
@@ -429,6 +496,9 @@ test('320px không cuộn ngang: trang Bảo mật, màn đăng ký, mã khôi p
   expect(await horizontalOverflow(page)).toBe(0);
 
   await page.goto(ENROLL);
+  await expect(reauthDialog(page)).toBeVisible();
+  expect(await horizontalOverflow(page)).toBe(0);
+  await confirmByEmail(page);
   await expect(page.getByTestId('manual-key')).toBeVisible();
   expect(await horizontalOverflow(page)).toBe(0);
 
