@@ -1,4 +1,4 @@
-import type { Page, Route } from '@playwright/test';
+import type { Locator, Page, Route } from '@playwright/test';
 
 import { PORT_PUBLIC_EVENT } from '../playwright.config';
 import { expect, test } from './fixtures';
@@ -29,7 +29,9 @@ import { expectQrImageEncodes } from './qr-image';
  * Đơn chờ, lỗi mạng rồi "Thử lại" cùng khóa) và trang Đơn `/orders/:code`. Phần tĩnh (trang Sự kiện và Checkout) SSR
  * từ API giả `e2e/public-event-api.ts`; `/availability`, `/funnel-events`, `/identity/*`, `/checkout`, `/orders` và
  * `/me/orders` gọi từ trình duyệt nên giả bằng `page.route`. Sự kiện `SLUG_BUY`: "Vé phổ thông" 0đ rồi "Vé VIP"
- * 300.000đ, giới hạn 4 Vé/Đơn.
+ * 300.000đ, giới hạn 4 Vé/Đơn. Story 3.4: màn thanh toán của Trang Đơn (`payment-summary`, `recipient-trust-block`,
+ * `countdown-chip`), redirect toàn trang sang trang Tingee giả (`CHECKOUT_URL`), "Thử lại" tạo link, đồng hồ về 0
+ * (`page.clock`), tạm ngừng bán.
  */
 
 const ORIGIN = `http://localhost:${PORT_PUBLIC_EVENT}`;
@@ -126,7 +128,19 @@ const QUESTIONS = [
 ];
 const PREFILL = { name: 'Nguyễn Văn An', phone: '+84912345678', email: EMAIL };
 
-/** `BuyerOrder` giả (Đơn 2 Vé VIP, đang giữ chỗ). */
+/** Trang thanh toán của Tingee (giả): "Thanh toán" redirect toàn trang tới đây. */
+const CHECKOUT_URL = `https://pay.tingee.test/checkout/${ORDER_CODE}?r=1`;
+const ORGANIZER = 'CLB Chạy Bộ Phố Cổ';
+const SERVER_NOW = '2026-11-10T01:00:00.000Z';
+/** Phần thanh toán giả (Story 3.4): đã có link, người nhận là tài khoản mặc định của BTC. */
+const payment = (patch: Record<string, unknown> = {}) => ({
+  checkoutUrl: CHECKOUT_URL,
+  linkError: null,
+  recipient: { organizationName: ORGANIZER, accountName: 'NGUYEN VAN TUAN', bankName: 'Vietcombank' },
+  ...patch,
+});
+
+/** `BuyerOrder` giả (Đơn 2 Vé VIP, đang giữ chỗ, đã có link thanh toán 15 phút). */
 const buyerOrder = (patch: Record<string, unknown> = {}) => ({
   code: ORDER_CODE,
   status: 'pending',
@@ -137,8 +151,9 @@ const buyerOrder = (patch: Record<string, unknown> = {}) => ({
   answers: [{ questionId: Q_SIZE, label: 'Size áo', answer: 'M' }],
   refundPolicy: 'Hoàn 100% nếu hủy trước 7 ngày.',
   createdAt: '2026-11-10T01:00:00.000Z',
-  expiresAt: '2026-11-10T01:01:00.000Z',
-  serverNow: '2026-11-10T01:00:00.000Z',
+  expiresAt: '2026-11-10T01:15:00.000Z',
+  serverNow: SERVER_NOW,
+  payment: payment(),
   tickets: [],
   ...patch,
 });
@@ -158,6 +173,7 @@ const freeOrder = (count = 2) =>
     event: { slug: SLUG_FREE, name: FREE_EVENT_NAME, startsAt: '2099-11-15T07:00:00+07:00' },
     items: [{ ticketTypeId: TIER_FREE_ONLY_ID, name: FREE_TIER, unitPrice: 0, quantity: count, amount: 0 }],
     totalAmount: 0,
+    payment: null,
     tickets: Array.from({ length: count }, (_, i) => ({
       id: ticketId(i + 1),
       seq: i + 1,
@@ -176,16 +192,18 @@ type OrdersMockOptions = {
   submit?: (call: OrderCall, n: number) => Reply | 'abort';
   /** `GET /me/orders/:code` theo mã; mã khác → 404 `ORDER_NOT_FOUND`. */
   orders?: Record<string, Reply>;
+  /** Phản hồi của lần thử lại link thứ `n` (`POST /me/orders/:code/payment-link`); mặc định 404. */
+  retryLink?: (code: string, n: number) => Reply | Promise<Reply>;
 };
 
 /**
- * Giả `GET /events/:slug/checkout`, `POST /events/:slug/orders`, `GET /me/orders/:code`; trả về các lần gửi Đơn và số lần
- * tải form mua.
+ * Giả `GET /events/:slug/checkout`, `POST /events/:slug/orders`, `GET /me/orders/:code`, `POST
+ * /me/orders/:code/payment-link`; trả về các lần gửi Đơn, số lần tải form mua và mã Đơn của các lần thử lại link.
  */
 async function mockOrders(
   page: Page,
   options: OrdersMockOptions = {},
-): Promise<{ calls: OrderCall[]; checkoutLoads: () => number }> {
+): Promise<{ calls: OrderCall[]; checkoutLoads: () => number; retries: string[] }> {
   const cors = corsHeaders(ORIGIN);
   const calls: OrderCall[] = [];
   let checkoutLoads = 0;
@@ -214,7 +232,16 @@ async function mockOrders(
     const code = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop()!);
     return reply(route, orders[code] ?? apiError(404, 'ORDER_NOT_FOUND'));
   });
-  return { calls, checkoutLoads: () => checkoutLoads };
+  const retries: string[] = [];
+  await page.route('**/v1/me/orders/*/payment-link', async (route) => {
+    const request = route.request();
+    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    const code = decodeURIComponent(new URL(request.url()).pathname.split('/').at(-2)!);
+    retries.push(code);
+    const result = options.retryLink ? await options.retryLink(code, retries.length - 1) : apiError(404, 'ORDER_NOT_FOUND');
+    return reply(route, result);
+  });
+  return { calls, checkoutLoads: () => checkoutLoads, retries };
 }
 
 /** `/identity/*` giả với `me` đổi theo trạng thái đăng nhập; OTP gửi/nhận luôn thành công. Kèm Checkout/Đơn giả mặc định. */
@@ -663,7 +690,8 @@ test.describe('Gửi Đơn', () => {
       answers: { [Q_SIZE]: 'M', [Q_LEVEL]: OPT_GOOD },
       funnelId,
     });
-    await expect(page.getByText('Đang giữ chỗ cho Đơn của bạn.')).toBeVisible();
+    // Đơn có phí (Story 3.4): sang màn thanh toán của chính Đơn đó.
+    await expect(page.locator('[data-slot="payment-amount"]')).toHaveText('600.000đ');
     await expect(page.locator('[data-slot="order-code"]')).toHaveText(ORDER_CODE);
     await expect(page.locator('[data-slot="order-summary-total"]')).toHaveText('600.000đ');
   });
@@ -1028,12 +1056,316 @@ test.describe('Đăng ký Sự kiện miễn phí (Story 3.3)', () => {
   });
 });
 
+const paymentScreen = (page: Page) => page.locator('[data-slot="order-payment"]');
+// Khi đang chờ, tên nút thêm "Đang xử lý" (spinner trong nút): khớp theo đầu tên.
+const payButton = (page: Page) => page.getByRole('button', { name: /^Thanh toán/ });
+const retryButton = (page: Page) => page.getByRole('button', { name: /^Thử lại/ });
+const chip = (page: Page) => page.locator('[data-slot="countdown-chip"]');
+const waitingLine = (page: Page) => page.locator('[data-slot="payment-waiting"]');
+const WAITING = 'Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền.';
+const HOLD_EXPIRED = 'Hết thời gian giữ chỗ. Chỗ đã được trả lại.';
+const SALES_PAUSED = 'Sự kiện tạm ngừng bán. Bạn thử lại sau nhé.';
+/** Banner trạng thái của Trang Đơn (chữ cũng có trong vùng `aria-live` ẩn nên không tìm bằng `getByText`). */
+const orderBanner = (page: Page) => page.locator('[data-slot="order-view"] [data-slot="status-banner"]');
+const announcement = (page: Page) => page.locator('[data-slot="order-status-announcement"]');
+const CONFIRMING = 'Đang xác nhận thanh toán. Nếu bạn đã trả, vé sẽ tự hiện — đừng trả lại.';
+
+/** Hộp của phần tử `name`; phải nằm trọn trong viewport hiện tại (không cần cuộn). */
+async function boxInViewport(page: Page, name: string, locator: Locator) {
+  const box = await locator.boundingBox();
+  const viewport = page.viewportSize()!;
+  expect(box, name).not.toBeNull();
+  expect(box!.y, name).toBeGreaterThanOrEqual(0);
+  expect(box!.y + box!.height, name).toBeLessThanOrEqual(viewport.height);
+  return box!;
+}
+
+/** Trang thanh toán của Tingee giả (giữ lại 300ms như mạng thật); trả về các URL đã mở. */
+async function mockTingeeCheckout(page: Page): Promise<string[]> {
+  const visits: string[] = [];
+  await page.route('https://pay.tingee.test/**', async (route) => {
+    visits.push(route.request().url());
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: '<!doctype html><meta charset="utf-8"><title>Tingee</title><h1>Trang Tingee giả</h1>',
+    });
+  });
+  return visits;
+}
+
+/**
+ * Ghi tên các nút chuyển sang `aria-busy="true"` (spinner trong nút) qua console: khi trang đang rời đi, Playwright không
+ * đọc DOM được nữa nhưng vẫn nhận console.
+ */
+async function recordBusyButtons(page: Page): Promise<string[]> {
+  const busy: string[] = [];
+  page.on('console', (message) => {
+    const text = message.text();
+    if (text.startsWith('[busy] ')) busy.push(text.slice('[busy] '.length));
+  });
+  await page.addInitScript(() => {
+    new MutationObserver((records) => {
+      for (const record of records) {
+        const el = record.target as HTMLElement;
+        if (el.getAttribute('aria-busy') === 'true') console.log(`[busy] ${el.textContent?.trim() ?? ''}`);
+      }
+    }).observe(document, { subtree: true, attributes: true, attributeFilter: ['aria-busy'] });
+  });
+  return busy;
+}
+
+test.describe('Màn thanh toán (Story 3.4)', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockAccount(page, { signedIn: true });
+  });
+
+  test('375×667: tên Sự kiện, stage, trust block, chính sách, dòng chờ, nút và chân đều thấy không cần cuộn; tóm tắt ở cuối', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    await mockOrders(page);
+    await page.goto(`/orders/${ORDER_CODE}`);
+    const screen = paymentScreen(page);
+    await expect(screen).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Giải chạy Hồ Gươm mùa thu 2026' })).toBeVisible();
+
+    const stage = page.locator('[data-slot="payment-summary"]');
+    await expect(stage).toContainText('Số tiền cần trả');
+    await expect(page.locator('[data-slot="payment-amount"]')).toHaveText('600.000đ');
+    await expect(chip(page)).toHaveText(/^Giữ chỗ còn (15:00|14:5\d)$/);
+    // Chip coral viền coral 50% trên stage; không đổi đỏ.
+    await expect(chip(page)).toHaveCSS('color', 'rgb(255, 77, 106)');
+    await expect(chip(page)).toHaveCSS('border-top-color', 'rgba(255, 77, 106, 0.5)');
+    await expect(chip(page)).toHaveAttribute('role', 'timer');
+    await expect(stage.locator('[data-slot="order-code"]')).toHaveText(ORDER_CODE);
+
+    const trust = page.locator('[data-slot="recipient-trust-block"]');
+    await expect(trust.locator('[data-slot="recipient-headline"]')).toHaveText(`Tiền chuyển thẳng cho ${ORGANIZER}`);
+    await expect(trust.locator('[data-slot="recipient-account-name"]')).toHaveText('NGUYEN VAN TUAN');
+    await expect(trust.locator('[data-slot="recipient-bank-name"]')).toHaveText('Vietcombank');
+    await expect(trust).toContainText('Chủ tài khoản');
+    await expect(trust).toContainText('Ngân hàng');
+    await expect(waitingLine(page)).toHaveText(WAITING);
+    await expect(payButton(page)).toBeVisible();
+    await expect(page.locator('[data-slot="payment-footer"]')).toHaveText('Tickee không giữ tiền của bạn');
+
+    // Thứ tự trên xuống và mục 1–7 nằm trọn trong 375×667 khi chưa cuộn.
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    const order: [string, Locator][] = [
+      ['tên Sự kiện', page.locator('[data-slot="order-event-name"]')],
+      ['stage', stage],
+      ['trust block', trust],
+      ['link chính sách', page.locator('[data-slot="refund-policy-link"]')],
+      ['dòng chờ', waitingLine(page)],
+      ['nút Thanh toán', payButton(page)],
+      ['chân', page.locator('[data-slot="payment-footer"]')],
+    ];
+    let previousBottom = 0;
+    for (const [name, locator] of order) {
+      const box = await boxInViewport(page, name, locator);
+      expect(box.y, name).toBeGreaterThanOrEqual(previousBottom - 1);
+      previousBottom = box.y + box.height;
+    }
+    const summary = (await page.locator('[data-slot="order-summary"]').boundingBox())!;
+    expect(summary.y).toBeGreaterThanOrEqual(previousBottom);
+
+    // Chính sách hoàn vé mở trong Sheet, không rời Trang Đơn.
+    await page.locator('[data-slot="refund-policy-link"]').click();
+    const sheet = page.getByRole('dialog', { name: 'Chính sách hoàn vé' });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.locator('[data-slot="refund-policy-text"]')).toHaveText('Hoàn 100% nếu hủy trước 7 ngày.');
+    await sheet.getByRole('button', { name: 'Đã hiểu' }).click();
+    await expect(sheet).toHaveCount(0);
+    expect(new URL(page.url()).pathname).toBe(`/orders/${ORDER_CODE}`);
+    await expectNoHorizontalScroll(page);
+  });
+
+  test('"Thanh toán" → spinner trong nút rồi điều hướng toàn trang tới checkoutUrl, không popup', async ({ page }) => {
+    await mockOrders(page);
+    const visits = await mockTingeeCheckout(page);
+    const busy = await recordBusyButtons(page);
+    await page.goto(`/orders/${ORDER_CODE}`);
+    const pages = page.context().pages().length;
+    await payButton(page).click();
+    await page.waitForURL(CHECKOUT_URL);
+    await expect(page.getByRole('heading', { name: 'Trang Tingee giả' })).toBeVisible();
+    // Spinner hiện trong nút trước khi rời trang; cùng tab, không popup.
+    expect(busy).toEqual(['Thanh toánĐang xử lý']);
+    expect(visits).toEqual([CHECKOUT_URL]);
+    expect(page.context().pages()).toHaveLength(pages);
+  });
+
+  test('chưa có link → "Chưa tạo được link thanh toán" + "Thử lại" (spinner, chặn bấm lặp) → hiện "Thanh toán"', async ({ page }) => {
+    const missing = buyerOrder({
+      expiresAt: '2026-11-10T01:01:00.000Z',
+      payment: payment({ checkoutUrl: null, linkError: 'provider_error' }),
+    });
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const orders = await mockOrders(page, {
+      orders: { [ORDER_CODE]: { status: 200, body: missing } },
+      retryLink: async () => {
+        await held;
+        return { status: 200, body: buyerOrder({ serverNow: new Date().toISOString(), expiresAt: new Date(Date.now() + 15 * 60_000).toISOString() }) };
+      },
+    });
+    await page.goto(`/orders/${ORDER_CODE}`);
+    await expect(page.locator('[data-slot="payment-link-error"]')).toHaveText('Chưa tạo được link thanh toán');
+    await expect(payButton(page)).toHaveCount(0);
+    await expect(waitingLine(page)).toHaveCount(0);
+    // Trust block và đếm ngược vẫn hiện.
+    await expect(page.locator('[data-slot="recipient-trust-block"]')).toBeVisible();
+    await expect(chip(page)).toHaveText(/^Giữ chỗ còn 0[01]:\d\d$/);
+
+    await retryButton(page).click();
+    await expect(retryButton(page)).toHaveAttribute('aria-busy', 'true');
+    await retryButton(page).click();
+    release();
+    await expect(payButton(page)).toBeVisible();
+    await expect(retryButton(page)).toHaveCount(0);
+    await expect(page.locator('[data-slot="payment-link-error"]')).toHaveCount(0);
+    await expect(waitingLine(page)).toHaveText(WAITING);
+    await expect(chip(page)).toHaveText(/^Giữ chỗ còn 1[45]:\d\d$/);
+    expect(orders.retries).toEqual([ORDER_CODE]);
+  });
+
+  test('đồng hồ về 0 (page.clock) khi đã có link: chip và dòng chờ "Đang xác nhận thanh toán…", ẩn nút; báo mốc 5 và 1 phút', async ({
+    page,
+  }) => {
+    await page.clock.install({ time: new Date(SERVER_NOW) });
+    await mockOrders(page);
+    await page.goto(`/orders/${ORDER_CODE}`);
+    await expect(chip(page)).toHaveText(/^Giữ chỗ còn 1[45]:\d\d$/);
+    const announcement = page.locator('[data-slot="countdown-announcement"]');
+    await expect(announcement).toHaveAttribute('aria-live', 'polite');
+    await expect(announcement).toHaveText('');
+
+    await page.clock.fastForward('10:00');
+    await expect(chip(page)).toHaveText(/^Giữ chỗ còn 0[45]:\d\d$/);
+    await expect(announcement).toHaveText('Giữ chỗ còn 5 phút.');
+    await page.clock.fastForward('04:05');
+    await expect(announcement).toHaveText('Giữ chỗ còn 1 phút.');
+    // Không đổi sang đỏ khi sắp hết.
+    await expect(chip(page)).toHaveCSS('color', 'rgb(255, 77, 106)');
+
+    await page.clock.fastForward('01:30');
+    await expect(chip(page)).toHaveText('Đang xác nhận thanh toán');
+    await expect(waitingLine(page)).toHaveText(CONFIRMING);
+    await expect(page.locator('[data-slot="payment-status"]')).toHaveAttribute('aria-live', 'polite');
+    await expect(payButton(page)).toHaveCount(0);
+    // Máy chủ chưa báo hết hạn: không hiện màn Hết hạn.
+    await expect(page.getByText(HOLD_EXPIRED)).toHaveCount(0);
+  });
+
+  test('đồng hồ về 0 khi chưa có link: ẩn "Thử lại", chờ máy chủ báo hết hạn', async ({ page }) => {
+    await page.clock.install({ time: new Date(SERVER_NOW) });
+    const missing = buyerOrder({
+      expiresAt: '2026-11-10T01:01:00.000Z',
+      payment: payment({ checkoutUrl: null, linkError: 'provider_error' }),
+    });
+    await mockOrders(page, { orders: { [ORDER_CODE]: { status: 200, body: missing } } });
+    await page.goto(`/orders/${ORDER_CODE}`);
+    await expect(retryButton(page)).toBeVisible();
+    await page.clock.fastForward('01:05');
+    await expect(retryButton(page)).toHaveCount(0);
+    await expect(chip(page)).toHaveText('Giữ chỗ còn 00:00');
+    await expect(page.locator('[data-slot="payment-link-error"]')).toHaveText('Chưa tạo được link thanh toán');
+  });
+
+  test('tạm ngừng bán (sales_paused) → "Sự kiện tạm ngừng bán. Bạn thử lại sau nhé." + nút về trang Sự kiện', async ({ page }) => {
+    const paused = buyerOrder({ status: 'expired', payment: payment({ checkoutUrl: null, linkError: 'sales_paused' }) });
+    await mockOrders(page, { orders: { [ORDER_CODE]: { status: 200, body: paused } } });
+    await page.goto(`/orders/${ORDER_CODE}`);
+    await expect(orderBanner(page)).toHaveText(SALES_PAUSED);
+    await expect(page.getByRole('link', { name: 'Về trang Sự kiện' })).toHaveAttribute('href', `/e/${SLUG_BUY}`);
+    await expect(page.getByText(HOLD_EXPIRED)).toHaveCount(0);
+    await expect(paymentScreen(page)).toHaveCount(0);
+  });
+
+  test('hết hạn vì kết quả tạo link mơ hồ (timeout) → màn Hết hạn thường, không phải câu tạm ngừng', async ({ page }) => {
+    const timedOut = buyerOrder({ status: 'expired', payment: payment({ checkoutUrl: null, linkError: 'timeout' }) });
+    await mockOrders(page, { orders: { [ORDER_CODE]: { status: 200, body: timedOut } } });
+    await page.goto(`/orders/${ORDER_CODE}`);
+    await expect(orderBanner(page)).toHaveText(HOLD_EXPIRED);
+    await expect(page.getByRole('link', { name: 'Mua lại' })).toHaveAttribute('href', `/e/${SLUG_BUY}`);
+    await expect(page.getByText(SALES_PAUSED)).toHaveCount(0);
+    await expect(paymentScreen(page)).toHaveCount(0);
+  });
+
+  test('Checkout nhận 201 Đơn expired (timeout) → sang Trang Đơn với màn Hết hạn', async ({ page }) => {
+    await mockFunnel(page);
+    await mockAvailability(page, ON_SALE);
+    const timedOut = buyerOrder({ status: 'expired', payment: payment({ checkoutUrl: null, linkError: 'timeout' }) });
+    const orders = await mockOrders(page, {
+      submit: () => ({ status: 201, body: timedOut }),
+      orders: { [ORDER_CODE]: { status: 200, body: timedOut } },
+    });
+    await page.goto(`${CHECKOUT}?items=${TIER_PAID_ID}:2`);
+    await answerQuestions(page);
+    await sendButton(page).click();
+    await page.waitForURL(`**/orders/${ORDER_CODE}`);
+    expect(orders.calls).toHaveLength(1);
+    await expect(orderBanner(page)).toHaveText(HOLD_EXPIRED);
+    await expect(page.getByText(SALES_PAUSED)).toHaveCount(0);
+    await expect(paymentScreen(page)).toHaveCount(0);
+  });
+
+  test('Đơn chuyển pending → expired khi hỏi lại: vùng aria-live vẫn gắn (cùng phần tử), chữ đổi sang câu Hết hạn', async ({
+    page,
+  }) => {
+    const responses: Record<string, Reply> = { [ORDER_CODE]: { status: 200, body: buyerOrder() } };
+    await mockOrders(page, { orders: responses });
+    await page.goto(`/orders/${ORDER_CODE}`);
+    await expect(paymentScreen(page)).toBeVisible();
+    const live = announcement(page);
+    await expect(live).toHaveAttribute('aria-live', 'polite');
+    await expect(live).toHaveText('');
+    // Đánh dấu chính phần tử này: nếu vùng bị gắn lại khi đổi màn, dấu sẽ mất.
+    await live.evaluate((el) => {
+      el.dataset.marker = 'giu-nguyen';
+    });
+
+    responses[ORDER_CODE] = {
+      status: 200,
+      body: buyerOrder({ status: 'expired', payment: payment({ checkoutUrl: null }) }),
+    };
+    // Hỏi lại định kỳ mỗi 5 giây khi Đơn còn chờ.
+    await expect(orderBanner(page)).toHaveText(HOLD_EXPIRED, { timeout: 10_000 });
+    await expect(paymentScreen(page)).toHaveCount(0);
+    await expect(live).toHaveText(HOLD_EXPIRED);
+    await expect(live).toHaveAttribute('data-marker', 'giu-nguyen');
+    await expect(page.locator('[data-slot="order-status-announcement"]')).toHaveCount(1);
+  });
+
+  test('320px, theme tối: không cuộn ngang; nút chính coral; BTC không còn tài khoản → chỉ còn tên BTC', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.setViewportSize({ width: 320, height: 640 });
+    const noAccount = buyerOrder({
+      event: { slug: SLUG_BUY, name: 'Giải chạy Hồ Gươm mùa thu 2026 — cự ly 42km dành cho vận động viên phong trào', startsAt: '2099-11-15T07:00:00+07:00' },
+      payment: payment({ recipient: { organizationName: 'Câu lạc bộ Chạy Bộ Phố Cổ Hà Nội Mở Rộng', accountName: null, bankName: null } }),
+    });
+    await mockOrders(page, { orders: { [ORDER_CODE]: { status: 200, body: noAccount } } });
+    await page.goto(`/orders/${ORDER_CODE}`);
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(payButton(page)).toHaveCSS('background-color', 'rgb(255, 77, 106)');
+    const trust = page.locator('[data-slot="recipient-trust-block"]');
+    await expect(trust).toContainText('Câu lạc bộ Chạy Bộ Phố Cổ Hà Nội Mở Rộng');
+    await expect(trust).not.toContainText('Chủ tài khoản');
+    await expect(trust).not.toContainText('Ngân hàng');
+    await expectNoHorizontalScroll(page);
+  });
+});
+
 test.describe('Trang Đơn', () => {
   test('Hết hạn → câu báo + "Mua lại" về trang Sự kiện; mã lạ → "Không tìm thấy Đơn này."', async ({ page }) => {
     await mockAccount(page, { signedIn: true });
     await mockOrders(page, { orders: { [ORDER_CODE]: { status: 200, body: buyerOrder({ status: 'expired' }) } } });
     await page.goto(`/orders/${ORDER_CODE}`);
-    await expect(page.getByText('Hết thời gian giữ chỗ. Chỗ đã được trả lại.')).toBeVisible();
+    await expect(orderBanner(page)).toHaveText(HOLD_EXPIRED);
     await expect(page.getByRole('link', { name: 'Mua lại' })).toHaveAttribute('href', `/e/${SLUG_BUY}`);
     await expect(page.locator('[data-slot="order-code"]')).toHaveText(ORDER_CODE);
     await expect(page.locator('[data-slot="order-summary-line"]')).toHaveText([`${VIP}2 × 300.000đ600.000đ`]);

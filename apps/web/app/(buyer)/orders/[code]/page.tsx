@@ -8,8 +8,9 @@ export const metadata: Metadata = { title: 'Đơn của bạn · Tickee', robots
 type OrderPageProps = { params: Promise<{ code: string }> };
 
 /**
- * Trang Đơn `/orders/{code}` (Story 3.2, bản tối thiểu): cần đăng nhập (`BuyerGate`), Đơn tải ở trình duyệt (phiên ở
- * origin API). Story 3.4 thêm màn thanh toán, 3.7 tự chuyển trạng thái theo thời gian thực.
+ * Trang Đơn `/orders/{code}` (Story 3.2): cần đăng nhập (`BuyerGate`), Đơn tải ở trình duyệt (phiên ở origin API). Đơn
+ * có phí đang chờ hiện màn thanh toán (Story 3.4); đây cũng là `returnUrl` khi Tingee đưa Người mua quay về. Story 3.7
+ * tự chuyển trạng thái theo thời gian thực.
  */
 export default async function OrderPage({ params }: OrderPageProps) {
   const { code } = await params;

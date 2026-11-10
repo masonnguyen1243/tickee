@@ -1,9 +1,9 @@
-import { FUNNEL_EVENT_TYPES, ORDER_STATUSES } from '@tickee/contracts';
+import { FUNNEL_EVENT_TYPES, ORDER_STATUSES, PAYMENT_LINK_ERRORS } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import { bigint, boolean, check, index, integer, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, id, timestamptz } from '../../platform/db/index.js';
 import { events, ticketTypes } from '../event/schema.js';
-import { organizations } from '../organizer/schema.js';
+import { organizations, payoutAccounts } from '../organizer/schema.js';
 
 /**
  * Tồn kho của một Hạng vé (Story 2.8, AD-2): `capacity` (số suất), `sold` (đã bán), `held` (đang Giữ chỗ). Chỉ
@@ -79,8 +79,15 @@ export type PaidSource = (typeof PAID_SOURCES)[number];
  * Đơn (Story 3.2, AD-3, AD-31): mã `TK` + 8 Crockford base32, Người mua (`user_id`, không FK: `ordering` không phụ
  * thuộc `identity`), Sự kiện, trạng thái (máy trạng thái CAS `WHERE status = :from`) và hạn Giữ chỗ (`expires_at`).
  * Bản chụp bất biến lúc đặt (TX1): tổng tiền tính ở server, tên, SĐT (E.164), email, chính sách hoàn vé; `tickee_app`
- * không UPDATE được các cột này (`UPDATE_PROTECTED_COLUMNS`). Cột ghi được sau khi tạo: `status`, `payment_link`
- * (Story 3.4), `expires_at`, `paid_*` (Story 3.3, `markPaid`), `updated_at`.
+ * không UPDATE được các cột này (`UPDATE_PROTECTED_COLUMNS`). Cột ghi được sau khi tạo: `status`, `payment_link`,
+ * `payout_account_id`, `payment_link_attempt_at`, `payment_link_error` (Story 3.4), `expires_at`, `paid_*` (Story 3.3,
+ * `markPaid`), `updated_at`.
+ *
+ * Link thanh toán (Story 3.4, AD-4, AD-5): `payment_link_attempt_at` là "lượt" tạo link — đặt (đồng hồ DB) trước mỗi lần
+ * gọi `create-link` bằng CAS, chỉ trả về `NULL` khi Tingee từ chối rõ ràng, nên tại một thời điểm tối đa một lời gọi cho
+ * mỗi Đơn và không bao giờ gọi lại sau kết quả mơ hồ. TX2 gắn link: `payment_link`, `payout_account_id` (tài khoản nhận
+ * tiền đã ký link, IPN và Đối soát bù dùng lại) và `expires_at` = lượt + `PAYMENT_LINK_MINUTES`. `payment_link_error`:
+ * lý do lần tạo link gần nhất thất bại (`PAYMENT_LINK_ERRORS`), web đọc lại sau khi tải lại trang.
  *
  * Thanh toán (`markPaid`): `paid_at`, `paid_amount` (số tiền ghi nhận, Đơn 0đ là 0), `paid_source` (`PAID_SOURCES`) có
  * đủ cả ba hoặc không có gì; Đơn `paid` luôn có. Đơn tổng 0đ (Story 3.3) có `expires_at` = lúc tạo (không Giữ chỗ).
@@ -110,6 +117,11 @@ export const orders = pgTable(
     funnelId: uuid('funnel_id'),
     /** Link thanh toán Gateway (Story 3.4, TX2). `NULL` = chưa có link: job hết hạn (a) chỉ chạm Đơn chưa có link. */
     paymentLink: text('payment_link'),
+    /** Tài khoản nhận tiền của link (TX2); `NULL` khi chưa có link. */
+    payoutAccountId: uuid('payout_account_id').references(() => payoutAccounts.id),
+    /** Lượt tạo link đang giữ (đặt bằng CAS trước khi gọi Tingee); `NULL` = còn lượt. */
+    paymentLinkAttemptAt: timestamptz('payment_link_attempt_at'),
+    paymentLinkError: text('payment_link_error', { enum: PAYMENT_LINK_ERRORS }),
     expiresAt: timestamptz('expires_at').notNull(),
     paidAt: timestamptz('paid_at'),
     paidAmount: bigint('paid_amount', { mode: 'number' }),
@@ -135,6 +147,10 @@ export const orders = pgTable(
     check(
       'orders_paid_source_check',
       sql`${t.paidSource} IS NULL OR ${t.paidSource} IN ('ipn', 'reconciliation', 'manual', 'free')`,
+    ),
+    check(
+      'orders_payment_link_error_check',
+      sql`${t.paymentLinkError} IS NULL OR ${t.paymentLinkError} IN ('provider_error', 'sales_paused', 'timeout')`,
     ),
     check(
       'orders_paid_check',

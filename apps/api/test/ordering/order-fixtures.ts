@@ -1,13 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import { BuyerOrder, EventDetail, FormQuestion, IDEMPOTENCY_KEY_HEADER, TicketTypeDetail } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
+import { CreateLinkError, TINGEE_CLIENT, type TingeeClient, type TingeeCredential } from '../../src/modules/tingee/index.js';
+import { parseCredentialKeys, SecretBox } from '../../src/platform/crypto/index.js';
 import { signUpPlatformAdmin } from '../admin/platform-admin.js';
+import { TEST_CREDENTIAL_KEYS } from '../helpers.js';
 import { signUp, type Harness } from '../identity/harness.js';
 
 /*
- * Dựng dữ liệu cho test tạo Đơn (Story 3.2): một Owner, BTC đã duyệt Closed Beta và có tài khoản nhận tiền (bán được Vé
- * có phí), Sự kiện đã mở bán với Hạng vé theo yêu cầu, và Người mua mới (đã đồng ý NĐ 13). Mỗi test dùng Sự kiện mới
- * nên không lẫn tồn kho của nhau.
+ * Dựng dữ liệu cho test tạo Đơn (Story 3.2): một Owner, BTC đã duyệt Closed Beta và có tài khoản nhận tiền mặc định
+ * (bán được Vé có phí), Sự kiện đã mở bán với Hạng vé theo yêu cầu, và Người mua mới (đã đồng ý NĐ 13). Mỗi test dùng
+ * Sự kiện mới nên không lẫn tồn kho của nhau.
+ *
+ * Story 3.4: tạo Đơn có phí gọi Tingee `create-link` ngay sau TX1. Test của 3.2/3.3 thay Tingee bằng
+ * `REJECTING_TINGEE` (`create-link` luôn bị từ chối bằng mã thường): Đơn có phí vẫn `pending`, chưa có link, hạn Giữ chỗ
+ * của TX1, như trước Story 3.4. Test của 3.4 dùng Tingee fake thật với merchant khớp credential của BTC.
  */
 
 export type User = Awaited<ReturnType<typeof signUp>>;
@@ -25,28 +32,87 @@ export interface Org {
   orgId: string;
 }
 
-/** BTC mới của một Owner mới, đã duyệt Closed Beta và có tài khoản nhận tiền (bán được Vé có phí). */
-export async function paidReadyOrg(h: Harness): Promise<Org> {
+/** Khóa giải mã credential của api trong test (`TEST_CREDENTIAL_KEYS`): niêm Secret Token như `organizer` lưu. */
+export const testSecretBox = new SecretBox(parseCredentialKeys(TEST_CREDENTIAL_KEYS));
+
+/** Tài khoản nhận tiền của BTC trong test: VA (khớp một tài khoản `active` của merchant trên Tingee fake), tên, ngân hàng. */
+export interface PayoutSpec {
+  vaAccountNumber: string;
+  accountName: string;
+  bankName: string;
+}
+
+export const DEFAULT_PAYOUT: PayoutSpec = {
+  vaAccountNumber: '9600000001',
+  accountName: 'NGUYEN VAN A',
+  bankName: 'MB Bank',
+};
+
+/**
+ * Lưu credential (Secret Token niêm bằng `testSecretBox`) + một tài khoản nhận tiền mặc định cho BTC `orgId`, như sau
+ * khi Owner kết nối Tingee (Story 2.6). Trả id tài khoản.
+ */
+export async function linkPayoutAccount(
+  org: Org,
+  credential: TingeeCredential,
+  payout: PayoutSpec = DEFAULT_PAYOUT,
+): Promise<{ credentialId: string; payoutAccountId: string }> {
+  const { h, owner, orgId } = org;
+  const created = await h.db.orm.execute<{ id: string }>(sql`
+    INSERT INTO tingee_credentials (organization_id, client_id, secret_token_ciphertext, created_by)
+    VALUES (${orgId}, ${credential.clientId}, ${testSecretBox.seal(credential.secretToken)}, ${owner.userId})
+    RETURNING id`);
+  const credentialId = created.rows[0]!.id;
+  const account = await h.db.orm.execute<{ id: string }>(sql`
+    INSERT INTO payout_accounts
+      (organization_id, tingee_credential_id, va_account_number, bank_bin, bank_name, account_type, account_last4,
+       account_name, created_by, is_default)
+    VALUES (${orgId}, ${credentialId}, ${payout.vaAccountNumber}, '970422', ${payout.bankName}, 'personal-account',
+      ${payout.vaAccountNumber.slice(-4)}, ${payout.accountName}, ${owner.userId}, true)
+    RETURNING id`);
+  return { credentialId, payoutAccountId: account.rows[0]!.id };
+}
+
+/** Credential giả của BTC trong test của 3.2/3.3 (Tingee là `REJECTING_TINGEE`, không bao giờ gọi HTTP). */
+export const TEST_CREDENTIAL: TingeeCredential = { clientId: 'tg-client-test', secretToken: 'tg-secret-test-0123456789' };
+
+/**
+ * BTC mới của một Owner mới, đã duyệt Closed Beta và có tài khoản nhận tiền mặc định (bán được Vé có phí) ký bằng
+ * `credential`.
+ */
+export async function paidReadyOrg(
+  h: Harness,
+  options: { name?: string; credential?: TingeeCredential; payout?: PayoutSpec } = {},
+): Promise<Org> {
   const owner = await signUp(h);
   const platformAdmin = await signUpPlatformAdmin(h);
-  const orgId = (await h.http.post('/v1/orgs').set('cookie', owner.cookie).send({ name: 'CLB ABC' }).expect(201)).body
-    .id as string;
+  const orgId = (
+    await h.http
+      .post('/v1/orgs')
+      .set('cookie', owner.cookie)
+      .send({ name: options.name ?? 'CLB ABC' })
+      .expect(201)
+  ).body.id as string;
   await h.http
     .post(`/v1/admin/organizations/${orgId}/closed-beta/approve`)
     .set('cookie', platformAdmin.cookie)
     .expect(204);
-  const credential = await h.db.orm.execute<{ id: string }>(sql`
-    INSERT INTO tingee_credentials (organization_id, client_id, secret_token_ciphertext, created_by)
-    VALUES (${orgId}, 'tg-client-test', 'v1:AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA.AAAA', ${owner.userId})
-    RETURNING id`);
-  await h.db.orm.execute(sql`
-    INSERT INTO payout_accounts
-      (organization_id, tingee_credential_id, va_account_number, bank_bin, bank_name, account_type, account_last4,
-       account_name, created_by)
-    VALUES (${orgId}, ${credential.rows[0]!.id}, '9600000001', '970422', 'MB Bank', 'personal-account', '0000',
-      'NGUYEN VAN A', ${owner.userId})`);
-  return { h, owner, orgId };
+  const org = { h, owner, orgId };
+  await linkPayoutAccount(org, options.credential ?? TEST_CREDENTIAL, options.payout);
+  return org;
 }
+
+/**
+ * Tingee giả cho test của 3.2/3.3: `create-link` luôn bị từ chối rõ ràng bằng mã thường (`1006`), nên Đơn có phí vẫn
+ * `pending`, chưa có link (`payment.linkError = 'provider_error'`) và hết hạn theo job (a) như trước Story 3.4.
+ */
+export const REJECTING_TINGEE: TingeeClient = {
+  listAccounts: () => Promise.resolve([]),
+  createPaymentLink: () => Promise.reject(CreateLinkError.rejected('1006')),
+};
+
+/** Override của harness cho test của 3.2/3.3 (`REJECTING_TINGEE`). */
+export const rejectingTingee = { provide: TINGEE_CLIENT, useValue: REJECTING_TINGEE };
 
 export const eventsPath = (org: Org, eventId = '') => `/v1/orgs/${org.orgId}/events${eventId ? `/${eventId}` : ''}`;
 

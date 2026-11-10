@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Headers, Inject, Param, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Header, Headers, HttpCode, Inject, Param, Post, Req, Res } from '@nestjs/common';
 import { IDEMPOTENCY_KEY_HEADER, type BuyerOrder, type CheckoutForm } from '@tickee/contracts';
 import type { Request, Response } from 'express';
 import { OrdersService, type Buyer } from './orders.service.js';
@@ -34,10 +34,11 @@ export class OrdersController {
   }
 
   /**
-   * `POST /v1/events/:slug/orders` (header `Idempotency-Key`): `201` Đơn mới — `pending` (tổng > 0) hoặc `paid` kèm Vé
-   * (tổng 0đ, Story 3.3); `200` Đơn đã tạo trước đó với cùng khóa. Lỗi: `400 VALIDATION_FAILED`, `404 EVENT_NOT_FOUND`,
-   * `409 TICKET_TYPE_SOLD_OUT` / `NOT_ON_SALE` / `PENDING_ORDER_EXISTS` / `FREE_TICKET_LIMIT_REACHED`, `429
-   * ORDER_RATE_LIMITED`.
+   * `POST /v1/events/:slug/orders` (header `Idempotency-Key`): `201` Đơn mới — tổng > 0: `pending` kèm link thanh toán
+   * (Story 3.4), `pending` chưa có link (`payment.linkError = 'provider_error'`, thử lại được) hoặc `expired`
+   * (`sales_paused`/`timeout`); tổng 0đ: `paid` kèm Vé (Story 3.3). `200` Đơn đã tạo trước đó với cùng khóa (chưa có link
+   * mà còn lượt thì thử tạo link). Lỗi: `400 VALIDATION_FAILED`, `404 EVENT_NOT_FOUND`, `409 TICKET_TYPE_SOLD_OUT` /
+   * `NOT_ON_SALE` / `PENDING_ORDER_EXISTS` / `FREE_TICKET_LIMIT_REACHED`, `429 ORDER_RATE_LIMITED`.
    */
   @Post('events/:slug/orders')
   @Header('cache-control', 'no-store')
@@ -61,5 +62,17 @@ export class OrdersController {
   @Header('cache-control', 'no-store')
   mine(@Param('code') code: string, @Req() req: BuyerRequest): Promise<BuyerOrder> {
     return this.orders.mine(buyerOf(req), code);
+  }
+
+  /**
+   * `POST /v1/me/orders/:code/payment-link` (Story 3.4): thử tạo lại link thanh toán cho cùng Đơn sau khi Tingee từ
+   * chối. `200` với `BuyerOrder` hiện tại (Đơn không đủ điều kiện thì không gọi Tingee); không có hoặc của người khác →
+   * `404 ORDER_NOT_FOUND`; lần thử tính vào giới hạn tốc độ tạo Đơn → quá giới hạn `429 ORDER_RATE_LIMITED`.
+   */
+  @Post('me/orders/:code/payment-link')
+  @HttpCode(200)
+  @Header('cache-control', 'no-store')
+  retryPaymentLink(@Param('code') code: string, @Req() req: BuyerRequest): Promise<BuyerOrder> {
+    return this.orders.retryPaymentLink(buyerOf(req), clientIp(req), code);
   }
 }

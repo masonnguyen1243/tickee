@@ -24,6 +24,7 @@ import {
   paidReadyOrg,
   parseOrder,
   postOrder,
+  rejectingTingee,
   resetOrderRateLimit,
   type Org,
   type User,
@@ -52,7 +53,7 @@ let boss: PgBoss;
 let org: Org;
 
 beforeAll(async () => {
-  h = await createHarness({}, { overrides: [{ provide: TicketsService, useValue: tickets }] });
+  h = await createHarness({}, { overrides: [{ provide: TicketsService, useValue: tickets }, rejectingTingee] });
   boss = h.app.get<PgBoss>(BOSS);
   org = await paidReadyOrg(h);
 });

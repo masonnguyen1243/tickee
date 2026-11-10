@@ -28,6 +28,21 @@ export function parseTingeeTimestamp(value: string): Date | null {
   return tingeeTimestamp(date) === value ? date : null;
 }
 
+/**
+ * `x-request-timestamp` của API Cổng thanh toán (Gateway, vd. `create-link`): UNIX timestamp mili giây, khác định dạng
+ * `yyyyMMddHHmmssSSS` của API Tài khoản & Định danh (AD-9). Tài liệu Tingee còn mâu thuẫn (bảng lỗi mã 90 ghi
+ * `yyyyMMddHHmmssSSS`); theo trang `create-link`, phải kiểm lại trên UAT.
+ */
+export function gatewayTimestamp(now: Date): string {
+  return String(now.getTime());
+}
+
+/** Đọc ngược `gatewayTimestamp` (chỉ chữ số, 13 chữ số); sai dạng → `null`. */
+export function parseGatewayTimestamp(value: string): Date | null {
+  if (!/^\d{13}$/.test(value)) return null;
+  return new Date(Number(value));
+}
+
 /** `x-signature`: hex thường của `HMAC_SHA512(timestamp + ':' + body, secret)`; `body` là đúng chuỗi JSON gửi đi. */
 export function sign(timestamp: string, body: string, secret: string): string {
   return createHmac('sha512', secret).update(`${timestamp}:${body}`).digest('hex');

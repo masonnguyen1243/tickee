@@ -16,6 +16,7 @@ import {
   paidReadyOrg,
   parseOrder,
   postOrder,
+  rejectingTingee,
   resetOrderRateLimit,
   type Org,
   type User,
@@ -32,7 +33,7 @@ let h: Harness;
 let org: Org;
 
 beforeAll(async () => {
-  h = await createHarness();
+  h = await createHarness({}, { overrides: [rejectingTingee] });
   org = await paidReadyOrg(h);
 });
 beforeEach(async () => {

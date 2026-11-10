@@ -12,7 +12,14 @@ export const ORDERING_CONFIG = Symbol('ORDERING_CONFIG');
 export interface OrderingConfig {
   /** Khóa gốc HMAC IP của bộ đếm tạo Đơn (tách miền bằng HKDF, như bộ đếm OTP của `identity`). */
   BETTER_AUTH_SECRET: string;
+  /** Origin của web: `returnUrl` của link thanh toán là Trang Đơn trên web (Story 3.4). */
+  WEB_ORIGIN: string;
+  /** Khóa giải mã Secret Token Tingee của BTC để ký `create-link` (Story 3.4). Không bao giờ log. */
+  TINGEE_CREDENTIAL_KEYS: string;
 }
+
+/** Giá trị của `ORDERING_CONFIG`: chỉ khóa HMAC IP (khóa credential Tingee đi riêng vào `PAYMENT_LINK_SETTINGS`). */
+export type OrderRateLimitConfig = Pick<OrderingConfig, 'BETTER_AUTH_SECRET'>;
 
 /** `now()` của Postgres (đầu transaction), cùng mốc với `created_at` mặc định. */
 async function dbNow(tx: Tx): Promise<number> {
@@ -22,8 +29,10 @@ async function dbNow(tx: Tx): Promise<number> {
 
 /**
  * Giới hạn tốc độ tạo Đơn (Story 3.2, AD-31) đếm trong Postgres: tối đa `perUser` lần mỗi tài khoản và `perIp` lần mỗi
- * IP trong cửa sổ trượt `windowSeconds`. Đếm mọi lần thử tới được TX1 (kể cả lần hết chỗ); không đếm lần bị chặn sớm
- * (payload sai, Đơn chờ đã có) hay lần trả lại Đơn cũ theo `Idempotency-Key`. Bảng chỉ có HMAC của IP.
+ * IP trong cửa sổ trượt `windowSeconds`. Đếm mọi lần thử tới được TX1 (kể cả lần hết chỗ) và mọi lần thử lại tạo link
+ * thanh toán cho Đơn đã có (Story 3.4: `POST /v1/me/orders/:code/payment-link`, hay gửi lại cùng `Idempotency-Key` khi
+ * Đơn chưa có link mà còn lượt); không đếm lần bị chặn sớm (payload sai, Đơn chờ đã có) hay lần trả lại Đơn cũ không
+ * cần tạo link. Bảng chỉ có HMAC của IP.
  *
  * Chỉ khóa theo tài khoản (giới hạn chính, không lọt khi gửi song song). Không khóa theo IP: CGNAT dồn nhiều Người mua
  * vào một IP (kịch bản NFR-3), một khóa theo IP sẽ bắt mọi lần thử xếp hàng, mỗi lần giữ một kết nối pool. Giới hạn theo
@@ -35,7 +44,7 @@ export class OrderRateLimiter {
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
-    @Inject(ORDERING_CONFIG) config: OrderingConfig,
+    @Inject(ORDERING_CONFIG) config: OrderRateLimitConfig,
   ) {
     this.key = Buffer.from(hkdfSync('sha256', config.BETTER_AUTH_SECRET, 'tickee', 'ordering.order-create-attempts', 32));
   }
