@@ -18,11 +18,4 @@ export {
 } from './tingee.client.js';
 export { domainErrorOf, TINGEE_ERROR_CODES, type TingeeDomainError } from './errors.js';
 export { tingeePortalUrl } from './portal.js';
-export {
-  gatewayTimestamp,
-  parseGatewayTimestamp,
-  parseTingeeTimestamp,
-  sign,
-  tingeeTimestamp,
-  verifySignature,
-} from './signing.js';
+export { parseTingeeTimestamp, sign, tingeeTimestamp, verifySignature } from './signing.js';

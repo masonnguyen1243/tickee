@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  gatewayTimestamp,
-  parseGatewayTimestamp,
-  parseTingeeTimestamp,
-  sign,
-  tingeeTimestamp,
-  verifySignature,
-} from '../../src/modules/tingee/index.js';
+import { parseTingeeTimestamp, sign, tingeeTimestamp, verifySignature } from '../../src/modules/tingee/index.js';
 
 describe('ký request Tingee', () => {
   it('timestamp yyyyMMddHHmmssSSS theo giờ Asia/Ho_Chi_Minh (UTC+7)', () => {
@@ -18,14 +11,8 @@ describe('ký request Tingee', () => {
     expect(parseTingeeTimestamp('20261332080203004')).toBeNull();
   });
 
-  it('Cổng thanh toán: timestamp UNIX ms (13 chữ số), đọc ngược được; sai dạng → null', () => {
-    const at = new Date('2026-11-10T01:02:03.004Z');
-    expect(gatewayTimestamp(at)).toBe(String(at.getTime()));
-    expect(gatewayTimestamp(at)).toBe('1794272523004');
-    expect(parseGatewayTimestamp('1794272523004')?.toISOString()).toBe('2026-11-10T01:02:03.004Z');
-    for (const bad of ['20261110080203004', '179427252300', '1794272523004.5', '-794272523004', '']) {
-      expect(parseGatewayTimestamp(bad), bad).toBeNull();
-    }
+  it('UNIX ms (định dạng trang tài liệu create-link ghi nhưng Tingee production trả 90) không phải timestamp hợp lệ', () => {
+    expect(parseTingeeTimestamp('1794272523004')).toBeNull();
   });
 
   it('chữ ký = hex thường của HMAC_SHA512(ts + ":" + body, secret) — vector cố định', () => {

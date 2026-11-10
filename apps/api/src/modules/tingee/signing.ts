@@ -9,7 +9,11 @@ const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
 
 const pad = (n: number, width = 2) => String(n).padStart(width, '0');
 
-/** `x-request-timestamp`: `yyyyMMddHHmmssSSS` theo giờ `Asia/Ho_Chi_Minh`. */
+/**
+ * `x-request-timestamp`: `yyyyMMddHHmmssSSS` theo giờ `Asia/Ho_Chi_Minh`, cho mọi API Tingee, kể cả `create-link` của
+ * Cổng thanh toán. Trang tài liệu `create-link` ghi UNIX ms, nhưng Tingee production trả 90 "Timestamp is not in correct
+ * format." cho UNIX ms và nhận định dạng này (chẩn đoán 10/11/2026).
+ */
 export function tingeeTimestamp(now: Date): string {
   const t = new Date(now.getTime() + VN_OFFSET_MS);
   return (
@@ -26,21 +30,6 @@ export function parseTingeeTimestamp(value: string): Date | null {
   const utc = Date.UTC(y, mo - 1, d, h, mi, s, ms) - VN_OFFSET_MS;
   const date = new Date(utc);
   return tingeeTimestamp(date) === value ? date : null;
-}
-
-/**
- * `x-request-timestamp` của API Cổng thanh toán (Gateway, vd. `create-link`): UNIX timestamp mili giây, khác định dạng
- * `yyyyMMddHHmmssSSS` của API Tài khoản & Định danh (AD-9). Tài liệu Tingee còn mâu thuẫn (bảng lỗi mã 90 ghi
- * `yyyyMMddHHmmssSSS`); theo trang `create-link`, phải kiểm lại trên UAT.
- */
-export function gatewayTimestamp(now: Date): string {
-  return String(now.getTime());
-}
-
-/** Đọc ngược `gatewayTimestamp` (chỉ chữ số, 13 chữ số); sai dạng → `null`. */
-export function parseGatewayTimestamp(value: string): Date | null {
-  if (!/^\d{13}$/.test(value)) return null;
-  return new Date(Number(value));
 }
 
 /** `x-signature`: hex thường của `HMAC_SHA512(timestamp + ':' + body, secret)`; `body` là đúng chuỗi JSON gửi đi. */

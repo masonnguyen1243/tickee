@@ -4,7 +4,7 @@ import { ErrorCode } from '@tickee/contracts';
 import { z } from 'zod';
 import { AppError } from '../../platform/http/index.js';
 import { DOMAIN_ERROR_MESSAGES, domainErrorOf, TINGEE_ERROR_CODES, type TingeeDomainError } from './errors.js';
-import { gatewayTimestamp, sign, tingeeTimestamp } from './signing.js';
+import { sign, tingeeTimestamp } from './signing.js';
 
 /** Token DI của `TingeeClient`; test thay bằng client trỏ vào Tingee fake. */
 export const TINGEE_CLIENT = Symbol('TINGEE_CLIENT');
@@ -119,8 +119,9 @@ export interface TingeeClient {
    */
   listAccounts(credential: TingeeCredential): Promise<TingeeAccount[]>;
   /**
-   * `POST /v1/payment-gateway/create-link` (Story 3.4): checkout URL (`data`) khi `code = '00'`. Timestamp UNIX ms,
-   * timeout `TINGEE_PAYMENT_LINK_TIMEOUT_MS`. Lỗi luôn là `CreateLinkError` (`rejected` / `ambiguous`).
+   * `POST /v1/payment-gateway/create-link` (Story 3.4): checkout URL (`data`) khi `code = '00'`. Timestamp
+   * `yyyyMMddHHmmssSSS` như mọi API Tingee (Tingee production trả 90 cho UNIX ms, dù trang tài liệu ghi UNIX ms), timeout
+   * `TINGEE_PAYMENT_LINK_TIMEOUT_MS`. Lỗi luôn là `CreateLinkError` (`rejected` / `ambiguous`).
    */
   createPaymentLink(credential: TingeeCredential, input: PaymentLinkInput): Promise<string>;
 }
@@ -245,10 +246,7 @@ export class HttpTingeeClient implements TingeeClient {
       returnUrl: input.returnUrl,
       description: input.description,
     };
-    const sent = await this.send(credential, TINGEE_CREATE_LINK_PATH, payload, {
-      timestamp: gatewayTimestamp,
-      timeoutMs: this.paymentLinkTimeoutMs,
-    });
+    const sent = await this.send(credential, TINGEE_CREATE_LINK_PATH, payload, this.paymentLinkTimeoutMs);
     if (sent.kind === 'failed') throw CreateLinkError.ambiguous(sent.reason, { httpStatus: sent.httpStatus });
     const { httpStatus, json } = sent;
     const rawCode = typeof json === 'object' && json !== null ? (json as { code?: unknown }).code : undefined;
@@ -265,7 +263,7 @@ export class HttpTingeeClient implements TingeeClient {
 
   /** Gửi một request ký bằng credential của BTC; trả `data` khi `code === '00'`, không thì ném lỗi miền. */
   private async post(credential: TingeeCredential, path: string, payload: Record<string, unknown>): Promise<unknown> {
-    const sent = await this.send(credential, path, payload, { timestamp: tingeeTimestamp, timeoutMs: this.timeoutMs });
+    const sent = await this.send(credential, path, payload, this.timeoutMs);
     if (sent.kind === 'failed') {
       if (sent.httpStatus === null) this.logger.warn({ path, reason: sent.reason }, 'Không gọi được Tingee');
       else this.logger.warn({ path, httpStatus: sent.httpStatus, reason: sent.reason }, 'Phản hồi Tingee không đọc được');
@@ -288,17 +286,17 @@ export class HttpTingeeClient implements TingeeClient {
   }
 
   /**
-   * Ký và gửi `payload` (JSON minify, đúng chuỗi được ký) bằng credential của BTC. `timestamp` theo nhóm API (Gateway:
-   * UNIX ms; Tài khoản & Định danh: `yyyyMMddHHmmssSSS`). Không ném: trả lỗi vận chuyển hoặc phản hồi đọc được.
+   * Ký và gửi `payload` (JSON minify, đúng chuỗi được ký) bằng credential của BTC, timestamp `yyyyMMddHHmmssSSS` (mọi
+   * API Tingee, kể cả Cổng thanh toán). Không ném: trả lỗi vận chuyển hoặc phản hồi đọc được.
    */
   private async send(
     credential: TingeeCredential,
     path: string,
     payload: Record<string, unknown>,
-    { timestamp: format, timeoutMs }: { timestamp: (now: Date) => string; timeoutMs: number },
+    timeoutMs: number,
   ): Promise<Sent> {
     const body = JSON.stringify(payload);
-    const timestamp = format(this.now());
+    const timestamp = tingeeTimestamp(this.now());
     let response: Response;
     try {
       response = await fetch(new URL(path, this.options.baseUrl), {

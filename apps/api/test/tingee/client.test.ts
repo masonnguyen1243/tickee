@@ -7,7 +7,7 @@ import {
   CreateLinkError,
   domainErrorOf,
   HttpTingeeClient,
-  parseGatewayTimestamp,
+  parseTingeeTimestamp,
   TINGEE_ACCOUNT_PAGE_SIZE,
   TINGEE_CREATE_LINK_PATH,
   TINGEE_PAYMENT_LINK_TIMEOUT_MS,
@@ -27,8 +27,8 @@ import {
 
 /*
  * Adapter Tingee trên Tingee fake (server HTTP thật, nhiều merchant): ký bằng credential của từng BTC, timeout, đổi mã
- * lỗi, lọc danh sách tài khoản; `create-link` của Cổng thanh toán (Story 3.4): timestamp UNIX ms, timeout riêng, phân
- * loại rõ ràng/mơ hồ. Không bao giờ gọi Tingee thật.
+ * lỗi, lọc danh sách tài khoản; `create-link` của Cổng thanh toán (Story 3.4): timestamp `yyyyMMddHHmmssSSS` như API
+ * Tài khoản (Tingee production trả 90 cho UNIX ms), timeout riêng, phân loại rõ ràng/mơ hồ. Không bao giờ gọi Tingee thật.
  */
 
 const A: TingeeCredential = { clientId: 'btc-a-client', secretToken: 'btc-a-secret-0123456789' };
@@ -251,15 +251,15 @@ describe('HttpTingeeClient.createPaymentLink (Story 3.4)', () => {
     fake.merchant(A.clientId).linkReplies = [];
   });
 
-  it('đúng đường dẫn và body (requestId uuid v4 mới mỗi lần, không merchantId/customerEmail); UNIX ms; ký đúng', async () => {
+  it('đúng đường dẫn và body (requestId uuid v4 mới mỗi lần, không merchantId/customerEmail); yyyyMMddHHmmssSSS; ký đúng', async () => {
     expect(TINGEE_CREATE_LINK_PATH).toBe(CREATE_LINK_PATH);
     const before = Date.now();
     const url = await client.createPaymentLink(A, input());
     await client.createPaymentLink(A, input());
     const [first, second] = fake.calls(CREATE_LINK_PATH);
     expect(first).toMatchObject({ clientId: A.clientId, signatureValid: true });
-    expect(first!.timestamp).toMatch(/^\d{13}$/);
-    const sentAt = parseGatewayTimestamp(first!.timestamp!)!.getTime();
+    expect(first!.timestamp).toMatch(/^\d{17}$/);
+    const sentAt = parseTingeeTimestamp(first!.timestamp!)!.getTime();
     expect(sentAt).toBeGreaterThanOrEqual(before);
     expect(sentAt).toBeLessThanOrEqual(Date.now());
     expect(first!.body).toEqual({
@@ -405,11 +405,12 @@ describe('HttpTingeeClient.createPaymentLink (Story 3.4)', () => {
     });
   });
 
-  it('timestamp sai định dạng của nhóm API → fake trả 90 (create-link cần UNIX ms, get-va-paging cần yyyyMMdd…)', async () => {
-    // Gửi tay để kiểm luật của fake: create-link với timestamp kiểu API Tài khoản.
+  it('timestamp UNIX ms → fake trả 90 như Tingee production (create-link cũng cần yyyyMMddHHmmssSSS)', async () => {
+    // Gửi tay để kiểm luật của fake: Tingee production trả 90 "Timestamp is not in correct format." cho UNIX ms
+    // (chẩn đoán 10/11, dù trang tài liệu create-link ghi UNIX ms).
     const res = await fetch(new URL(CREATE_LINK_PATH, fake.url), {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-client-id': A.clientId, 'x-request-timestamp': '20261110080000000' },
+      headers: { 'content-type': 'application/json', 'x-client-id': A.clientId, 'x-request-timestamp': '1794272523004' },
       body: '{}',
     });
     expect(((await res.json()) as { code: string }).code).toBe('90');

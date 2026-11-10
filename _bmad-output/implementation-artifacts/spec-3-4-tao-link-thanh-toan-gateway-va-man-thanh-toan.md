@@ -16,7 +16,7 @@ context:
 
 ## Intent
 
-**Problem:** Sau 3.2, Đơn có phí dừng ở `pending` mà không có link thanh toán. Người mua không trả tiền được, còn Trang Đơn chỉ ghi "Đang giữ chỗ". Adapter Tingee chưa có `create-link`, chưa ký được timestamp UNIX ms, và chưa phân biệt lỗi rõ ràng với kết quả mơ hồ.
+**Problem:** Sau 3.2, Đơn có phí dừng ở `pending` mà không có link thanh toán. Người mua không trả tiền được, còn Trang Đơn chỉ ghi "Đang giữ chỗ". Adapter Tingee chưa có `create-link` và chưa phân biệt lỗi rõ ràng với kết quả mơ hồ.
 
 **Approach:** Sau TX1, `ordering` lấy tài khoản nhận tiền mặc định cùng credential đã giải mã (qua `organizer`), rồi gọi `tingee.createPaymentLink()` ngoài transaction với timeout 5 giây. Sau đó TX2 lưu link bằng CAS và enqueue job hết hạn (c) trên queue sẵn có. `BuyerOrder` có thêm khối `payment`. Trang Đơn hiện màn thanh toán theo DESIGN/EXPERIENCE và redirect toàn trang sang Gateway. Thêm `POST /v1/me/orders/:code/payment-link` để thử lại.
 
@@ -26,7 +26,7 @@ context:
 - **Request `create-link`** theo tài liệu Tingee công khai (`developers.tingee.vn/docs/payment-gateway/create-payment-link`):
   - Body: `requestId` là UUID v4 sinh mới mỗi lần; `orderId` = mã Đơn; `amount` = `total_amount`; `vaAccountNumber` = VA của tài khoản mặc định; `expireInMinute` = 15; `returnUrl` = `{WEB_ORIGIN}/orders/:code`; `description` = `Thanh toán Đơn {code}`.
   - Không gửi `merchantId`, `customerEmail`.
-  - Header `x-request-timestamp` là UNIX ms. Chữ ký HMAC-SHA512 như các API khác. Timeout 5 giây.
+  - Header `x-request-timestamp` là `yyyyMMddHHmmssSSS` giờ Việt Nam, như các API Tingee khác. (Sửa 10/11 sau khi Mason duyệt chẩn đoán: Tingee production trả `90` "Timestamp is not in correct format." cho UNIX ms, dù trang tài liệu `create-link` ghi UNIX ms.) Chữ ký HMAC-SHA512 như các API khác. Timeout 5 giây.
   - Thành công là `{ code: '00', data: <checkout URL> }`. Tingee không trả hạn link.
 - **Phân loại kết quả** (chỉ `tingee` biết mã Tingee):
   - **ok**: `code = '00'` và `data` là URL.
@@ -91,7 +91,7 @@ context:
 
 | Scenario | Input / State | Expected Output / Behavior | Error Handling |
 |---|---|---|---|
-| Tạo link thành công | Đơn có phí; BTC có tài khoản mặc định; Tingee trả `00` | 201 `pending`, `payment.checkoutUrl` = `data`. DB có link, `payout_account_id`, `expires_at` ≈ lượt + 15 phút; có job (c). Fake nhận đúng body (không có `merchantId`), timestamp UNIX ms, chữ ký hợp lệ | — |
+| Tạo link thành công | Đơn có phí; BTC có tài khoản mặc định; Tingee trả `00` | 201 `pending`, `payment.checkoutUrl` = `data`. DB có link, `payout_account_id`, `expires_at` ≈ lượt + 15 phút; có job (c). Fake nhận đúng body (không có `merchantId`), timestamp `yyyyMMddHHmmssSSS`, chữ ký hợp lệ | — |
 | Lỗi rõ ràng | Tingee trả mã thường (vd. `1006`) | 201 `pending`, `checkoutUrl` null, `linkError = 'provider_error'`, `held` giữ nguyên | Web: "Chưa tạo được link thanh toán" + "Thử lại" |
 | Thử lại thành công | Như trên; gọi thử lại trong 60 giây, Tingee trả `00` | 200 `pending` có `checkoutUrl` | — |
 | Thử lại song song | Hai request thử lại cùng lúc | Đúng một lời gọi `create-link`; cả hai trả 200 | — |
@@ -143,8 +143,8 @@ context:
 - [x] `packages/contracts/src/{order,errors}.ts` + test: `BuyerOrderPayment`, `PAYMENT_LINK_ERRORS`, đường dẫn thử lại, mã lỗi `PAYMENT_ACCOUNT_NOT_ALLOWED` (kéo theo `app-error.ts` `DEFAULT_STATUS` và `error.filter.ts` `MESSAGES`).
 - [x] `apps/api/src/modules/tingee/{tingee.client,signing,errors,index}.ts` + `test/tingee-fake/server.ts`:
   - `createPaymentLink(credential, input)` trả URL hoặc ném lỗi phân rõ rõ ràng/mơ hồ, kèm mã Tingee.
-  - Timestamp UNIX ms, timeout 5 giây theo từng lời gọi.
-  - Fake có route `create-link`: kiểm UNIX ms và chữ ký, ghi lại body, hỗ trợ các `behavior`.
+  - Timestamp `yyyyMMddHHmmssSSS` (sửa 10/11, trước là UNIX ms), timeout 5 giây theo từng lời gọi.
+  - Fake có route `create-link`: kiểm timestamp (UNIX ms → `90` như Tingee production) và chữ ký, ghi lại body, hỗ trợ các `behavior`.
 - [x] `apps/api/src/modules/organizer/{payout-targets.ts,index.ts}`: `defaultPayoutTargetOf(db, secretBox, organizationId)` trả `{ payoutAccountId, vaAccountNumber, credential, accountName, bankName }` hoặc null; `payoutRecipientOf(db, { organizationId, payoutAccountId })` không có credential. `organizer` chỉ đọc, không giữ secret.
 - [x] `apps/api/src/modules/ordering/{schema,payment-link,orders.service,orders.controller,order-jobs,ordering.module}.ts` + `drizzle/0018` + `api.module.ts`:
   - Cột `payout_account_id`, `payment_link_attempt_at`, `payment_link_error` (CHECK ba giá trị).
@@ -183,6 +183,13 @@ context:
 
 ## Spec Change Log
 
+- **10/11/2026: timestamp của `create-link`.**
+  - **Phát hiện:** chạy local với Tingee production, mọi Đơn có phí đều dừng ở "Chưa tạo được link thanh toán" (`provider_error`, Đơn `TK7DJZJXC0`, `TKWZFA9S0B`).
+  - **Chẩn đoán:** hai lời gọi an toàn (`amount` = 1.000đ, dưới mức tối thiểu nên Tingee không tạo được link), Mason duyệt từng lần. UNIX ms → `90` "Timestamp is not in correct format."; `yyyyMMddHHmmssSSS` → qua bước kiểm timestamp và chữ ký, chỉ còn `400` "amount must not be less than 2000".
+  - **Sửa:** `create-link` ký bằng `tingeeTimestamp` như mọi API khác; bỏ `gatewayTimestamp`/`parseGatewayTimestamp`; fake trả `90` cho UNIX ms. Khối frozen (dòng header timestamp), task và Design Notes cập nhật theo; spine:179 cũng sửa.
+  - **Trạng thái tránh được:** bán Vé có phí thật thì không Đơn nào tạo được link, Người mua chỉ thấy "Thử lại" lặp mãi.
+  - **KEEP:** mọi phần còn lại của luồng `create-link` (body, phân loại rõ ràng/mơ hồ, lượt, TX2) giữ nguyên.
+
 ## Review Triage Log
 
 Vòng 1 (review_loop_iteration 0). Nguồn: BH = Blind Hunter, EC = Edge Case Hunter, VG = Verification Gap.
@@ -217,7 +224,7 @@ Vòng 1 (review_loop_iteration 0). Nguồn: BH = Blind Hunter, EC = Edge Case Hu
 - **Vì sao `expires_at` = lượt + 15 phút:** Tingee không trả hạn link (`data` chỉ là URL). Lượt được đặt bằng đồng hồ DB trước khi gửi request, nên hạn của Tickee không bao giờ muộn hơn hạn thật của Tingee; job (c) còn cộng thêm 5 phút. Điều này lệch với câu "hạn link do Tingee trả" trong epics.
 - **Vì sao trả `BuyerOrder` thay vì lỗi `ORDER_EXPIRED`/`MERCHANT_SUSPENDED`:** sau TX1 thì Đơn đã tồn tại, và gửi lại cùng khóa phải trả đúng Đơn đó. Dùng một kiểu phản hồi thì web chỉ cần chuyển tới Trang Đơn như hiện nay. `linkError` nằm trong DB, nên tải lại trang vẫn hiện đúng màn.
 - **Vì sao lượt không có thời hạn:** Tingee chưa nói gọi trùng `orderId` thì sao (spine:541). Lượt bị kẹt chỉ làm mất một Đơn đang giữ chỗ 60 giây; còn gọi trùng có thể sinh hai link trả được tiền.
-- **Mâu thuẫn trong tài liệu Tingee:** trang `create-link` ghi timestamp là UNIX ms, nhưng bảng lỗi (mã `90`) ghi `yyyyMMddHHmmssSSS`. Spec theo trang `create-link` và spine:179; phải kiểm lại trên UAT.
+- **Mâu thuẫn trong tài liệu Tingee (đã chốt 10/11):** trang `create-link` ghi timestamp là UNIX ms, nhưng bảng lỗi (mã `90`) ghi `yyyyMMddHHmmssSSS`. Tingee production theo bảng lỗi: UNIX ms bị trả `90`. Code dùng `yyyyMMddHHmmssSSS` cho mọi API (xem Spec Change Log).
 
 ## Verification
 
@@ -227,4 +234,4 @@ Vòng 1 (review_loop_iteration 0). Nguồn: BH = Blind Hunter, EC = Edge Case Hu
 - `pnpm test:e2e`: pass (`purchase.spec.ts` và các spec cũ).
 
 **Manual checks (if no CLI):**
-- Trên UAT, bằng key thật có quyền "Cổng thanh toán": tạo Đơn có phí → `create-link` trả `00` (xác nhận timestamp UNIX ms) → "Thanh toán" mở trang Tingee. Tên người nhận trên trang Tingee khớp `recipient-trust-block`.
+- Trên UAT, bằng key thật có quyền "Cổng thanh toán": tạo Đơn có phí → `create-link` trả `00` → "Thanh toán" mở trang Tingee. Tên người nhận trên trang Tingee khớp `recipient-trust-block`.

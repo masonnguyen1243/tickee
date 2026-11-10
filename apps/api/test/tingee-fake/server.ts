@@ -1,7 +1,7 @@
 import { randomInt } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { parseGatewayTimestamp, parseTingeeTimestamp, verifySignature } from '../../src/modules/tingee/signing.js';
+import { parseTingeeTimestamp, verifySignature } from '../../src/modules/tingee/signing.js';
 
 /*
  * Tingee fake: server HTTP thật trên cổng ngẫu nhiên (hoặc cổng chỉ định, cho dev local) với nhiều merchant, mỗi merchant
@@ -11,9 +11,10 @@ import { parseGatewayTimestamp, parseTingeeTimestamp, verifySignature } from '..
  * `error` → HTTP 500 · `hang` → treo (quá timeout của client). `get-va-paging` có `merchantId` trong body → mã 400 (key
  * merchant không được gửi `merchantId`). Mọi request được ghi lại (`requests`) để test kiểm.
  *
- * Cổng thanh toán (Story 3.4): `create-link` ký bằng timestamp UNIX ms (API Tài khoản dùng `yyyyMMddHHmmssSSS`; sai
- * định dạng của nhóm API → 90). Kiểm body như tài liệu (`requestId` uuid v4, `orderId`, `amount` ≥ 2.000, không
- * `merchantId`), VA phải là tài khoản `active` của merchant (không thì 2023), rồi trả `00` với checkout URL trỏ về chính
+ * Cổng thanh toán (Story 3.4): `create-link` ký bằng timestamp `yyyyMMddHHmmssSSS` như API Tài khoản; UNIX ms → 90 như
+ * Tingee production (dù trang tài liệu `create-link` ghi UNIX ms; chẩn đoán 10/11/2026). Kiểm body như tài liệu
+ * (`requestId` uuid v4, `orderId`, `amount` ≥ 2.000, không `merchantId`), VA phải là tài khoản `active` của merchant
+ * (không thì 2023), rồi trả `00` với checkout URL trỏ về chính
  * fake (`GET /checkout/:orderId` hiện một trang tối giản có link quay về `returnUrl`). `linkReplies` cài trước phản hồi
  * của từng lần gọi kế tiếp (mã lỗi, HTTP lạ, `data` sai dạng, treo); `linkDelayMs` giả Tingee chậm.
  */
@@ -237,9 +238,8 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
       requests.push({ path, clientId, timestamp, signature, signatureValid, body, receivedAt: new Date() });
       for (const wake of waiters) wake();
 
-      // Cổng thanh toán: UNIX ms; API Tài khoản & Định danh: `yyyyMMddHHmmssSSS` giờ Việt Nam.
-      const parseTimestamp = path === CREATE_LINK_PATH ? parseGatewayTimestamp : parseTingeeTimestamp;
-      const sent = timestamp ? parseTimestamp(timestamp) : null;
+      // Mọi API, kể cả Cổng thanh toán: `yyyyMMddHHmmssSSS` giờ Việt Nam (UNIX ms → 90).
+      const sent = timestamp ? parseTingeeTimestamp(timestamp) : null;
       const skew = sent ? Date.now() - sent.getTime() : Number.NaN;
       let reply: Reply | 'hang';
       if (req.method !== 'POST') reply = fail('405', 'Chỉ nhận POST');

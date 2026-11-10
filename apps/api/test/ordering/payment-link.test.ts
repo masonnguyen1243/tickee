@@ -9,6 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ExpireOrderPayload, expireOrder } from '../../src/modules/ordering/order-jobs.js';
 import {
   HttpTingeeClient,
+  parseTingeeTimestamp,
   TINGEE_CLIENT,
   type PaymentLinkInput,
   type TingeeClient,
@@ -199,10 +200,11 @@ describe('tạo link khi gửi Đơn', () => {
       recipient: { organizationName: 'CLB Pickleball Quận 3', accountName: 'NGUYEN VAN TUAN', bankName: 'Vietcombank' },
     });
 
-    // Request đúng tài liệu: body đủ trường, không merchantId/customerEmail; timestamp UNIX ms; chữ ký đúng.
+    // Request đúng tài liệu: body đủ trường, không merchantId/customerEmail; timestamp `yyyyMMddHHmmssSSS` giờ Việt Nam
+    // (Tingee production trả 90 cho UNIX ms); chữ ký đúng.
     expect(call).toMatchObject({ clientId: MAIN.clientId, signatureValid: true });
-    expect(call!.timestamp).toMatch(/^\d{13}$/);
-    expect(Math.abs(Number(call!.timestamp) - Date.now())).toBeLessThan(30_000);
+    expect(call!.timestamp).toMatch(/^\d{17}$/);
+    expect(Math.abs(parseTingeeTimestamp(call!.timestamp!)!.getTime() - Date.now())).toBeLessThan(30_000);
     expect(call!.body).toEqual({
       requestId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
       orderId: order.code,
