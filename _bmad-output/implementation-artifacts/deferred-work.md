@@ -334,6 +334,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-5-refactor-web.md`
   summary: E2E `purchase-form.spec.ts:376` (sắp thứ tự câu hỏi, kiểm focus sang nút "Xuống") chập chờn trên cả android-chromium và ios-webkit.
   evidence: Chạy lặp 40 lần: baseline `14b9084` fail 4/40, bản E2-5 fail 2/40. Focus được đặt trong `requestAnimationFrame` sau `setQueryData` + `invalidateQueries` (`purchase-form-editor.tsx` ~:671-675), nên dễ đua với lần render của refetch. Nên gộp vào việc ghi các test webkit chập chờn ở E2-8.
+- Đã xử lý (10/11/2026): mục trên được sửa tận gốc ở `purchase-form-editor.tsx`, không nới timeout hay thêm retry. Nguyên nhân không nằm ở refetch: TanStack Query báo cache đổi cho React qua `setTimeout(0)`, nên lần render thứ tự mới là một task riêng và có thể tới sau khung hình kế. Khi `requestAnimationFrame` chạy trước, nút "Xuống Trình độ" vẫn `disabled` theo thứ tự cũ nên `focus()` không có tác dụng. Đo bằng spec chẩn đoán tạm (ghi mỗi lần `focus()` và lúc danh sách đổi trong DOM): 6/6 lần fail đều focus trước khi đổi thứ tự, lúc nút còn `disabled`; 74/74 lần pass đều sau. Ép rAF chạy ngay thì fail 10/10. Cách sửa: `onSuccess` chỉ ghi nút đích vào ref; `useEffect` theo `questions` focus sau lần commit có thứ tự mới (cùng mẫu `pendingFocus` của form câu hỏi). Sau khi sửa: chạy lặp 40 lần pass 80/80 trên hai project; ép rAF chạy ngay thì pass 20/20.
 
 ## Deferred from: build of spec-3-1-chon-ve-va-dang-nhap-khi-bam-mua.md (2026-11-09)
 
