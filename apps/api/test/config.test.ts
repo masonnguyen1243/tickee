@@ -5,6 +5,9 @@ const SECRET = 's3cret-Gi4-tri';
 /** Khóa 32 byte (base64) dùng làm "giá trị bí mật" của `TINGEE_CREDENTIAL_KEYS`. */
 const KEY_1 = Buffer.alloc(32, 0x5a).toString('base64');
 const KEY_2 = Buffer.alloc(32, 0xa5).toString('base64');
+/** Khóa 32 byte (base64) dùng làm "giá trị bí mật" của `TICKET_QR_KEYS`. */
+const QR_KEY_1 = Buffer.alloc(32, 0x3c).toString('base64');
+const QR_KEY_2 = Buffer.alloc(32, 0xc3).toString('base64');
 const apiEnv = {
   APP_ROLE: 'api',
   DATABASE_URL: `postgresql://tickee_app:${SECRET}@db:5432/tickee`,
@@ -17,6 +20,7 @@ const apiEnv = {
   GOOGLE_CLIENT_SECRET: `GOCSPX-${SECRET}`,
   TINGEE_BASE_URL: 'https://uat-open-api.tingee.vn',
   TINGEE_CREDENTIAL_KEYS: `v1:${KEY_1}, v2:${KEY_2}`,
+  TICKET_QR_KEYS: `v1:${QR_KEY_1},v2:${QR_KEY_2}`,
 };
 const workerEnv = {
   APP_ROLE: 'worker',
@@ -145,6 +149,7 @@ describe('loadConfig', () => {
       'GOOGLE_CLIENT_ID',
       'GOOGLE_CLIENT_SECRET',
       'SMTP_URL',
+      'TICKET_QR_KEYS',
       'TINGEE_BASE_URL',
       'TINGEE_CREDENTIAL_KEYS',
       'WEB_ORIGIN',
@@ -185,6 +190,36 @@ describe('loadConfig', () => {
       expect(err.message).not.toContain(KEY_2);
       expect(err.message).not.toContain(short);
     }
+  });
+
+  it('TICKET_QR_KEYS (Story 3.3): bắt buộc ở vai api; trống hoặc sai dạng → dừng, nêu tên biến, không in khóa', () => {
+    expect(loadConfig({ ...apiEnv, TICKET_QR_KEYS: `v1:${QR_KEY_1}` })).toMatchObject({
+      TICKET_QR_KEYS: `v1:${QR_KEY_1}`,
+    });
+    for (const value of [undefined, '']) {
+      const err = issuesOf({ ...apiEnv, TICKET_QR_KEYS: value });
+      expect(err.issues).toEqual([{ variable: 'TICKET_QR_KEYS', reason: 'thiếu' }]);
+      expect(err.message).toContain('TICKET_QR_KEYS');
+    }
+    const short = Buffer.alloc(16, 0x3c).toString('base64');
+    for (const value of [
+      ' ',
+      ',',
+      QR_KEY_1,
+      `v0:${QR_KEY_1}`,
+      `t1:${QR_KEY_1}`,
+      `v1:${short}`,
+      `v1:${QR_KEY_1}!`,
+      `v1:${QR_KEY_1},v1:${QR_KEY_2}`,
+    ]) {
+      const err = issuesOf({ ...apiEnv, TICKET_QR_KEYS: value });
+      expect(err.issues.map((i) => i.variable), value).toEqual(['TICKET_QR_KEYS']);
+      expect(err.message).not.toContain(QR_KEY_1);
+      expect(err.message).not.toContain(QR_KEY_2);
+      expect(err.message).not.toContain(short);
+    }
+    // Vai worker chưa cần khóa này.
+    expect(loadConfig(workerEnv)).not.toHaveProperty('TICKET_QR_KEYS');
   });
 
   it('vai api: thiếu hoặc rỗng biến Google → dừng, chỉ nêu tên biến, không in giá trị', () => {

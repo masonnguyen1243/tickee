@@ -4,6 +4,7 @@ import {
   CreateOrderRequest,
   ErrorCode,
   EVENT_UNAVAILABLE_REASONS,
+  FREE_TICKET_LIMIT_MESSAGE,
   FunnelEventType,
   IDEMPOTENCY_KEY_HEADER,
   IdempotencyKey,
@@ -11,7 +12,9 @@ import {
   ORDER_CODE_PATTERN,
   orderRequestFor,
   OrderStatus,
+  ticketCount,
   TierSaleStatus,
+  toEventIso,
   type BuyerOrder,
   type CheckoutForm,
   type EventAvailability,
@@ -19,7 +22,7 @@ import {
   type PendingOrderExistsDetails,
   type TicketTypeSoldOutDetails,
 } from '@tickee/contracts';
-import { and, asc, desc, eq, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import pg from 'pg';
 import type { PgBoss } from 'pg-boss';
 import { DATABASE, type Database, type DbExecutor, type Tx } from '../../platform/db/index.js';
@@ -32,7 +35,9 @@ import {
   saleEventById,
   type TicketTypeRow,
 } from '../event/index.js';
-import { holdInventory, type InventoryLine } from './inventory.service.js';
+import { TicketsService } from '../ticketing/index.js';
+import { holdInventory, sellInventory, type InventoryLine } from './inventory.service.js';
+import { OrderPayments } from './mark-paid.js';
 import { ORDER_CODE_ATTEMPTS, ORDER_CODE_GENERATOR, type OrderCodeGenerator } from './order-code.js';
 import { enqueueOrderExpiry, expireOrder, OrderQueues } from './order-jobs.js';
 import { OrderRateLimiter } from './order-rate-limit.js';
@@ -40,16 +45,18 @@ import { checkoutFunnelEvents, orderAnswers, orderItems, orders } from './schema
 import { saleFactsOf, saleStatusOf } from './sellability.js';
 
 /*
- * Checkout và tạo Đơn (Story 3.2, AD-2, AD-4, AD-31). Mọi Đơn của 3.2 (kể cả Đơn 0đ) đi cùng một đường: giữ chỗ rồi
- * `pending` với hạn `ORDER_HOLD_SECONDS`; 3.3 tách Đơn tổng 0đ sang đường bán ngay, 3.4 gắn link thanh toán.
+ * Checkout và tạo Đơn (Story 3.2, AD-2, AD-4, AD-31). Đơn tổng > 0: giữ chỗ rồi `pending` với hạn
+ * `ORDER_HOLD_SECONDS` (3.4 gắn link thanh toán). Đơn tổng 0đ (Story 3.3): bán ngay trong TX1 rồi `markPaid` nguồn
+ * `free`, nên request trả Đơn `paid` kèm Vé.
  *
  * Tạo Đơn: kiểm khóa chống trùng và payload → tra Đơn theo `(user_id, Idempotency-Key)` (có → 200 Đơn cũ) → hết hạn Đơn
  * chờ cũ đã quá hạn (transaction riêng, cùng hàm với job) → Đơn chờ khác còn hạn → 409 (cùng khóa → 200) → queue sẵn
  * sàng → giới hạn tốc độ → TX1. TX1 (một
  * transaction): khóa Sự kiện `FOR SHARE` → kiểm lại form, giới hạn Vé/Đơn và luật bán (`saleStatusOf`) trên dữ liệu đã
- * khóa → giữ chỗ có điều kiện theo `ticket_type_id` tăng dần → Đơn `pending` + bản chụp → `order_created` → enqueue job
- * hết hạn bằng chính `tx`. TX1 không gọi Tingee, không gửi email, không `NOTIFY`. Lỗi unique sau rollback (hai request
- * cùng khóa, hay hai Đơn chờ đua nhau) → đọc lại: trả Đơn của bên thắng hoặc 409.
+ * khóa → giữ chỗ (Đơn 0đ: bán) có điều kiện theo `ticket_type_id` tăng dần → Đơn `pending` + bản chụp → `order_created`
+ * → enqueue job hết hạn bằng chính `tx` (Đơn 0đ: trần Vé miễn phí → `markPaid`, không job). TX1 không gọi Tingee, không
+ * gửi email, không `NOTIFY`. Lỗi unique sau rollback (hai request cùng khóa, hay hai Đơn chờ đua nhau) → đọc lại: trả
+ * Đơn của bên thắng hoặc 409.
  */
 
 /** Token DI của thời gian Giữ chỗ (giây) của Đơn mới; mặc định `ORDER_HOLD_SECONDS`, test tiêm số nhỏ. */
@@ -93,6 +100,8 @@ const soldOut = (ticketTypeId: string, ticketTypeName: string) => {
     details,
   });
 };
+
+const freeTicketLimitReached = () => new AppError(ErrorCode.FREE_TICKET_LIMIT_REACHED, FREE_TICKET_LIMIT_MESSAGE);
 
 const notOnSale = (details: NotOnSaleDetails) =>
   new AppError(ErrorCode.NOT_ON_SALE, 'Sự kiện hoặc Hạng vé này hiện không nhận Đơn.', { details });
@@ -145,6 +154,8 @@ export class OrdersService {
     @Inject(OrderRateLimiter) private readonly limiter: OrderRateLimiter,
     @Inject(ORDER_CODE_GENERATOR) private readonly orderCode: OrderCodeGenerator,
     @Inject(ORDER_HOLD) private readonly holdSeconds: number,
+    @Inject(OrderPayments) private readonly payments: OrderPayments,
+    @Inject(TicketsService) private readonly tickets: TicketsService,
   ) {}
 
   /**
@@ -230,7 +241,12 @@ export class OrdersService {
     return this.view(row);
   }
 
-  /** TX1. Trả id Đơn mới. Lỗi nghiệp vụ hoặc unique → ném, cả transaction rollback (không giữ chỗ gì). */
+  /**
+   * TX1. Trả id Đơn mới. Lỗi nghiệp vụ hoặc unique → ném, cả transaction rollback (không giữ chỗ, không bán, không Vé).
+   * Đơn tổng > 0: giữ chỗ (`held += n`), Đơn `pending` hạn `holdSeconds`, job hết hạn. Đơn tổng 0đ: bán (`sold += n`),
+   * Đơn `pending` hạn = lúc tạo, kiểm trần Vé miễn phí của Người mua, rồi `markPaid` nguồn `free` (Đơn `paid` + Vé);
+   * không job hết hạn.
+   */
   private async placeOrder(tx: Tx, buyer: Buyer, slug: string, key: string, body: unknown): Promise<string> {
     const event = await lockSaleEventBySlug(tx, slug);
     const questions = await buyerFormQuestions(tx, event.id);
@@ -242,26 +258,34 @@ export class OrdersService {
     const facts = await saleFactsOf(tx, event);
     const tiers = new Map(facts.tiers.map((t) => [t.id, t]));
     assertOnSale(saleStatusOf(facts, new Date()), lines, tiers);
-    const short = await holdInventory(tx, lines);
-    if (short !== null) throw soldOut(short, tiers.get(short)?.name ?? '');
-
+    // Mọi dòng đã qua `assertOnSale` nên đều là Hạng vé của Sự kiện: giá đã chốt lúc khóa.
     const items = lines.map((line) => {
       const tier = tiers.get(line.ticketTypeId)!;
       return { ...line, name: tier.name, unitPrice: tier.price };
     });
     const totalAmount = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
-    const order = await this.insertOrder(tx, {
-      userId: buyer.id,
-      eventId: event.id,
-      organizationId: event.organizationId,
-      totalAmount,
-      buyerName: input.buyer.name,
-      buyerPhone: input.buyer.phone,
-      buyerEmail: buyer.email,
-      refundPolicy: event.refundPolicy,
-      idempotencyKey: key,
-      funnelId: input.funnelId?.toLowerCase() ?? null,
-    });
+    const free = totalAmount === 0;
+
+    const short = free ? await sellInventory(tx, lines) : await holdInventory(tx, lines);
+    if (short !== null) throw soldOut(short, tiers.get(short)?.name ?? '');
+
+    const order = await this.insertOrder(
+      tx,
+      {
+        userId: buyer.id,
+        eventId: event.id,
+        organizationId: event.organizationId,
+        totalAmount,
+        buyerName: input.buyer.name,
+        buyerPhone: input.buyer.phone,
+        buyerEmail: buyer.email,
+        refundPolicy: event.refundPolicy,
+        idempotencyKey: key,
+        funnelId: input.funnelId?.toLowerCase() ?? null,
+      },
+      // Đơn 0đ không Giữ chỗ; cột NOT NULL nên hạn = lúc tạo.
+      free ? sql`clock_timestamp()` : sql`clock_timestamp() + make_interval(secs => ${this.holdSeconds})`,
+    );
     await tx.insert(orderItems).values(
       items.map((i) => ({
         orderId: order.id,
@@ -291,18 +315,56 @@ export class OrdersService {
         .values({ eventId: event.id, type: FunnelEventType.ORDER_CREATED, funnelId: input.funnelId.toLowerCase() })
         .onConflictDoNothing({ target: [checkoutFunnelEvents.funnelId, checkoutFunnelEvents.type] });
     }
-    await enqueueOrderExpiry(this.boss, tx, order.id, order.expiresAt);
+    if (!free) {
+      await enqueueOrderExpiry(this.boss, tx, order.id, order.expiresAt);
+      return order.id;
+    }
+
+    await this.assertFreeTicketLimit(tx, buyer.id, event.id, ticketCount(lines), event.maxTicketsPerOrder);
+    const result = await this.payments.markPaid(tx, order.id, 'free', 0);
+    // Đơn vừa chèn `pending` trong chính `tx` này: không bên nào khác chuyển được trước.
+    if (result !== 'paid') throw new Error(`markPaid trả ${result} cho Đơn 0đ vừa tạo`);
     return order.id;
   }
 
   /**
-   * INSERT Đơn `pending` với `expires_at = clock_timestamp() + hạn Giữ chỗ` (giờ lúc INSERT, không phải giờ bắt đầu
-   * transaction: TX1 chờ khóa lâu thì hạn Giữ chỗ không bị ngắn đi) trong một savepoint: trùng mã (`orders_code_key`) thì
-   * sinh mã khác, tối đa `ORDER_CODE_ATTEMPTS` lần, mà không hủy phần đã giữ chỗ của TX1. Lỗi unique khác ném ra ngoài.
+   * Trần Vé miễn phí của Người mua (Story 3.3): số Vé trong các Đơn `paid` tổng 0đ của Người mua ở Sự kiện (Vé có phí
+   * không tính) + `requested` ≤ giới hạn Vé/Đơn, nếu không → `409 FREE_TICKET_LIMIT_REACHED`. Chạy sau khi chèn Đơn
+   * `pending`: TX1 khác của cùng Người mua cho cùng Sự kiện chờ ở unique Đơn chờ tới khi TX1 này commit (lúc đó Đơn đã
+   * `paid`), nên câu đếm của bên chạy sau (READ COMMITTED, ảnh chụp mới mỗi câu) luôn thấy Vé vừa phát của bên kia.
+   */
+  private async assertFreeTicketLimit(
+    tx: Tx,
+    userId: string,
+    eventId: string,
+    requested: number,
+    limit: number,
+  ): Promise<void> {
+    const [row] = await tx
+      .select({ tickets: sql<number>`COALESCE(SUM(${orderItems.quantity}), 0)::int` })
+      .from(orderItems)
+      .innerJoin(orders, eq(orders.id, orderItems.orderId))
+      .where(
+        and(
+          eq(orders.userId, userId),
+          eq(orders.eventId, eventId),
+          eq(orders.status, OrderStatus.PAID),
+          eq(orders.totalAmount, 0),
+        ),
+      );
+    if (Number(row?.tickets ?? 0) + requested > limit) throw freeTicketLimitReached();
+  }
+
+  /**
+   * INSERT Đơn `pending` với `expires_at` = `expiresAt` (tính theo `clock_timestamp()`, giờ lúc INSERT, không phải giờ
+   * bắt đầu transaction: TX1 chờ khóa lâu thì hạn Giữ chỗ không bị ngắn đi) trong một savepoint: trùng mã
+   * (`orders_code_key`) thì sinh mã khác, tối đa `ORDER_CODE_ATTEMPTS` lần, mà không hủy phần đã giữ chỗ của TX1. Lỗi
+   * unique khác ném ra ngoài.
    */
   private async insertOrder(
     tx: Tx,
     values: Omit<typeof orders.$inferInsert, 'code' | 'status' | 'expiresAt'>,
+    expiresAt: SQL,
   ): Promise<{ id: string; expiresAt: Date }> {
     for (let attempt = 1; ; attempt++) {
       const code = this.orderCode();
@@ -314,7 +376,7 @@ export class OrdersService {
               ...values,
               code,
               status: OrderStatus.PENDING,
-              expiresAt: sql`clock_timestamp() + make_interval(secs => ${this.holdSeconds})`,
+              expiresAt,
             })
             .returning({ id: orders.id, expiresAt: orders.expiresAt });
           if (!row) throw new Error('INSERT orders không trả về dòng nào');
@@ -364,9 +426,12 @@ export class OrdersService {
     return pending ?? null;
   }
 
-  /** Đơn + bản chụp + Sự kiện (tên, slug hiện tại) → `BuyerOrder`, kèm `serverNow`. */
+  /**
+   * Đơn + bản chụp + Sự kiện (tên, slug, giờ bắt đầu hiện tại) → `BuyerOrder`, kèm `serverNow`; Đơn `paid` kèm Vé theo
+   * `seq` và Mã QR vé.
+   */
   private async view(row: OrderRow, db: DbExecutor = this.db.orm): Promise<BuyerOrder> {
-    const [items, answers, event] = await Promise.all([
+    const [items, answers, event, tickets] = await Promise.all([
       db
         .select()
         .from(orderItems)
@@ -378,11 +443,12 @@ export class OrdersService {
         .where(eq(orderAnswers.orderId, row.id))
         .orderBy(asc(orderAnswers.position)),
       saleEventById(db, row.eventId),
+      row.status === OrderStatus.PAID ? this.tickets.ticketsOfOrder(db, row.id) : Promise.resolve([]),
     ]);
     return {
       code: row.code,
       status: row.status,
-      event: { slug: event.slug, name: event.name },
+      event: { slug: event.slug, name: event.name, startsAt: toEventIso(event.startsAt) },
       items: items.map((i) => ({
         ticketTypeId: i.ticketTypeId,
         name: i.ticketTypeName,
@@ -397,6 +463,7 @@ export class OrdersService {
       createdAt: row.createdAt.toISOString(),
       expiresAt: row.expiresAt.toISOString(),
       serverNow: new Date().toISOString(),
+      tickets,
     };
   }
 }

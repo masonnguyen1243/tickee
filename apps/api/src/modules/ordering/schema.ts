@@ -39,7 +39,8 @@ export const ticketTypeInventory = pgTable(
 
 /**
  * Phễu mua (Story 3.1, đo SM-C2): `buy_clicked` khi bấm "Mua", `login_completed` khi tới Checkout sau khi đăng nhập,
- * `order_created` khi Đơn được tạo (Story 3.2, ghi trong TX1). Không PII, không `user_id`: các sự kiện chỉ nối với nhau
+ * `order_created` khi Đơn được tạo (Story 3.2, ghi trong TX1), `paid` khi Đơn chuyển `paid` (Story 3.3, ghi trong
+ * `markPaid`). Không PII, không `user_id`: các sự kiện chỉ nối với nhau
  * bằng `funnel_id` (uuid do trình duyệt sinh lúc bấm "Mua"). `login_required` chỉ có ở `buy_clicked` (lúc bấm đã đăng
  * nhập sẵn thì không tính vào mẫu số). Chỉ INSERT: role `tickee_app` bị thu UPDATE/DELETE (`APPEND_ONLY_TABLES`). Unique
  * `(funnel_id, type)`: gửi trùng không thêm dòng.
@@ -59,7 +60,10 @@ export const checkoutFunnelEvents = pgTable(
   (t) => [
     uniqueIndex('checkout_funnel_events_funnel_id_type_key').on(t.funnelId, t.type),
     index('checkout_funnel_events_event_id_created_at_idx').on(t.eventId, t.createdAt),
-    check('checkout_funnel_events_type_check', sql`${t.type} IN ('buy_clicked', 'login_completed', 'order_created')`),
+    check(
+      'checkout_funnel_events_type_check',
+      sql`${t.type} IN ('buy_clicked', 'login_completed', 'order_created', 'paid')`,
+    ),
     check(
       'checkout_funnel_events_login_required_check',
       sql`(${t.type} = 'buy_clicked') = (${t.loginRequired} IS NOT NULL)`,
@@ -67,12 +71,19 @@ export const checkoutFunnelEvents = pgTable(
   ],
 );
 
+/** Nguồn ghi nhận thanh toán của `markPaid` (AD-1): IPN, Đối soát bù, BTC xác nhận tay, Đơn tổng 0đ. */
+export const PAID_SOURCES = ['ipn', 'reconciliation', 'manual', 'free'] as const;
+export type PaidSource = (typeof PAID_SOURCES)[number];
+
 /**
  * Đơn (Story 3.2, AD-3, AD-31): mã `TK` + 8 Crockford base32, Người mua (`user_id`, không FK: `ordering` không phụ
  * thuộc `identity`), Sự kiện, trạng thái (máy trạng thái CAS `WHERE status = :from`) và hạn Giữ chỗ (`expires_at`).
  * Bản chụp bất biến lúc đặt (TX1): tổng tiền tính ở server, tên, SĐT (E.164), email, chính sách hoàn vé; `tickee_app`
  * không UPDATE được các cột này (`UPDATE_PROTECTED_COLUMNS`). Cột ghi được sau khi tạo: `status`, `payment_link`
- * (Story 3.4), `expires_at`, `updated_at`.
+ * (Story 3.4), `expires_at`, `paid_*` (Story 3.3, `markPaid`), `updated_at`.
+ *
+ * Thanh toán (`markPaid`): `paid_at`, `paid_amount` (số tiền ghi nhận, Đơn 0đ là 0), `paid_source` (`PAID_SOURCES`) có
+ * đủ cả ba hoặc không có gì; Đơn `paid` luôn có. Đơn tổng 0đ (Story 3.3) có `expires_at` = lúc tạo (không Giữ chỗ).
  *
  * Unique: `code`; `(user_id, idempotency_key)` (gửi lại cùng khóa trả Đơn đã có); một phần `(user_id, event_id) WHERE
  * status = 'pending'` (tối đa một Đơn chờ mỗi Người mua mỗi Sự kiện). `funnel_id`: `f` của lần bấm "Mua" dẫn tới Đơn.
@@ -100,6 +111,9 @@ export const orders = pgTable(
     /** Link thanh toán Gateway (Story 3.4, TX2). `NULL` = chưa có link: job hết hạn (a) chỉ chạm Đơn chưa có link. */
     paymentLink: text('payment_link'),
     expiresAt: timestamptz('expires_at').notNull(),
+    paidAt: timestamptz('paid_at'),
+    paidAmount: bigint('paid_amount', { mode: 'number' }),
+    paidSource: text('paid_source', { enum: PAID_SOURCES }),
     createdAt: createdAt(),
     updatedAt: timestamptz('updated_at')
       .notNull()
@@ -118,6 +132,14 @@ export const orders = pgTable(
     ),
     check('orders_code_check', sql`${t.code} ~ '^TK[0-9A-HJKMNP-TV-Z]{8}$'`),
     check('orders_total_amount_check', sql`${t.totalAmount} >= 0`),
+    check(
+      'orders_paid_source_check',
+      sql`${t.paidSource} IS NULL OR ${t.paidSource} IN ('ipn', 'reconciliation', 'manual', 'free')`,
+    ),
+    check(
+      'orders_paid_check',
+      sql`(${t.paidAt} IS NULL) = (${t.paidAmount} IS NULL) AND (${t.paidAt} IS NULL) = (${t.paidSource} IS NULL) AND (${t.paidAmount} IS NULL OR ${t.paidAmount} >= 0) AND (${t.status} <> 'paid' OR ${t.paidAt} IS NOT NULL)`,
+    ),
   ],
 );
 

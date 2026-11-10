@@ -71,9 +71,10 @@ describe('lựa chọn Vé trong URL (items=<ticketTypeId>:<qty>[,…])', () => 
 });
 
 describe('FunnelEventInput', () => {
-  it('ba loại sự kiện phễu; order_created chỉ API ghi (không gửi qua funnel-events)', () => {
-    expect(FUNNEL_EVENT_TYPES).toEqual(['buy_clicked', 'login_completed', 'order_created']);
+  it('bốn loại sự kiện phễu; order_created và paid chỉ API ghi (không gửi qua funnel-events)', () => {
+    expect(FUNNEL_EVENT_TYPES).toEqual(['buy_clicked', 'login_completed', 'order_created', 'paid']);
     expect(FunnelEventInput.safeParse({ type: 'order_created', funnelId: FUNNEL }).success).toBe(false);
+    expect(FunnelEventInput.safeParse({ type: 'paid', funnelId: FUNNEL }).success).toBe(false);
   });
 
   it('buy_clicked cần loginRequired; login_completed chỉ có funnelId', () => {

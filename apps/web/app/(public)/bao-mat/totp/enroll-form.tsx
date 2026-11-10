@@ -4,11 +4,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ErrorCode, TOTP_DIGITS, type TotpEnrollResponse } from '@tickee/contracts';
 import { Copy, Download } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import QRCode from 'qrcode';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 
 import { FieldError } from '@/components/tickee/field-error';
 import { OtpInput } from '@/components/tickee/otp-input';
+import { QrPlate } from '@/components/tickee/qr-plate';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -30,29 +30,6 @@ import { copyWithToast } from '@/lib/clipboard';
 /** 409 `VALIDATION_FAILED`: đã đăng ký (lúc bắt đầu) hoặc phiên đăng ký đã hết (lúc xác nhận). */
 const isConflict = (error: unknown) =>
   error instanceof ApiError && error.code === ErrorCode.VALIDATION_FAILED && error.status === 409;
-
-function QrImage({ uri }: { uri: string }) {
-  const [src, setSrc] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    QRCode.toDataURL(uri, { margin: 1, width: 192, errorCorrectionLevel: 'M' })
-      .then((url) => !cancelled && setSrc(url))
-      .catch(() => !cancelled && setSrc(null));
-    return () => {
-      cancelled = true;
-    };
-  }, [uri]);
-  return (
-    // Nền trắng cố định: ứng dụng xác thực cần QR tương phản kể cả ở dark mode.
-    <div className="mx-auto flex size-52 items-center justify-center rounded-md bg-white p-2">
-      {src ? (
-        <img src={src} width={192} height={192} alt="Mã QR để thêm Tickee vào ứng dụng xác thực" />
-      ) : (
-        <div aria-hidden="true" className="size-48 animate-pulse rounded-sm bg-muted" />
-      )}
-    </div>
-  );
-}
 
 function ScanStep({
   enrollment,
@@ -100,7 +77,12 @@ function ScanStep({
         <p className="text-body text-muted-foreground">
           Mở ứng dụng xác thực (Google Authenticator, Microsoft Authenticator…) và quét mã này.
         </p>
-        <QrImage uri={enrollment.totpUri} />
+        <QrPlate
+          value={enrollment.totpUri}
+          label="Mã QR để thêm Tickee vào ứng dụng xác thực"
+          size={192}
+          className="self-center"
+        />
         <div className="flex flex-col gap-2">
           <p className="text-meta text-muted-foreground">Không quét được? Nhập khóa này vào ứng dụng:</p>
           <p data-testid="manual-key" className="font-mono text-body break-words tabular-nums">

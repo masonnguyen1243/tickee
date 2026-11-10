@@ -188,9 +188,10 @@ describe('TX1 kiểm lại trên dữ liệu đã khóa', () => {
     expect(await ordersOfEvent(h, sale.event.id)).toEqual([]);
   });
 
-  it('một Người mua gửi song song hai Đơn khác khóa cho cùng Sự kiện → một 201, một 409 PENDING_ORDER_EXISTS mã Đơn thắng', async () => {
+  it('một Người mua gửi song song hai Đơn có phí khác khóa cho cùng Sự kiện → một 201, một 409 PENDING_ORDER_EXISTS mã Đơn thắng', async () => {
     const buyer = await signUp(h);
-    const sale = await eventOnSale(org, [{ name: 'Vé', price: 0, capacity: 5 }]);
+    // Đơn có phí (Đơn 0đ thành `paid` ngay trong TX1, không còn là Đơn chờ: free-order-concurrency.test.ts).
+    const sale = await eventOnSale(org, [{ name: 'Vé', price: 100_000, capacity: 5 }]);
     const tier = sale.tiers[0]!;
     const body = orderBody([{ ticketTypeId: tier.id, quantity: 2 }]);
 

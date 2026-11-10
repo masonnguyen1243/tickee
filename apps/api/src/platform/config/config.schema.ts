@@ -87,6 +87,12 @@ export const apiConfigSchema = z.object({
    * Sinh khóa: `openssl rand -base64 32`. Không bao giờ log.
    */
   TINGEE_CREDENTIAL_KEYS: credentialKeys,
+  /**
+   * Khóa HMAC-SHA256 ký Mã QR vé (AD-16, Story 3.3): cùng dạng `TINGEE_CREDENTIAL_KEYS` (`v<k>:<base64 của 32 byte>`,
+   * nhiều khóa cách nhau bằng dấu phẩy, không trùng `k`). Ký Vé mới bằng khóa có `k` lớn nhất; Vé lưu `k` nên QR không
+   * đổi khi xoay khóa, miễn khóa cũ còn trong danh sách. Khác khóa của `TINGEE_CREDENTIAL_KEYS`. Không bao giờ log.
+   */
+  TICKET_QR_KEYS: credentialKeys,
 });
 
 export const workerConfigSchema = z.object({

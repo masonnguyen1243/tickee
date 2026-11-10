@@ -132,6 +132,29 @@ export async function holdInventory(tx: Tx, lines: readonly InventoryLine[]): Pr
 }
 
 /**
+ * Bán có điều kiện cho cả Đơn tổng 0đ (Story 3.3, AD-2): mỗi dòng một câu `UPDATE … SET sold = sold + :n WHERE
+ * ticket_type_id = :id AND sold + held + :n <= capacity`, theo `ticket_type_id` tăng dần. Cùng hợp đồng với
+ * `holdInventory`: dòng đầu tiên trả 0 dòng → trả `ticketTypeId` của dòng đó, người gọi ném lỗi để rollback cả
+ * transaction; đủ chỗ → `null`.
+ */
+export async function sellInventory(tx: Tx, lines: readonly InventoryLine[]): Promise<string | null> {
+  for (const { ticketTypeId, quantity } of byTicketTypeId(lines)) {
+    const sold = await tx
+      .update(ticketTypeInventory)
+      .set({ sold: sql`${ticketTypeInventory.sold} + ${quantity}` })
+      .where(
+        and(
+          eq(ticketTypeInventory.ticketTypeId, ticketTypeId),
+          sql`${ticketTypeInventory.sold} + ${ticketTypeInventory.held} + ${quantity} <= ${ticketTypeInventory.capacity}`,
+        ),
+      )
+      .returning({ ticketTypeId: ticketTypeInventory.ticketTypeId });
+    if (sold.length === 0) return ticketTypeId;
+  }
+  return null;
+}
+
+/**
  * Nhả chỗ đang giữ của một Đơn (`held -= n`), theo `ticket_type_id` tăng dần. CHECK `held >= 0` chặn nhả quá số đang
  * giữ (lỗi lập trình → transaction lỗi, không âm thầm sai số).
  */

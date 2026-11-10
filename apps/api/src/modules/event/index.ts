@@ -5,6 +5,7 @@ export { buyerFormQuestions } from './form.service.js';
 export {
   assertPublicSlug,
   eventNotFound,
+  lockEventByIdForShare,
   lockSaleEventBySlug,
   publicEventBySlug,
   saleEventById,

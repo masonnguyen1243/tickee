@@ -194,7 +194,10 @@ export const CheckoutForm = z.object({
 });
 export type CheckoutForm = z.infer<typeof CheckoutForm>;
 
-/** Trạng thái Đơn (máy trạng thái AD-3). Story 3.2 chỉ tạo `pending` và chuyển `pending` → `expired`. */
+/**
+ * Trạng thái Đơn (máy trạng thái AD-3). Story 3.2: tạo `pending`, `pending` → `expired`. Story 3.3: Đơn tổng 0đ đi
+ * `pending` → `paid` ngay trong transaction tạo Đơn (`ordering.markPaid`, nguồn `free`).
+ */
 export const OrderStatus = {
   PENDING: 'pending',
   PAID: 'paid',
@@ -218,15 +221,38 @@ export const BuyerOrderItem = z.object({
 export type BuyerOrderItem = z.infer<typeof BuyerOrderItem>;
 
 /**
+ * Mã QR vé (AD-16): `t<k>.<ticketId>.<sig>`, `k` là phiên bản khóa ký (số nguyên dương), `ticketId` là uuid chữ thường
+ * của Vé, `sig` = base64url (không đệm, 43 ký tự) của HMAC-SHA256(khóa `k`, `t<k>.<ticketId>`). Không chứa PII. Máy
+ * chủ tính lại khi đọc (không lưu chuỗi QR hay chữ ký trong DB); kiểm chữ ký là việc của máy chủ (check-in, Epic 5).
+ */
+export const TICKET_QR_PATTERN =
+  /^t[1-9]\d{0,8}\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[A-Za-z0-9_-]{43}$/;
+
+/**
+ * Một Vé của Đơn đã thanh toán (bản chụp lúc phát Vé, AD-35): `seq`/`count` là "Vé k/N" (đánh theo Hạng vé tăng dần
+ * theo id), tên Hạng vé và tên Người mua lúc phát, `qr` là Mã QR vé.
+ */
+export const BuyerTicket = z.object({
+  id: z.uuid(),
+  seq: z.number().int().min(1),
+  count: z.number().int().min(1),
+  ticketTypeName: z.string(),
+  holderName: z.string(),
+  qr: z.string().regex(TICKET_QR_PATTERN),
+});
+export type BuyerTicket = z.infer<typeof BuyerTicket>;
+
+/**
  * Đơn của chính Người mua: `201`/`200` của `POST /v1/events/:slug/orders` và `GET /v1/me/orders/:code`. Mọi trường trừ
- * `status`, `expiresAt`, `serverNow` và `event` là bản chụp lúc đặt (BTC sửa giá, tên Hạng vé, chính sách hoàn vé hay
- * form sau đó không đổi gì ở đây). `serverNow`: giờ của máy chủ lúc trả lời, để web đếm ngược tới `expiresAt` không theo
- * đồng hồ máy.
+ * `status`, `expiresAt`, `serverNow`, `event` và `tickets` là bản chụp lúc đặt (BTC sửa giá, tên Hạng vé, chính sách
+ * hoàn vé hay form sau đó không đổi gì ở đây). `serverNow`: giờ của máy chủ lúc trả lời, để web đếm ngược tới
+ * `expiresAt` không theo đồng hồ máy. `event.startsAt`: giờ bắt đầu hiện tại của Sự kiện (thẻ Vé). `tickets`: các Vé theo
+ * `seq` khi Đơn `paid`; chưa `paid` thì rỗng.
  */
 export const BuyerOrder = z.object({
   code: z.string().regex(ORDER_CODE_PATTERN),
   status: orderStatusSchema,
-  event: z.object({ slug: z.string(), name: z.string() }),
+  event: z.object({ slug: z.string(), name: z.string(), startsAt: EventDateTime }),
   items: z.array(BuyerOrderItem).min(1),
   totalAmount: z.number().int().min(0),
   buyer: z.object({ name: z.string(), phone: z.string(), email: z.string() }),
@@ -235,6 +261,7 @@ export const BuyerOrder = z.object({
   createdAt: EventDateTime,
   expiresAt: EventDateTime,
   serverNow: EventDateTime,
+  tickets: z.array(BuyerTicket),
 });
 export type BuyerOrder = z.infer<typeof BuyerOrder>;
 
@@ -268,6 +295,12 @@ export type NotOnSaleDetails = z.infer<typeof NotOnSaleDetails>;
 /** `details` của `409 PENDING_ORDER_EXISTS`: mã Đơn đang chờ của chính Người mua cho Sự kiện này. */
 export const PendingOrderExistsDetails = z.object({ code: z.string().regex(ORDER_CODE_PATTERN) });
 export type PendingOrderExistsDetails = z.infer<typeof PendingOrderExistsDetails>;
+
+/**
+ * Câu báo của `409 FREE_TICKET_LIMIT_REACHED`: Đơn tổng 0đ làm tổng Vé của Người mua trong các Đơn `paid` tổng 0đ của
+ * Sự kiện vượt giới hạn Vé/Đơn (Vé có phí không tính).
+ */
+export const FREE_TICKET_LIMIT_MESSAGE = 'Bạn đã nhận đủ số Vé tối đa cho Sự kiện này.';
 
 /** `details` của `429 ORDER_RATE_LIMITED`. */
 export const OrderRateLimitedDetails = z.object({ retryAfterSeconds: z.number().int().positive() });

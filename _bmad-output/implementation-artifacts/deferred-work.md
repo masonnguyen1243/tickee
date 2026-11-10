@@ -358,3 +358,24 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-2-checkout-va-giu-cho-khong-ban-qua-so-suat.md`
   summary: (Chưa kiểm, nếu đúng thì medium) Trong flash sale, các TX1 giữ khóa `FOR SHARE` trên dòng `events` nối tiếp nhau liên tục, có thể bỏ đói lệnh `FOR UPDATE` của BTC (Ẩn, Kết thúc, sửa Hạng vé) tới khi hết người mua.
   evidence: Review 3.2 (EC) triage #17. `lockSaleEventBySlug` dùng `FOR SHARE`, và Postgres cho khóa tương thích vào trước người ghi đang chờ. Muốn kết luận thì viết test giữ `FOR SHARE` chồng nhau liên tục từ nhiều client, rồi đo thời gian chờ của một `FOR UPDATE`. Nếu đúng, cân nhắc đặt `lock_timeout` cho lệnh của BTC kèm câu báo rõ ràng, hoặc một khóa xếp hàng công bằng.
+
+## Deferred from: build of spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md (2026-11-10)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md`
+  summary: Story 4.7. Kiểm cấu hình lúc deploy: `TICKET_QR_KEYS` phải khác `TINGEE_CREDENTIAL_KEYS`, và production không được dùng khóa mẫu trong `.env.example`. Lộ khóa ký thì ai cũng giả được Mã QR vé.
+  evidence: Review 3.3 (BH) triage #9. `config.schema.ts` chỉ kiểm định dạng. Lỗ này có sẵn với mọi bí mật trong `.env.example`, kể cả `TINGEE_CREDENTIAL_KEYS`, nên gom vào checklist cấu hình production của 4.7: refine khóa khác nhau, chặn giá trị mẫu khi `NODE_ENV=production`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md`
+  summary: Story 4.7/4.6. Quy trình xoay khóa QR. Nếu gỡ khỏi `TICKET_QR_KEYS` một phiên bản khóa mà còn Vé đang dùng, thì `GET /v1/me/orders/:code` của các Đơn đó trả 500. Hiện chưa có lệnh tra phiên bản nào còn dùng, chưa kiểm lúc khởi động, cũng chưa có công cụ ký lại (`qr_key_version` vẫn sửa được để phục vụ việc này).
+  evidence: Review 3.3 (BH) triage #8. `ticketsOfOrder` → `signTicketQr` ném lỗi khi thiếu khóa, đúng như thiết kế; README đã dặn giữ khóa cũ. Cần một runbook xoay khóa (`SELECT DISTINCT qr_key_version FROM tickets`), và tùy chọn kiểm lúc khởi động.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md`
+  summary: Story 3.9/7.5. `BuyerTicket` chưa có `status`/`checkedInAt`, và `ticketsOfOrder` không lọc Vé `cancelled`. Khi đã có luồng hủy hoặc vô hiệu Vé, Vé đã hủy vẫn hiện thẻ với QR quét được.
+  evidence: Review 3.3 (BH, EC) triage #11. Hiện chưa có đường nào đặt `tickets.status = 'cancelled'`. Story làm hủy Vé (7.1/7.5) hoặc hiển thị Vé (3.9: đã check-in hay đã hủy thì QR mờ .25 + badge) phải thêm `status` vào contract và render đúng.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md`
+  summary: Story 3.7. Màn Thành công rung và chạy hiệu ứng trượt lên mỗi lần mount, kể cả khi tải lại hoặc mở lại Trang Đơn sau này. 3.7 nên chốt "khoảnh khắc" chỉ chạy khi Đơn vừa chuyển `paid` trong lúc đang xem, hoặc khi vừa từ Checkout sang.
+  evidence: Review 3.3 (BH, EC) triage #15. `order-success.tsx` `useSuccessVibration` + `animate-ticket-rise` không có điều kiện. 3.3 không xử lý vì sửa phải thêm state, mà 3.7 sẽ dùng lại màn này cho chuyển trạng thái realtime.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md`
+  summary: Story 3.7. Trang Đơn `paid` thay toàn bộ phần tóm tắt (dòng, tổng tiền, câu trả lời) bằng màn Thành công. Với Đơn 0đ thì ổn, nhưng Đơn có phí sẽ mất phần "đã trả bao nhiêu". `expiresAt` của Đơn 0đ bằng `createdAt`, chưa ghi vào contract.
+  evidence: Review 3.3 (BH) triage #19. `order-view.tsx` trả `<OrderSuccess>` cho mọi `paid`. 3.7 quyết định có hiện tóm tắt hoặc biên nhận dưới các thẻ Vé hay không.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md`
+  summary: Story 3.8/4.1. `TicketingModule` và `TICKET_QR_KEYS` mới chỉ nối ở vai api. Email Vé (3.8, có QR) và Đối soát bù (4.1, gọi `markPaid` nguồn `reconciliation`) chạy trong worker, nên phải thêm khóa vào `workerConfigSchema` và nối DI cho worker.
+  evidence: Review 3.3 (BH) triage #18. `config.test.ts` đang ghim "Vai worker chưa cần khóa này", đúng phạm vi 3.3.

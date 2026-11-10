@@ -34,9 +34,10 @@ export class OrdersController {
   }
 
   /**
-   * `POST /v1/events/:slug/orders` (header `Idempotency-Key`): `201` Đơn mới `pending`; `200` Đơn đã tạo trước đó với
-   * cùng khóa. Lỗi: `400 VALIDATION_FAILED`, `404 EVENT_NOT_FOUND`, `409 TICKET_TYPE_SOLD_OUT` / `NOT_ON_SALE` /
-   * `PENDING_ORDER_EXISTS`, `429 ORDER_RATE_LIMITED`.
+   * `POST /v1/events/:slug/orders` (header `Idempotency-Key`): `201` Đơn mới — `pending` (tổng > 0) hoặc `paid` kèm Vé
+   * (tổng 0đ, Story 3.3); `200` Đơn đã tạo trước đó với cùng khóa. Lỗi: `400 VALIDATION_FAILED`, `404 EVENT_NOT_FOUND`,
+   * `409 TICKET_TYPE_SOLD_OUT` / `NOT_ON_SALE` / `PENDING_ORDER_EXISTS` / `FREE_TICKET_LIMIT_REACHED`, `429
+   * ORDER_RATE_LIMITED`.
    */
   @Post('events/:slug/orders')
   @Header('cache-control', 'no-store')
@@ -52,7 +53,10 @@ export class OrdersController {
     return order;
   }
 
-  /** `GET /v1/me/orders/:code`: Đơn của chính Người mua; không có hoặc của người khác → `404 ORDER_NOT_FOUND`. */
+  /**
+   * `GET /v1/me/orders/:code`: Đơn của chính Người mua (Đơn `paid` kèm Vé và Mã QR vé); không có hoặc của người khác →
+   * `404 ORDER_NOT_FOUND`.
+   */
   @Get('me/orders/:code')
   @Header('cache-control', 'no-store')
   mine(@Param('code') code: string, @Req() req: BuyerRequest): Promise<BuyerOrder> {
