@@ -26,6 +26,7 @@ import {
   paidReadyOrg,
   parseOrder,
   postOrder,
+  rejectingTingee,
   resetOrderRateLimit,
   type Org,
   type User,
@@ -51,6 +52,7 @@ beforeAll(async () => {
           provide: ORDER_CODE_GENERATOR,
           useValue: () => forcedCodes.shift() ?? randomOrderCode(),
         },
+        rejectingTingee,
       ],
     },
   );
@@ -429,7 +431,7 @@ describe('POST /v1/events/:slug/orders — payload sai', () => {
 });
 
 describe('POST /v1/events/:slug/orders — chống trùng và Đơn chờ', () => {
-  it('gửi lại cùng khóa → 200 Đơn cũ (trạng thái hiện tại), không giữ thêm chỗ, không tính lần thử', async () => {
+  it('gửi lại cùng khóa → 200 Đơn cũ (trạng thái hiện tại), không giữ thêm chỗ; chỉ tính lần thử khi thử tạo link', async () => {
     const buyer = await signUp(h);
     const s = await standardEvent();
     const key = randomUUID();
@@ -446,11 +448,13 @@ describe('POST /v1/events/:slug/orders — chống trùng và Đơn chờ', () =
     expect(await inventory(h, s.a.id)).toMatchObject({ held: 2 });
     expect(await inventory(h, s.b.id)).toMatchObject({ held: 0 });
     expect(await ordersOfEvent(h, s.event.id)).toHaveLength(1);
-    expect(await attempts()).toBe(1);
+    // Story 3.4: Đơn chưa có link (Tingee từ chối) mà còn lượt → mỗi lần gửi lại thử tạo link, tính một lần thử.
+    expect(await attempts()).toBe(3);
 
-    // Đơn đã hết hạn: gửi lại cùng khóa trả trạng thái hiện tại.
+    // Đơn đã hết hạn: gửi lại cùng khóa trả trạng thái hiện tại, không thử tạo link nên không tính lần thử.
     await h.db.orm.execute(sql`UPDATE orders SET status = 'expired' WHERE code = ${first.code}`);
     expect(parseOrder((await postOrder(h, buyer, s.event.slug, body, key).expect(200)).body).status).toBe('expired');
+    expect(await attempts()).toBe(3);
   });
 
   it('hai request song song cùng khóa → đúng một Đơn, một 201 và một 200 cùng mã, giữ chỗ một lần', async () => {

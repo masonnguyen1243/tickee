@@ -5,9 +5,15 @@ import { FunnelService } from './funnel.service.js';
 import { OrderPayments } from './mark-paid.js';
 import { ORDER_CODE_GENERATOR, randomOrderCode } from './order-code.js';
 import { OrderQueues } from './order-jobs.js';
-import { ORDERING_CONFIG, OrderRateLimiter, type OrderingConfig } from './order-rate-limit.js';
+import {
+  ORDERING_CONFIG,
+  OrderRateLimiter,
+  type OrderingConfig,
+  type OrderRateLimitConfig,
+} from './order-rate-limit.js';
 import { OrdersController } from './orders.controller.js';
 import { ORDER_HOLD, OrdersService } from './orders.service.js';
+import { PAYMENT_LINK_SETTINGS, paymentLinkSettings, PaymentLinks } from './payment-link.js';
 import {
   AVAILABILITY_CLOCK,
   AvailabilityMemo,
@@ -16,9 +22,10 @@ import {
 
 /**
  * Trạng thái bán công khai (Story 2.11-a), phễu mua (Story 3.1), Checkout và tạo Đơn (Story 3.2), Đơn 0đ và `markPaid`
- * (Story 3.3). Cần `DbModule`, `JobsModule` (enqueue job hết hạn Đơn trong TX1) và `TicketingModule` (toàn cục: phát
- * Vé, Mã QR vé) ở gốc DI; `config` cho khóa HMAC IP của bộ đếm tạo Đơn. Xuất `OrderPayments` (`markPaid`) cho nguồn
- * thanh toán khác (IPN, Story 3.5).
+ * (Story 3.3), link thanh toán Gateway (Story 3.4). Cần `DbModule`, `JobsModule` (enqueue job hết hạn Đơn trong TX1 và
+ * TX2), `TicketingModule` (toàn cục: phát Vé, Mã QR vé) và `TingeeModule` (toàn cục: `create-link`) ở gốc DI; `config`
+ * cho khóa HMAC IP của bộ đếm tạo Đơn, `WEB_ORIGIN` (`returnUrl`) và khóa giải mã credential Tingee. Xuất
+ * `OrderPayments` (`markPaid`) cho nguồn thanh toán khác (IPN, Story 3.5).
  */
 @Module({})
 export class OrderingModule {
@@ -30,10 +37,15 @@ export class OrderingModule {
         AvailabilityMemo,
         FunnelService,
         OrdersService,
+        PaymentLinks,
         OrderPayments,
         OrderRateLimiter,
         OrderQueues,
-        { provide: ORDERING_CONFIG, useValue: { BETTER_AUTH_SECRET: config.BETTER_AUTH_SECRET } },
+        {
+          provide: ORDERING_CONFIG,
+          useValue: { BETTER_AUTH_SECRET: config.BETTER_AUTH_SECRET } satisfies OrderRateLimitConfig,
+        },
+        { provide: PAYMENT_LINK_SETTINGS, useFactory: () => paymentLinkSettings(config) },
         { provide: ORDER_CODE_GENERATOR, useValue: randomOrderCode },
         { provide: ORDER_HOLD, useValue: ORDER_HOLD_SECONDS },
         { provide: AVAILABILITY_CLOCK, useValue: () => Date.now() },

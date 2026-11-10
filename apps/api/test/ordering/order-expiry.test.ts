@@ -19,6 +19,7 @@ import {
   paidReadyOrg,
   parseOrder,
   postOrder,
+  rejectingTingee,
   resetOrderRateLimit,
   type Org,
 } from './order-fixtures.js';
@@ -35,7 +36,7 @@ let h: Harness;
 let org: Org;
 
 beforeAll(async () => {
-  h = await createHarness({}, { overrides: [{ provide: ORDER_HOLD, useValue: 1 }] });
+  h = await createHarness({}, { overrides: [{ provide: ORDER_HOLD, useValue: 1 }, rejectingTingee] });
   org = await paidReadyOrg(h);
 });
 beforeEach(async () => {

@@ -379,3 +379,9 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md`
   summary: Story 3.8/4.1. `TicketingModule` và `TICKET_QR_KEYS` mới chỉ nối ở vai api. Email Vé (3.8, có QR) và Đối soát bù (4.1, gọi `markPaid` nguồn `reconciliation`) chạy trong worker, nên phải thêm khóa vào `workerConfigSchema` và nối DI cho worker.
   evidence: Review 3.3 (BH) triage #18. `config.test.ts` đang ghim "Vai worker chưa cần khóa này", đúng phạm vi 3.3.
+
+## Deferred from: build of spec-3-4-tao-link-thanh-toan-gateway-va-man-thanh-toan.md (2026-11-10)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-4-tao-link-thanh-toan-gateway-va-man-thanh-toan.md`
+  summary: Story 4.2. BTC chưa được báo khi `create-link` bị Tingee từ chối vì cấu hình sai: key thiếu quyền "Cổng thanh toán" (`1133`), VA chưa được cho phép trên portal Gateway (`2023`), VA lỗi (`1023`/`1045`/`1024`/`1072`). Banner Owner của `payment_service_status` phải kèm câu nhắc cấp quyền hoặc cho phép VA tương ứng.
+  evidence: Mason chốt 10/11 khi lập spec 3.4: 3.4 chỉ log cảnh báo (`organizationId`, mã Đơn, mã Tingee); Người mua thấy "Sự kiện tạm ngừng bán". Mục này đóng phần còn lại của deferred 2.6 ("Story 3.4 cần báo `TINGEE_CREDENTIAL_INVALID` kèm câu nhắc cấp quyền").

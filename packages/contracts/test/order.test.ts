@@ -6,6 +6,8 @@ import {
   answerIssues,
   answerSnapshot,
   BuyerOrder,
+  BuyerOrderPayment,
+  buyerOrderApiPath,
   BuyerPhone,
   BuyerTicket,
   CreateOrderRequest,
@@ -19,6 +21,10 @@ import {
   ORDER_STATUSES,
   orderPath,
   orderRequestFor,
+  PAYMENT_LINK_ERRORS,
+  PAYMENT_LINK_GRACE_SECONDS,
+  PAYMENT_LINK_MINUTES,
+  paymentLinkApiPath,
   TICKET_QR_PATTERN,
 } from '../src/order.js';
 import { PII_COLUMNS, PII_KEYS } from '../src/pii.js';
@@ -218,11 +224,20 @@ describe('BuyerOrder và lỗi', () => {
       createdAt: '2026-11-10T08:00:00.000Z',
       expiresAt: '2026-11-10T08:01:00.000Z',
       serverNow: '2026-11-10T08:00:00.123Z',
+      payment: {
+        checkoutUrl: 'https://pay.tingee.vn/checkout/abc?x=1',
+        linkError: null,
+        recipient: { organizationName: 'CLB ABC', accountName: 'NGUYEN VAN TUAN', bankName: 'Vietcombank' },
+      },
       tickets: [],
     };
     expect(BuyerOrder.parse(order)).toEqual(order);
     const paid = { ...order, status: 'paid', tickets: [ticket(1, 2), ticket(2, 2)] };
     expect(BuyerOrder.parse(paid)).toEqual(paid);
+    // Đơn 0đ: không có phần thanh toán; thiếu `payment` (API cũ) → không nhận.
+    expect(BuyerOrder.parse({ ...order, payment: null }).payment).toBeNull();
+    const { payment: _payment, ...noPayment } = order;
+    expect(BuyerOrder.safeParse(noPayment).success).toBe(false);
     // Thiếu `tickets` hay `event.startsAt` (API cũ) → không nhận.
     const { tickets: _tickets, ...noTickets } = order;
     expect(BuyerOrder.safeParse(noTickets).success).toBe(false);
@@ -256,6 +271,34 @@ describe('BuyerOrder và lỗi', () => {
     expect(PII_COLUMNS.ticketing).toEqual(['holder_name']);
     for (const key of ['holder_name', 'holderName']) expect(PII_KEYS).toContain(key);
     expect(FREE_TICKET_LIMIT_MESSAGE).toBe('Bạn đã nhận đủ số Vé tối đa cho Sự kiện này.');
+  });
+});
+
+describe('Thanh toán (Story 3.4)', () => {
+  const recipient = { organizationName: 'CLB ABC', accountName: null, bankName: null };
+
+  it('BuyerOrderPayment: checkoutUrl chỉ http/https; linkError ba giá trị; recipient không còn tài khoản → null', () => {
+    expect(PAYMENT_LINK_ERRORS).toEqual(['provider_error', 'sales_paused', 'timeout']);
+    for (const linkError of [...PAYMENT_LINK_ERRORS, null]) {
+      expect(BuyerOrderPayment.safeParse({ checkoutUrl: null, linkError, recipient }).success).toBe(true);
+    }
+    expect(BuyerOrderPayment.safeParse({ checkoutUrl: null, linkError: 'other', recipient }).success).toBe(false);
+    expect(
+      BuyerOrderPayment.safeParse({ checkoutUrl: 'http://127.0.0.1:4010/checkout/TK8F3Q2AXM', linkError: null, recipient })
+        .success,
+    ).toBe(true);
+    for (const checkoutUrl of ['javascript:alert(1)', 'data:text/html,x', '/orders/TK8F3Q2AXM', 'khong-phai-url']) {
+      expect(BuyerOrderPayment.safeParse({ checkoutUrl, linkError: null, recipient }).success, checkoutUrl).toBe(false);
+    }
+  });
+
+  it('link 15 phút, chừa 5 phút trước khi hết hạn (c); đường dẫn thử lại; mã lỗi tài khoản chưa được cho phép', () => {
+    expect(PAYMENT_LINK_MINUTES).toBe(15);
+    expect(PAYMENT_LINK_GRACE_SECONDS).toBe(300);
+    expect(buyerOrderApiPath('TK8F3Q2AXM')).toBe('/me/orders/TK8F3Q2AXM');
+    expect(paymentLinkApiPath('TK8F3Q2AXM')).toBe('/me/orders/TK8F3Q2AXM/payment-link');
+    expect(paymentLinkApiPath('a/b')).toBe('/me/orders/a%2Fb/payment-link');
+    expect(ErrorCode.PAYMENT_ACCOUNT_NOT_ALLOWED).toBe('PAYMENT_ACCOUNT_NOT_ALLOWED');
   });
 });
 

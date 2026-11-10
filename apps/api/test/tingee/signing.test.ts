@@ -11,6 +11,10 @@ describe('ký request Tingee', () => {
     expect(parseTingeeTimestamp('20261332080203004')).toBeNull();
   });
 
+  it('UNIX ms (định dạng trang tài liệu create-link ghi nhưng Tingee production trả 90) không phải timestamp hợp lệ', () => {
+    expect(parseTingeeTimestamp('1794272523004')).toBeNull();
+  });
+
   it('chữ ký = hex thường của HMAC_SHA512(ts + ":" + body, secret) — vector cố định', () => {
     const body = JSON.stringify({ merchantId: 1001, bankBin: '970422' });
     const signature = sign('20261103080203004', body, 'tingee-test-secret');

@@ -176,7 +176,7 @@ IPN của Cổng thanh toán không có trường số tài khoản/VA, nên kh�
 - **Rule:**
   - Chỉ mô-đun `tingee` gọi HTTP sang Tingee và biết tên field của Tingee. Mọi lời gọi nhận credential của một BTC làm tham số (do `organizer` giải mã ngay trước khi gọi, không giữ trong bộ nhớ lâu hơn lời gọi).
   - Adapter làm các việc:
-    - Ký request. Gateway dùng timestamp UNIX ms; API Tài khoản & Định danh dùng `yyyyMMddHHmmssSSS` UTC+7.
+    - Ký request. Mọi API, kể cả Gateway (`create-link`), dùng timestamp `yyyyMMddHHmmssSSS` UTC+7. Trang tài liệu `create-link` ghi UNIX ms, nhưng Tingee production trả 90 cho UNIX ms (kiểm 10/11/2026, Story 3.4).
     - Đổi mã lỗi Tingee thành lỗi miền: `TINGEE_CREDENTIAL_INVALID` (92, 97, 1133), `MERCHANT_SUSPENDED` (1007, 1034), `BANK_NOT_SUPPORTED`.
     - Đổi chuỗi thời gian UTC+7 thành `timestamptz`.
   - Server đồng bộ giờ bằng NTP. Env chỉ có `TINGEE_BASE_URL` và `TINGEE_CREDENTIAL_KEYS` (danh sách khóa AES-256-GCM có phiên bản, mẫu AD-23); không có credential Tingee nào trong env. Secret Token không bao giờ trả về web hay ghi log; Client ID hiển thị dạng che.

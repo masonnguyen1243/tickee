@@ -12,17 +12,19 @@ import {
   ORDER_CODE_PATTERN,
   orderRequestFor,
   OrderStatus,
+  PAYMENT_LINK_GRACE_SECONDS,
   ticketCount,
   TierSaleStatus,
   toEventIso,
   type BuyerOrder,
+  type BuyerOrderPayment,
   type CheckoutForm,
   type EventAvailability,
   type NotOnSaleDetails,
   type PendingOrderExistsDetails,
   type TicketTypeSoldOutDetails,
 } from '@tickee/contracts';
-import { and, asc, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import pg from 'pg';
 import type { PgBoss } from 'pg-boss';
 import { DATABASE, type Database, type DbExecutor, type Tx } from '../../platform/db/index.js';
@@ -35,28 +37,32 @@ import {
   saleEventById,
   type TicketTypeRow,
 } from '../event/index.js';
+import { payoutRecipientOf } from '../organizer/index.js';
 import { TicketsService } from '../ticketing/index.js';
 import { holdInventory, sellInventory, type InventoryLine } from './inventory.service.js';
 import { OrderPayments } from './mark-paid.js';
 import { ORDER_CODE_ATTEMPTS, ORDER_CODE_GENERATOR, type OrderCodeGenerator } from './order-code.js';
 import { enqueueOrderExpiry, expireOrder, OrderQueues } from './order-jobs.js';
 import { OrderRateLimiter } from './order-rate-limit.js';
+import { PaymentLinks } from './payment-link.js';
 import { checkoutFunnelEvents, orderAnswers, orderItems, orders } from './schema.js';
 import { saleFactsOf, saleStatusOf } from './sellability.js';
 
 /*
  * Checkout và tạo Đơn (Story 3.2, AD-2, AD-4, AD-31). Đơn tổng > 0: giữ chỗ rồi `pending` với hạn
- * `ORDER_HOLD_SECONDS` (3.4 gắn link thanh toán). Đơn tổng 0đ (Story 3.3): bán ngay trong TX1 rồi `markPaid` nguồn
- * `free`, nên request trả Đơn `paid` kèm Vé.
+ * `ORDER_HOLD_SECONDS`, TX1 đặt sẵn lượt tạo link; sau khi TX1 commit, hàm bảo đảm link (`PaymentLinks`, Story 3.4) gọi
+ * Tingee ngoài transaction rồi TX2 gắn link. Đơn tổng 0đ (Story 3.3): bán ngay trong TX1 rồi `markPaid` nguồn `free`,
+ * nên request trả Đơn `paid` kèm Vé.
  *
  * Tạo Đơn: kiểm khóa chống trùng và payload → tra Đơn theo `(user_id, Idempotency-Key)` (có → 200 Đơn cũ) → hết hạn Đơn
  * chờ cũ đã quá hạn (transaction riêng, cùng hàm với job) → Đơn chờ khác còn hạn → 409 (cùng khóa → 200) → queue sẵn
  * sàng → giới hạn tốc độ → TX1. TX1 (một
  * transaction): khóa Sự kiện `FOR SHARE` → kiểm lại form, giới hạn Vé/Đơn và luật bán (`saleStatusOf`) trên dữ liệu đã
- * khóa → giữ chỗ (Đơn 0đ: bán) có điều kiện theo `ticket_type_id` tăng dần → Đơn `pending` + bản chụp → `order_created`
- * → enqueue job hết hạn bằng chính `tx` (Đơn 0đ: trần Vé miễn phí → `markPaid`, không job). TX1 không gọi Tingee, không
- * gửi email, không `NOTIFY`. Lỗi unique sau rollback (hai request cùng khóa, hay hai Đơn chờ đua nhau) → đọc lại: trả
- * Đơn của bên thắng hoặc 409.
+ * khóa → giữ chỗ (Đơn 0đ: bán) có điều kiện theo `ticket_type_id` tăng dần → Đơn `pending` + bản chụp (Đơn có phí: kèm
+ * lượt tạo link) → `order_created` → enqueue job hết hạn bằng chính `tx` (Đơn 0đ: trần Vé miễn phí → `markPaid`, không
+ * job). TX1 không gọi Tingee, không gửi email, không `NOTIFY`. Lỗi unique sau rollback (hai request cùng khóa, hay hai
+ * Đơn chờ đua nhau) → đọc lại: trả Đơn của bên thắng hoặc 409. Mọi lần trả Đơn đã có (cùng khóa) cũng đi qua hàm bảo
+ * đảm link: Đơn chưa có link mà còn lượt thì thử tạo link.
  */
 
 /** Token DI của thời gian Giữ chỗ (giây) của Đơn mới; mặc định `ORDER_HOLD_SECONDS`, test tiêm số nhỏ. */
@@ -156,6 +162,7 @@ export class OrdersService {
     @Inject(ORDER_HOLD) private readonly holdSeconds: number,
     @Inject(OrderPayments) private readonly payments: OrderPayments,
     @Inject(TicketsService) private readonly tickets: TicketsService,
+    @Inject(PaymentLinks) private readonly links: PaymentLinks,
   ) {}
 
   /**
@@ -182,7 +189,8 @@ export class OrdersService {
 
   /**
    * `POST /v1/events/:slug/orders`. `created`: Đơn mới (201); `false`: Đơn đã có theo khóa chống trùng (200, trạng thái
-   * hiện tại, không giữ thêm chỗ).
+   * hiện tại, không giữ thêm chỗ; chưa có link mà còn lượt thì thử tạo link). Đơn có phí mới: tạo link ngay sau TX1
+   * (timeout 5 giây), nên Đơn trả về có thể đã `expired` (Tingee báo tạm ngừng hoặc kết quả mơ hồ).
    */
   async create(
     buyer: Buyer,
@@ -194,7 +202,7 @@ export class OrdersService {
     const key = idempotencyKeyOf(rawKey);
     parseRequest(CreateOrderRequest, body);
     const existing = await this.byKey(buyer.id, key);
-    if (existing) return { order: await this.view(existing), created: false };
+    if (existing) return { order: await this.withPaymentLink(existing, buyer, ip), created: false };
 
     // Kiểm trước, ngoài transaction (lỗi ở đây không tính vào giới hạn tốc độ); TX1 kiểm lại trên dữ liệu đã khóa.
     const event = await publicEventBySlug(this.db.orm, slug);
@@ -203,7 +211,7 @@ export class OrdersService {
     const pending = await this.pendingOf(buyer.id, event.id);
     if (pending) {
       // Request cùng khóa vừa commit Đơn sau lần tra theo khóa ở trên: đó là Đơn của chính request này.
-      if (pending.idempotencyKey === key) return { order: await this.view(pending), created: false };
+      if (pending.idempotencyKey === key) return { order: await this.withPaymentLink(pending, buyer, ip), created: false };
       throw pendingExists(pending.code);
     }
     // pg-boss đã start và queue đã có (ngoài transaction): `boss.send` trong TX1 cần cả hai. Trước giới hạn tốc độ:
@@ -219,31 +227,71 @@ export class OrdersService {
       if (constraint === IDEMPOTENCY_KEY || constraint === ONE_PENDING_KEY) {
         // Bên thua của hai request cùng khóa: cả phần giữ chỗ đã rollback; trả Đơn của bên thắng.
         const winner = await this.byKey(buyer.id, key);
-        if (winner) return { order: await this.view(winner), created: false };
+        if (winner) return { order: await this.withPaymentLink(winner, buyer, ip), created: false };
         const other = await this.pendingOf(buyer.id, event.id);
         if (other) throw pendingExists(other.code);
       }
       throw err;
     }
-    const [row] = await this.db.orm.select().from(orders).where(eq(orders.id, orderId));
-    if (!row) throw new Error('Không đọc lại được Đơn vừa tạo');
+    const row = await this.reload(orderId);
+    // TX1 đã đặt sẵn lượt tạo link cho Đơn có phí: chính request này gọi Tingee (sau commit, ngoài transaction).
+    if (row.status === OrderStatus.PENDING && row.paymentLinkAttemptAt !== null && row.paymentLink === null) {
+      await this.links.ensure(row, { claimed: true });
+      return { order: await this.view(await this.reload(orderId)), created: true };
+    }
     return { order: await this.view(row), created: true };
   }
 
   /** `GET /v1/me/orders/:code`: Đơn của chính Người mua. Mã sai dạng, không có hoặc của người khác → `404 ORDER_NOT_FOUND`. */
   async mine(buyer: Buyer, code: string): Promise<BuyerOrder> {
+    return this.view(await this.ownOrder(buyer, code));
+  }
+
+  /**
+   * `POST /v1/me/orders/:code/payment-link` (Story 3.4): thử tạo lại link cho cùng Đơn sau khi Tingee từ chối rõ ràng.
+   * Đơn đủ điều kiện (`pending`, chưa có link, còn lượt, còn hạn) → hàm bảo đảm link (tính vào giới hạn tốc độ tạo Đơn);
+   * không đủ → không gọi Tingee. Trả `BuyerOrder` hiện tại. Đơn của người khác hay mã sai → `404 ORDER_NOT_FOUND`; quá
+   * giới hạn tốc độ → `429 ORDER_RATE_LIMITED`, không gọi Tingee.
+   */
+  async retryPaymentLink(buyer: Buyer, ip: string, code: string): Promise<BuyerOrder> {
+    return this.withPaymentLink(await this.ownOrder(buyer, code), buyer, ip);
+  }
+
+  /** Đơn của chính Người mua theo mã. Mã sai dạng, không có hoặc của người khác → `404 ORDER_NOT_FOUND`. */
+  private async ownOrder(buyer: Buyer, code: string): Promise<OrderRow> {
     if (!ORDER_CODE_PATTERN.test(code)) throw orderNotFound();
     const [row] = await this.db.orm
       .select()
       .from(orders)
       .where(and(eq(orders.code, code), eq(orders.userId, buyer.id)));
     if (!row) throw orderNotFound();
-    return this.view(row);
+    return row;
+  }
+
+  /**
+   * Hàm bảo đảm link (CAS giành lượt; Đơn không đủ điều kiện thì không làm gì) rồi `BuyerOrder` của trạng thái sau đó.
+   * Đơn đủ điều kiện: tính một lần thử vào giới hạn tốc độ tạo Đơn của Người mua trước khi giành lượt (mỗi lần Tingee từ
+   * chối rõ ràng lại trả lượt, nên không có giới hạn này thì vòng thử lại gọi Tingee bằng key của BTC không ngừng); quá
+   * giới hạn → `429 ORDER_RATE_LIMITED`. Không có lời gọi Tingee thì không đọc lại Đơn.
+   */
+  private async withPaymentLink(row: OrderRow, buyer: Buyer, ip: string): Promise<BuyerOrder> {
+    const attempted = await this.links.ensure(row, {
+      claimed: false,
+      beforeClaim: () => this.limiter.consume(buyer.id, ip),
+    });
+    return this.view(attempted ? await this.reload(row.id) : row);
+  }
+
+  private async reload(orderId: string): Promise<OrderRow> {
+    const [row] = await this.db.orm.select().from(orders).where(eq(orders.id, orderId));
+    if (!row) throw new Error('Không đọc lại được Đơn');
+    return row;
   }
 
   /**
    * TX1. Trả id Đơn mới. Lỗi nghiệp vụ hoặc unique → ném, cả transaction rollback (không giữ chỗ, không bán, không Vé).
-   * Đơn tổng > 0: giữ chỗ (`held += n`), Đơn `pending` hạn `holdSeconds`, job hết hạn. Đơn tổng 0đ: bán (`sold += n`),
+   * Đơn tổng > 0: giữ chỗ (`held += n`), Đơn `pending` hạn `holdSeconds` kèm lượt tạo link (`payment_link_attempt_at`,
+   * cho lần gọi Tingee ngay sau commit), job hết hạn (a). Đơn tổng 0đ: bán (`sold += n`),
    * Đơn `pending` hạn = lúc tạo, kiểm trần Vé miễn phí của Người mua, rồi `markPaid` nguồn `free` (Đơn `paid` + Vé);
    * không job hết hạn.
    */
@@ -285,6 +333,8 @@ export class OrdersService {
       },
       // Đơn 0đ không Giữ chỗ; cột NOT NULL nên hạn = lúc tạo.
       free ? sql`clock_timestamp()` : sql`clock_timestamp() + make_interval(secs => ${this.holdSeconds})`,
+      // Đơn có phí: lượt tạo link cho lần gọi đầu thuộc về chính request này.
+      !free,
     );
     await tx.insert(orderItems).values(
       items.map((i) => ({
@@ -357,14 +407,16 @@ export class OrdersService {
 
   /**
    * INSERT Đơn `pending` với `expires_at` = `expiresAt` (tính theo `clock_timestamp()`, giờ lúc INSERT, không phải giờ
-   * bắt đầu transaction: TX1 chờ khóa lâu thì hạn Giữ chỗ không bị ngắn đi) trong một savepoint: trùng mã
+   * bắt đầu transaction: TX1 chờ khóa lâu thì hạn Giữ chỗ không bị ngắn đi), `claimPaymentLink` → lượt tạo link đặt
+   * cùng lúc (`payment_link_attempt_at = clock_timestamp()`), trong một savepoint: trùng mã
    * (`orders_code_key`) thì sinh mã khác, tối đa `ORDER_CODE_ATTEMPTS` lần, mà không hủy phần đã giữ chỗ của TX1. Lỗi
    * unique khác ném ra ngoài.
    */
   private async insertOrder(
     tx: Tx,
-    values: Omit<typeof orders.$inferInsert, 'code' | 'status' | 'expiresAt'>,
+    values: Omit<typeof orders.$inferInsert, 'code' | 'status' | 'expiresAt' | 'paymentLinkAttemptAt'>,
     expiresAt: SQL,
+    claimPaymentLink: boolean,
   ): Promise<{ id: string; expiresAt: Date }> {
     for (let attempt = 1; ; attempt++) {
       const code = this.orderCode();
@@ -377,6 +429,7 @@ export class OrdersService {
               code,
               status: OrderStatus.PENDING,
               expiresAt,
+              paymentLinkAttemptAt: claimPaymentLink ? sql`clock_timestamp()` : null,
             })
             .returning({ id: orders.id, expiresAt: orders.expiresAt });
           if (!row) throw new Error('INSERT orders không trả về dòng nào');
@@ -398,23 +451,29 @@ export class OrdersService {
   }
 
   /**
-   * Đơn chờ cũ của chính Người mua cho Sự kiện, chưa có link và đã quá hạn (job chưa kịp chạy): hết hạn bằng chính hàm
-   * của job, mỗi Đơn một transaction riêng trước TX1 (nhả rồi giữ chỗ trong cùng TX1 là hai lượt khóa tồn kho).
+   * Đơn chờ cũ của chính Người mua cho Sự kiện đã quá hạn (job chưa kịp chạy): (a) chưa có link, quá `expires_at`; (c)
+   * đã có link, quá `expires_at + PAYMENT_LINK_GRACE_SECONDS`. Hết hạn bằng chính hàm của job, mỗi Đơn một transaction
+   * riêng trước TX1 (nhả rồi giữ chỗ trong cùng TX1 là hai lượt khóa tồn kho).
    */
   private async expireStalePending(userId: string, eventId: string): Promise<void> {
     const stale = await this.db.orm
-      .select({ id: orders.id })
+      .select({ id: orders.id, paymentLink: orders.paymentLink })
       .from(orders)
       .where(
         and(
           eq(orders.userId, userId),
           eq(orders.eventId, eventId),
           eq(orders.status, OrderStatus.PENDING),
-          sql`${orders.paymentLink} IS NULL`,
-          lt(orders.expiresAt, sql`now()`),
+          or(
+            and(isNull(orders.paymentLink), lt(orders.expiresAt, sql`now()`)),
+            and(
+              isNotNull(orders.paymentLink),
+              lt(sql`${orders.expiresAt} + make_interval(secs => ${PAYMENT_LINK_GRACE_SECONDS})`, sql`now()`),
+            ),
+          ),
         ),
       );
-    for (const { id } of stale) await expireOrder(this.db, id);
+    for (const { id, paymentLink } of stale) await expireOrder(this.db, id, paymentLink === null ? 'hold' : 'link');
   }
 
   /** Đơn `pending` của Người mua cho Sự kiện (tối đa một, unique một phần); không có → `null`. */
@@ -428,10 +487,10 @@ export class OrdersService {
 
   /**
    * Đơn + bản chụp + Sự kiện (tên, slug, giờ bắt đầu hiện tại) → `BuyerOrder`, kèm `serverNow`; Đơn `paid` kèm Vé theo
-   * `seq` và Mã QR vé.
+   * `seq` và Mã QR vé; Đơn có phí kèm phần thanh toán (`paymentOf`).
    */
   private async view(row: OrderRow, db: DbExecutor = this.db.orm): Promise<BuyerOrder> {
-    const [items, answers, event, tickets] = await Promise.all([
+    const [items, answers, event, tickets, payment] = await Promise.all([
       db
         .select()
         .from(orderItems)
@@ -444,6 +503,7 @@ export class OrdersService {
         .orderBy(asc(orderAnswers.position)),
       saleEventById(db, row.eventId),
       row.status === OrderStatus.PAID ? this.tickets.ticketsOfOrder(db, row.id) : Promise.resolve([]),
+      this.paymentOf(row, db),
     ]);
     return {
       code: row.code,
@@ -463,7 +523,26 @@ export class OrdersService {
       createdAt: row.createdAt.toISOString(),
       expiresAt: row.expiresAt.toISOString(),
       serverNow: new Date().toISOString(),
+      payment,
       tickets,
+    };
+  }
+
+  /**
+   * Phần thanh toán của Đơn có phí (Đơn 0đ → `null`): checkout URL chỉ khi `pending` và đã có link; lý do lần tạo link
+   * gần nhất thất bại; người nhận tiền theo tài khoản đã chụp (chưa chụp: tài khoản mặc định hiện tại).
+   */
+  private async paymentOf(row: OrderRow, db: DbExecutor): Promise<BuyerOrderPayment | null> {
+    if (row.totalAmount === 0) return null;
+    const recipient = await payoutRecipientOf(db, {
+      organizationId: row.organizationId,
+      payoutAccountId: row.payoutAccountId,
+    });
+    if (!recipient) throw new Error('Không đọc được BTC của Đơn');
+    return {
+      checkoutUrl: row.status === OrderStatus.PENDING ? row.paymentLink : null,
+      linkError: row.paymentLinkError,
+      recipient,
     };
   }
 }

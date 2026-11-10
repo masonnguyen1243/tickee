@@ -29,6 +29,42 @@ export const orderPath = (code: string): string => `/orders/${encodeURIComponent
 export const ORDER_HOLD_SECONDS = 60;
 
 /**
+ * Link thanh toán Gateway (Story 3.4, AD-4, AD-6): `create-link` gửi `expireInMinute` bằng số này. Tingee không trả hạn
+ * link nên hạn Đơn (`expires_at`) = lúc giành lượt tạo link (đồng hồ DB, trước khi gửi request) + chừng này phút: không
+ * bao giờ muộn hơn hạn thật của link.
+ */
+export const PAYMENT_LINK_MINUTES = 15;
+
+/**
+ * Đơn đã có link chỉ hết hạn (AD-4 (c)) khi quá `expires_at` thêm chừng này giây: chừa thời gian cho IPN của lần trả
+ * tiền sát giờ.
+ */
+export const PAYMENT_LINK_GRACE_SECONDS = 300;
+
+/**
+ * Lý do chưa có link thanh toán của Đơn có phí (`BuyerOrder.payment.linkError`):
+ * - `provider_error`: Tingee từ chối bằng mã thường; Đơn vẫn `pending`, thử lại được cho cùng Đơn trong hạn Giữ chỗ.
+ * - `sales_paused`: dịch vụ thanh toán của BTC đang tạm ngừng (merchant bị khóa, key không còn dùng được, tài khoản
+ *   nhận tiền chưa được cho phép trên Cổng thanh toán) hoặc BTC không còn tài khoản nhận tiền mặc định; Đơn `expired`.
+ * - `timeout`: kết quả mơ hồ (timeout, lỗi mạng, phản hồi lạ); Đơn `expired`, không thử lại cùng Đơn.
+ */
+export const PaymentLinkError = {
+  PROVIDER_ERROR: 'provider_error',
+  SALES_PAUSED: 'sales_paused',
+  TIMEOUT: 'timeout',
+} as const;
+export type PaymentLinkError = (typeof PaymentLinkError)[keyof typeof PaymentLinkError];
+export const PAYMENT_LINK_ERRORS = Object.values(PaymentLinkError) as [PaymentLinkError, ...PaymentLinkError[]];
+export const paymentLinkErrorSchema = z.enum(PaymentLinkError);
+
+/**
+ * API thử lại tạo link thanh toán cho cùng Đơn (`POST /v1/me/orders/:code/payment-link`, Story 3.4), tương đối với gốc
+ * `/v1` như mọi đường dẫn web gọi qua `apiRequest`.
+ */
+export const buyerOrderApiPath = (code: string): string => `/me/orders/${encodeURIComponent(code)}`;
+export const paymentLinkApiPath = (code: string): string => `${buyerOrderApiPath(code)}/payment-link`;
+
+/**
  * Header chống trùng của `POST /v1/events/:slug/orders` (AD-31): một uuid cho mỗi lần mở Checkout. Gửi lại cùng khóa
  * (kể cả hai request song song) trả về Đơn đã tạo, không giữ thêm chỗ.
  */
@@ -243,11 +279,36 @@ export const BuyerTicket = z.object({
 export type BuyerTicket = z.infer<typeof BuyerTicket>;
 
 /**
- * Đơn của chính Người mua: `201`/`200` của `POST /v1/events/:slug/orders` và `GET /v1/me/orders/:code`. Mọi trường trừ
- * `status`, `expiresAt`, `serverNow`, `event` và `tickets` là bản chụp lúc đặt (BTC sửa giá, tên Hạng vé, chính sách
- * hoàn vé hay form sau đó không đổi gì ở đây). `serverNow`: giờ của máy chủ lúc trả lời, để web đếm ngược tới
- * `expiresAt` không theo đồng hồ máy. `event.startsAt`: giờ bắt đầu hiện tại của Sự kiện (thẻ Vé). `tickets`: các Vé theo
- * `seq` khi Đơn `paid`; chưa `paid` thì rỗng.
+ * Người nhận tiền của Đơn (`recipient-trust-block`): tên BTC, tên chủ tài khoản (in hoa như app ngân hàng) và ngân hàng
+ * của tài khoản nhận tiền đã chụp lúc gắn link; chưa có link thì của tài khoản mặc định hiện tại; BTC không còn tài
+ * khoản nào thì hai trường sau `null`.
+ */
+export const PaymentRecipient = z.object({
+  organizationName: z.string(),
+  accountName: z.string().nullable(),
+  bankName: z.string().nullable(),
+});
+export type PaymentRecipient = z.infer<typeof PaymentRecipient>;
+
+/**
+ * Phần thanh toán của Đơn có phí (Story 3.4). `checkoutUrl`: trang thanh toán của Tingee (chỉ http/https), chỉ có khi
+ * Đơn `pending` và đã có link; web mở bằng redirect toàn trang. `linkError`: lý do lần tạo link gần nhất thất bại
+ * (`PaymentLinkError`), `null` khi chưa thất bại hoặc đã có link.
+ */
+export const BuyerOrderPayment = z.object({
+  checkoutUrl: z.url({ protocol: /^https?$/ }).nullable(),
+  linkError: paymentLinkErrorSchema.nullable(),
+  recipient: PaymentRecipient,
+});
+export type BuyerOrderPayment = z.infer<typeof BuyerOrderPayment>;
+
+/**
+ * Đơn của chính Người mua: `201`/`200` của `POST /v1/events/:slug/orders`, `GET /v1/me/orders/:code` và `200` của `POST
+ * /v1/me/orders/:code/payment-link`. Mọi trường trừ `status`, `expiresAt`, `serverNow`, `event`, `payment` và `tickets`
+ * là bản chụp lúc đặt (BTC sửa giá, tên Hạng vé, chính sách hoàn vé hay form sau đó không đổi gì ở đây). `serverNow`:
+ * giờ của máy chủ lúc trả lời, để web đếm ngược tới `expiresAt` không theo đồng hồ máy. `event.startsAt`: giờ bắt đầu
+ * hiện tại của Sự kiện (thẻ Vé). `payment`: `null` với Đơn tổng 0đ. `tickets`: các Vé theo `seq` khi Đơn `paid`; chưa
+ * `paid` thì rỗng.
  */
 export const BuyerOrder = z.object({
   code: z.string().regex(ORDER_CODE_PATTERN),
@@ -261,6 +322,7 @@ export const BuyerOrder = z.object({
   createdAt: EventDateTime,
   expiresAt: EventDateTime,
   serverNow: EventDateTime,
+  payment: BuyerOrderPayment.nullable(),
   tickets: z.array(BuyerTicket),
 });
 export type BuyerOrder = z.infer<typeof BuyerOrder>;
@@ -307,7 +369,9 @@ export const OrderRateLimitedDetails = z.object({ retryAfterSeconds: z.number().
 export type OrderRateLimitedDetails = z.infer<typeof OrderRateLimitedDetails>;
 
 /**
- * Giới hạn tốc độ tạo Đơn, đếm trong Postgres (mọi lần thử tới được TX1, trừ lần trả lại Đơn cũ theo khóa). Theo tài
+ * Giới hạn tốc độ tạo Đơn, đếm trong Postgres (mọi lần thử tới được TX1, trừ lần trả lại Đơn cũ theo khóa; Story 3.4:
+ * cộng mọi lần thử lại tạo link thanh toán cho Đơn đã có — `POST /v1/me/orders/:code/payment-link` hay gửi lại cùng khóa
+ * khi Đơn chưa có link mà còn lượt). Theo tài
  * khoản là giới hạn chính; theo IP chỉ là lưới chặn cuối, nới rộng vì CGNAT của nhà mạng di động dồn nhiều Người mua vào
  * một IP (kịch bản NFR-3: 5.000 người tranh 300 vé, mỗi lần báo hết vé vẫn bị đếm).
  */

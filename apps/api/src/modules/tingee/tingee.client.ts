@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import { ErrorCode } from '@tickee/contracts';
 import { z } from 'zod';
@@ -8,11 +9,17 @@ import { sign, tingeeTimestamp } from './signing.js';
 /** Token DI của `TingeeClient`; test thay bằng client trỏ vào Tingee fake. */
 export const TINGEE_CLIENT = Symbol('TINGEE_CLIENT');
 
-/** Timeout mỗi lời gọi Tingee. */
+/** Timeout mỗi lời gọi Tingee (API Tài khoản & Định danh). */
 export const TINGEE_TIMEOUT_MS = 15_000;
+
+/** Timeout của `create-link` (Story 3.4): Người mua đang chờ ở Checkout, API phải trả trong khoảng 6 giây. */
+export const TINGEE_PAYMENT_LINK_TIMEOUT_MS = 5_000;
 
 /** Số dòng tối đa đọc trong một lần `get-va-paging` (Tingee cho tối đa 2000; một BTC nhiều hơn chừng này là bất thường). */
 export const TINGEE_ACCOUNT_PAGE_SIZE = 200;
+
+/** Đường dẫn `create-link` của Cổng thanh toán (`developers.tingee.vn/docs/payment-gateway/create-payment-link`). */
+export const TINGEE_CREATE_LINK_PATH = '/v1/payment-gateway/create-link';
 
 /**
  * API key của một BTC trên Tingee (`organizer` giải mã ngay trước khi gọi). Không bao giờ log, không giữ lâu hơn lời gọi.
@@ -37,9 +44,73 @@ export interface TingeeAccount {
 }
 
 /**
+ * Một link thanh toán Gateway cho một Đơn (`create-link`). `requestId` do adapter sinh mới (uuid v4) mỗi lần gọi; không
+ * gửi `merchantId` (key của merchant) hay `customerEmail`.
+ */
+export interface PaymentLinkInput {
+  /** Mã Đơn (`orderId` của Tingee, IPN trả lại đúng mã này). */
+  orderId: string;
+  /** Số tiền (đồng), đúng `total_amount` của Đơn. */
+  amount: number;
+  /** VA của tài khoản nhận tiền. */
+  vaAccountNumber: string;
+  expireInMinute: number;
+  /** Trang Đơn trên web, nơi Tingee đưa Người mua quay về. */
+  returnUrl: string;
+  description: string;
+}
+
+/** Kết quả mơ hồ của `create-link`: không biết Tingee đã tạo link hay chưa. */
+export type CreateLinkAmbiguousReason = 'timeout' | 'network' | 'http_status' | 'invalid_json' | 'invalid_response';
+
+/**
+ * Lỗi của `createPaymentLink`, phân hai loại (Story 3.4; chỉ `tingee` biết mã Tingee):
+ * - `rejected`: Tingee trả JSON (HTTP 200) có `code` (chuỗi hoặc số) khác `'00'`: chắc chắn chưa có link. `code` là lỗi
+ *   miền theo bảng mã (`TINGEE_CREDENTIAL_INVALID`, `MERCHANT_SUSPENDED`, `PAYMENT_ACCOUNT_NOT_ALLOWED`, mã lạ →
+ *   `PAYMENT_PROVIDER_UNAVAILABLE`), `tingeeCode` là mã gốc (chỉ để log).
+ * - `ambiguous`: timeout, lỗi mạng, HTTP ≠ 200, JSON hỏng, `code` thiếu/không phải chuỗi hay số, hoặc `'00'` mà `data`
+ *   không phải URL http/https: có thể Tingee đã tạo link. Không được gọi lại cùng `orderId`. `code` luôn là
+ *   `PAYMENT_PROVIDER_UNAVAILABLE`; `httpStatus` và `tingeeCode` (mã gốc trong body, nếu đọc được) chỉ để log.
+ */
+export class CreateLinkError extends AppError {
+  override readonly name = 'CreateLinkError';
+
+  private constructor(
+    readonly outcome: 'rejected' | 'ambiguous',
+    code: TingeeDomainError,
+    readonly tingeeCode: string | null,
+    readonly reason: CreateLinkAmbiguousReason | null,
+    /** HTTP status của phản hồi; không nhận được phản hồi (timeout, lỗi mạng) → `null`. */
+    readonly httpStatus: number | null,
+    cause: unknown,
+  ) {
+    super(code, DOMAIN_ERROR_MESSAGES[code], { cause });
+  }
+
+  /** Tingee từ chối (HTTP 200) bằng mã `tingeeCode` (khác `'00'`). */
+  static rejected(tingeeCode: string): CreateLinkError {
+    const cause = new TingeeTransportError(`${TINGEE_CREATE_LINK_PATH}: Tingee code ${tingeeCode}`);
+    return new CreateLinkError('rejected', domainErrorOf(tingeeCode), tingeeCode, null, 200, cause);
+  }
+
+  /** Không biết Tingee đã tạo link hay chưa; kèm HTTP status và mã gốc nếu có (để log). */
+  static ambiguous(
+    reason: CreateLinkAmbiguousReason,
+    { httpStatus = null, tingeeCode = null }: { httpStatus?: number | null; tingeeCode?: string | null } = {},
+  ): CreateLinkError {
+    const detail = [reason, httpStatus === null ? null : `HTTP ${httpStatus}`, tingeeCode === null ? null : `code ${tingeeCode}`]
+      .filter((part) => part !== null)
+      .join(', ');
+    const cause = new TingeeTransportError(`${TINGEE_CREATE_LINK_PATH}: ${detail}`);
+    return new CreateLinkError('ambiguous', ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE, tingeeCode, reason, httpStatus, cause);
+  }
+}
+
+/**
  * Cổng gọi Tingee (AD-5, AD-9): chỉ mô-đun `tingee` biết tên trường, host và mã lỗi Tingee. Mọi lời gọi nhận credential
  * của một BTC làm tham số và không gửi `merchantId`. Lỗi luôn là `AppError` với mã miền (`TINGEE_CREDENTIAL_INVALID`,
- * `MERCHANT_SUSPENDED`, `PAYMENT_PROVIDER_UNAVAILABLE`). Không bao giờ gọi bên trong transaction DB.
+ * `MERCHANT_SUSPENDED`, `PAYMENT_ACCOUNT_NOT_ALLOWED`, `PAYMENT_PROVIDER_UNAVAILABLE`). Không bao giờ gọi bên trong
+ * transaction DB.
  */
 export interface TingeeClient {
   /**
@@ -47,16 +118,30 @@ export interface TingeeClient {
    * Cũng là cách kiểm key: key sai → `TINGEE_CREDENTIAL_INVALID`.
    */
   listAccounts(credential: TingeeCredential): Promise<TingeeAccount[]>;
+  /**
+   * `POST /v1/payment-gateway/create-link` (Story 3.4): checkout URL (`data`) khi `code = '00'`. Timestamp
+   * `yyyyMMddHHmmssSSS` như mọi API Tingee (Tingee production trả 90 cho UNIX ms, dù trang tài liệu ghi UNIX ms), timeout
+   * `TINGEE_PAYMENT_LINK_TIMEOUT_MS`. Lỗi luôn là `CreateLinkError` (`rejected` / `ambiguous`).
+   */
+  createPaymentLink(credential: TingeeCredential, input: PaymentLinkInput): Promise<string>;
 }
 
 export interface TingeeClientOptions {
   /** Origin, vd. `https://uat-open-api.tingee.vn`. */
   baseUrl: string;
   timeoutMs?: number;
+  /** Timeout của `create-link`; mặc định `TINGEE_PAYMENT_LINK_TIMEOUT_MS`. */
+  paymentLinkTimeoutMs?: number;
   now?: () => Date;
 }
 
 const Envelope = z.object({ code: z.coerce.string(), message: z.string().nullish(), data: z.unknown().optional() });
+type Envelope = z.infer<typeof Envelope>;
+/**
+ * Mã của phản hồi `create-link`: chỉ chuỗi không rỗng hoặc số (không ép kiểu: `null` hay thiếu `code` không bao giờ thành
+ * một mã "từ chối" để trả lượt rồi gọi lại cùng `orderId`).
+ */
+const LinkCode = z.union([z.string().trim().min(1), z.number().int()]).transform(String);
 const Page = z.object({ items: z.array(z.unknown()), totalCount: z.unknown().optional() });
 /** Chuỗi không rỗng; số (vd. `bankBin` dạng số) đổi sang chuỗi. Không dùng `z.coerce.string()`: `null` sẽ thành "null". */
 const Text = z.union([z.string().trim().min(1), z.number().int().nonnegative().transform(String)]);
@@ -77,6 +162,8 @@ const AccountItem = z.object({
   transactionType: z.string().nullish(),
   shopId: OptionalId,
 });
+/** Checkout URL: chỉ http/https (web mở bằng `window.location.assign`, không bao giờ nhận `javascript:`). */
+const CheckoutUrl = z.url({ protocol: /^https?$/ });
 
 /** Lỗi miền kèm thông điệp hành động được. */
 export function tingeeError(code: TingeeDomainError, cause?: unknown): AppError {
@@ -88,14 +175,21 @@ class TingeeTransportError extends Error {
   override readonly name = 'TingeeTransportError';
 }
 
+/** Một lần gửi: không tới được Tingee / không đọc được phản hồi, hoặc phản hồi đọc được (envelope có thể sai dạng). */
+type Sent =
+  | { kind: 'failed'; reason: 'timeout' | 'network' | 'invalid_json'; httpStatus: number | null }
+  | { kind: 'replied'; httpStatus: number; envelope: Envelope | null; json: unknown };
+
 /** `TingeeClient` qua HTTP: ký HMAC-SHA512, timeout bằng `AbortSignal.timeout`, đổi mã lỗi Tingee sang lỗi miền. */
 export class HttpTingeeClient implements TingeeClient {
   private readonly logger = new Logger('Tingee');
   private readonly timeoutMs: number;
+  private readonly paymentLinkTimeoutMs: number;
   private readonly now: () => Date;
 
   constructor(private readonly options: TingeeClientOptions) {
     this.timeoutMs = options.timeoutMs ?? TINGEE_TIMEOUT_MS;
+    this.paymentLinkTimeoutMs = options.paymentLinkTimeoutMs ?? TINGEE_PAYMENT_LINK_TIMEOUT_MS;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -138,8 +232,69 @@ export class HttpTingeeClient implements TingeeClient {
     return accounts;
   }
 
+  /**
+   * Ghi chú: không log ở đây (người gọi log kèm BTC và mã Đơn); không bao giờ log checkout URL hay body (có VA).
+   */
+  async createPaymentLink(credential: TingeeCredential, input: PaymentLinkInput): Promise<string> {
+    // Đúng thứ tự trường của tài liệu; chỉ các trường dùng tới, không có trường rỗng.
+    const payload = {
+      requestId: randomUUID(),
+      orderId: input.orderId,
+      amount: input.amount,
+      vaAccountNumber: input.vaAccountNumber,
+      expireInMinute: input.expireInMinute,
+      returnUrl: input.returnUrl,
+      description: input.description,
+    };
+    const sent = await this.send(credential, TINGEE_CREATE_LINK_PATH, payload, this.paymentLinkTimeoutMs);
+    if (sent.kind === 'failed') throw CreateLinkError.ambiguous(sent.reason, { httpStatus: sent.httpStatus });
+    const { httpStatus, json } = sent;
+    const rawCode = typeof json === 'object' && json !== null ? (json as { code?: unknown }).code : undefined;
+    const code = LinkCode.safeParse(rawCode);
+    const tingeeCode = code.success ? code.data : null;
+    // HTTP ≠ 200 (kể cả khi body có mã lỗi): không chắc Tingee chưa tạo link.
+    if (httpStatus !== 200) throw CreateLinkError.ambiguous('http_status', { httpStatus, tingeeCode });
+    if (tingeeCode === null) throw CreateLinkError.ambiguous('invalid_response', { httpStatus });
+    if (tingeeCode !== '00') throw CreateLinkError.rejected(tingeeCode);
+    const url = CheckoutUrl.safeParse((json as { data?: unknown }).data);
+    if (!url.success) throw CreateLinkError.ambiguous('invalid_response', { httpStatus, tingeeCode });
+    return url.data;
+  }
+
   /** Gửi một request ký bằng credential của BTC; trả `data` khi `code === '00'`, không thì ném lỗi miền. */
   private async post(credential: TingeeCredential, path: string, payload: Record<string, unknown>): Promise<unknown> {
+    const sent = await this.send(credential, path, payload, this.timeoutMs);
+    if (sent.kind === 'failed') {
+      if (sent.httpStatus === null) this.logger.warn({ path, reason: sent.reason }, 'Không gọi được Tingee');
+      else this.logger.warn({ path, httpStatus: sent.httpStatus, reason: sent.reason }, 'Phản hồi Tingee không đọc được');
+      throw tingeeError(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE, new TingeeTransportError(`${path}: ${sent.reason}`));
+    }
+    const { envelope, httpStatus } = sent;
+    // Mã đã biết (key sai, merchant bị khóa) vẫn là lỗi miền dù Tingee kèm HTTP 4xx; còn lại HTTP lỗi là Tingee tạm lỗi.
+    const known = envelope !== null && TINGEE_ERROR_CODES.has(envelope.code);
+    const ok = httpStatus >= 200 && httpStatus < 300;
+    if (!envelope || (!ok && !known)) {
+      this.logger.warn({ path, httpStatus }, 'Tingee trả lỗi HTTP');
+      throw tingeeError(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE, new TingeeTransportError(`${path}: HTTP ${httpStatus}`));
+    }
+    const { code } = envelope;
+    if (code === '00') return envelope.data;
+    const domain = domainErrorOf(code);
+    // Chỉ log mã Tingee, không log `message` (có thể lặp lại dữ liệu người dùng).
+    this.logger.warn({ path, tingeeCode: code, domainCode: domain }, 'Tingee từ chối request');
+    throw tingeeError(domain, new TingeeTransportError(`${path}: Tingee code ${code}`));
+  }
+
+  /**
+   * Ký và gửi `payload` (JSON minify, đúng chuỗi được ký) bằng credential của BTC, timestamp `yyyyMMddHHmmssSSS` (mọi
+   * API Tingee, kể cả Cổng thanh toán). Không ném: trả lỗi vận chuyển hoặc phản hồi đọc được.
+   */
+  private async send(
+    credential: TingeeCredential,
+    path: string,
+    payload: Record<string, unknown>,
+    timeoutMs: number,
+  ): Promise<Sent> {
     const body = JSON.stringify(payload);
     const timestamp = tingeeTimestamp(this.now());
     let response: Response;
@@ -153,12 +308,11 @@ export class HttpTingeeClient implements TingeeClient {
           'x-signature': sign(timestamp, body, credential.secretToken),
         },
         body,
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
       const reason = err instanceof Error && err.name === 'TimeoutError' ? 'timeout' : 'network';
-      this.logger.warn({ path, reason }, 'Không gọi được Tingee');
-      throw tingeeError(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE, new TingeeTransportError(`${path}: ${reason}`));
+      return { kind: 'failed', reason, httpStatus: null };
     }
 
     let json: unknown;
@@ -166,21 +320,9 @@ export class HttpTingeeClient implements TingeeClient {
       json = await response.json();
     } catch (err) {
       const reason = err instanceof Error && err.name === 'TimeoutError' ? 'timeout' : 'invalid_json';
-      this.logger.warn({ path, httpStatus: response.status, reason }, 'Phản hồi Tingee không đọc được');
-      throw tingeeError(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE, new TingeeTransportError(`${path}: ${reason}`));
+      return { kind: 'failed', reason, httpStatus: response.status };
     }
     const envelope = Envelope.safeParse(json);
-    // Mã đã biết (key sai, merchant bị khóa) vẫn là lỗi miền dù Tingee kèm HTTP 4xx; còn lại HTTP lỗi là Tingee tạm lỗi.
-    const known = envelope.success && TINGEE_ERROR_CODES.has(envelope.data.code);
-    if (!envelope.success || (!response.ok && !known)) {
-      this.logger.warn({ path, httpStatus: response.status }, 'Tingee trả lỗi HTTP');
-      throw tingeeError(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE, new TingeeTransportError(`${path}: HTTP ${response.status}`));
-    }
-    const { code } = envelope.data;
-    if (code === '00') return envelope.data.data;
-    const domain = domainErrorOf(code);
-    // Chỉ log mã Tingee, không log `message` (có thể lặp lại dữ liệu người dùng).
-    this.logger.warn({ path, tingeeCode: code, domainCode: domain }, 'Tingee từ chối request');
-    throw tingeeError(domain, new TingeeTransportError(`${path}: Tingee code ${code}`));
+    return { kind: 'replied', httpStatus: response.status, envelope: envelope.success ? envelope.data : null, json };
   }
 }

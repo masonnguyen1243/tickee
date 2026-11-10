@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-10-2026 12:36
+last_updated: 11-10-2026 15:23
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -62,8 +62,8 @@ development_status:
   epic-3: in-progress
   3-1-chọn-vé-và-đăng-nhập-khi-bấm-mua: done
   3-2-checkout-và-giữ-chỗ-không-bao-giờ-bán-quá-số-suất: done
-  3-3-đăng-ký-sự-kiện-miễn-phí-và-nhận-vé-ngay: review
-  3-4-tạo-link-thanh-toán-gateway-và-màn-thanh-toán: backlog
+  3-3-đăng-ký-sự-kiện-miễn-phí-và-nhận-vé-ngay: done
+  3-4-tạo-link-thanh-toán-gateway-và-màn-thanh-toán: review
   3-5-nhận-ipn-và-phát-vé-đúng-một-lần: backlog
   3-6-ipn-cho-các-trường-hợp-biên: backlog
   3-7-trang-đơn-tự-chuyển-thành-công-theo-thời-gian-thực: backlog
@@ -127,6 +127,10 @@ action_items:
     owner: "Mason"
     status: open
     ref: "_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-03.md"
+    note: "Phần 3.4 có câu trả lời từ tài liệu công khai của Tingee (developers.tingee.vn
+      › error-list): mã 2023 \"Tài khoản không nằm trong danh sách cấu hình của Payment
+      Gateway\". 3.4 cho 2023 và nhóm VA lỗi đi nhánh tạm ngừng bán (Mason chốt 10/11).
+      Tài liệu cũng cho thấy create-link không trả hạn link. Các câu cho 4.1/4.2/4.5 vẫn mở"
   - epic: 2
     action: "Hỏi Tingee: key merchant có gọi được Chi hộ/rút tiền không, có tạo key
       giới hạn quyền không; nếu không thì ghi rủi ro chấp nhận vào PRD (R lộ Secret
@@ -269,8 +273,10 @@ action_items:
     note: "Phần 3.1 và 3.2 xong (spec-3-2-checkout-va-giu-cho-khong-ban-qua-so-suat.md):
       sellability lúc đặt Đơn khóa Sự kiện FOR SHARE và kiểm lại giới hạn Vé/Đơn, bản
       chụp chính sách hoàn vé vào orders, xóa Hạng vé có order_items → 409, câu hỏi form
-      cho Người mua, serverNow. Các mục còn lại thuộc 3.4/3.5 (read model payout,
-      create-link) và 3.11/4.2 (nhãn dashboard)"
+      cho Người mua, serverNow. Phần 3.4 xong (spec-3-4-tao-link-thanh-toan-gateway-va-man-thanh-toan.md):
+      read model payout (defaultPayoutTargetOf, payoutRecipientOf) và
+      TingeeClient.createPaymentLink (UNIX ms, timeout 5 giây). Còn lại: tra BTC theo
+      ipnKey và cấu hình Tingee cho worker (3.5), nhãn dashboard (3.11/4.2)"
   - id: "epic-2-retro-e2-7-moi-truong-dev"
     epic: 2
     action: "E2-7: môi trường dev — pnpm dev tự migrate và chạy worker, seed BTC đã

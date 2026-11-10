@@ -78,6 +78,11 @@ export const ErrorCode = {
   PAYOUT_ACCOUNT_NOT_LINKED_YET: 'PAYOUT_ACCOUNT_NOT_LINKED_YET',
   /** Tài khoản merchant Tingee của BTC đang bị Tingee tạm khóa. */
   MERCHANT_SUSPENDED: 'MERCHANT_SUSPENDED',
+  /**
+   * Tingee từ chối tài khoản nhận tiền (VA) của BTC: VA chưa được cho phép nhận thanh toán trên Cổng thanh toán, hoặc
+   * VA không còn dùng được (Story 3.4). BTC kiểm lại cấu hình trên portal Tingee.
+   */
+  PAYMENT_ACCOUNT_NOT_ALLOWED: 'PAYMENT_ACCOUNT_NOT_ALLOWED',
   /** Tingee tạm lỗi (timeout, lỗi mạng, lỗi hệ thống hoặc mã lỗi không lường trước): thử lại sau ít phút. */
   PAYMENT_PROVIDER_UNAVAILABLE: 'PAYMENT_PROVIDER_UNAVAILABLE',
   /**

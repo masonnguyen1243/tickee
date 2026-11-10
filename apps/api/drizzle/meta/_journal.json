@@ -127,6 +127,13 @@
       "when": 1794286491085,
       "tag": "0017_tickets_free_orders",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794295237735,
+      "tag": "0018_payment_link",
+      "breakpoints": true
     }
   ]
 }

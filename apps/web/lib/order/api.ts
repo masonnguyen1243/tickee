@@ -1,14 +1,17 @@
 import {
   BuyerOrder,
+  buyerOrderApiPath,
   CheckoutForm,
   IDEMPOTENCY_KEY_HEADER,
+  paymentLinkApiPath,
   type CreateOrderRequest,
 } from '@tickee/contracts';
 
 import { apiRequest } from '@/lib/api/client';
 
 /*
- * Checkout và Đơn của Người mua (Story 3.2): gọi từ trình duyệt (phiên ở origin API), không bao giờ render ở server.
+ * Checkout và Đơn của Người mua (Story 3.2), thử lại link thanh toán (Story 3.4): gọi từ trình duyệt (phiên ở origin
+ * API), không bao giờ render ở server.
  */
 
 const eventPath = (slug: string) => `/events/${encodeURIComponent(slug)}`;
@@ -35,5 +38,13 @@ export function createOrder(slug: string, idempotencyKey: string, body: CreateOr
 }
 
 export function fetchBuyerOrder(code: string, signal?: AbortSignal): Promise<BuyerOrder> {
-  return apiRequest(`/me/orders/${encodeURIComponent(code)}`, { schema: BuyerOrder, init: { signal } });
+  return apiRequest(buyerOrderApiPath(code), { schema: BuyerOrder, init: { signal } });
+}
+
+/**
+ * `POST /v1/me/orders/:code/payment-link`: thử tạo lại link thanh toán cho cùng Đơn (sau khi Tingee từ chối). Luôn trả
+ * Đơn hiện tại; Đơn không đủ điều kiện thì máy chủ không gọi Tingee.
+ */
+export function retryPaymentLink(code: string): Promise<BuyerOrder> {
+  return apiRequest(paymentLinkApiPath(code), { schema: BuyerOrder, init: { method: 'POST' } });
 }

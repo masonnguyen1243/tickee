@@ -110,6 +110,7 @@ beforeAll(async () => {
       if (hook) await hook();
       return accounts;
     },
+    createPaymentLink: (credential, input) => http.createPaymentLink(credential, input),
   };
   h = await createHarness({ TINGEE_BASE_URL: fake.url }, { overrides: [{ provide: TINGEE_CLIENT, useValue: client }] });
   owner = await signUp(h);

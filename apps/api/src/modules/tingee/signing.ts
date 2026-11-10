@@ -9,7 +9,11 @@ const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
 
 const pad = (n: number, width = 2) => String(n).padStart(width, '0');
 
-/** `x-request-timestamp`: `yyyyMMddHHmmssSSS` theo giờ `Asia/Ho_Chi_Minh`. */
+/**
+ * `x-request-timestamp`: `yyyyMMddHHmmssSSS` theo giờ `Asia/Ho_Chi_Minh`, cho mọi API Tingee, kể cả `create-link` của
+ * Cổng thanh toán. Trang tài liệu `create-link` ghi UNIX ms, nhưng Tingee production trả 90 "Timestamp is not in correct
+ * format." cho UNIX ms và nhận định dạng này (chẩn đoán 10/11/2026).
+ */
 export function tingeeTimestamp(now: Date): string {
   const t = new Date(now.getTime() + VN_OFFSET_MS);
   return (
