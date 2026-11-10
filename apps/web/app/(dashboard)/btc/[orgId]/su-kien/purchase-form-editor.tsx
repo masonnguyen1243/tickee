@@ -658,6 +658,8 @@ export function PurchaseFormEditor({ orgId, eventId }: { orgId: string; eventId:
   });
 
   const buttonId = (questionId: string, direction: Direction) => `${ids}-${questionId}-${direction}`;
+  /** Nút "Lên"/"Xuống" cần focus khi danh sách đã render theo thứ tự vừa lưu. */
+  const pendingMoveFocus = useRef<string | null>(null);
 
   const move = useMutation({
     mutationFn: ({ questionIds }: Move) => reorderFormQuestions(orgId, eventId, { questionIds }),
@@ -669,10 +671,12 @@ export function PurchaseFormEditor({ orgId, eventId }: { orgId: string; eventId:
       const question = saved.questions[index];
       if (question) setAnnouncement(`Đã chuyển ${question.label} tới vị trí ${index + 1}.`);
       // React dời DOM của hàng (`insertBefore`) nên focus rơi về `body`: focus lại nút vừa bấm, hoặc nút còn lại của
-      // hàng khi nút vừa bấm bị tắt (câu hỏi đã lên đầu/xuống cuối).
+      // hàng khi nút vừa bấm bị tắt (câu hỏi đã lên đầu/xuống cuối). Focus trong effect bên dưới, không phải ở đây hay
+      // trong `requestAnimationFrame`: lần render thứ tự mới là một task riêng (TanStack Query báo cho React qua
+      // `setTimeout(0)`), có thể tới sau khung hình kế; khi đó nút đích vẫn `disabled` theo thứ tự cũ và `focus()`
+      // không có tác dụng.
       const atEdge = direction === 'up' ? index === 0 : index === saved.questions.length - 1;
-      const target = buttonId(questionId, atEdge ? (direction === 'up' ? 'down' : 'up') : direction);
-      requestAnimationFrame(() => document.getElementById(target)?.focus());
+      pendingMoveFocus.current = buttonId(questionId, atEdge ? (direction === 'up' ? 'down' : 'up') : direction);
     },
     onError: (error) => {
       if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
@@ -703,6 +707,13 @@ export function PurchaseFormEditor({ orgId, eventId }: { orgId: string; eventId:
   const questions = form.data?.questions;
   const full = (questions?.length ?? 0) >= FORM_QUESTIONS_MAX;
   const addHintId = `${ids}-add-hint`;
+
+  // Chạy sau lần commit đầu tiên có `questions` mới, tức thứ tự vừa lưu đã ở trong DOM và nút đích đã bật.
+  useEffect(() => {
+    if (!pendingMoveFocus.current) return;
+    document.getElementById(pendingMoveFocus.current)?.focus();
+    pendingMoveFocus.current = null;
+  }, [questions]);
 
   let body;
   if (questions) {
