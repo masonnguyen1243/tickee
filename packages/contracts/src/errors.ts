@@ -97,7 +97,10 @@ export const ErrorCode = {
    * trạng thái Sự kiện, kể cả Sự kiện có cả Hạng vé có phí (`details`: `FreeEventCapacityExceededDetails`). Không lưu gì.
    */
   FREE_EVENT_CAPACITY_EXCEEDED: 'FREE_EVENT_CAPACITY_EXCEEDED',
-  /** Hạng vé đã có Vé bán ra hoặc đang Giữ chỗ (đã bán + đang giữ chỗ > 0): không xóa được. */
+  /**
+   * Hạng vé đã có Vé bán ra, đang Giữ chỗ (đã bán + đang giữ chỗ > 0) hoặc đã có dòng Đơn (kể cả Đơn đã hết hạn): không
+   * xóa được (không xóa mềm; muốn ngừng bán thì đặt giờ kết thúc bán).
+   */
   TICKET_TYPE_IN_USE: 'TICKET_TYPE_IN_USE',
   /**
    * Sự kiện không còn nháp: tạo Hạng vé giá > 0, hoặc sửa Hạng vé mà giá sau khi sửa > 0, khi BTC chưa đủ điều kiện bán
@@ -147,6 +150,25 @@ export const ErrorCode = {
    * Không gửi, không cấp gì.
    */
   REAUTH_METHOD_MISMATCH: 'REAUTH_METHOD_MISMATCH',
+  /**
+   * Gửi Đơn: một Hạng vé không còn đủ chỗ (giữ chỗ có điều kiện trả 0 dòng). Không tạo Đơn, không giữ chỗ Hạng vé nào.
+   * `details`: `TicketTypeSoldOutDetails` (`ticketTypeId`, `ticketTypeName`).
+   */
+  TICKET_TYPE_SOLD_OUT: 'TICKET_TYPE_SOLD_OUT',
+  /**
+   * Gửi Đơn khi Sự kiện không nhận Đơn (ẩn, khóa, hủy, đã kết thúc) hoặc một Hạng vé không bán (tạm ngừng, chưa mở,
+   * đã đóng, không còn). Không tạo Đơn. `details`: `NotOnSaleDetails` (`ticketTypeId?`, `reason`).
+   */
+  NOT_ON_SALE: 'NOT_ON_SALE',
+  /**
+   * Người mua đang có một Đơn `pending` khác cho cùng Sự kiện. Không tạo Đơn. `details`: `PendingOrderExistsDetails`
+   * (`code` của Đơn đang chờ).
+   */
+  PENDING_ORDER_EXISTS: 'PENDING_ORDER_EXISTS',
+  /** Gửi Đơn quá nhanh (theo tài khoản hoặc theo IP, `ORDER_RATE_LIMITS`); `details.retryAfterSeconds`. */
+  ORDER_RATE_LIMITED: 'ORDER_RATE_LIMITED',
+  /** Không tìm thấy Đơn: mã sai dạng, không tồn tại, hoặc Đơn của người khác (cùng lỗi để không lộ mã nào có thật). */
+  ORDER_NOT_FOUND: 'ORDER_NOT_FOUND',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

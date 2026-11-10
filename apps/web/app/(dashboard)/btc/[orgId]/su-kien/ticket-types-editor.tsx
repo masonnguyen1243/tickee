@@ -61,6 +61,10 @@ import {
  * theo giờ Việt Nam (+07:00).
  */
 
+/** Xóa Hạng vé đã có Đơn (`409 TICKET_TYPE_IN_USE`): không xóa mềm, chỉ BTC cách ngừng bán. */
+const TICKET_TYPE_IN_USE_MESSAGE =
+  'Hạng vé đã có Đơn, không xóa được. Muốn ngừng bán thì đặt giờ kết thúc bán của Hạng vé.';
+
 // ---------------------------------------------------------------------------------------------------------------
 // Form Hạng vé
 // ---------------------------------------------------------------------------------------------------------------
@@ -422,16 +426,14 @@ function DeleteDialog({
       }}
       titleClassName="wrap-break-word"
       title={`Xóa Hạng vé ${target?.name}?`}
-      description="Hạng vé và số suất của nó bị xóa khỏi Sự kiện, không khôi phục được. Chỉ xóa được Hạng vé chưa có ai mua hoặc giữ chỗ."
+      description="Hạng vé và số suất của nó bị xóa khỏi Sự kiện, không khôi phục được. Chỉ xóa được Hạng vé chưa có Đơn nào."
       confirmLabel="Xóa"
       confirmDisabled={blocked}
       cancelLabel={blocked ? 'Đóng' : 'Hủy'}
       onConfirm={() => target && remove.mutate(target)}
       pending={remove.isPending}
       failureTitle="Chưa xóa được"
-      failure={
-        failure && (inUse ? 'Hạng vé đã có người mua hoặc đang giữ chỗ, không xóa được.' : messageOf(failure))
-      }
+      failure={failure && (inUse ? TICKET_TYPE_IN_USE_MESSAGE : messageOf(failure))}
     />
   );
 }

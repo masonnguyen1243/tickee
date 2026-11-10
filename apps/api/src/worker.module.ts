@@ -1,6 +1,7 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { EventJobsModule } from './modules/event/index.js';
 import { IdentityJanitorModule } from './modules/identity/index.js';
+import { OrderingJobsModule } from './modules/ordering/index.js';
 import { OrganizerJobsModule } from './modules/organizer/index.js';
 import { APP_CONFIG, type WorkerConfig } from './platform/config/index.js';
 import { DbModule } from './platform/db/index.js';
@@ -9,8 +10,8 @@ import { JobsModule } from './platform/jobs/index.js';
 import { createLoggerModule } from './platform/logging/index.js';
 
 /**
- * Gốc DI của vai `worker`: không mở HTTP, chạy pg-boss, các job định kỳ, job gửi email (lời mời Admin) và job revalidate
- * trang Sự kiện công khai (gọi `<WEB_ORIGIN>/api/revalidate`).
+ * Gốc DI của vai `worker`: không mở HTTP, chạy pg-boss, các job định kỳ, job gửi email (lời mời Admin), job revalidate
+ * trang Sự kiện công khai (gọi `<WEB_ORIGIN>/api/revalidate`) và job hết hạn Giữ chỗ của Đơn.
  */
 @Module({})
 export class WorkerModule {
@@ -26,6 +27,7 @@ export class WorkerModule {
         IdentityJanitorModule,
         OrganizerJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN }),
         EventJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN, REVALIDATE_SECRET: config.REVALIDATE_SECRET }),
+        OrderingJobsModule,
       ],
       providers: [{ provide: APP_CONFIG, useValue: config }],
     };

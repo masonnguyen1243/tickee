@@ -363,7 +363,9 @@ test('xóa qua Dialog xác nhận nêu hậu quả; Hạng vé đã có người
 
   await page.getByRole('button', { name: 'Xóa Đôi nam nữ' }).click();
   await dialog(page).getByRole('button', { name: 'Xóa', exact: true }).click();
-  await expect(dialog(page).getByText('Hạng vé đã có người mua hoặc đang giữ chỗ, không xóa được.')).toBeVisible();
+  await expect(
+    dialog(page).getByText('Hạng vé đã có Đơn, không xóa được. Muốn ngừng bán thì đặt giờ kết thúc bán của Hạng vé.'),
+  ).toBeVisible();
   await expect(rows(page)).toHaveCount(1);
   expect(writes(calls).map((c) => `${c.method} ${c.path}`)).toEqual([
     `DELETE ${ticketTypesPath}/${ticketTypeId(0)}`,

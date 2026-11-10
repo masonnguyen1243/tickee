@@ -1,8 +1,17 @@
-import type { Page } from '@playwright/test';
+import type { Page, Route } from '@playwright/test';
 
 import { PORT_PUBLIC_EVENT } from '../playwright.config';
 import { expect, test } from './fixtures';
-import { apiError, EMAIL, me, mockIdentityApi, unauthenticated, type Handler, type Reply } from './identity-mock';
+import {
+  apiError,
+  corsHeaders,
+  EMAIL,
+  me,
+  mockIdentityApi,
+  unauthenticated,
+  type Handler,
+  type Reply,
+} from './identity-mock';
 import {
   SLUG_BUY,
   SLUG_DRAFT,
@@ -15,9 +24,11 @@ import {
 
 /*
  * Story 3.1: chọn Vé trên trang Sự kiện (`quantity-stepper`, `purchase-bar`), bấm "Mua" → đăng nhập → Checkout đúng
- * lựa chọn, phễu `buy_clicked`/`login_completed`. Phần tĩnh (trang Sự kiện và Checkout) SSR từ API giả
- * `e2e/public-event-api.ts`; `/availability`, `/funnel-events` và `/identity/*` gọi từ trình duyệt nên giả bằng
- * `page.route`. Sự kiện `SLUG_BUY`: "Vé phổ thông" 0đ rồi "Vé VIP" 300.000đ, giới hạn 4 Vé/Đơn.
+ * lựa chọn, phễu `buy_clicked`/`login_completed`. Story 3.2: form mua ở Checkout, "Gửi Đơn" (lỗi tại trường, hết chỗ,
+ * Đơn chờ, lỗi mạng rồi "Thử lại" cùng khóa) và trang Đơn `/orders/:code`. Phần tĩnh (trang Sự kiện và Checkout) SSR
+ * từ API giả `e2e/public-event-api.ts`; `/availability`, `/funnel-events`, `/identity/*`, `/checkout`, `/orders` và
+ * `/me/orders` gọi từ trình duyệt nên giả bằng `page.route`. Sự kiện `SLUG_BUY`: "Vé phổ thông" 0đ rồi "Vé VIP"
+ * 300.000đ, giới hạn 4 Vé/Đơn.
  */
 
 const ORIGIN = `http://localhost:${PORT_PUBLIC_EVENT}`;
@@ -81,8 +92,107 @@ async function mockFunnel(page: Page, { fail = false } = {}): Promise<FunnelCall
   return calls;
 }
 
-/** `/identity/*` giả với `me` đổi theo trạng thái đăng nhập; OTP gửi/nhận luôn thành công. */
+const ORDER_CODE = 'TK8F3Q2AXM';
+const Q_SIZE = '019a3b2c-0900-7abc-8def-000000000001';
+const Q_LEVEL = '019a3b2c-0900-7abc-8def-000000000002';
+const OPT_BEGINNER = '019a3b2c-0a00-7abc-8def-000000000001';
+const OPT_GOOD = '019a3b2c-0a00-7abc-8def-000000000002';
+const Q_SHIRT = '019a3b2c-0900-7abc-8def-000000000003';
+const QUESTIONS = [
+  { id: Q_SIZE, position: 0, label: 'Size áo', kind: 'text', required: true, options: [] },
+  {
+    id: Q_LEVEL,
+    position: 1,
+    label: 'Trình độ',
+    kind: 'choice',
+    required: true,
+    options: [
+      { id: OPT_BEGINNER, label: 'Mới chơi' },
+      { id: OPT_GOOD, label: 'Khá' },
+    ],
+  },
+  {
+    id: Q_SHIRT,
+    position: 2,
+    label: 'Nhận áo',
+    kind: 'choice',
+    required: false,
+    options: [
+      { id: '019a3b2c-0a00-7abc-8def-000000000003', label: 'Có' },
+      { id: '019a3b2c-0a00-7abc-8def-000000000004', label: 'Không' },
+    ],
+  },
+];
+const PREFILL = { name: 'Nguyễn Văn An', phone: '+84912345678', email: EMAIL };
+
+/** `BuyerOrder` giả (Đơn 2 Vé VIP, đang giữ chỗ). */
+const buyerOrder = (patch: Record<string, unknown> = {}) => ({
+  code: ORDER_CODE,
+  status: 'pending',
+  event: { slug: SLUG_BUY, name: 'Giải chạy Hồ Gươm mùa thu 2026' },
+  items: [{ ticketTypeId: TIER_PAID_ID, name: VIP, unitPrice: 300_000, quantity: 2, amount: 600_000 }],
+  totalAmount: 600_000,
+  buyer: { name: 'Nguyễn Văn An', phone: '+84912345678', email: EMAIL },
+  answers: [{ questionId: Q_SIZE, label: 'Size áo', answer: 'M' }],
+  refundPolicy: 'Hoàn 100% nếu hủy trước 7 ngày.',
+  createdAt: '2026-11-10T01:00:00.000Z',
+  expiresAt: '2026-11-10T01:01:00.000Z',
+  serverNow: '2026-11-10T01:00:00.000Z',
+  ...patch,
+});
+
+type OrderCall = { key: string | null; body: Record<string, unknown> };
+type OrdersMockOptions = {
+  /** Phần tự điền của `GET …/checkout`. */
+  buyer?: { name: string; phone: string | null; email: string };
+  /** Phản hồi của lần gửi Đơn thứ `n` (từ 0); `'abort'` = lỗi mạng. Mặc định 201 `buyerOrder()`. */
+  submit?: (call: OrderCall, n: number) => Reply | 'abort';
+  /** `GET /me/orders/:code` theo mã; mã khác → 404 `ORDER_NOT_FOUND`. */
+  orders?: Record<string, Reply>;
+};
+
+/**
+ * Giả `GET /events/:slug/checkout`, `POST /events/:slug/orders`, `GET /me/orders/:code`; trả về các lần gửi Đơn và số lần
+ * tải form mua.
+ */
+async function mockOrders(
+  page: Page,
+  options: OrdersMockOptions = {},
+): Promise<{ calls: OrderCall[]; checkoutLoads: () => number }> {
+  const cors = corsHeaders(ORIGIN);
+  const calls: OrderCall[] = [];
+  let checkoutLoads = 0;
+  const submit = options.submit ?? ((): Reply => ({ status: 201, body: buyerOrder() }));
+  const orders = options.orders ?? { [ORDER_CODE]: { status: 200, body: buyerOrder() } };
+  const reply = (route: Route, r: Reply) =>
+    route.fulfill({
+      status: r.status,
+      headers: { ...cors, 'content-type': 'application/json' },
+      body: r.body === undefined ? '' : JSON.stringify(r.body),
+    });
+  await page.route('**/v1/events/*/checkout', (route) => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    checkoutLoads += 1;
+    return reply(route, { status: 200, body: { questions: QUESTIONS, buyer: options.buyer ?? PREFILL } });
+  });
+  await page.route('**/v1/events/*/orders', (route) => {
+    const request = route.request();
+    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    const call = { key: request.headers()['idempotency-key'] ?? null, body: request.postDataJSON() as Record<string, unknown> };
+    calls.push(call);
+    const result = submit(call, calls.length - 1);
+    return result === 'abort' ? route.abort('failed') : reply(route, result);
+  });
+  await page.route('**/v1/me/orders/*', (route) => {
+    const code = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop()!);
+    return reply(route, orders[code] ?? apiError(404, 'ORDER_NOT_FOUND'));
+  });
+  return { calls, checkoutLoads: () => checkoutLoads };
+}
+
+/** `/identity/*` giả với `me` đổi theo trạng thái đăng nhập; OTP gửi/nhận luôn thành công. Kèm Checkout/Đơn giả mặc định. */
 async function mockAccount(page: Page, initial: { signedIn: boolean; consentRequired?: boolean }) {
+  await mockOrders(page);
   /** `meFails`: `me` trả 500 (api lỗi), bất kể trạng thái đăng nhập. */
   const state = { signedIn: initial.signedIn, consentedAt: initial.consentRequired ? null : CONSENTED, meFails: false };
   const handlers: Record<string, Handler> = {
@@ -342,9 +452,7 @@ test.describe('bấm Mua', () => {
     await expect.poll(() => funnel.map((c) => c.body.type)).toEqual(['buy_clicked', 'login_completed']);
   });
 
-  test('đã đăng nhập → thẳng Checkout, không có f, buy_clicked loginRequired false, không login_completed', async ({
-    page,
-  }) => {
+  test('đã đăng nhập → thẳng Checkout kèm f (rồi bỏ khỏi URL), buy_clicked loginRequired false', async ({ page }) => {
     await mockAccount(page, { signedIn: true });
     const funnel = await mockFunnel(page);
     await mockAvailability(page, ON_SALE);
@@ -353,11 +461,17 @@ test.describe('bấm Mua', () => {
     await pick(page, BASIC, 2);
     await bar(page).getByRole('button', { name: 'Mua' }).click();
 
-    await page.waitForURL((url) => url.pathname === CHECKOUT);
+    await page.waitForURL((url) => url.pathname === CHECKOUT && !url.searchParams.has('f'));
     expect(new URL(page.url()).search).toBe(`?items=${TIER_FREE_ID}:2,${TIER_PAID_ID}:1`);
     await expectSummary(page, [`${BASIC}2 × Miễn phíMiễn phí`, `${VIP}1 × 300.000đ300.000đ`], 3, '300.000đ');
-    await expect.poll(() => funnel.length).toBe(1);
+    await expect.poll(() => funnel.length).toBeGreaterThanOrEqual(1);
+    const funnelId = funnel[0]!.body.funnelId;
     expect(funnel[0]!.body).toEqual({ type: 'buy_clicked', funnelId: expect.stringMatching(UUID), loginRequired: false });
+    // Checkout luôn báo `login_completed` khi có `f`; API chỉ ghi khi lần "Mua" đó phải đăng nhập.
+    await expect.poll(() => funnel.map((c) => c.body)).toEqual([
+      { type: 'buy_clicked', funnelId, loginRequired: false },
+      { type: 'login_completed', funnelId },
+    ]);
   });
 
   test('`me` lỗi 500 lúc bấm Mua → vẫn vào Checkout (không về đăng nhập), loginRequired false; "Thử lại" khi `me` hồi lại', async ({
@@ -372,7 +486,9 @@ test.describe('bấm Mua', () => {
     await bar(page).getByRole('button', { name: 'Mua' }).click();
 
     await page.waitForURL((url) => url.pathname === CHECKOUT);
-    expect(new URL(page.url()).search).toBe(`?items=${TIER_PAID_ID}:1`);
+    const url = new URL(page.url());
+    expect(url.searchParams.get('items')).toBe(`${TIER_PAID_ID}:1`);
+    expect(url.searchParams.get('f')).toMatch(UUID);
     await expect.poll(() => funnel.map((c) => c.body.loginRequired)).toEqual([false]);
     // Query `me` tự thử lại 5xx 2 lần trước khi báo lỗi.
     await expect(page.getByText('Chưa tải được tài khoản')).toBeVisible({ timeout: 15_000 });
@@ -462,6 +578,276 @@ test.describe('Checkout', () => {
     await expect(stepperValue(page, BASIC)).toHaveText('1');
     await expect(stepperValue(page, VIP)).toHaveText('2');
     await expect(bar(page)).toContainText('Tổng · 3 vé');
+  });
+});
+
+/** Trả lời hai câu hỏi bắt buộc của form giả. */
+async function answerQuestions(page: Page): Promise<void> {
+  await page.getByLabel('Size áo').fill('M');
+  await page.getByRole('radio', { name: 'Khá' }).check();
+}
+
+const sendButton = (page: Page) => bar(page).getByRole('button', { name: 'Gửi Đơn' });
+
+test.describe('Gửi Đơn', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockAccount(page, { signedIn: true });
+    await mockFunnel(page);
+    await mockAvailability(page, ON_SALE);
+  });
+
+  test('form tự điền, Email chỉ đọc, dòng chia sẻ BTC; Gửi Đơn → body đúng, Idempotency-Key, funnelId, sang Trang Đơn', async ({
+    page,
+  }) => {
+    const orders = await mockOrders(page);
+    const funnelId = '5f0c6b8e-2a4d-4c1e-9b7a-3d2f1e0a9c8b';
+    await page.goto(`${CHECKOUT}?items=${TIER_PAID_ID}:2&f=${funnelId}`);
+    await page.waitForURL((url) => url.pathname === CHECKOUT && !url.searchParams.has('f'));
+
+    await expect(page.getByLabel('Tên')).toHaveValue('Nguyễn Văn An');
+    await expect(page.getByLabel('Số điện thoại')).toHaveValue('0912345678');
+    const email = page.getByLabel('Email');
+    await expect(email).toHaveValue(EMAIL);
+    await expect(email).toHaveAttribute('readonly', '');
+    await expect(page.locator('[data-slot="checkout-share-note"]')).toHaveText(
+      'Thông tin trong form sẽ được chia sẻ cho CLB Chạy Bộ Phố Cổ.',
+    );
+    await expect(bar(page)).toContainText('Tổng · 2 vé');
+    await expect(bar(page).locator('[data-slot="purchase-bar-total"]')).toHaveText('600.000đ');
+
+    await answerQuestions(page);
+    // Câu chọn không bắt buộc: chọn nhầm thì "Bỏ chọn" xóa câu trả lời (không gửi lên).
+    const yes = page.getByRole('radio', { name: 'Có', exact: true });
+    await expect(page.getByRole('button', { name: 'Bỏ chọn Nhận áo' })).toHaveCount(0);
+    await yes.check();
+    await page.getByRole('button', { name: 'Bỏ chọn Nhận áo' }).click();
+    await expect(yes).not.toBeChecked();
+    await expect(page.getByRole('radio', { name: 'Không', exact: true })).not.toBeChecked();
+    await expect(page.getByRole('button', { name: 'Bỏ chọn Nhận áo' })).toHaveCount(0);
+    // Câu bắt buộc không có "Bỏ chọn".
+    await expect(page.getByRole('button', { name: 'Bỏ chọn Trình độ' })).toHaveCount(0);
+    await sendButton(page).click();
+    await page.waitForURL(`**/orders/${ORDER_CODE}`);
+    expect(orders.calls).toHaveLength(1);
+    expect(orders.calls[0]!.key).toMatch(UUID);
+    expect(orders.calls[0]!.body).toEqual({
+      items: [{ ticketTypeId: TIER_PAID_ID, quantity: 2 }],
+      buyer: { name: 'Nguyễn Văn An', phone: '0912345678' },
+      answers: { [Q_SIZE]: 'M', [Q_LEVEL]: OPT_GOOD },
+      funnelId,
+    });
+    await expect(page.getByText('Đang giữ chỗ cho Đơn của bạn.')).toBeVisible();
+    await expect(page.locator('[data-slot="order-code"]')).toHaveText(ORDER_CODE);
+    await expect(page.locator('[data-slot="order-summary-total"]')).toHaveText('600.000đ');
+  });
+
+  test('lỗi tại trường khi rời trường và khi gửi; 375×667: focus trường lỗi đầu tiên, không bị thanh che; không gửi', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    const orders = await mockOrders(page, { buyer: { name: '', phone: null, email: EMAIL } });
+    await page.goto(`${CHECKOUT}?items=${TIER_PAID_ID}:1`);
+
+    const name = page.getByLabel('Tên');
+    await expect(name).toHaveValue('');
+    await name.focus();
+    await name.blur();
+    await expect(name).toHaveAttribute('aria-invalid', 'true');
+    const nameError = await name.getAttribute('aria-describedby');
+    await expect(page.locator(`[id="${nameError}"]`)).toHaveText('Nhập tên của bạn.');
+    await name.fill('An');
+    await expect(page.locator(`[id="${nameError}"]`)).toHaveText('');
+
+    const phone = page.getByLabel('Số điện thoại');
+    await phone.fill('12345');
+    await phone.blur();
+    await expect(page.getByText('Số điện thoại chưa đúng (vd. 0912 345 678).')).toBeVisible();
+    await phone.fill('0912 345 678');
+    await expect(page.getByText('Số điện thoại chưa đúng (vd. 0912 345 678).')).toHaveCount(0);
+
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await sendButton(page).click();
+    const size = page.getByLabel('Size áo');
+    await expect(size).toBeFocused();
+    await expect(size).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.getByText('Câu này bắt buộc.')).toBeVisible();
+    await expect(page.getByText('Chọn một phương án.')).toBeVisible();
+    const box = (await size.boundingBox())!;
+    const barBox = (await bar(page).boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(barBox.y);
+    expect(orders.calls).toHaveLength(0);
+  });
+
+  test('hết chỗ → toast "Hạng vé {tên} vừa hết. Bạn chọn lại nhé." + về trang Sự kiện, hạng đó = 0, hạng khác giữ', async ({
+    page,
+  }) => {
+    await mockOrders(page, {
+      submit: () => apiError(409, 'TICKET_TYPE_SOLD_OUT', { ticketTypeId: TIER_PAID_ID, ticketTypeName: VIP }),
+    });
+    await page.goto(`${CHECKOUT}?items=${TIER_FREE_ID}:1,${TIER_PAID_ID}:2`);
+    await answerQuestions(page);
+    await sendButton(page).click();
+    await page.waitForURL((url) => url.pathname === `/e/${SLUG_BUY}`);
+    expect(new URL(page.url()).searchParams.get('items')).toBe(`${TIER_FREE_ID}:1`);
+    await expect(page.getByText(`Hạng vé ${VIP} vừa hết. Bạn chọn lại nhé.`)).toBeVisible();
+    await expect(stepperValue(page, VIP)).toHaveText('0');
+    await expect(stepperValue(page, BASIC)).toHaveText('1');
+  });
+
+  test('Hạng vé không bán → toast + về trang Sự kiện, hạng đó = 0', async ({ page }) => {
+    await mockOrders(page, { submit: () => apiError(409, 'NOT_ON_SALE', { ticketTypeId: TIER_PAID_ID, reason: 'closed' }) });
+    await page.goto(`${CHECKOUT}?items=${TIER_FREE_ID}:1,${TIER_PAID_ID}:1`);
+    await answerQuestions(page);
+    await sendButton(page).click();
+    await page.waitForURL((url) => url.pathname === `/e/${SLUG_BUY}`);
+    expect(new URL(page.url()).searchParams.get('items')).toBe(`${TIER_FREE_ID}:1`);
+    await expect(page.getByText(`Hạng vé ${VIP} đã đóng bán. Bạn chọn lại nhé.`)).toBeVisible();
+  });
+
+  test('đã có Đơn chờ → sang Trang Đơn đó + toast', async ({ page }) => {
+    const pendingCode = 'TKPENDNG23';
+    await mockOrders(page, {
+      submit: () => apiError(409, 'PENDING_ORDER_EXISTS', { code: pendingCode }),
+      orders: { [pendingCode]: { status: 200, body: buyerOrder({ code: pendingCode }) } },
+    });
+    await page.goto(`${CHECKOUT}?items=${TIER_PAID_ID}:1`);
+    await answerQuestions(page);
+    await sendButton(page).click();
+    await page.waitForURL(`**/orders/${pendingCode}`);
+    await expect(page.getByText('Bạn đang có một Đơn chờ thanh toán cho Sự kiện này.')).toBeVisible();
+    await expect(page.locator('[data-slot="order-code"]')).toHaveText(pendingCode);
+  });
+
+  test('lỗi mạng → "Chưa gửi được Đơn…" + "Thử lại" cùng khóa, form giữ nguyên dữ liệu', async ({ page }) => {
+    const orders = await mockOrders(page, {
+      submit: (_call, n) => (n === 0 ? 'abort' : { status: 201, body: buyerOrder() }),
+    });
+    await page.goto(`${CHECKOUT}?items=${TIER_PAID_ID}:2`);
+    await answerQuestions(page);
+    await sendButton(page).click();
+    await expect(page.locator('[data-slot="checkout-submit-error"]')).toContainText(
+      'Chưa gửi được Đơn. Kiểm tra kết nối rồi thử lại.',
+    );
+    expect(new URL(page.url()).pathname).toBe(CHECKOUT);
+    await expect(page.getByLabel('Size áo')).toHaveValue('M');
+    await expect(page.getByRole('radio', { name: 'Khá' })).toBeChecked();
+    await expect(page.getByLabel('Tên')).toHaveValue('Nguyễn Văn An');
+
+    await page.getByRole('button', { name: 'Thử lại' }).click();
+    await page.waitForURL(`**/orders/${ORDER_CODE}`);
+    expect(orders.calls).toHaveLength(2);
+    expect(orders.calls[1]!.key).toMatch(UUID);
+    expect(orders.calls[1]!.key).toBe(orders.calls[0]!.key);
+    expect(orders.calls[1]!.body).toEqual(orders.calls[0]!.body);
+  });
+
+  test('lỗi máy chủ (5xx) → cũng "Thử lại" được', async ({ page }) => {
+    await mockOrders(page, {
+      submit: (_call, n) => (n === 0 ? apiError(500, 'INTERNAL_ERROR') : { status: 200, body: buyerOrder() }),
+    });
+    await page.goto(`${CHECKOUT}?items=${TIER_PAID_ID}:2`);
+    await answerQuestions(page);
+    await sendButton(page).click();
+    await expect(page.locator('[data-slot="checkout-submit-error"]')).toContainText('Chưa gửi được Đơn.');
+    await page.getByRole('button', { name: 'Thử lại' }).click();
+    await page.waitForURL(`**/orders/${ORDER_CODE}`);
+  });
+
+  test('400 tại items (giới hạn Vé/Đơn vừa đổi) → toast + về trang Sự kiện giữ lựa chọn', async ({ page }) => {
+    await mockOrders(page, {
+      submit: () => apiError(400, 'VALIDATION_FAILED', { issues: [{ path: 'items', code: 'too_big' }] }),
+    });
+    await page.goto(`${CHECKOUT}?items=${TIER_FREE_ID}:1,${TIER_PAID_ID}:2`);
+    await answerQuestions(page);
+    await sendButton(page).click();
+    await page.waitForURL((url) => url.pathname === `/e/${SLUG_BUY}`);
+    expect(new URL(page.url()).searchParams.get('items')).toBe(`${TIER_FREE_ID}:1,${TIER_PAID_ID}:2`);
+    await expect(page.getByText('Lựa chọn vé không còn hợp lệ. Bạn chọn lại nhé.')).toBeVisible();
+  });
+
+  test('400 tại câu hỏi lạ (BTC vừa đổi form) → "Form mua vừa thay đổi…" và tải lại form mua', async ({ page }) => {
+    const orders = await mockOrders(page, {
+      submit: () =>
+        apiError(400, 'VALIDATION_FAILED', {
+          issues: [{ path: 'answers.019a3b2c-0900-7abc-8def-0000000000ff', code: 'custom' }],
+        }),
+    });
+    await page.goto(`${CHECKOUT}?items=${TIER_PAID_ID}:1`);
+    await answerQuestions(page);
+    expect(orders.checkoutLoads()).toBe(1);
+    await sendButton(page).click();
+    await expect(page.locator('[data-slot="checkout-submit-error"]')).toHaveText(
+      'Form mua vừa thay đổi. Kiểm tra lại rồi gửi.',
+    );
+    await expect(page.locator('[data-slot="checkout-submit-error"]').getByRole('button')).toHaveCount(0);
+    await expect.poll(() => orders.checkoutLoads()).toBe(2);
+    expect(new URL(page.url()).pathname).toBe(CHECKOUT);
+  });
+
+  test('400 tại buyer.phone → lỗi tại ô SĐT, ô đó được focus', async ({ page }) => {
+    await mockOrders(page, {
+      submit: () => apiError(400, 'VALIDATION_FAILED', { issues: [{ path: 'buyer.phone', code: 'invalid_format' }] }),
+    });
+    await page.goto(`${CHECKOUT}?items=${TIER_PAID_ID}:1`);
+    await answerQuestions(page);
+    await sendButton(page).click();
+    const phone = page.getByLabel('Số điện thoại');
+    await expect(phone).toBeFocused();
+    await expect(phone).toHaveAttribute('aria-invalid', 'true');
+    const describedBy = (await phone.getAttribute('aria-describedby'))!.split(' ');
+    await expect(page.locator(`[id="${describedBy.at(-1)}"]`)).toHaveText('Kiểm tra lại câu trả lời này.');
+  });
+
+  test('429 → "Thử lại sau 2 phút." (retryAfterSeconds 61), không có nút "Thử lại"', async ({ page }) => {
+    const orders = await mockOrders(page, {
+      submit: () => apiError(429, 'ORDER_RATE_LIMITED', { retryAfterSeconds: 61 }),
+    });
+    await page.goto(`${CHECKOUT}?items=${TIER_PAID_ID}:1`);
+    await answerQuestions(page);
+    await sendButton(page).click();
+    const error = page.locator('[data-slot="checkout-submit-error"]');
+    await expect(error).toHaveText('Bạn gửi Đơn quá nhanh. Thử lại sau 2 phút.');
+    await expect(error.getByRole('button')).toHaveCount(0);
+    expect(orders.calls).toHaveLength(1);
+  });
+
+  test('"Mua" không kẹt khi Checkout redirect về lại trang Sự kiện', async ({ page }) => {
+    const funnel = await mockFunnel(page);
+    // Sự kiện Ẩn: số vé (giả) vẫn cho chọn, nhưng server Checkout từ chối lựa chọn và redirect về `/e/{slug}`.
+    await page.goto(`/e/${SLUG_HIDDEN}`);
+    await pick(page, VIP, 1);
+    const buyButton = bar(page).getByRole('button', { name: 'Mua' });
+    await buyButton.click();
+    await expect.poll(() => funnel.length).toBe(1);
+    await page.waitForURL((url) => url.pathname === `/e/${SLUG_HIDDEN}` && !url.searchParams.has('items'));
+    await expect(buyButton).not.toHaveAttribute('aria-busy', 'true');
+    if ((await stepperValue(page, VIP).textContent()) === '0') await pick(page, VIP, 1);
+    await expect(buyButton).toBeEnabled();
+    await buyButton.click();
+    await expect.poll(() => funnel.length).toBe(2);
+  });
+});
+
+test.describe('Trang Đơn', () => {
+  test('Hết hạn → câu báo + "Mua lại" về trang Sự kiện; mã lạ → "Không tìm thấy Đơn này."', async ({ page }) => {
+    await mockAccount(page, { signedIn: true });
+    await mockOrders(page, { orders: { [ORDER_CODE]: { status: 200, body: buyerOrder({ status: 'expired' }) } } });
+    await page.goto(`/orders/${ORDER_CODE}`);
+    await expect(page.getByText('Hết thời gian giữ chỗ. Chỗ đã được trả lại.')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Mua lại' })).toHaveAttribute('href', `/e/${SLUG_BUY}`);
+    await expect(page.locator('[data-slot="order-code"]')).toHaveText(ORDER_CODE);
+    await expect(page.locator('[data-slot="order-summary-line"]')).toHaveText([`${VIP}2 × 300.000đ600.000đ`]);
+
+    await page.goto('/orders/TKKHNGC0XX');
+    await expect(page.getByText('Không tìm thấy Đơn này.')).toBeVisible();
+  });
+
+  test('chưa đăng nhập → màn đăng nhập, returnTo là Trang Đơn', async ({ page }) => {
+    await mockAccount(page, { signedIn: false });
+    await page.goto(`/orders/${ORDER_CODE}`);
+    await page.waitForURL('**/dang-nhap?returnTo=*');
+    expect(returnToOf(page).pathname).toBe(`/orders/${ORDER_CODE}`);
   });
 });
 

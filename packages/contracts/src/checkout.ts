@@ -18,12 +18,15 @@ export const checkoutPath = (slug: string): string => `${eventPagePath(slug)}/ch
  */
 export const SELECTION_PARAM = 'items';
 
-/** Tham số query mang `funnelId` từ "Mua" qua màn đăng nhập tới Checkout (chỉ khi phải đăng nhập). */
+/**
+ * Tham số query mang `funnelId` từ "Mua" (qua màn đăng nhập nếu phải đăng nhập) tới Checkout. Checkout giữ `funnelId` để
+ * gửi kèm Đơn (`order_created`) rồi bỏ tham số khỏi URL.
+ */
 export const FUNNEL_ID_PARAM = 'f';
 
-/** Một dòng lựa chọn: Hạng vé và số Vé (1–50). */
+/** Một dòng lựa chọn: Hạng vé (id chuyển về chữ thường, để so trùng không phân biệt hoa/thường) và số Vé (1–50). */
 export const TicketSelectionItem = z.object({
-  ticketTypeId: z.uuid(),
+  ticketTypeId: z.uuid().toLowerCase(),
   quantity: z.number().int().min(1).max(MAX_TICKETS_PER_ORDER_MAX),
 });
 export type TicketSelectionItem = z.infer<typeof TicketSelectionItem>;
@@ -69,16 +72,28 @@ export function serializeSelection(items: readonly TicketSelectionItem[]): strin
 export const FunnelEventType = {
   /** Bấm "Mua"/"Đăng ký" trên trang Sự kiện. */
   BUY_CLICKED: 'buy_clicked',
-  /** Đăng nhập xong và tới Checkout sau một lần "Mua" phải đăng nhập. */
+  /**
+   * Đăng nhập xong và tới Checkout sau một lần "Mua" phải đăng nhập: chỉ ghi khi `buy_clicked` cùng `funnelId` có
+   * `loginRequired = true`.
+   */
   LOGIN_COMPLETED: 'login_completed',
+  /**
+   * Đơn được tạo (TX1, Story 3.2) từ Checkout mang `funnelId` này. Chỉ API ghi, trong transaction tạo Đơn; không gửi
+   * qua `POST …/funnel-events` (không có trong `FunnelEventInput`).
+   */
+  ORDER_CREATED: 'order_created',
 } as const;
 export type FunnelEventType = (typeof FunnelEventType)[keyof typeof FunnelEventType];
 /** Loại sự kiện phễu ghi được (CHECK của `checkout_funnel_events.type`). */
-export const FUNNEL_EVENT_TYPES = [FunnelEventType.BUY_CLICKED, FunnelEventType.LOGIN_COMPLETED] as const;
+export const FUNNEL_EVENT_TYPES = [
+  FunnelEventType.BUY_CLICKED,
+  FunnelEventType.LOGIN_COMPLETED,
+  FunnelEventType.ORDER_CREATED,
+] as const;
 
 /**
  * `POST /v1/events/:slug/funnel-events` (không cần đăng nhập, trả 204). `funnelId` là uuid do trình duyệt sinh lúc bấm
- * "Mua", nối `buy_clicked` với `login_completed`. `loginRequired`: lúc bấm chưa đăng nhập (người đã đăng nhập sẵn
+ * "Mua", nối `buy_clicked` với `login_completed` và `order_created`. `order_created` không gửi qua đây. `loginRequired`: lúc bấm chưa đăng nhập (người đã đăng nhập sẵn
  * không tính vào mẫu số SM-C2). Không nhận trường nào khác (không PII).
  */
 export const FunnelEventInput = z.discriminatedUnion('type', [

@@ -40,8 +40,9 @@ export class ApiModule {
         ReportingModule,
         // Sự kiện (Story 2.7): route BTC dùng `PermissionGuard` toàn cục của OrganizerModule.
         EventModule,
-        // Trạng thái bán công khai (Story 2.11-a): `GET /v1/events/:slug/availability`; phễu mua (Story 3.1).
-        OrderingModule,
+        // Trạng thái bán công khai (Story 2.11-a): `GET /v1/events/:slug/availability`; phễu mua (Story 3.1); Checkout
+        // và tạo Đơn, giữ chỗ (Story 3.2).
+        OrderingModule.forRoot(config),
         // Hạng vé và tồn kho (Story 2.8): ghi cả `event` lẫn `ordering` nên controller ở flows.
         FlowsModule,
         // Khu `/v1/admin/*`: guard Quản trị Tingee (cờ `platform_admin`, 2FA, step-up) do IdentityModule đăng ký.

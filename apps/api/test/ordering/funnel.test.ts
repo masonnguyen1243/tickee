@@ -97,6 +97,13 @@ describe('POST /v1/events/:slug/funnel-events', () => {
     ]);
   });
 
+  it('login_completed sau buy_clicked đã đăng nhập sẵn (loginRequired false) → 204, bỏ qua', async () => {
+    const funnelId = randomUUID();
+    await send(onSale.slug, buyClicked(funnelId, false)).expect(204);
+    await send(onSale.slug, loginCompleted(funnelId)).expect(204);
+    expect(await rowsOf(funnelId)).toEqual([{ event_id: onSale.id, type: 'buy_clicked', login_required: false }]);
+  });
+
   it('login_completed không có buy_clicked cùng funnelId → 204, bỏ qua', async () => {
     const funnelId = randomUUID();
     await send(onSale.slug, loginCompleted(funnelId)).expect(204);
@@ -124,6 +131,7 @@ describe('POST /v1/events/:slug/funnel-events', () => {
   it.each([
     ['thiếu body', undefined],
     ['type lạ', { type: 'paid', funnelId: randomUUID() }],
+    ['order_created (chỉ API ghi lúc tạo Đơn)', { type: 'order_created', funnelId: randomUUID() }],
     ['funnelId không phải uuid', { type: 'buy_clicked', funnelId: 'abc', loginRequired: true }],
     ['buy_clicked thiếu loginRequired', { type: 'buy_clicked', funnelId: randomUUID() }],
     ['có trường lạ (PII)', { type: 'login_completed', funnelId: randomUUID(), email: 'a@vidu.vn' }],
@@ -175,6 +183,18 @@ describe('bảng checkout_funnel_events', () => {
         VALUES (${onSale.id}, 'login_completed', ${randomUUID()}, true)`),
     ).rejects.toSatisfy((err) => pgCode((err as { cause?: unknown }).cause ?? err) === '23514');
     expect(await rowsOf(funnelId)).toHaveLength(1);
+  });
+
+  it('CHECK type nhận order_created (login_required null), không nhận loại lạ', async () => {
+    const pgCode = (err: unknown) => (err as { code?: string }).code;
+    const funnelId = randomUUID();
+    await h.db.orm.execute(sql`
+      INSERT INTO checkout_funnel_events (event_id, type, funnel_id) VALUES (${onSale.id}, 'order_created', ${funnelId})`);
+    expect(await rowsOf(funnelId)).toEqual([{ event_id: onSale.id, type: 'order_created', login_required: null }]);
+    await expect(
+      h.db.orm.execute(sql`
+        INSERT INTO checkout_funnel_events (event_id, type, funnel_id) VALUES (${onSale.id}, 'paid', ${randomUUID()})`),
+    ).rejects.toSatisfy((err) => pgCode((err as { cause?: unknown }).cause ?? err) === '23514');
   });
 });
 

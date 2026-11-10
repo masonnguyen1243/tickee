@@ -49,6 +49,11 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   EVENT_NOT_STARTED: 409,
   REAUTH_REQUIRED: 403,
   REAUTH_METHOD_MISMATCH: 409,
+  TICKET_TYPE_SOLD_OUT: 409,
+  NOT_ON_SALE: 409,
+  PENDING_ORDER_EXISTS: 409,
+  ORDER_RATE_LIMITED: 429,
+  ORDER_NOT_FOUND: 404,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

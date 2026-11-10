@@ -18,14 +18,16 @@ import {
   checkoutLines,
   checkoutSelection,
   priceLabel,
+  selectionItems,
   selectionTotals,
   withSelection,
   type CheckoutLine,
 } from '@/lib/event/selection';
 
 import { CheckoutGate } from './checkout-gate';
+import { CheckoutOrderForm } from './checkout-order-form';
 
-export const metadata: Metadata = { title: 'Tóm tắt Đơn · Tickee', robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: 'Checkout · Tickee', robots: { index: false, follow: false } };
 
 type CheckoutPageProps = {
   params: Promise<{ slug: string }>;
@@ -57,9 +59,10 @@ function SummaryLine({ line }: { line: CheckoutLine }) {
 }
 
 /**
- * Checkout `/e/{slug}/checkout?items=…` (Story 3.1): bề mặt cần đăng nhập, hiện tóm tắt Đơn và "Sửa lựa chọn". Form mua
- * và "Gửi Đơn" thuộc Story 3.2. Server hợp lệ hóa `items` theo phần tĩnh của Sự kiện (sai, hoặc Sự kiện không bán →
- * về `/e/{slug}`); chặn chưa đăng nhập và ghi `login_completed` ở trình duyệt (`checkout-gate.tsx`).
+ * Checkout `/e/{slug}/checkout?items=…`: bề mặt cần đăng nhập, tóm tắt Đơn + "Sửa lựa chọn" (Story 3.1) và form mua một
+ * lần cho cả Đơn với "Gửi Đơn" ở `purchase-bar` (Story 3.2). Server hợp lệ hóa `items` theo phần tĩnh của Sự kiện (sai,
+ * hoặc Sự kiện không bán → về `/e/{slug}`); chặn chưa đăng nhập, ghi `login_completed` và giữ `funnelId` ở trình duyệt
+ * (`checkout-gate.tsx`); câu hỏi form và phần tự điền tải ở trình duyệt (`checkout-order-form.tsx`).
  */
 export default async function CheckoutPage({ params, searchParams }: CheckoutPageProps) {
   const { slug } = await params;
@@ -111,6 +114,14 @@ export default async function CheckoutPage({ params, searchParams }: CheckoutPag
             </span>
           </div>
         </section>
+        <CheckoutOrderForm
+          slug={slug}
+          organizationName={event.organizationName}
+          ticketTypes={event.ticketTypes}
+          items={selectionItems(selection, event.ticketTypes)}
+          count={count}
+          amount={amount}
+        />
       </div>
     </CheckoutGate>
   );

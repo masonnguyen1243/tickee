@@ -40,7 +40,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   TICKET_TYPE_NOT_FOUND: 'Không tìm thấy Hạng vé này.',
   CAPACITY_BELOW_COMMITTED: 'Số suất không được nhỏ hơn số đã bán và đang giữ chỗ.',
   FREE_EVENT_CAPACITY_EXCEEDED: `Tối đa ${FREE_EVENT_TICKET_CAP} suất miễn phí mỗi Sự kiện.`,
-  TICKET_TYPE_IN_USE: 'Hạng vé đã có người mua hoặc đang giữ chỗ, không xóa được.',
+  TICKET_TYPE_IN_USE: 'Hạng vé đã có Đơn, không xóa được. Muốn ngừng bán thì đặt giờ kết thúc bán của Hạng vé.',
   PAID_TICKET_TYPE_NOT_ALLOWED: 'BTC chưa đủ điều kiện bán Vé có phí.',
   LAST_TICKET_TYPE: 'Sự kiện đã mở bán phải còn ít nhất một Hạng vé.',
   FORM_QUESTION_NOT_FOUND: 'Không tìm thấy câu hỏi này.',
@@ -53,6 +53,11 @@ const MESSAGES: Record<ErrorCode, string> = {
   EVENT_NOT_STARTED: 'Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.',
   REAUTH_REQUIRED: 'Bạn cần xác nhận lại để tiếp tục.',
   REAUTH_METHOD_MISMATCH: 'Cách xác nhận này không còn đúng với tài khoản. Thử lại theo cách được yêu cầu.',
+  TICKET_TYPE_SOLD_OUT: 'Hạng vé này vừa hết. Bạn chọn lại nhé.',
+  NOT_ON_SALE: 'Sự kiện hoặc Hạng vé này hiện không nhận Đơn.',
+  PENDING_ORDER_EXISTS: 'Bạn đang có một Đơn chờ thanh toán cho Sự kiện này.',
+  ORDER_RATE_LIMITED: 'Bạn gửi Đơn quá nhanh. Vui lòng thử lại sau.',
+  ORDER_NOT_FOUND: 'Không tìm thấy Đơn này.',
 };
 
 /** Lỗi DB chỉ log `{ type, code }` (message/params có thể mang email, token session); lỗi khác log nguyên để giữ stack. */

@@ -1,0 +1,402 @@
+import { Inject, Injectable } from '@nestjs/common';
+import {
+  answerSnapshot,
+  CreateOrderRequest,
+  ErrorCode,
+  EVENT_UNAVAILABLE_REASONS,
+  FunnelEventType,
+  IDEMPOTENCY_KEY_HEADER,
+  IdempotencyKey,
+  NotOnSaleReason,
+  ORDER_CODE_PATTERN,
+  orderRequestFor,
+  OrderStatus,
+  TierSaleStatus,
+  type BuyerOrder,
+  type CheckoutForm,
+  type EventAvailability,
+  type NotOnSaleDetails,
+  type PendingOrderExistsDetails,
+  type TicketTypeSoldOutDetails,
+} from '@tickee/contracts';
+import { and, asc, desc, eq, lt, sql } from 'drizzle-orm';
+import pg from 'pg';
+import type { PgBoss } from 'pg-boss';
+import { DATABASE, type Database, type DbExecutor, type Tx } from '../../platform/db/index.js';
+import { AppError, parseRequest } from '../../platform/http/index.js';
+import { BOSS } from '../../platform/jobs/index.js';
+import {
+  buyerFormQuestions,
+  lockSaleEventBySlug,
+  publicEventBySlug,
+  saleEventById,
+  type TicketTypeRow,
+} from '../event/index.js';
+import { holdInventory, type InventoryLine } from './inventory.service.js';
+import { ORDER_CODE_ATTEMPTS, ORDER_CODE_GENERATOR, type OrderCodeGenerator } from './order-code.js';
+import { enqueueOrderExpiry, expireOrder, OrderQueues } from './order-jobs.js';
+import { OrderRateLimiter } from './order-rate-limit.js';
+import { checkoutFunnelEvents, orderAnswers, orderItems, orders } from './schema.js';
+import { saleFactsOf, saleStatusOf } from './sellability.js';
+
+/*
+ * Checkout và tạo Đơn (Story 3.2, AD-2, AD-4, AD-31). Mọi Đơn của 3.2 (kể cả Đơn 0đ) đi cùng một đường: giữ chỗ rồi
+ * `pending` với hạn `ORDER_HOLD_SECONDS`; 3.3 tách Đơn tổng 0đ sang đường bán ngay, 3.4 gắn link thanh toán.
+ *
+ * Tạo Đơn: kiểm khóa chống trùng và payload → tra Đơn theo `(user_id, Idempotency-Key)` (có → 200 Đơn cũ) → hết hạn Đơn
+ * chờ cũ đã quá hạn (transaction riêng, cùng hàm với job) → Đơn chờ khác còn hạn → 409 (cùng khóa → 200) → queue sẵn
+ * sàng → giới hạn tốc độ → TX1. TX1 (một
+ * transaction): khóa Sự kiện `FOR SHARE` → kiểm lại form, giới hạn Vé/Đơn và luật bán (`saleStatusOf`) trên dữ liệu đã
+ * khóa → giữ chỗ có điều kiện theo `ticket_type_id` tăng dần → Đơn `pending` + bản chụp → `order_created` → enqueue job
+ * hết hạn bằng chính `tx`. TX1 không gọi Tingee, không gửi email, không `NOTIFY`. Lỗi unique sau rollback (hai request
+ * cùng khóa, hay hai Đơn chờ đua nhau) → đọc lại: trả Đơn của bên thắng hoặc 409.
+ */
+
+/** Token DI của thời gian Giữ chỗ (giây) của Đơn mới; mặc định `ORDER_HOLD_SECONDS`, test tiêm số nhỏ. */
+export const ORDER_HOLD = Symbol('ORDER_HOLD');
+
+/** Người mua của request, đọc từ `req.user` của session (không import `identity`). */
+export interface Buyer {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
+type OrderRow = typeof orders.$inferSelect;
+
+const CODE_KEY = 'orders_code_key';
+const IDEMPOTENCY_KEY = 'orders_user_id_idempotency_key_key';
+const ONE_PENDING_KEY = 'orders_one_pending_per_buyer_event_key';
+
+/** Tên unique index bị vi phạm (ở chính lỗi hoặc một tầng `cause` của Drizzle); không phải → `null`. */
+function uniqueViolation(err: unknown): string | null {
+  let current: unknown = err;
+  for (let depth = 0; depth < 8 && typeof current === 'object' && current !== null; depth++) {
+    if (current instanceof pg.DatabaseError && current.code === '23505') return current.constraint ?? null;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return null;
+}
+
+const orderNotFound = () => new AppError(ErrorCode.ORDER_NOT_FOUND, 'Không tìm thấy Đơn này.');
+
+const pendingExists = (code: string) => {
+  const details: PendingOrderExistsDetails = { code };
+  return new AppError(ErrorCode.PENDING_ORDER_EXISTS, 'Bạn đang có một Đơn chờ thanh toán cho Sự kiện này.', {
+    details,
+  });
+};
+
+const soldOut = (ticketTypeId: string, ticketTypeName: string) => {
+  const details: TicketTypeSoldOutDetails = { ticketTypeId, ticketTypeName };
+  return new AppError(ErrorCode.TICKET_TYPE_SOLD_OUT, `Hạng vé ${ticketTypeName} vừa hết. Bạn chọn lại nhé.`, {
+    details,
+  });
+};
+
+const notOnSale = (details: NotOnSaleDetails) =>
+  new AppError(ErrorCode.NOT_ON_SALE, 'Sự kiện hoặc Hạng vé này hiện không nhận Đơn.', { details });
+
+/** `Idempotency-Key` thiếu hoặc không phải uuid → `400 VALIDATION_FAILED` (cùng dạng với `parseRequest`). */
+function idempotencyKeyOf(raw: unknown): string {
+  const parsed = IdempotencyKey.safeParse(raw);
+  if (parsed.success) return parsed.data.toLowerCase();
+  const issue = { path: `headers.${IDEMPOTENCY_KEY_HEADER}`, code: raw === undefined ? 'invalid_type' : 'invalid_format' };
+  throw new AppError(ErrorCode.VALIDATION_FAILED, 'Yêu cầu không hợp lệ.', { details: { issues: [issue] } });
+}
+
+/**
+ * Luật bán tại TX1 cho các dòng của Đơn (đã xếp theo `ticket_type_id`): Sự kiện không nhận Đơn → `NOT_ON_SALE` (không có
+ * `ticketTypeId`); Hạng vé không có trong Sự kiện, tạm ngừng, chưa mở hay đã đóng → `NOT_ON_SALE` của Hạng vé đó; hết
+ * chỗ → `TICKET_TYPE_SOLD_OUT`. Đủ chỗ hay không do câu giữ chỗ có điều kiện quyết định sau đó.
+ */
+function assertOnSale(
+  availability: EventAvailability,
+  lines: readonly InventoryLine[],
+  tiers: ReadonlyMap<string, TicketTypeRow>,
+): void {
+  const reason = availability.eventReason;
+  if (reason !== null && EVENT_UNAVAILABLE_REASONS.includes(reason)) {
+    throw notOnSale({ reason: reason as NotOnSaleDetails['reason'] });
+  }
+  const statusOf = new Map(availability.tiers.map((t) => [t.ticketTypeId, t.status]));
+  let firstSoldOut: string | null = null;
+  for (const { ticketTypeId } of lines) {
+    const status = statusOf.get(ticketTypeId);
+    if (status === TierSaleStatus.ON_SALE) continue;
+    if (status === TierSaleStatus.SOLD_OUT) {
+      firstSoldOut ??= ticketTypeId;
+      continue;
+    }
+    if (status === TierSaleStatus.PAUSED || status === TierSaleStatus.NOT_STARTED || status === TierSaleStatus.CLOSED) {
+      throw notOnSale({ ticketTypeId, reason: status });
+    }
+    throw notOnSale({ ticketTypeId, reason: NotOnSaleReason.CLOSED });
+  }
+  if (firstSoldOut !== null) throw soldOut(firstSoldOut, tiers.get(firstSoldOut)?.name ?? '');
+}
+
+@Injectable()
+export class OrdersService {
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    @Inject(BOSS) private readonly boss: PgBoss,
+    @Inject(OrderQueues) private readonly queues: OrderQueues,
+    @Inject(OrderRateLimiter) private readonly limiter: OrderRateLimiter,
+    @Inject(ORDER_CODE_GENERATOR) private readonly orderCode: OrderCodeGenerator,
+    @Inject(ORDER_HOLD) private readonly holdSeconds: number,
+  ) {}
+
+  /**
+   * `GET /v1/events/:slug/checkout`: câu hỏi riêng theo thứ tự và phần tự điền. Tên và SĐT lấy từ Đơn gần nhất của chính
+   * Người mua; chưa có Đơn nào thì tên của tài khoản (nếu có), SĐT `null`. Email luôn là email tài khoản. Slug lạ hoặc
+   * Sự kiện nháp → `404 EVENT_NOT_FOUND`.
+   */
+  async checkoutForm(buyer: Buyer, slug: string): Promise<CheckoutForm> {
+    const event = await publicEventBySlug(this.db.orm, slug);
+    const [questions, [last]] = await Promise.all([
+      buyerFormQuestions(this.db.orm, event.id),
+      this.db.orm
+        .select({ name: orders.buyerName, phone: orders.buyerPhone })
+        .from(orders)
+        .where(eq(orders.userId, buyer.id))
+        .orderBy(desc(orders.createdAt), desc(orders.id))
+        .limit(1),
+    ]);
+    return {
+      questions,
+      buyer: { name: last?.name ?? buyer.name ?? '', phone: last?.phone ?? null, email: buyer.email },
+    };
+  }
+
+  /**
+   * `POST /v1/events/:slug/orders`. `created`: Đơn mới (201); `false`: Đơn đã có theo khóa chống trùng (200, trạng thái
+   * hiện tại, không giữ thêm chỗ).
+   */
+  async create(
+    buyer: Buyer,
+    ip: string,
+    slug: string,
+    rawKey: unknown,
+    body: unknown,
+  ): Promise<{ order: BuyerOrder; created: boolean }> {
+    const key = idempotencyKeyOf(rawKey);
+    parseRequest(CreateOrderRequest, body);
+    const existing = await this.byKey(buyer.id, key);
+    if (existing) return { order: await this.view(existing), created: false };
+
+    // Kiểm trước, ngoài transaction (lỗi ở đây không tính vào giới hạn tốc độ); TX1 kiểm lại trên dữ liệu đã khóa.
+    const event = await publicEventBySlug(this.db.orm, slug);
+    parseRequest(orderRequestFor(event, await buyerFormQuestions(this.db.orm, event.id)), body);
+    await this.expireStalePending(buyer.id, event.id);
+    const pending = await this.pendingOf(buyer.id, event.id);
+    if (pending) {
+      // Request cùng khóa vừa commit Đơn sau lần tra theo khóa ở trên: đó là Đơn của chính request này.
+      if (pending.idempotencyKey === key) return { order: await this.view(pending), created: false };
+      throw pendingExists(pending.code);
+    }
+    // pg-boss đã start và queue đã có (ngoài transaction): `boss.send` trong TX1 cần cả hai. Trước giới hạn tốc độ:
+    // pg-boss lỗi thì không tới TX1, không tính lần thử.
+    await this.queues.ready();
+    await this.limiter.consume(buyer.id, ip);
+
+    let orderId: string;
+    try {
+      orderId = await this.db.transaction((tx) => this.placeOrder(tx, buyer, slug, key, body));
+    } catch (err) {
+      const constraint = uniqueViolation(err);
+      if (constraint === IDEMPOTENCY_KEY || constraint === ONE_PENDING_KEY) {
+        // Bên thua của hai request cùng khóa: cả phần giữ chỗ đã rollback; trả Đơn của bên thắng.
+        const winner = await this.byKey(buyer.id, key);
+        if (winner) return { order: await this.view(winner), created: false };
+        const other = await this.pendingOf(buyer.id, event.id);
+        if (other) throw pendingExists(other.code);
+      }
+      throw err;
+    }
+    const [row] = await this.db.orm.select().from(orders).where(eq(orders.id, orderId));
+    if (!row) throw new Error('Không đọc lại được Đơn vừa tạo');
+    return { order: await this.view(row), created: true };
+  }
+
+  /** `GET /v1/me/orders/:code`: Đơn của chính Người mua. Mã sai dạng, không có hoặc của người khác → `404 ORDER_NOT_FOUND`. */
+  async mine(buyer: Buyer, code: string): Promise<BuyerOrder> {
+    if (!ORDER_CODE_PATTERN.test(code)) throw orderNotFound();
+    const [row] = await this.db.orm
+      .select()
+      .from(orders)
+      .where(and(eq(orders.code, code), eq(orders.userId, buyer.id)));
+    if (!row) throw orderNotFound();
+    return this.view(row);
+  }
+
+  /** TX1. Trả id Đơn mới. Lỗi nghiệp vụ hoặc unique → ném, cả transaction rollback (không giữ chỗ gì). */
+  private async placeOrder(tx: Tx, buyer: Buyer, slug: string, key: string, body: unknown): Promise<string> {
+    const event = await lockSaleEventBySlug(tx, slug);
+    const questions = await buyerFormQuestions(tx, event.id);
+    const input = parseRequest(orderRequestFor(event, questions), body);
+    const lines: InventoryLine[] = input.items
+      .map((i) => ({ ticketTypeId: i.ticketTypeId.toLowerCase(), quantity: i.quantity }))
+      .sort((a, b) => (a.ticketTypeId < b.ticketTypeId ? -1 : 1));
+
+    const facts = await saleFactsOf(tx, event);
+    const tiers = new Map(facts.tiers.map((t) => [t.id, t]));
+    assertOnSale(saleStatusOf(facts, new Date()), lines, tiers);
+    const short = await holdInventory(tx, lines);
+    if (short !== null) throw soldOut(short, tiers.get(short)?.name ?? '');
+
+    const items = lines.map((line) => {
+      const tier = tiers.get(line.ticketTypeId)!;
+      return { ...line, name: tier.name, unitPrice: tier.price };
+    });
+    const totalAmount = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+    const order = await this.insertOrder(tx, {
+      userId: buyer.id,
+      eventId: event.id,
+      organizationId: event.organizationId,
+      totalAmount,
+      buyerName: input.buyer.name,
+      buyerPhone: input.buyer.phone,
+      buyerEmail: buyer.email,
+      refundPolicy: event.refundPolicy,
+      idempotencyKey: key,
+      funnelId: input.funnelId?.toLowerCase() ?? null,
+    });
+    await tx.insert(orderItems).values(
+      items.map((i) => ({
+        orderId: order.id,
+        ticketTypeId: i.ticketTypeId,
+        ticketTypeName: i.name,
+        unitPrice: i.unitPrice,
+        quantity: i.quantity,
+      })),
+    );
+    const answers = answerSnapshot(questions, input.answers);
+    if (answers.length > 0) {
+      await tx.insert(orderAnswers).values(
+        answers.map((a) => ({
+          orderId: order.id,
+          questionId: a.questionId,
+          position: a.position,
+          label: a.label,
+          kind: a.kind,
+          answer: a.answer,
+          optionId: a.optionId,
+        })),
+      );
+    }
+    if (input.funnelId) {
+      await tx
+        .insert(checkoutFunnelEvents)
+        .values({ eventId: event.id, type: FunnelEventType.ORDER_CREATED, funnelId: input.funnelId.toLowerCase() })
+        .onConflictDoNothing({ target: [checkoutFunnelEvents.funnelId, checkoutFunnelEvents.type] });
+    }
+    await enqueueOrderExpiry(this.boss, tx, order.id, order.expiresAt);
+    return order.id;
+  }
+
+  /**
+   * INSERT Đơn `pending` với `expires_at = clock_timestamp() + hạn Giữ chỗ` (giờ lúc INSERT, không phải giờ bắt đầu
+   * transaction: TX1 chờ khóa lâu thì hạn Giữ chỗ không bị ngắn đi) trong một savepoint: trùng mã (`orders_code_key`) thì
+   * sinh mã khác, tối đa `ORDER_CODE_ATTEMPTS` lần, mà không hủy phần đã giữ chỗ của TX1. Lỗi unique khác ném ra ngoài.
+   */
+  private async insertOrder(
+    tx: Tx,
+    values: Omit<typeof orders.$inferInsert, 'code' | 'status' | 'expiresAt'>,
+  ): Promise<{ id: string; expiresAt: Date }> {
+    for (let attempt = 1; ; attempt++) {
+      const code = this.orderCode();
+      try {
+        return await tx.transaction(async (sp) => {
+          const [row] = await sp
+            .insert(orders)
+            .values({
+              ...values,
+              code,
+              status: OrderStatus.PENDING,
+              expiresAt: sql`clock_timestamp() + make_interval(secs => ${this.holdSeconds})`,
+            })
+            .returning({ id: orders.id, expiresAt: orders.expiresAt });
+          if (!row) throw new Error('INSERT orders không trả về dòng nào');
+          return row;
+        });
+      } catch (err) {
+        if (attempt < ORDER_CODE_ATTEMPTS && uniqueViolation(err) === CODE_KEY) continue;
+        throw err;
+      }
+    }
+  }
+
+  private async byKey(userId: string, key: string): Promise<OrderRow | null> {
+    const [row] = await this.db.orm
+      .select()
+      .from(orders)
+      .where(and(eq(orders.userId, userId), eq(orders.idempotencyKey, key)));
+    return row ?? null;
+  }
+
+  /**
+   * Đơn chờ cũ của chính Người mua cho Sự kiện, chưa có link và đã quá hạn (job chưa kịp chạy): hết hạn bằng chính hàm
+   * của job, mỗi Đơn một transaction riêng trước TX1 (nhả rồi giữ chỗ trong cùng TX1 là hai lượt khóa tồn kho).
+   */
+  private async expireStalePending(userId: string, eventId: string): Promise<void> {
+    const stale = await this.db.orm
+      .select({ id: orders.id })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.userId, userId),
+          eq(orders.eventId, eventId),
+          eq(orders.status, OrderStatus.PENDING),
+          sql`${orders.paymentLink} IS NULL`,
+          lt(orders.expiresAt, sql`now()`),
+        ),
+      );
+    for (const { id } of stale) await expireOrder(this.db, id);
+  }
+
+  /** Đơn `pending` của Người mua cho Sự kiện (tối đa một, unique một phần); không có → `null`. */
+  private async pendingOf(userId: string, eventId: string): Promise<OrderRow | null> {
+    const [pending] = await this.db.orm
+      .select()
+      .from(orders)
+      .where(and(eq(orders.userId, userId), eq(orders.eventId, eventId), eq(orders.status, OrderStatus.PENDING)));
+    return pending ?? null;
+  }
+
+  /** Đơn + bản chụp + Sự kiện (tên, slug hiện tại) → `BuyerOrder`, kèm `serverNow`. */
+  private async view(row: OrderRow, db: DbExecutor = this.db.orm): Promise<BuyerOrder> {
+    const [items, answers, event] = await Promise.all([
+      db
+        .select()
+        .from(orderItems)
+        .where(eq(orderItems.orderId, row.id))
+        .orderBy(asc(orderItems.ticketTypeId)),
+      db
+        .select()
+        .from(orderAnswers)
+        .where(eq(orderAnswers.orderId, row.id))
+        .orderBy(asc(orderAnswers.position)),
+      saleEventById(db, row.eventId),
+    ]);
+    return {
+      code: row.code,
+      status: row.status,
+      event: { slug: event.slug, name: event.name },
+      items: items.map((i) => ({
+        ticketTypeId: i.ticketTypeId,
+        name: i.ticketTypeName,
+        unitPrice: i.unitPrice,
+        quantity: i.quantity,
+        amount: i.unitPrice * i.quantity,
+      })),
+      totalAmount: row.totalAmount,
+      buyer: { name: row.buyerName, phone: row.buyerPhone, email: row.buyerEmail },
+      answers: answers.map((a) => ({ questionId: a.questionId, label: a.label, answer: a.answer })),
+      refundPolicy: row.refundPolicy,
+      createdAt: row.createdAt.toISOString(),
+      expiresAt: row.expiresAt.toISOString(),
+      serverNow: new Date().toISOString(),
+    };
+  }
+}

@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-09-2026 19:11
+last_updated: 11-10-2026 09:28
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -61,7 +61,7 @@ development_status:
 
   epic-3: in-progress
   3-1-chọn-vé-và-đăng-nhập-khi-bấm-mua: review
-  3-2-checkout-và-giữ-chỗ-không-bao-giờ-bán-quá-số-suất: backlog
+  3-2-checkout-và-giữ-chỗ-không-bao-giờ-bán-quá-số-suất: review
   3-3-đăng-ký-sự-kiện-miễn-phí-và-nhận-vé-ngay: backlog
   3-4-tạo-link-thanh-toán-gateway-và-màn-thanh-toán: backlog
   3-5-nhận-ipn-và-phát-vé-đúng-một-lần: backlog
@@ -262,6 +262,11 @@ action_items:
     owner: "Mason"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
+    note: "Phần 3.1 và 3.2 xong (spec-3-2-checkout-va-giu-cho-khong-ban-qua-so-suat.md):
+      sellability lúc đặt Đơn khóa Sự kiện FOR SHARE và kiểm lại giới hạn Vé/Đơn, bản
+      chụp chính sách hoàn vé vào orders, xóa Hạng vé có order_items → 409, câu hỏi form
+      cho Người mua, serverNow. Các mục còn lại thuộc 3.4/3.5 (read model payout,
+      create-link) và 3.11/4.2 (nhãn dashboard)"
   - id: "epic-2-retro-e2-7-moi-truong-dev"
     epic: 2
     action: "E2-7: môi trường dev — pnpm dev tự migrate và chạy worker, seed BTC đã

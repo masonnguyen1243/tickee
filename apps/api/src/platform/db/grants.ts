@@ -5,9 +5,15 @@ export const APP_DB_ROLE = 'tickee_app';
 
 /**
  * Bảng chỉ cho INSERT/SELECT với `tickee_app` (`schema.table`). Thu UPDATE/DELETE/TRUNCATE sau khi cấp quyền,
- * nên quyền này vẫn bị chặn sau mỗi lần migrate. `checkout_funnel_events`: phễu mua (Story 3.1).
+ * nên quyền này vẫn bị chặn sau mỗi lần migrate. `checkout_funnel_events`: phễu mua (Story 3.1). `order_items`,
+ * `order_answers`: bản chụp dòng Đơn và câu trả lời form lúc đặt (Story 3.2).
  */
-export const APPEND_ONLY_TABLES = ['public.audit_events', 'public.checkout_funnel_events'] as const;
+export const APPEND_ONLY_TABLES = [
+  'public.audit_events',
+  'public.checkout_funnel_events',
+  'public.order_items',
+  'public.order_answers',
+] as const;
 
 /**
  * Cột `tickee_app` không được UPDATE (`schema.table` → tên cột). Sau mỗi lần migrate, bảng bị thu UPDATE cấp bảng rồi
@@ -19,6 +25,23 @@ export const APPEND_ONLY_TABLES = ['public.audit_events', 'public.checkout_funne
  */
 export const UPDATE_PROTECTED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   'public.users': ['platform_admin'],
+  // Bản chụp bất biến của Đơn lúc đặt (Story 3.2): chỉ `status`, `payment_link`, `expires_at`, `updated_at` (và cột thêm
+  // sau) ghi được.
+  'public.orders': [
+    'id',
+    'code',
+    'user_id',
+    'event_id',
+    'organization_id',
+    'total_amount',
+    'buyer_name',
+    'buyer_phone',
+    'buyer_email',
+    'refund_policy',
+    'idempotency_key',
+    'funnel_id',
+    'created_at',
+  ],
 };
 
 const quoteIdent = (name: string) => `"${name.replaceAll('"', '""')}"`;
