@@ -1,6 +1,6 @@
 import { EVENT_SLUG_PATTERN, toEventIso, type PublicEvent } from '@tickee/contracts';
 import { and, eq, ne } from 'drizzle-orm';
-import type { DbExecutor } from '../../platform/db/index.js';
+import type { DbExecutor, Tx } from '../../platform/db/index.js';
 import { organizationNameOf } from '../organizer/index.js';
 import { notFound, UUID } from './event.service.js';
 import { events } from './schema.js';
@@ -33,40 +33,71 @@ async function publishedRowBySlug(db: DbExecutor, slug: string): Promise<EventRo
   return row;
 }
 
-/** Phần Sự kiện mà `ordering.sellability` cần. */
+/**
+ * Phần Sự kiện mà `ordering` cần: luật bán của `sellability`, cùng slug, tên, giới hạn Vé/Đơn và chính sách hoàn vé
+ * cho tạo Đơn (bản chụp) và trang Đơn.
+ */
 export type PublicEventRef = Pick<
   EventRow,
-  'id' | 'organizationId' | 'status' | 'lockedAt' | 'effectiveEndAt' | 'refundPolicy'
+  | 'id'
+  | 'organizationId'
+  | 'slug'
+  | 'name'
+  | 'status'
+  | 'lockedAt'
+  | 'effectiveEndAt'
+  | 'refundPolicy'
+  | 'maxTicketsPerOrder'
 >;
+
+const refColumns = {
+  id: events.id,
+  organizationId: events.organizationId,
+  slug: events.slug,
+  name: events.name,
+  status: events.status,
+  lockedAt: events.lockedAt,
+  effectiveEndAt: events.effectiveEndAt,
+  refundPolicy: events.refundPolicy,
+  maxTicketsPerOrder: events.maxTicketsPerOrder,
+};
 
 /** Tra Sự kiện công khai theo slug (cùng luật 404 với `GET /v1/events/:slug`). */
 export async function publicEventBySlug(db: DbExecutor, slug: string): Promise<PublicEventRef> {
-  const row = await publishedRowBySlug(db, slug);
-  return {
-    id: row.id,
-    organizationId: row.organizationId,
-    status: row.status,
-    lockedAt: row.lockedAt,
-    effectiveEndAt: row.effectiveEndAt,
-    refundPolicy: row.refundPolicy,
-  };
+  assertPublicSlug(slug);
+  const [row] = await db
+    .select(refColumns)
+    .from(events)
+    .where(and(eq(events.slug, slug), ne(events.status, 'draft')));
+  if (!row) throw notFound();
+  return row;
 }
 
 /**
- * Tra Sự kiện đã mở bán (không còn nháp) theo id, cho `ordering.sellability` khi người gọi chỉ có id (vd. tạo Đơn,
+ * Khóa dòng Sự kiện công khai theo slug `FOR SHARE` trong `tx` của tạo Đơn (TX1, Story 3.2) rồi trả về (cùng luật 404 với
+ * `publicEventBySlug`). Các TX1 song song không chờ nhau trên dòng `events`; mọi lệnh ghi của BTC lên Sự kiện (Hạng vé,
+ * Ẩn/Kết thúc, form, thông tin) khóa `FOR UPDATE` nên chờ các TX1 đang chạy xong, và TX1 luôn thấy trạng thái đã
+ * commit. Thứ tự khóa: Sự kiện trước, rồi tồn kho. Không cần `AccessContext` (Người mua không thuộc BTC).
+ */
+export async function lockSaleEventBySlug(tx: Tx, slug: string): Promise<PublicEventRef> {
+  assertPublicSlug(slug);
+  const [row] = await tx
+    .select(refColumns)
+    .from(events)
+    .where(and(eq(events.slug, slug), ne(events.status, 'draft')))
+    .for('share');
+  if (!row) throw notFound();
+  return row;
+}
+
+/**
+ * Tra Sự kiện đã mở bán (không còn nháp) theo id, cho `ordering.sellability` khi người gọi chỉ có id (vd. trang Đơn,
  * Epic 3). Id sai dạng, không tồn tại hoặc còn nháp → `404 EVENT_NOT_FOUND`.
  */
 export async function saleEventById(db: DbExecutor, eventId: string): Promise<PublicEventRef> {
   if (!UUID.test(eventId)) throw notFound();
   const [row] = await db
-    .select({
-      id: events.id,
-      organizationId: events.organizationId,
-      status: events.status,
-      lockedAt: events.lockedAt,
-      effectiveEndAt: events.effectiveEndAt,
-      refundPolicy: events.refundPolicy,
-    })
+    .select(refColumns)
     .from(events)
     .where(and(eq(events.id, eventId), ne(events.status, 'draft')));
   if (!row) throw notFound();

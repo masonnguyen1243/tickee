@@ -7,9 +7,11 @@ import { checkoutFunnelEvents } from './schema.js';
 
 /*
  * Phễu mua (Story 3.1, SM-C2): ghi `buy_clicked` lúc bấm "Mua" và `login_completed` lúc tới Checkout sau khi đăng
- * nhập. Không PII, không `user_id`; hai sự kiện nối bằng `funnel_id`. `login_completed` chỉ ghi khi đã có `buy_clicked`
- * cùng `funnel_id` của cùng Sự kiện, nên muốn bơm rác phải gửi theo cặp. Trùng `(funnel_id, type)` → không thêm dòng.
- * Chưa giới hạn tốc độ theo IP (deferred, Story 4.6).
+ * nhập. Không PII, không `user_id`; các sự kiện nối bằng `funnel_id`. "Mua" luôn đưa `f` sang Checkout (Story 3.2), nên
+ * `login_completed` chỉ ghi khi đã có `buy_clicked` cùng `funnel_id` của cùng Sự kiện với `login_required = true` (người
+ * đã đăng nhập sẵn không tính vào SM-C2); muốn bơm rác cũng phải gửi theo cặp. `order_created` do tạo Đơn ghi trong TX1
+ * (`orders.service.ts`), không qua đây. Trùng `(funnel_id, type)` → không thêm dòng. Chưa giới hạn tốc độ theo IP
+ * (deferred, Story 4.6).
  */
 @Injectable()
 export class FunnelService {
@@ -37,6 +39,7 @@ export class FunnelService {
           eq(checkoutFunnelEvents.funnelId, input.funnelId),
           eq(checkoutFunnelEvents.type, FunnelEventType.BUY_CLICKED),
           eq(checkoutFunnelEvents.eventId, event.id),
+          eq(checkoutFunnelEvents.loginRequired, true),
         ),
       )
       .limit(1);

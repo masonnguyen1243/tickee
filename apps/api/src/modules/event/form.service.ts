@@ -93,6 +93,20 @@ function questionsOf(db: DbExecutor, ctx: AccessContext, eventId: string): Promi
     .orderBy(asc(eventFormQuestions.position), asc(eventFormQuestions.id));
 }
 
+/**
+ * Câu hỏi riêng của form mua theo thứ tự hiện cho Người mua (`position`), đọc theo `eventId` không cần `AccessContext`:
+ * Checkout (`GET /v1/events/:slug/checkout`) và tạo Đơn (TX1, sau khi khóa Sự kiện `FOR SHARE` nên không đổi giữa
+ * chừng). Người gọi đã tra Sự kiện công khai.
+ */
+export async function buyerFormQuestions(db: DbExecutor, eventId: string): Promise<FormQuestion[]> {
+  const rows = await db
+    .select()
+    .from(eventFormQuestions)
+    .where(eq(eventFormQuestions.eventId, eventId))
+    .orderBy(asc(eventFormQuestions.position), asc(eventFormQuestions.id));
+  return rows.map(questionOf);
+}
+
 /** Câu hỏi `questionId` của Sự kiện (đã khóa); id sai dạng, lạ hoặc thuộc Sự kiện khác → `404 FORM_QUESTION_NOT_FOUND`. */
 async function questionIn(tx: Tx, ctx: AccessContext, eventId: string, questionId: string): Promise<QuestionRow> {
   if (!UUID.test(questionId)) throw formQuestionNotFound();

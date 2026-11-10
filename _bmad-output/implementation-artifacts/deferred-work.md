@@ -343,3 +343,18 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-1-chon-ve-va-dang-nhap-khi-bam-mua.md`
   summary: (Chưa kiểm, nếu đúng thì medium) `useBuy` ở `ticket-tiers.tsx` đặt `pending = true` và không bao giờ trả về false. Nếu Checkout redirect server về `/e/{slug}` (lựa chọn hết hợp lệ) mà App Router giữ nguyên instance `TicketPicker`, nút "Mua" sẽ quay mãi tới khi tải lại trang.
   evidence: Review 3.1 (BH, EC, VG) triage #5. Cần thử trên trình duyệt: người đã đăng nhập chọn vé, BTC hạ giới hạn Vé/Đơn (hoặc đóng giờ bán), bấm "Mua", rồi xem nút có bấm lại được không. Đúng thì reset `pending` khi URL đổi, hoặc dùng `useTransition`. Nên làm cùng 3.2, lúc thanh mua được dùng lại ở Checkout.
+
+## Deferred from: build of spec-3-2-checkout-va-giu-cho-khong-ban-qua-so-suat.md (2026-11-10)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-2-checkout-va-giu-cho-khong-ban-qua-so-suat.md`
+  summary: Story 4.6 — dọn dòng cũ của `order_create_attempts` (bộ đếm giới hạn tốc độ tạo Đơn). Bảng chỉ cần các dòng trong cửa sổ 10 phút gần nhất nhưng hiện không có job nào xóa, nên phình theo mỗi lần thử tới được TX1 (kể cả lần hết vé của kịch bản NFR-3).
+  evidence: Spec 3.2 § Design Notes: "Dọn `order_create_attempts` cũ để vào deferred (4.6)." `apps/api/src/modules/ordering/order-rate-limit.ts` chỉ INSERT; nên gộp vào quét định kỳ lưới an toàn của 4.6 (`DELETE … WHERE created_at < now() - interval '10 minutes'`).
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-1-chon-ve-va-dang-nhap-khi-bam-mua.md`
+  summary: (Đã kiểm ở 3.2) Deferred 3.1 #5 — nút "Mua" kẹt `pending` khi Checkout redirect về `/e/{slug}` — không tái hiện được trên trình duyệt: sau redirect App Router dựng lại `TicketPicker` (URL đổi từ `?items=…` thành không query), state về mặc định. 3.2 vẫn chuyển `useBuy` sang `useTransition` (spinner hết khi điều hướng xong) và thêm e2e `purchase.spec.ts` › "Mua" không kẹt; e2e đó cũng qua với mã cũ, nên chỉ là test hồi quy, không chứng minh lỗi cũ.
+  evidence: Chạy e2e "Mua không kẹt khi Checkout redirect về lại trang Sự kiện" trên bản build dùng `useBuy` cũ (`setPending(true)` không bao giờ về false): 2/2 qua (ios-webkit, android-chromium).
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-2-checkout-va-giu-cho-khong-ban-qua-so-suat.md`
+  summary: (Chưa kiểm, nếu đúng thì medium) TX1 tạo Đơn chờ khóa Sự kiện và tồn kho mà không có `lock_timeout`. Lúc tải cao, các TX1 đang chờ chiếm hết 10 kết nối pool, nên request khác có thể lỗi sau 3 giây chờ kết nối.
+  evidence: Review 3.2 (EC) triage #16. `orders.service.ts` `placeOrder` chạy trong `db.transaction`, không đặt `SET LOCAL lock_timeout`. Muốn kết luận thì đo trong kiểm thử tải NFR-3 (Story 5.8): 5.000 người mua 300 Vé, xem có lỗi chờ kết nối pool hay không. Nếu có, đặt `lock_timeout` cho TX1 và map `55P03` sang 503 để thử lại.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-2-checkout-va-giu-cho-khong-ban-qua-so-suat.md`
+  summary: (Chưa kiểm, nếu đúng thì medium) Trong flash sale, các TX1 giữ khóa `FOR SHARE` trên dòng `events` nối tiếp nhau liên tục, có thể bỏ đói lệnh `FOR UPDATE` của BTC (Ẩn, Kết thúc, sửa Hạng vé) tới khi hết người mua.
+  evidence: Review 3.2 (EC) triage #17. `lockSaleEventBySlug` dùng `FOR SHARE`, và Postgres cho khóa tương thích vào trước người ghi đang chờ. Muốn kết luận thì viết test giữ `FOR SHARE` chồng nhau liên tục từ nhiều client, rồi đo thời gian chờ của một `FOR UPDATE`. Nếu đúng, cân nhắc đặt `lock_timeout` cho lệnh của BTC kèm câu báo rõ ràng, hoặc một khóa xếp hàng công bằng.

@@ -3,6 +3,7 @@ import { EventDetail, ErrorResponse, JobQueue, Role, TicketTypeDetail, TicketTyp
 import { sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { randomOrderCode } from '../../src/modules/ordering/order-code.js';
 import { BOSS } from '../../src/platform/jobs/index.js';
 import { signUpPlatformAdmin } from '../admin/platform-admin.js';
 import { createHarness, signUp, type Harness } from '../identity/harness.js';
@@ -265,6 +266,28 @@ describe('xóa Hạng vé', () => {
     const res = await h.http.delete(`${path(event.id)}/${ticketType.id}`).set('cookie', admin.cookie).expect(409);
     expect(errorOf(res.body).code).toBe('TICKET_TYPE_IN_USE');
     expect(await list(event.id)).toHaveLength(1);
+  });
+
+  it('đã có dòng Đơn (kể cả Đơn đã hết hạn, đã nhả chỗ) → 409 TICKET_TYPE_IN_USE, không xóa, không xóa mềm', async () => {
+    const event = await newEvent();
+    const ticketType = await created(event.id, free(10));
+    const other = await created(event.id, free(10));
+    const buyer = await signUp(h);
+    const order = await h.db.orm.execute<{ id: string }>(sql`
+      INSERT INTO orders (code, user_id, event_id, organization_id, status, total_amount, buyer_name, buyer_phone,
+        buyer_email, idempotency_key, expires_at)
+      VALUES (${randomOrderCode()}, ${buyer.userId}, ${event.id}, ${orgId}, 'expired', 0, 'An', '+84912345678',
+        ${buyer.email}, ${randomUUID()}, now())
+      RETURNING id`);
+    await h.db.orm.execute(sql`
+      INSERT INTO order_items (order_id, ticket_type_id, ticket_type_name, unit_price, quantity)
+      VALUES (${order.rows[0]!.id}, ${ticketType.id}, 'Miễn phí', 0, 1)`);
+    expect(await inventory(ticketType.id)).toMatchObject({ sold: 0, held: 0 });
+    const res = await h.http.delete(`${path(event.id)}/${ticketType.id}`).set('cookie', admin.cookie).expect(409);
+    expect(errorOf(res.body).code).toBe('TICKET_TYPE_IN_USE');
+    expect((await list(event.id)).map((t) => t.id)).toEqual([ticketType.id, other.id]);
+    // Hạng vé chưa có Đơn vẫn xóa được.
+    await h.http.delete(`${path(event.id)}/${other.id}`).set('cookie', admin.cookie).expect(204);
   });
 
   it('xóa Hạng vé có phí khi còn 0đ 200 suất → 204 (trần không phụ thuộc Hạng vé có phí)', async () => {

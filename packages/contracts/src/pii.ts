@@ -7,6 +7,8 @@ export const PII_COLUMNS = {
   // `email`: email người được mời (`organization_invitations.email`).
   // `account_name`, `account_last4`: tên chủ và 4 số cuối tài khoản nhận tiền (`payout_accounts`).
   organizer: ['contact_phone', 'contact_email', 'email', 'account_name', 'account_last4'],
+  // Bản chụp Người mua của Đơn (`orders.buyer_*`) và câu trả lời form (`order_answers.answer`).
+  ordering: ['buyer_name', 'buyer_phone', 'buyer_email', 'answer'],
 } as const satisfies Record<string, readonly string[]>;
 
 const snakeToCamel = (s: string): string => s.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());

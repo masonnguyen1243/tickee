@@ -13,7 +13,7 @@ import {
 } from '@tickee/contracts';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useId, useState } from 'react';
+import { Suspense, useId, useState, useTransition } from 'react';
 
 import { PurchaseBar } from '@/components/tickee/purchase-bar';
 import { QuantityStepper } from '@/components/tickee/quantity-stepper';
@@ -81,16 +81,21 @@ function TierStatus({ tierId, availability }: { tierId: string; availability: Ev
 }
 
 /**
- * "Mua"/"Đăng ký": ghi `buy_clicked` (không chờ), rồi đã đăng nhập → thẳng Checkout; chưa → màn đăng nhập với
- * `returnTo` là URL Checkout kèm lựa chọn và `f=<funnelId>` (để Checkout ghi `login_completed`). Chưa có `me` mới (đang
- * tải hoặc lần tải gần nhất lỗi) thì hỏi lại `me`, spinner trong nút trong lúc chờ. Chỉ `401 UNAUTHENTICATED` là chưa
- * đăng nhập; lỗi khác (`TOTP_REQUIRED`, 5xx, mạng) coi như đã đăng nhập: Checkout tự hiện lỗi kèm "Thử lại".
+ * "Mua"/"Đăng ký": ghi `buy_clicked` (không chờ), rồi tới URL Checkout kèm lựa chọn và luôn kèm `f=<funnelId>` (Checkout
+ * giữ `funnelId` để gửi kèm Đơn, ghi `order_created`; Story 3.2): đã đăng nhập → thẳng Checkout; chưa → màn đăng nhập
+ * với `returnTo` là URL đó. Chưa có `me` mới (đang tải hoặc lần tải gần nhất lỗi) thì hỏi lại `me`. Chỉ `401
+ * UNAUTHENTICATED` là chưa đăng nhập; lỗi khác (`TOTP_REQUIRED`, 5xx, mạng) coi như đã đăng nhập: Checkout tự hiện lỗi
+ * kèm "Thử lại". Spinner trong nút từ lúc bấm tới khi điều hướng xong (`useTransition`), kể cả khi Checkout redirect về
+ * lại trang Sự kiện (lựa chọn hết hợp lệ): nút không bao giờ kẹt.
  */
 function useBuy(slug: string) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const me = useQuery({ queryKey: ME_QUERY_KEY, queryFn: ({ signal }) => fetchMe(signal) });
-  const [pending, setPending] = useState(false);
+  /** Đang hỏi lại `me` trước khi điều hướng. */
+  const [checking, setChecking] = useState(false);
+  const [navigating, startNavigation] = useTransition();
+  const pending = checking || navigating;
 
   const needsLogin = async (): Promise<boolean> => {
     // TanStack giữ `data` cũ khi lần tải lại lỗi (vd. 401 vì phiên hết hạn): chỉ tin `data` khi không có lỗi.
@@ -106,7 +111,8 @@ function useBuy(slug: string) {
 
   const buy = async (items: string) => {
     if (pending) return;
-    setPending(true);
+    setChecking(true);
+    // Không bao giờ ném: lỗi khác 401 coi như đã đăng nhập.
     const loginRequired = await needsLogin();
     const funnelId = newFunnelId();
     sendFunnelEvent(slug, { type: FunnelEventType.BUY_CLICKED, funnelId, loginRequired });
@@ -115,8 +121,13 @@ function useBuy(slug: string) {
     const here = new URL(window.location.href);
     here.searchParams.set(SELECTION_PARAM, items);
     window.history.replaceState(window.history.state, '', `${here.pathname}${here.search}${here.hash}`);
-    const checkout = `${checkoutPath(slug)}?${SELECTION_PARAM}=${items}`;
-    router.push(loginRequired ? withReturnTo(LOGIN_PATH, `${checkout}&${FUNNEL_ID_PARAM}=${funnelId}`) : checkout);
+    const checkout = `${checkoutPath(slug)}?${SELECTION_PARAM}=${items}&${FUNNEL_ID_PARAM}=${funnelId}`;
+    // `checking` về false cùng lúc điều hướng commit; `navigating` giữ spinner tới khi trang đích (hoặc trang redirect
+    // về) render xong.
+    startNavigation(() => {
+      setChecking(false);
+      router.push(loginRequired ? withReturnTo(LOGIN_PATH, checkout) : checkout);
+    });
   };
 
   return { buy, pending };

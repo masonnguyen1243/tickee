@@ -31,5 +31,13 @@ export const JobQueue = {
   ORGANIZER_NOTIFY_OWNERSHIP_TRANSFERRED: 'organizer.notify-ownership-transferred',
   /** Dead-letter của `ORGANIZER_NOTIFY_OWNERSHIP_TRANSFERRED`: job hết lượt retry được chép sang đây. */
   ORGANIZER_NOTIFY_OWNERSHIP_TRANSFERRED_DEAD_LETTER: 'organizer.notify-ownership-transferred.dead-letter',
+  /**
+   * Hết hạn Giữ chỗ của Đơn chưa có link thanh toán (`ordering`, Story 3.2, AD-4 (a)). Payload chỉ `{ orderId }`;
+   * enqueue bằng chính `tx` tạo Đơn (TX1) với `startAfter = expires_at`. Đơn đã có link hoặc không còn `pending` → bỏ
+   * qua; chạy sớm → retry.
+   */
+  ORDERING_EXPIRE_ORDER: 'ordering.expire-order',
+  /** Dead-letter của `ORDERING_EXPIRE_ORDER`: job hết lượt retry được chép sang đây. */
+  ORDERING_EXPIRE_ORDER_DEAD_LETTER: 'ordering.expire-order.dead-letter',
 } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];

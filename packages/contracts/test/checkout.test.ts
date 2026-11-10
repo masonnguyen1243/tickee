@@ -25,8 +25,10 @@ describe('lựa chọn Vé trong URL (items=<ticketTypeId>:<qty>[,…])', () => 
     expect(parseSelection(`${A}:50`)).toEqual([{ ticketTypeId: A, quantity: 50 }]);
   });
 
-  it('id trùng → null', () => {
+  it('id trùng → null, kể cả khác hoa/thường; id chữ hoa về chữ thường', () => {
     expect(parseSelection(`${A}:1,${A}:2`)).toBeNull();
+    expect(parseSelection(`${A.toUpperCase()}:1,${A}:2`)).toBeNull();
+    expect(parseSelection(`${A.toUpperCase()}:2`)).toEqual([{ ticketTypeId: A, quantity: 2 }]);
   });
 
   it.each([
@@ -69,8 +71,9 @@ describe('lựa chọn Vé trong URL (items=<ticketTypeId>:<qty>[,…])', () => 
 });
 
 describe('FunnelEventInput', () => {
-  it('hai loại sự kiện phễu', () => {
-    expect(FUNNEL_EVENT_TYPES).toEqual(['buy_clicked', 'login_completed']);
+  it('ba loại sự kiện phễu; order_created chỉ API ghi (không gửi qua funnel-events)', () => {
+    expect(FUNNEL_EVENT_TYPES).toEqual(['buy_clicked', 'login_completed', 'order_created']);
+    expect(FunnelEventInput.safeParse({ type: 'order_created', funnelId: FUNNEL }).success).toBe(false);
   });
 
   it('buy_clicked cần loginRequired; login_completed chỉ có funnelId', () => {

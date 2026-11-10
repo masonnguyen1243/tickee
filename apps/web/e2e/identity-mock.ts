@@ -31,6 +31,17 @@ export type MockIdentityOptions = {
   origin?: string;
 };
 
+/**
+ * Header CORS của API giả cho request kèm cookie từ `origin`: cho phép header xác nhận lại (Story 2.13) và
+ * `idempotency-key` của gửi Đơn (Story 3.2).
+ */
+export const corsHeaders = (origin: string): Record<string, string> => ({
+  'access-control-allow-origin': origin,
+  'access-control-allow-credentials': 'true',
+  'access-control-allow-methods': 'GET, POST, OPTIONS',
+  'access-control-allow-headers': 'accept, content-type, x-reauth-token, idempotency-key',
+});
+
 /** Giả lập `/v1/identity/*`; mặc định `me` → 401 (chưa đăng nhập). Trả về danh sách lời gọi để kiểm. */
 export async function mockIdentityApi(
   page: Page,
@@ -38,12 +49,7 @@ export async function mockIdentityApi(
   { origin = WEB_ORIGIN }: MockIdentityOptions = {},
 ): Promise<Call[]> {
   const calls: Call[] = [];
-  const cors = {
-    'access-control-allow-origin': origin,
-    'access-control-allow-credentials': 'true',
-    'access-control-allow-methods': 'GET, POST, OPTIONS',
-    'access-control-allow-headers': 'accept, content-type, x-reauth-token',
-  };
+  const cors = corsHeaders(origin);
   await page.route('**/v1/identity/**', async (route) => {
     const request = route.request();
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
