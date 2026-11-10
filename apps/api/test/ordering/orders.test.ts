@@ -168,7 +168,7 @@ describe('POST /v1/events/:slug/orders — đặt thành công', () => {
     expect(await attempts()).toBe(1);
   });
 
-  it('Đơn chỉ có Hạng vé 0đ cũng giữ chỗ rồi pending; không gửi funnelId → không ghi order_created', async () => {
+  it('Đơn chỉ có Hạng vé 0đ (Story 3.3): bán ngay, paid; không gửi funnelId → không ghi order_created/paid', async () => {
     const buyer = await signUp(h);
     const sale = await eventOnSale(org, [{ name: 'Vé tham dự', price: 0, capacity: 3 }]);
     const tier = sale.tiers[0]!;
@@ -176,12 +176,10 @@ describe('POST /v1/events/:slug/orders — đặt thành công', () => {
       201,
     );
     const order = parseOrder(res.body);
-    expect(order).toMatchObject({ status: 'pending', totalAmount: 0, answers: [] });
-    expect(await inventory(h, tier.id)).toEqual({ capacity: 3, sold: 0, held: 3 });
-    const funnel = await h.db.pool.query(
-      "SELECT 1 FROM checkout_funnel_events WHERE event_id = $1 AND type = 'order_created'",
-      [sale.event.id],
-    );
+    expect(order).toMatchObject({ status: 'paid', totalAmount: 0, answers: [] });
+    expect(order.tickets).toHaveLength(3);
+    expect(await inventory(h, tier.id)).toEqual({ capacity: 3, sold: 3, held: 0 });
+    const funnel = await h.db.pool.query('SELECT 1 FROM checkout_funnel_events WHERE event_id = $1', [sale.event.id]);
     expect(funnel.rows).toEqual([]);
   });
 

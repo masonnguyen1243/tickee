@@ -14,6 +14,7 @@ import { priceLabel } from '@/lib/event/selection';
 import { buyerOrderQueryKey, fetchBuyerOrder } from '@/lib/order/api';
 
 import { BuyerSkeleton } from '../../buyer-gate';
+import { OrderSuccess } from './order-success';
 
 /** Đơn đang chờ: hỏi lại máy chủ mỗi chừng này ms để thấy "Hết hạn" khi job chạy (Story 3.7 thay bằng realtime). */
 const PENDING_REFETCH_MS = 5_000;
@@ -40,8 +41,8 @@ function StatusBlock({ order }: { order: BuyerOrder }) {
 }
 
 /**
- * Tóm tắt, mã Đơn và trạng thái lấy từ máy chủ (`GET /v1/me/orders/:code`). Mã sai, Đơn của người khác hay không có →
- * thông báo riêng (`404 ORDER_NOT_FOUND`).
+ * Tóm tắt, mã Đơn và trạng thái lấy từ máy chủ (`GET /v1/me/orders/:code`). Đơn `paid` → màn "Thành công" với từng Vé
+ * (Story 3.3). Mã sai, Đơn của người khác hay không có → thông báo riêng (`404 ORDER_NOT_FOUND`).
  */
 export function OrderView({ code }: { code: string }) {
   const order = useQuery({
@@ -78,6 +79,7 @@ export function OrderView({ code }: { code: string }) {
   if (!order.data) return <BuyerSkeleton />;
 
   const data = order.data;
+  if (data.status === OrderStatus.PAID) return <OrderSuccess order={data} />;
   const count = data.items.reduce((sum, item) => sum + item.quantity, 0);
   return (
     <div className="flex flex-col gap-section pt-2" data-slot="order-view" data-status={data.status}>

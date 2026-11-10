@@ -6,6 +6,7 @@ import {
   ErrorCode,
   eventPagePath,
   FormQuestionKind,
+  FREE_TICKET_LIMIT_MESSAGE,
   NotOnSaleDetails,
   orderPath,
   PendingOrderExistsDetails,
@@ -83,7 +84,8 @@ function focusField(prefix: string, key: FieldKey): void {
 
 /**
  * Form mua một lần cho cả Đơn (Story 3.2): Tên, SĐT (tự điền từ Đơn gần nhất), Email (chỉ đọc), câu hỏi riêng của BTC;
- * `purchase-bar` với tổng và "Gửi Đơn". Lỗi tại trường khi rời trường và khi gửi; gửi lỗi thì cuộn rồi focus trường lỗi
+ * `purchase-bar` với tổng và "Gửi Đơn" ("Đăng ký" khi tổng 0đ: Đơn thành `paid` ngay, Trang Đơn hiện Vé — Story 3.3).
+ * Vượt trần Vé miễn phí → toast rồi về trang Sự kiện giữ lựa chọn. Lỗi tại trường khi rời trường và khi gửi; gửi lỗi thì cuộn rồi focus trường lỗi
  * đầu tiên. Một `Idempotency-Key` cho mỗi lần mở Checkout: "Thử lại" sau lỗi mạng dùng lại khóa đó. Dữ liệu form chỉ ở
  * state của trang.
  */
@@ -152,6 +154,11 @@ export function CheckoutOrderForm({ slug, organizationName, ticketTypes, items, 
       const parsed = NotOnSaleDetails.safeParse(details);
       toast.error(notOnSaleMessage(parsed.success ? parsed.data : null, ticketTypes));
       backToEvent(parsed.success ? parsed.data.ticketTypeId : undefined);
+      return;
+    }
+    if (hasErrorCode(error, ErrorCode.FREE_TICKET_LIMIT_REACHED)) {
+      toast.error(FREE_TICKET_LIMIT_MESSAGE);
+      backToEvent();
       return;
     }
     if (hasErrorCode(error, ErrorCode.PENDING_ORDER_EXISTS)) {
@@ -421,7 +428,7 @@ export function CheckoutOrderForm({ slug, organizationName, ticketTypes, items, 
         total={priceLabel(amount)}
         action={
           <Button type="submit" variant="primary" loading={busy} className="w-35 shrink">
-            Gửi Đơn
+            {amount === 0 ? 'Đăng ký' : 'Gửi Đơn'}
           </Button>
         }
       />

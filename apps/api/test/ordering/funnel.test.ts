@@ -185,15 +185,20 @@ describe('bảng checkout_funnel_events', () => {
     expect(await rowsOf(funnelId)).toHaveLength(1);
   });
 
-  it('CHECK type nhận order_created (login_required null), không nhận loại lạ', async () => {
+  it('CHECK type nhận order_created và paid (login_required null), không nhận loại lạ', async () => {
     const pgCode = (err: unknown) => (err as { code?: string }).code;
     const funnelId = randomUUID();
     await h.db.orm.execute(sql`
       INSERT INTO checkout_funnel_events (event_id, type, funnel_id) VALUES (${onSale.id}, 'order_created', ${funnelId})`);
-    expect(await rowsOf(funnelId)).toEqual([{ event_id: onSale.id, type: 'order_created', login_required: null }]);
+    await h.db.orm.execute(sql`
+      INSERT INTO checkout_funnel_events (event_id, type, funnel_id) VALUES (${onSale.id}, 'paid', ${funnelId})`);
+    expect(await rowsOf(funnelId)).toEqual([
+      { event_id: onSale.id, type: 'order_created', login_required: null },
+      { event_id: onSale.id, type: 'paid', login_required: null },
+    ]);
     await expect(
       h.db.orm.execute(sql`
-        INSERT INTO checkout_funnel_events (event_id, type, funnel_id) VALUES (${onSale.id}, 'paid', ${randomUUID()})`),
+        INSERT INTO checkout_funnel_events (event_id, type, funnel_id) VALUES (${onSale.id}, 'refunded', ${randomUUID()})`),
     ).rejects.toSatisfy((err) => pgCode((err as { cause?: unknown }).cause ?? err) === '23514');
   });
 });

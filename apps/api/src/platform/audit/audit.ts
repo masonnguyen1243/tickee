@@ -88,7 +88,12 @@ export type AuditAction =
   /** Owner/Admin xóa câu hỏi riêng (Đơn đã đặt vẫn giữ câu trả lời đã chụp). */
   | 'event_form.question_removed'
   /** Owner/Admin đổi thứ tự câu hỏi riêng (đối tượng: Sự kiện). */
-  | 'event_form.reordered';
+  | 'event_form.reordered'
+  /**
+   * Đơn chuyển `pending` → `paid` và Vé được phát (`ordering.markPaid`, Story 3.3; actor: hệ thống; đối tượng: Đơn). Một
+   * dòng cho mỗi lần chuyển thành công, cùng transaction với phát Vé.
+   */
+  | 'order.paid';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

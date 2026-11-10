@@ -17,6 +17,8 @@ export const migrationDatabaseUrl = (): string => {
 export const testCredentialKey = (version: number, fill: number): string =>
   `v${version}:${Buffer.alloc(32, fill).toString('base64')}`;
 export const TEST_CREDENTIAL_KEYS = testCredentialKey(1, 7);
+/** Khóa ký Mã QR vé chỉ dùng trong test (cùng dạng, khác giá trị với `TEST_CREDENTIAL_KEYS`). */
+export const TEST_TICKET_QR_KEYS = testCredentialKey(1, 9);
 
 /** Origin web giả lập trong test: CORS và Better Auth chỉ tin origin này. */
 export const TEST_WEB_ORIGIN = 'http://web.tickee.test';
@@ -40,6 +42,7 @@ export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
   // Không bao giờ gọi Tingee thật: cổng 1 để lỡ gọi thì lỗi ngay; test tài khoản nhận tiền trỏ vào `test/tingee-fake`.
   TINGEE_BASE_URL: 'http://127.0.0.1:1',
   TINGEE_CREDENTIAL_KEYS: TEST_CREDENTIAL_KEYS,
+  TICKET_QR_KEYS: TEST_TICKET_QR_KEYS,
   ...overrides,
 });
 

@@ -7,6 +7,7 @@ import { IdentityModule } from './modules/identity/index.js';
 import { OrderingModule } from './modules/ordering/index.js';
 import { OrganizerModule } from './modules/organizer/index.js';
 import { ReportingModule } from './modules/reporting/index.js';
+import { TicketingModule } from './modules/ticketing/index.js';
 import { TingeeModule } from './modules/tingee/index.js';
 import { APP_CONFIG, type ApiConfig } from './platform/config/index.js';
 import { DbModule } from './platform/db/index.js';
@@ -40,8 +41,10 @@ export class ApiModule {
         ReportingModule,
         // Sự kiện (Story 2.7): route BTC dùng `PermissionGuard` toàn cục của OrganizerModule.
         EventModule,
+        // Vé và Mã QR vé (Story 3.3, toàn cục): `ordering.markPaid` phát Vé, trang Đơn trả Vé kèm QR.
+        TicketingModule.forRoot(config),
         // Trạng thái bán công khai (Story 2.11-a): `GET /v1/events/:slug/availability`; phễu mua (Story 3.1); Checkout
-        // và tạo Đơn, giữ chỗ (Story 3.2).
+        // và tạo Đơn, giữ chỗ (Story 3.2); Đơn 0đ nhận Vé ngay (Story 3.3).
         OrderingModule.forRoot(config),
         // Hạng vé và tồn kho (Story 2.8): ghi cả `event` lẫn `ordering` nên controller ở flows.
         FlowsModule,

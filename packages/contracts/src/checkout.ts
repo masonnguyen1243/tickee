@@ -82,6 +82,11 @@ export const FunnelEventType = {
    * qua `POST …/funnel-events` (không có trong `FunnelEventInput`).
    */
   ORDER_CREATED: 'order_created',
+  /**
+   * Đơn mang `funnelId` này chuyển `paid` (Story 3.3, ghi trong `ordering.markPaid`, cùng transaction). Chỉ API ghi;
+   * không có trong `FunnelEventInput`.
+   */
+  PAID: 'paid',
 } as const;
 export type FunnelEventType = (typeof FunnelEventType)[keyof typeof FunnelEventType];
 /** Loại sự kiện phễu ghi được (CHECK của `checkout_funnel_events.type`). */
@@ -89,6 +94,7 @@ export const FUNNEL_EVENT_TYPES = [
   FunnelEventType.BUY_CLICKED,
   FunnelEventType.LOGIN_COMPLETED,
   FunnelEventType.ORDER_CREATED,
+  FunnelEventType.PAID,
 ] as const;
 
 /**

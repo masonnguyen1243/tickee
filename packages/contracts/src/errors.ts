@@ -167,6 +167,11 @@ export const ErrorCode = {
   PENDING_ORDER_EXISTS: 'PENDING_ORDER_EXISTS',
   /** Gửi Đơn quá nhanh (theo tài khoản hoặc theo IP, `ORDER_RATE_LIMITS`); `details.retryAfterSeconds`. */
   ORDER_RATE_LIMITED: 'ORDER_RATE_LIMITED',
+  /**
+   * Đơn tổng 0đ (Story 3.3): số Vé của Người mua trong các Đơn `paid` tổng 0đ của Sự kiện cộng số Vé xin thêm vượt giới
+   * hạn Vé/Đơn (Vé có phí không tính). Không tạo Đơn, tồn kho không đổi.
+   */
+  FREE_TICKET_LIMIT_REACHED: 'FREE_TICKET_LIMIT_REACHED',
   /** Không tìm thấy Đơn: mã sai dạng, không tồn tại, hoặc Đơn của người khác (cùng lỗi để không lộ mã nào có thật). */
   ORDER_NOT_FOUND: 'ORDER_NOT_FOUND',
 } as const;

@@ -5,6 +5,7 @@ import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
 import { apiError, EMAIL, me, mockIdentityApi, unauthenticated, USER_ID, type Call, type Handler, type Reply } from './identity-mock';
 import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
+import { expectQrImageEncodes } from './qr-image';
 
 /*
  * Xác thực hai lớp tự bật (Story 2.2 làm lại): trang Bảo mật tài khoản (bật/tắt), màn đăng ký `/bao-mat/totp`, dialog
@@ -111,6 +112,7 @@ test('bật từ trang Bảo mật: QR + khóa nhập tay; mã sai báo tại ô
   await expect(page.getByRole('img', { name: /Mã QR/ })).toHaveCount(0);
   await confirmByEmail(page);
   await expect(page.getByRole('img', { name: /Mã QR/ })).toBeVisible();
+  await expectQrImageEncodes(page.getByRole('img', { name: /Mã QR/ }), TOTP_URI);
   await expect(page.getByTestId('manual-key')).toHaveText('JBSW Y3DP EHPK 3PXP');
   expect(reauth.headers).toEqual([null, 'tok-1']);
   expect(callsTo(identityCalls, '/identity/reauth/email-code')).toHaveLength(1);

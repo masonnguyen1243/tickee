@@ -21,6 +21,7 @@ import {
   TIER_FREE_ONLY_ID,
   TIER_PAID_ID,
 } from './public-event-api';
+import { expectQrImageEncodes } from './qr-image';
 
 /*
  * Story 3.1: chọn Vé trên trang Sự kiện (`quantity-stepper`, `purchase-bar`), bấm "Mua" → đăng nhập → Checkout đúng
@@ -129,7 +130,7 @@ const PREFILL = { name: 'Nguyễn Văn An', phone: '+84912345678', email: EMAIL 
 const buyerOrder = (patch: Record<string, unknown> = {}) => ({
   code: ORDER_CODE,
   status: 'pending',
-  event: { slug: SLUG_BUY, name: 'Giải chạy Hồ Gươm mùa thu 2026' },
+  event: { slug: SLUG_BUY, name: 'Giải chạy Hồ Gươm mùa thu 2026', startsAt: '2099-11-15T07:00:00+07:00' },
   items: [{ ticketTypeId: TIER_PAID_ID, name: VIP, unitPrice: 300_000, quantity: 2, amount: 600_000 }],
   totalAmount: 600_000,
   buyer: { name: 'Nguyễn Văn An', phone: '+84912345678', email: EMAIL },
@@ -138,8 +139,34 @@ const buyerOrder = (patch: Record<string, unknown> = {}) => ({
   createdAt: '2026-11-10T01:00:00.000Z',
   expiresAt: '2026-11-10T01:01:00.000Z',
   serverNow: '2026-11-10T01:00:00.000Z',
+  tickets: [],
   ...patch,
 });
+
+const FREE_CODE = 'TKFREE2345';
+const FREE_EVENT_NAME = 'Workshop pha cà phê miễn phí';
+const FREE_TIER = 'Vé tham dự';
+/** Id Vé giả thứ `n` (uuid, nhóm cuối 12 chữ số). */
+const ticketId = (n: number) => `019a3b2c-0b00-7abc-8def-${String(n).padStart(12, '0')}`;
+/** Mã QR vé giả đúng mẫu `t<k>.<ticketId>.<sig>` (Story 3.3): chữ ký đúng 43 ký tự base64url. */
+const ticketQr = (n: number) => `t1.${ticketId(n)}.${String(n).padStart(43, 'q')}`;
+/** Đơn 0đ đã `paid` với `count` Vé (Story 3.3). */
+const freeOrder = (count = 2) =>
+  buyerOrder({
+    code: FREE_CODE,
+    status: 'paid',
+    event: { slug: SLUG_FREE, name: FREE_EVENT_NAME, startsAt: '2099-11-15T07:00:00+07:00' },
+    items: [{ ticketTypeId: TIER_FREE_ONLY_ID, name: FREE_TIER, unitPrice: 0, quantity: count, amount: 0 }],
+    totalAmount: 0,
+    tickets: Array.from({ length: count }, (_, i) => ({
+      id: ticketId(i + 1),
+      seq: i + 1,
+      count,
+      ticketTypeName: FREE_TIER,
+      holderName: 'Nguyễn Văn An',
+      qr: ticketQr(i + 1),
+    })),
+  });
 
 type OrderCall = { key: string | null; body: Record<string, unknown> };
 type OrdersMockOptions = {
@@ -826,6 +853,178 @@ test.describe('Gửi Đơn', () => {
     await expect(buyButton).toBeEnabled();
     await buyButton.click();
     await expect.poll(() => funnel.length).toBe(2);
+  });
+});
+
+const FREE_CHECKOUT = `/e/${SLUG_FREE}/checkout`;
+const registerButton = (page: Page) => bar(page).getByRole('button', { name: 'Đăng ký' });
+const ticketCards = (page: Page) => page.locator('[data-slot="ticket-card"]');
+
+/** Ghi lại các lần `navigator.vibrate` (WebKit không có API này: thêm vào để đếm). */
+async function recordVibrations(page: Page): Promise<() => Promise<unknown[]>> {
+  await page.addInitScript(() => {
+    const calls: unknown[] = [];
+    (window as unknown as { __vibrations: unknown[] }).__vibrations = calls;
+    Object.defineProperty(navigator, 'vibrate', {
+      configurable: true,
+      value: (pattern: unknown) => {
+        calls.push(pattern);
+        return true;
+      },
+    });
+  });
+  return () => page.evaluate(() => (window as unknown as { __vibrations: unknown[] }).__vibrations);
+}
+
+/** Chờ mọi animation trượt lên của thẻ Vé chạy xong (vị trí cuối). */
+async function settleTickets(page: Page): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('[data-slot="ticket-card"]')].every((card) =>
+          card.getAnimations().every((a) => a.playState === 'finished'),
+        ),
+      ),
+    )
+    .toBe(true);
+}
+
+async function expectNoHorizontalScroll(page: Page): Promise<void> {
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+}
+
+/**
+ * Ảnh Mã QR vé thứ `i` mã hóa đúng `qrs[i]`, ≥ 200×200 (cỡ bố cục, không tính transform của chuyển cảnh), đen trên tấm
+ * trắng. Gọi sau `settleTickets`.
+ */
+async function expectQrPlates(page: Page, qrs: readonly string[]): Promise<void> {
+  const plates = page.locator('[data-slot="ticket-card"] [data-slot="qr-plate"]');
+  await expect(plates).toHaveCount(qrs.length);
+  for (let i = 0; i < qrs.length; i++) {
+    const plate = plates.nth(i);
+    await expect(plate).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+    const image = plate.getByRole('img');
+    await expect(image).toBeVisible();
+    const size = await image.evaluate((img: HTMLImageElement) => ({
+      width: img.offsetWidth,
+      height: img.offsetHeight,
+      loaded: img.complete && img.naturalWidth >= 200,
+    }));
+    expect(size.width).toBeGreaterThanOrEqual(200);
+    expect(size.height).toBeGreaterThanOrEqual(200);
+    expect(size.loaded).toBe(true);
+    await expectQrImageEncodes(image, qrs[i]!);
+  }
+}
+
+test.describe('Đăng ký Sự kiện miễn phí (Story 3.3)', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockAccount(page, { signedIn: true });
+    await mockFunnel(page);
+    await mockAvailability(page, ok([tier(TIER_FREE_ONLY_ID)]));
+  });
+
+  test('tổng 0đ: nút "Đăng ký" → Thành công: stage, 2 thẻ "Vé k/N", nhãn QR, QR ≥ 200px trên tấm trắng, thẻ đầu chồng stage, rung nhẹ', async ({
+    page,
+  }) => {
+    const vibrations = await recordVibrations(page);
+    const orders = await mockOrders(page, {
+      submit: () => ({ status: 201, body: freeOrder(2) }),
+      orders: { [FREE_CODE]: { status: 200, body: freeOrder(2) } },
+    });
+    await page.goto(`${FREE_CHECKOUT}?items=${TIER_FREE_ONLY_ID}:2`);
+    await expect(bar(page).locator('[data-slot="purchase-bar-total"]')).toHaveText('Miễn phí');
+    await expect(bar(page).getByRole('button', { name: 'Gửi Đơn' })).toHaveCount(0);
+    await answerQuestions(page);
+    await registerButton(page).click();
+    await page.waitForURL(`**/orders/${FREE_CODE}`);
+    expect(orders.calls).toHaveLength(1);
+    expect(orders.calls[0]!.body).toMatchObject({ items: [{ ticketTypeId: TIER_FREE_ONLY_ID, quantity: 2 }] });
+
+    const success = page.locator('[data-slot="order-success"]');
+    const stage = success.locator('[data-slot="stage-block"]');
+    await expect(stage).toHaveAttribute('aria-live', 'polite');
+    await expect(stage.locator('[data-slot="wordmark"]')).toHaveText('tickee');
+    await expect(stage).toContainText(FREE_EVENT_NAME);
+    // Focus chuyển vào tiêu đề để trình đọc màn hình đọc "Vé của bạn đã sẵn sàng!" ngay sau "Đăng ký".
+    await expect(page.getByRole('heading', { level: 1, name: 'Vé của bạn đã sẵn sàng!' })).toBeFocused();
+    // Chưa có email Vé (3.8) và "Vé của tôi" (3.9).
+    await expect(success).not.toContainText('Đã gửi Vé tới');
+    await expect(page.getByRole('button', { name: 'Chia sẻ Vé' })).toHaveCount(0);
+    await expect(page.getByText('Xem Vé của tôi')).toHaveCount(0);
+
+    await expect(ticketCards(page)).toHaveCount(2);
+    await expect(page.locator('[data-slot="ticket-card-position"]')).toHaveText(['· Vé 1/2', '· Vé 2/2']);
+    await expect(page.locator('[data-slot="ticket-card-qr-label"]')).toHaveText([
+      'Mã QR vé · đưa cho CTV ở cổng',
+      'Mã QR vé · đưa cho CTV ở cổng',
+    ]);
+    const first = ticketCards(page).first();
+    await expect(first).toContainText(FREE_TIER);
+    await expect(first.locator('[data-slot="ticket-card-holder"]')).toHaveText('Nguyễn Văn An');
+    await expect(first).toContainText('Chủ nhật, 15/11/2099 · 07:00');
+    await expect(page.getByRole('img', { name: `Mã QR vé 2 trên 2, ${FREE_TIER}` })).toBeVisible();
+    await settleTickets(page);
+    await expectQrPlates(page, [ticketQr(1), ticketQr(2)]);
+
+    const stageBox = (await stage.boundingBox())!;
+    const cardBox = (await first.boundingBox())!;
+    const overlap = stageBox.y + stageBox.height - cardBox.y;
+    expect(overlap).toBeGreaterThanOrEqual(24);
+    expect(overlap).toBeLessThanOrEqual(36);
+    await expect(first).toHaveCSS('animation-name', 'ticket-rise');
+    await expectNoHorizontalScroll(page);
+    expect(await vibrations()).toHaveLength(1);
+  });
+
+  test('reduced motion: thẻ hiện ngay (animation-name none), không rung', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const vibrations = await recordVibrations(page);
+    await mockOrders(page, { orders: { [FREE_CODE]: { status: 200, body: freeOrder(3) } } });
+    await page.goto(`/orders/${FREE_CODE}`);
+    await expect(ticketCards(page)).toHaveCount(3);
+    for (const card of await ticketCards(page).all()) {
+      await expect(card).toHaveCSS('animation-name', 'none');
+      await expect(card).toHaveCSS('opacity', '1');
+    }
+    expect(await vibrations()).toHaveLength(0);
+  });
+
+  test('320px, theme tối: không cuộn ngang; QR vẫn đen trên tấm trắng ≥ 200×200; thẻ nền card tối', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.setViewportSize({ width: 320, height: 640 });
+    await mockOrders(page, { orders: { [FREE_CODE]: { status: 200, body: freeOrder(2) } } });
+    await page.goto(`/orders/${FREE_CODE}`);
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(ticketCards(page)).toHaveCount(2);
+    await expect(ticketCards(page).first()).toHaveCSS('background-color', 'rgb(28, 20, 22)');
+    await settleTickets(page);
+    await expectQrPlates(page, [ticketQr(1), ticketQr(2)]);
+    await expectNoHorizontalScroll(page);
+  });
+
+  test('vượt trần Vé miễn phí → toast "Bạn đã nhận đủ số Vé tối đa cho Sự kiện này." + về trang Sự kiện giữ lựa chọn', async ({
+    page,
+  }) => {
+    await mockOrders(page, { submit: () => apiError(409, 'FREE_TICKET_LIMIT_REACHED') });
+    await page.goto(`${FREE_CHECKOUT}?items=${TIER_FREE_ONLY_ID}:2`);
+    await answerQuestions(page);
+    await registerButton(page).click();
+    await page.waitForURL((url) => url.pathname === `/e/${SLUG_FREE}`);
+    expect(new URL(page.url()).searchParams.get('items')).toBe(`${TIER_FREE_ONLY_ID}:2`);
+    await expect(page.getByText('Bạn đã nhận đủ số Vé tối đa cho Sự kiện này.')).toBeVisible();
+    await expect(stepperValue(page, FREE_TIER)).toHaveText('2');
+  });
+
+  test('Sự kiện có cả Hạng vé có phí: chỉ chọn Hạng vé 0đ → "Đăng ký"; có Hạng vé có phí → "Gửi Đơn"', async ({ page }) => {
+    await mockAvailability(page, ON_SALE);
+    await page.goto(`${CHECKOUT}?items=${TIER_FREE_ID}:1`);
+    await expect(registerButton(page)).toBeVisible();
+    await expect(sendButton(page)).toHaveCount(0);
+    await page.goto(`${CHECKOUT}?items=${TIER_FREE_ID}:1,${TIER_PAID_ID}:1`);
+    await expect(sendButton(page)).toBeVisible();
+    await expect(registerButton(page)).toHaveCount(0);
   });
 });
 

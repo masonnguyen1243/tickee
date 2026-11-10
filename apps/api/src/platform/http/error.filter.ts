@@ -1,5 +1,11 @@
 import { ArgumentsHost, Catch, HttpException, Logger, type ExceptionFilter } from '@nestjs/common';
-import { ErrorCode, FORM_QUESTIONS_MAX, FREE_EVENT_TICKET_CAP, type ErrorResponse } from '@tickee/contracts';
+import {
+  ErrorCode,
+  FORM_QUESTIONS_MAX,
+  FREE_EVENT_TICKET_CAP,
+  FREE_TICKET_LIMIT_MESSAGE,
+  type ErrorResponse,
+} from '@tickee/contracts';
 import type { Response } from 'express';
 import { dbErrorSummary, isDatabaseError } from '../logging/index.js';
 import { AppError } from './app-error.js';
@@ -58,6 +64,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   PENDING_ORDER_EXISTS: 'Bạn đang có một Đơn chờ thanh toán cho Sự kiện này.',
   ORDER_RATE_LIMITED: 'Bạn gửi Đơn quá nhanh. Vui lòng thử lại sau.',
   ORDER_NOT_FOUND: 'Không tìm thấy Đơn này.',
+  FREE_TICKET_LIMIT_REACHED: FREE_TICKET_LIMIT_MESSAGE,
 };
 
 /** Lỗi DB chỉ log `{ type, code }` (message/params có thể mang email, token session); lỗi khác log nguyên để giữ stack. */

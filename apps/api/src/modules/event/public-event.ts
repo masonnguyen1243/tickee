@@ -34,8 +34,8 @@ async function publishedRowBySlug(db: DbExecutor, slug: string): Promise<EventRo
 }
 
 /**
- * Phần Sự kiện mà `ordering` cần: luật bán của `sellability`, cùng slug, tên, giới hạn Vé/Đơn và chính sách hoàn vé
- * cho tạo Đơn (bản chụp) và trang Đơn.
+ * Phần Sự kiện mà `ordering` cần: luật bán của `sellability`, cùng slug, tên, giờ bắt đầu, giới hạn Vé/Đơn và chính
+ * sách hoàn vé cho tạo Đơn (bản chụp) và trang Đơn (thẻ Vé).
  */
 export type PublicEventRef = Pick<
   EventRow,
@@ -44,6 +44,7 @@ export type PublicEventRef = Pick<
   | 'slug'
   | 'name'
   | 'status'
+  | 'startsAt'
   | 'lockedAt'
   | 'effectiveEndAt'
   | 'refundPolicy'
@@ -56,6 +57,7 @@ const refColumns = {
   slug: events.slug,
   name: events.name,
   status: events.status,
+  startsAt: events.startsAt,
   lockedAt: events.lockedAt,
   effectiveEndAt: events.effectiveEndAt,
   refundPolicy: events.refundPolicy,
@@ -86,6 +88,19 @@ export async function lockSaleEventBySlug(tx: Tx, slug: string): Promise<PublicE
     .from(events)
     .where(and(eq(events.slug, slug), ne(events.status, 'draft')))
     .for('share');
+  if (!row) throw notFound();
+  return row;
+}
+
+/**
+ * Khóa dòng Sự kiện theo id `FOR SHARE` trong `tx` của người gọi rồi trả về (`ordering.markPaid`, Story 3.3: phát Vé
+ * không chạy song song với lệnh ghi của BTC lên Sự kiện, vốn khóa `FOR UPDATE`). Khóa lại dòng đã khóa trong cùng `tx`
+ * (TX1 đã khóa theo slug) không chờ. Không lọc trạng thái: Đơn đã có thì Sự kiện đã từng mở bán. Không có → `404
+ * EVENT_NOT_FOUND`.
+ */
+export async function lockEventByIdForShare(tx: Tx, eventId: string): Promise<PublicEventRef> {
+  if (!UUID.test(eventId)) throw notFound();
+  const [row] = await tx.select(refColumns).from(events).where(eq(events.id, eventId)).for('share');
   if (!row) throw notFound();
   return row;
 }

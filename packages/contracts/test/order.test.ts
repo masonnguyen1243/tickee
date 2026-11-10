@@ -7,7 +7,9 @@ import {
   answerSnapshot,
   BuyerOrder,
   BuyerPhone,
+  BuyerTicket,
   CreateOrderRequest,
+  FREE_TICKET_LIMIT_MESSAGE,
   IdempotencyKey,
   localBuyerPhone,
   NotOnSaleDetails,
@@ -17,6 +19,7 @@ import {
   ORDER_STATUSES,
   orderPath,
   orderRequestFor,
+  TICKET_QR_PATTERN,
 } from '../src/order.js';
 import { PII_COLUMNS, PII_KEYS } from '../src/pii.js';
 
@@ -28,6 +31,17 @@ const Q_OPTIONAL = '019a3b2c-0900-7abc-8def-000000000003';
 const OPT_1 = '019a3b2c-0a00-7abc-8def-000000000001';
 const OPT_2 = '019a3b2c-0a00-7abc-8def-000000000002';
 const FUNNEL = '5f0c6b8e-2a4d-4c1e-9b7a-3d2f1e0a9c8b';
+const TICKET = '019a3b2c-0b00-7abc-8def-000000000001';
+const SIG = 'q2dA3x_9-Lr4ZfKXJ0b1c2d3e4f5g6h7i8j9k0l1m2n';
+const QR = `t1.${TICKET}.${SIG}`;
+const ticket = (seq: number, count: number) => ({
+  id: TICKET,
+  seq,
+  count,
+  ticketTypeName: 'Đơn nam',
+  holderName: 'Nguyễn Văn An',
+  qr: QR,
+});
 
 const questions: FormQuestion[] = [
   { id: Q_TEXT, position: 0, label: 'Size áo', kind: 'text', required: true, options: [] },
@@ -195,7 +209,7 @@ describe('BuyerOrder và lỗi', () => {
     const order = {
       code: 'TK8F3Q2AXM',
       status: 'pending',
-      event: { slug: 'giai-chay-ab12', name: 'Giải chạy' },
+      event: { slug: 'giai-chay-ab12', name: 'Giải chạy', startsAt: '2026-11-16T07:00:00+07:00' },
       items: [{ ticketTypeId: A, name: 'Đơn nam', unitPrice: 300_000, quantity: 2, amount: 600_000 }],
       totalAmount: 600_000,
       buyer: { name: 'An', phone: '+84912345678', email: 'an@vidu.vn' },
@@ -204,8 +218,15 @@ describe('BuyerOrder và lỗi', () => {
       createdAt: '2026-11-10T08:00:00.000Z',
       expiresAt: '2026-11-10T08:01:00.000Z',
       serverNow: '2026-11-10T08:00:00.123Z',
+      tickets: [],
     };
     expect(BuyerOrder.parse(order)).toEqual(order);
+    const paid = { ...order, status: 'paid', tickets: [ticket(1, 2), ticket(2, 2)] };
+    expect(BuyerOrder.parse(paid)).toEqual(paid);
+    // Thiếu `tickets` hay `event.startsAt` (API cũ) → không nhận.
+    const { tickets: _tickets, ...noTickets } = order;
+    expect(BuyerOrder.safeParse(noTickets).success).toBe(false);
+    expect(BuyerOrder.safeParse({ ...order, event: { slug: 'giai-chay-ab12', name: 'Giải chạy' } }).success).toBe(false);
     expect(ORDER_STATUSES).toEqual(['pending', 'paid', 'expired', 'review', 'cancelled', 'refunded']);
   });
 
@@ -216,6 +237,7 @@ describe('BuyerOrder và lỗi', () => {
       'PENDING_ORDER_EXISTS',
       'ORDER_RATE_LIMITED',
       'ORDER_NOT_FOUND',
+      'FREE_TICKET_LIMIT_REACHED',
     ] as const) {
       expect(ErrorCode[code]).toBe(code);
     }
@@ -231,5 +253,35 @@ describe('BuyerOrder và lỗi', () => {
     expect(IdempotencyKey.safeParse('abc').success).toBe(false);
     expect(PII_COLUMNS.ordering).toEqual(['buyer_name', 'buyer_phone', 'buyer_email', 'answer']);
     for (const key of ['buyerName', 'buyerPhone', 'buyerEmail', 'answer']) expect(PII_KEYS).toContain(key);
+    expect(PII_COLUMNS.ticketing).toEqual(['holder_name']);
+    for (const key of ['holder_name', 'holderName']) expect(PII_KEYS).toContain(key);
+    expect(FREE_TICKET_LIMIT_MESSAGE).toBe('Bạn đã nhận đủ số Vé tối đa cho Sự kiện này.');
+  });
+});
+
+describe('Mã QR vé và BuyerTicket', () => {
+  it('t<k>.<ticketId>.<sig 43 ký tự base64url>; không nhận biến thể sai', () => {
+    expect(TICKET_QR_PATTERN.test(QR)).toBe(true);
+    expect(TICKET_QR_PATTERN.test(`t12.${TICKET}.${SIG}`)).toBe(true);
+    for (const bad of [
+      `t0.${TICKET}.${SIG}`,
+      `t01.${TICKET}.${SIG}`,
+      `v1.${TICKET}.${SIG}`,
+      `t1.${TICKET.toUpperCase()}.${SIG}`,
+      `t1.${TICKET}.${SIG}=`,
+      `t1.${TICKET}.${SIG.slice(1)}`,
+      `t1.${TICKET}.${SIG.slice(0, -1)}+`,
+      `t1.khong-phai-uuid.${SIG}`,
+      `t1.${TICKET}`,
+      ` ${QR}`,
+    ]) {
+      expect(TICKET_QR_PATTERN.test(bad), bad).toBe(false);
+    }
+  });
+
+  it('BuyerTicket: seq/count ≥ 1, qr đúng mẫu', () => {
+    expect(BuyerTicket.parse(ticket(1, 1))).toEqual(ticket(1, 1));
+    expect(BuyerTicket.safeParse({ ...ticket(1, 1), seq: 0 }).success).toBe(false);
+    expect(BuyerTicket.safeParse({ ...ticket(1, 1), qr: 'abc' }).success).toBe(false);
   });
 });

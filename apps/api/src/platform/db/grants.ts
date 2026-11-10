@@ -42,6 +42,22 @@ export const UPDATE_PROTECTED_COLUMNS: Readonly<Record<string, readonly string[]
     'funnel_id',
     'created_at',
   ],
+  // Vé (Story 3.3, AD-35): chủ thể và bản chụp lúc phát không đổi được. Ghi được: `status`, `cancel_reason`,
+  // `checked_in_at`, `qr_key_version`, `updated_at` (và cột thêm sau).
+  'public.tickets': [
+    'id',
+    'order_id',
+    'event_id',
+    'organization_id',
+    'user_id',
+    'ticket_type_id',
+    'seq',
+    'order_ticket_count',
+    'holder_name',
+    'ticket_type_name',
+    'order_code',
+    'issued_at',
+  ],
 };
 
 const quoteIdent = (name: string) => `"${name.replaceAll('"', '""')}"`;
