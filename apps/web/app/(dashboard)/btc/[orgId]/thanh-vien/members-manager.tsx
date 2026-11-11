@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ErrorCode,
+  formatVnDateTime,
   InviteAdminRequest,
   ORGANIZATION_INVITATION_DAILY_LIMIT,
   ORGANIZATION_INVITATION_TTL_DAYS,
@@ -40,15 +41,6 @@ import {
   transferOwnership,
 } from '@/lib/organizer/api';
 import { roleLabel } from '@/lib/organizer/nav';
-
-const EXPIRES_FORMAT = new Intl.DateTimeFormat('vi-VN', {
-  timeZone: 'Asia/Ho_Chi_Minh',
-  hour: '2-digit',
-  minute: '2-digit',
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-});
 
 /**
  * Form mời Admin bằng email. Xử lý kết quả đặt trên `useMutation` (không `mutateAsync`): session chưa qua lớp hai thì
@@ -457,7 +449,7 @@ function InvitationRow({
           <StatusBadge tone="warning">Đã hết hạn</StatusBadge>
         ) : (
           <span className="text-meta text-muted-foreground">
-            Hết hạn {EXPIRES_FORMAT.format(new Date(invitation.expiresAt))}
+            Hết hạn {formatVnDateTime(invitation.expiresAt)}
           </span>
         )}
       </div>

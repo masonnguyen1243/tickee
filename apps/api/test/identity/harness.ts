@@ -25,10 +25,15 @@ import { apiConfig, databaseUrl, LogCapture } from '../helpers.js';
 /** Transport giả: ghi lại email thay vì gửi SMTP (CI không có Mailpit). */
 export class FakeEmailTransport implements EmailTransport {
   readonly sent: EmailMessage[] = [];
+  /** Làm lỗi mọi địa chỉ. */
   failWith: Error | null = null;
+  /** Làm lỗi riêng từng địa chỉ (`to` → lỗi ném ra); địa chỉ khác vẫn gửi được. */
+  readonly failFor = new Map<string, Error>();
 
   async send(message: EmailMessage): Promise<void> {
     if (this.failWith) throw this.failWith;
+    const failure = this.failFor.get(message.to);
+    if (failure) throw failure;
     this.sent.push(message);
   }
 

@@ -1,7 +1,4 @@
-import type { EmailMessage } from '../../platform/email/index.js';
-
-const escapeHtml = (s: string): string =>
-  s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
+import { escapeHtml, type EmailMessage } from '../../platform/email/index.js';
 
 /**
  * Email chứa mã OTP đăng nhập (tiếng Việt). Mã chỉ nằm trong nội dung email, không bao giờ vào log.

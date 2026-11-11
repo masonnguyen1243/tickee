@@ -1,11 +1,10 @@
 import { Inject, Injectable, Logger, Module, type OnApplicationBootstrap } from '@nestjs/common';
 import { JobQueue, OrderStatus, PAYMENT_LINK_GRACE_SECONDS } from '@tickee/contracts';
 import { and, asc, eq, gte, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm';
-import { fromDrizzle, type JobResult, type PgBoss, type Queue, type WorkOptions } from 'pg-boss';
+import type { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
-import { BOSS } from '../../platform/jobs/index.js';
-import { dbErrorSummary, isDatabaseError } from '../../platform/logging/index.js';
+import { BOSS, defineQueue, JOB_COMPLETED, QueueProducer, registerQueueWorker } from '../../platform/jobs/index.js';
 import { releaseHeld } from './inventory.service.js';
 import { orderItems, orders } from './schema.js';
 
@@ -18,29 +17,25 @@ import { orderItems, orders } from './schema.js';
  * (job chưa chạy) trước TX1, trong transaction riêng.
  */
 
-const QUEUE = JobQueue.ORDERING_EXPIRE_ORDER;
-const DEAD_LETTER = JobQueue.ORDERING_EXPIRE_ORDER_DEAD_LETTER;
-
-/**
- * Retry khi chạy sớm (Đơn còn trong hạn) hay lỗi DB: 10 lần, chờ 5 giây rồi tăng gấp đôi (tối đa 5 phút). Hết lượt thì
- * pg-boss chép job sang dead-letter; quét định kỳ (Story 4.6) là lưới an toàn.
- */
-export const EXPIRE_ORDER_QUEUE_OPTIONS = {
-  retryLimit: 10,
-  retryDelay: 5,
-  retryBackoff: true,
-  retryDelayMax: 300,
-  deadLetter: DEAD_LETTER,
-} as const satisfies Omit<Queue, 'name'>;
-
-/** Lấy tối đa 20 job mỗi lần, lấy tiếp ngay khi lô đầy; mỗi job một transaction ngắn, chốt riêng. */
-const WORK_OPTIONS = { batchSize: 20, burstWhenBatchFull: true, perJobResults: true } as const satisfies WorkOptions;
-
 /**
  * Payload của job: id Đơn và cờ loại job (`linked`: (c) Đơn đã có link; thiếu → (a), như job enqueue trước Story 3.4).
  */
 export const ExpireOrderPayload = z.object({ orderId: z.uuid(), linked: z.boolean().default(false) });
 export type ExpireOrderPayload = z.infer<typeof ExpireOrderPayload>;
+
+/**
+ * Queue hết hạn Đơn. Retry khi chạy sớm (Đơn còn trong hạn) hay lỗi DB: 10 lần, chờ 5 giây rồi tăng gấp đôi (tối đa 5
+ * phút). Hết lượt thì pg-boss chép job sang dead-letter; quét định kỳ (Story 4.6) là lưới an toàn. Lấy tối đa 20 job mỗi
+ * lần, lấy tiếp ngay khi lô đầy; mỗi job một transaction ngắn, chốt riêng.
+ */
+export const EXPIRE_ORDER_QUEUE = defineQueue({
+  name: JobQueue.ORDERING_EXPIRE_ORDER,
+  deadLetter: JobQueue.ORDERING_EXPIRE_ORDER_DEAD_LETTER,
+  options: { retryLimit: 10, retryDelay: 5, retryBackoff: true, retryDelayMax: 300 },
+  work: { batchSize: 20, burstWhenBatchFull: true, perJobResults: true },
+  payload: ExpireOrderPayload,
+});
+export const EXPIRE_ORDER_QUEUE_OPTIONS = EXPIRE_ORDER_QUEUE.queueOptions;
 
 /** Loại hết hạn: (a) `hold` — Đơn chưa có link; (c) `link` — Đơn đã có link, quá hạn link + thời gian chừa. */
 export type ExpiryKind = 'hold' | 'link';
@@ -48,11 +43,7 @@ export type ExpiryKind = 'hold' | 'link';
 const kindOf = (linked: boolean): ExpiryKind => (linked ? 'link' : 'hold');
 
 /** Tạo queue hết hạn Đơn và dead-letter (gọi lại không sao); `updateQueue` áp lại cấu hình cho môi trường đã có queue. */
-export async function ensureOrderQueues(boss: PgBoss): Promise<void> {
-  await boss.createQueue(DEAD_LETTER);
-  await boss.createQueue(QUEUE, EXPIRE_ORDER_QUEUE_OPTIONS);
-  await boss.updateQueue(QUEUE, EXPIRE_ORDER_QUEUE_OPTIONS);
-}
+export const ensureOrderQueues = (boss: PgBoss): Promise<void> => EXPIRE_ORDER_QUEUE.ensure(boss);
 
 /**
  * Enqueue job hết hạn bằng chính `tx` của người gọi (`tx` rollback thì không có job), chạy từ `startAfter`: (a) từ TX1
@@ -66,9 +57,7 @@ export async function enqueueOrderExpiry(
   startAfter: Date,
   kind: ExpiryKind = 'hold',
 ): Promise<void> {
-  const payload: ExpireOrderPayload = { orderId, linked: kind === 'link' };
-  const jobId = await boss.send(QUEUE, payload, { db: fromDrizzle(tx, sql), startAfter });
-  if (!jobId) throw new Error(`pg-boss không tạo job ${QUEUE}`);
+  await EXPIRE_ORDER_QUEUE.enqueue(boss, tx, { orderId, linked: kind === 'link' }, { startAfter });
 }
 
 /** Hạn của Đơn theo loại: (a) `expires_at`; (c) `expires_at + PAYMENT_LINK_GRACE_SECONDS`. */
@@ -131,35 +120,17 @@ export async function expireOrder(db: Database, orderId: string, kind: ExpiryKin
 }
 
 /**
- * Vai `api`: start pg-boss (chế độ `producer`) và tạo queue ngay lúc khởi động, không chặn khởi động khi DB chưa sẵn
- * sàng. Trước TX1, `ready()` chờ việc đó xong (lần trước lỗi thì làm lại). Không đăng ký handler.
+ * Vai `api`: start pg-boss (producer) và tạo queue lúc khởi động; trước TX1, `ready()` chờ việc đó xong (lần trước lỗi
+ * thì làm lại). Không đăng ký handler.
  */
 @Injectable()
-export class OrderQueues implements OnApplicationBootstrap {
-  private readonly logger = new Logger('OrderQueues');
-  private pending: Promise<void> | null = null;
-
-  constructor(@Inject(BOSS) private readonly boss: PgBoss) {}
-
-  onApplicationBootstrap(): void {
-    this.ready().catch((err: unknown) =>
-      this.logger.warn({ err }, `Chưa tạo được queue ${QUEUE}; sẽ thử lại khi tạo Đơn`),
-    );
-  }
-
-  ready(): Promise<void> {
-    this.pending ??= (async () => {
-      await this.boss.start();
-      await ensureOrderQueues(this.boss);
-    })().catch((err: unknown) => {
-      this.pending = null;
-      throw err;
-    });
-    return this.pending;
+export class OrderQueues extends QueueProducer {
+  constructor(@Inject(BOSS) boss: PgBoss) {
+    super(boss, EXPIRE_ORDER_QUEUE, 'khi tạo Đơn');
   }
 }
 
-/** Vai `worker`: tạo queue và đăng ký handler hết hạn Đơn. */
+/** Vai `worker`: tạo queue và đăng ký handler hết hạn Đơn. Job chạy sớm (Đơn chưa tới hạn) → retry. */
 @Injectable()
 export class OrderExpiryWorker implements OnApplicationBootstrap {
   private readonly logger = new Logger('OrderExpiryWorker');
@@ -170,41 +141,18 @@ export class OrderExpiryWorker implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    await ensureOrderQueues(this.boss);
-    // `failed` → pg-boss retry theo cấu hình queue, hết lượt thì sang dead-letter. Payload hỏng thì retry vô ích: sang
-    // dead-letter ngay.
-    await this.boss.work<unknown>(QUEUE, WORK_OPTIONS, async (jobs) => {
-      const results: JobResult[] = [];
-      for (const job of jobs) {
-        const payload = ExpireOrderPayload.safeParse(job.data);
-        if (!payload.success) {
-          results.push({ id: job.id, status: 'deadletter', output: { error: 'Payload không hợp lệ' } });
-          continue;
-        }
-        const { orderId, linked } = payload.data;
+    await registerQueueWorker(this.boss, EXPIRE_ORDER_QUEUE, {
+      logger: this.logger,
+      label: 'Hết hạn Đơn',
+      logContext: ({ orderId }) => ({ orderId }),
+      handle: async ({ orderId, linked }, job) => {
         const kind = kindOf(linked);
-        try {
-          const result = await expireOrder(this.db, orderId, kind);
-          if (result === 'not_yet') {
-            results.push({ id: job.id, status: 'failed', output: { error: 'Đơn chưa tới hạn' } });
-            continue;
-          }
-          this.logger.log({ jobId: job.id, orderId, kind, result }, 'Xử lý job hết hạn Đơn');
-          results.push({ id: job.id, status: 'completed' });
-        } catch (err) {
-          // Lỗi DB chỉ ghi `{ type, code }` (job lưu `output` vào DB, log không được mang tham số truy vấn).
-          const error = isDatabaseError(err)
-            ? JSON.stringify(dbErrorSummary(err))
-            : err instanceof Error
-              ? err.message
-              : 'Lỗi không rõ';
-          this.logger.warn({ jobId: job.id, orderId, error }, 'Hết hạn Đơn thất bại; pg-boss sẽ thử lại');
-          results.push({ id: job.id, status: 'failed', output: { error } });
-        }
-      }
-      return results;
+        const result = await expireOrder(this.db, orderId, kind);
+        if (result === 'not_yet') return { status: 'retry', reason: 'Đơn chưa tới hạn' };
+        this.logger.log({ jobId: job.id, orderId, kind, result }, 'Xử lý job hết hạn Đơn');
+        return JOB_COMPLETED;
+      },
     });
-    this.logger.log(`Đã đăng ký job ${QUEUE}`);
   }
 }
 

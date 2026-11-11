@@ -1,17 +1,5 @@
-import { ORGANIZATION_INVITATION_TTL_DAYS } from '@tickee/contracts';
-import type { EmailMessage } from '../../platform/email/index.js';
-
-const escapeHtml = (s: string): string =>
-  s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
-
-const EXPIRES_FORMAT = new Intl.DateTimeFormat('vi-VN', {
-  timeZone: 'Asia/Ho_Chi_Minh',
-  hour: '2-digit',
-  minute: '2-digit',
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-});
+import { formatVnDateTime, ORGANIZATION_INVITATION_TTL_DAYS } from '@tickee/contracts';
+import { escapeHtml, type EmailMessage } from '../../platform/email/index.js';
 
 export interface AdminInvitationEmailInput {
   organizationName: string;
@@ -25,7 +13,7 @@ export function buildAdminInvitationEmail({ organizationName, link, expiresAt }:
   EmailMessage,
   'to'
 > {
-  const expires = `${EXPIRES_FORMAT.format(expiresAt)} (giờ Việt Nam)`;
+  const expires = `${formatVnDateTime(expiresAt)} (giờ Việt Nam)`;
   const name = escapeHtml(organizationName);
   const href = escapeHtml(link);
   return {

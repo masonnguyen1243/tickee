@@ -9,12 +9,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_PAYOUT_QUEUE_OPTIONS,
   DefaultPayoutChangedPayload,
+  defaultPayoutRecipients,
   DefaultPayoutQueues,
   enqueueDefaultPayoutChanged,
-  notifyDefaultPayoutChanged,
+  sendDefaultPayoutChangedEmail,
 } from '../../src/modules/organizer/payout-default-jobs.js';
 import { EMAIL_TRANSPORT } from '../../src/platform/email/index.js';
-import { BOSS } from '../../src/platform/jobs/index.js';
+import { BOSS, childJobId } from '../../src/platform/jobs/index.js';
 import { WorkerModule } from '../../src/worker.module.js';
 import { workerConfig } from '../helpers.js';
 import { createHarness, FakeEmailTransport, reauthToken, signUp, type Harness } from '../identity/harness.js';
@@ -22,8 +23,9 @@ import { createHarness, FakeEmailTransport, reauthToken, signUp, type Harness } 
 /*
  * Job `organizer.notify-default-payout-changed` (Story 2.13-a, 2.13-b): mỗi lần tài khoản nhận tiền mặc định đổi (kể
  * cả đổi key Tingee khi BTC đã hủy hết tài khoản: `previousAccountId` null), worker gửi email cảnh báo cho Owner và mọi
- * Admin của BTC (tên BTC, 4 số cuối cũ → mới, người đổi, giờ Việt Nam). Job enqueue bằng chính `tx` của thay đổi:
- * rollback thì không có job, không có email. Email đi qua transport giả.
+ * Admin của BTC (tên BTC, 4 số cuối cũ → mới, người đổi, giờ Việt Nam). Job gốc enqueue bằng chính `tx` của thay đổi
+ * (rollback thì không có job, không có email), chốt danh sách người nhận rồi tạo mỗi người một job con (E2-5); job con
+ * gửi đúng một email. Email đi qua transport giả.
  */
 
 const QUEUE = JobQueue.ORGANIZER_NOTIFY_DEFAULT_PAYOUT_CHANGED;
@@ -96,9 +98,25 @@ const payload = (overrides: Partial<DefaultPayoutChangedPayload> = {}): DefaultP
 const notifier = () => ({ db: h.db, email });
 const recipients = () => [owner.email, ...admins.map((a) => a.email)];
 
-describe('notifyDefaultPayoutChanged', () => {
+/** Như worker: job gốc tính người nhận, rồi mỗi người một job con (ở đây gọi tuần tự). */
+async function notifyAll(p: DefaultPayoutChangedPayload): Promise<number | 'skipped'> {
+  const userIds = await defaultPayoutRecipients(h.db, p);
+  if (userIds === 'skipped') return 'skipped';
+  let sent = 0;
+  for (const userId of userIds) {
+    if ((await sendDefaultPayoutChangedEmail(notifier(), p, userId)) === 'sent') sent += 1;
+  }
+  return sent;
+}
+
+describe('defaultPayoutRecipients (job gốc) và sendDefaultPayoutChangedEmail (job con)', () => {
+  it('người nhận theo thứ tự: Owner rồi mọi Admin (không ai khác); job gốc không gửi gì', async () => {
+    expect(await defaultPayoutRecipients(h.db, payload())).toEqual([owner.userId, ...admins.map((a) => a.userId)]);
+    expect(email.sent).toEqual([]);
+  });
+
   it('gửi Owner và mọi Admin (không ai khác): tên BTC, ••••cũ → ••••mới, người đổi, giờ Việt Nam, lời khuyên', async () => {
-    expect(await notifyDefaultPayoutChanged(notifier(), payload())).toBe(3);
+    expect(await notifyAll(payload())).toBe(3);
     expect(email.sent.map((m) => m.to)).toEqual(recipients());
     expect(email.sent.some((m) => m.to === outsider.email)).toBe(false);
 
@@ -123,14 +141,14 @@ describe('notifyDefaultPayoutChanged', () => {
     await h.db.orm.execute(
       sql`UPDATE payout_accounts SET retired_at = now(), is_default = false WHERE organization_id = ${orgId}`,
     );
-    expect(await notifyDefaultPayoutChanged(notifier(), payload({ nextAccountId: null }))).toBe(3);
+    expect(await notifyAll(payload({ nextAccountId: null }))).toBe(3);
     const [message] = email.sent;
     expect(message?.text).toContain('MB Bank ••••1111 → không còn tài khoản nhận tiền');
     expect(message?.text).toContain('BTC chưa bán được Vé có phí cho tới khi liên kết một tài khoản nhận tiền khác.');
   });
 
   it('đổi key Tingee khi BTC đã hủy hết (Story 2.13-b): "chưa có tài khoản nhận tiền → ACB ••••2222"', async () => {
-    expect(await notifyDefaultPayoutChanged(notifier(), payload({ previousAccountId: null }))).toBe(3);
+    expect(await notifyAll(payload({ previousAccountId: null }))).toBe(3);
     const [message] = email.sent;
     expect(message?.text).toContain('chưa có tài khoản nhận tiền → ACB ••••2222');
     expect(message?.text).toContain('Đơn mới sẽ nhận tiền vào ACB ••••2222.');
@@ -139,7 +157,7 @@ describe('notifyDefaultPayoutChanged', () => {
   });
 
   it('đổi key Tingee (reason tingee_key_replaced): tiêu đề và câu mở đầu nói key Tingee vừa đổi, mọi tài khoản cũ bị hủy liên kết; giữ dòng ••••cũ → ••••mới', async () => {
-    expect(await notifyDefaultPayoutChanged(notifier(), payload({ reason: 'tingee_key_replaced' }))).toBe(3);
+    expect(await notifyAll(payload({ reason: 'tingee_key_replaced' }))).toBe(3);
     expect(email.sent.map((m) => m.to)).toEqual(recipients());
     const [message] = email.sent;
     expect(message?.subject).toBe(`Key Tingee của ${orgName} vừa đổi`);
@@ -155,7 +173,7 @@ describe('notifyDefaultPayoutChanged', () => {
 
     // BTC đã hủy hết rồi mới đổi key: "chưa có tài khoản nhận tiền → …".
     email.sent.length = 0;
-    await notifyDefaultPayoutChanged(notifier(), payload({ reason: 'tingee_key_replaced', previousAccountId: null }));
+    await notifyAll(payload({ reason: 'tingee_key_replaced', previousAccountId: null }));
     expect(email.sent[0]?.text).toContain('chưa có tài khoản nhận tiền → ACB ••••2222');
   });
 
@@ -175,22 +193,33 @@ describe('notifyDefaultPayoutChanged', () => {
     ).toBe(false);
   });
 
-  it('BTC hay tài khoản không còn (hoặc của BTC khác) → skipped, không gửi gì', async () => {
-    expect(await notifyDefaultPayoutChanged(notifier(), payload({ organizationId: randomUUID() }))).toBe('skipped');
-    expect(await notifyDefaultPayoutChanged(notifier(), payload({ previousAccountId: randomUUID() }))).toBe('skipped');
-    expect(await notifyDefaultPayoutChanged(notifier(), payload({ nextAccountId: randomUUID() }))).toBe('skipped');
-    expect(
-      await notifyDefaultPayoutChanged(notifier(), payload({ previousAccountId: null, nextAccountId: randomUUID() })),
-    ).toBe('skipped');
+  it('BTC hay tài khoản không còn lúc job con chạy, hoặc người nhận không còn tài khoản → job con skipped', async () => {
+    expect(await sendDefaultPayoutChangedEmail(notifier(), payload({ organizationId: randomUUID() }), owner.userId)).toBe(
+      'skipped',
+    );
+    expect(await sendDefaultPayoutChangedEmail(notifier(), payload({ nextAccountId: randomUUID() }), owner.userId)).toBe(
+      'skipped',
+    );
+    expect(await sendDefaultPayoutChangedEmail(notifier(), payload(), randomUUID())).toBe('skipped');
     expect(email.sent).toEqual([]);
   });
 
-  it('SMTP lỗi → ném lỗi (pg-boss retry), lỗi không chứa địa chỉ email', async () => {
-    email.failWith = new Error(`SMTP từ chối ${owner.email}`);
-    const err = await notifyDefaultPayoutChanged(notifier(), payload()).catch((e: unknown) => e);
+  it('BTC hay tài khoản không còn (hoặc của BTC khác) → skipped, không gửi gì', async () => {
+    expect(await notifyAll(payload({ organizationId: randomUUID() }))).toBe('skipped');
+    expect(await notifyAll(payload({ previousAccountId: randomUUID() }))).toBe('skipped');
+    expect(await notifyAll(payload({ nextAccountId: randomUUID() }))).toBe('skipped');
+    expect(await notifyAll(payload({ previousAccountId: null, nextAccountId: randomUUID() }))).toBe('skipped');
+    expect(email.sent).toEqual([]);
+  });
+
+  it('SMTP lỗi → job con ném lỗi (pg-boss retry), lỗi chỉ có tên lớp, không chứa địa chỉ email', async () => {
+    email.failFor.set(owner.email, new Error(`SMTP từ chối ${owner.email}`));
+    const err = await sendDefaultPayoutChangedEmail(notifier(), payload(), owner.userId).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain('3/3');
-    expect((err as Error).message).not.toContain(owner.email);
+    expect((err as Error).message).toBe('Không gửi được email cảnh báo đổi tài khoản nhận tiền (Error)');
+    // Người khác vẫn gửi được.
+    expect(await sendDefaultPayoutChangedEmail(notifier(), payload(), admins[0]!.userId)).toBe('sent');
+    expect(email.sent.map((m) => m.to)).toEqual([admins[0]!.email]);
   });
 });
 
@@ -241,6 +270,13 @@ describe('worker', () => {
     await worker.close();
   });
 
+  /** Job gốc (không `recipientUserId`) và các job con của BTC hiện tại. */
+  async function jobsForOrg() {
+    const jobs = await worker.get<PgBoss>(BOSS).findJobs(QUEUE, { data: { organizationId: orgId } });
+    const isChild = (j: (typeof jobs)[number]) => (j.data as { recipientUserId?: string }).recipientUserId !== undefined;
+    return { roots: jobs.filter((j) => !isChild(j)), children: jobs.filter(isChild) };
+  }
+
   /** Email cảnh báo của BTC hiện tại mà worker đã gửi (worker có thể xử lý job của test khác trong DB dùng chung). */
   const sentForOrg = () =>
     workerEmail.sent.filter((m) => m.subject === `Tài khoản nhận tiền mặc định của ${orgName} vừa đổi`);
@@ -266,12 +302,19 @@ describe('worker', () => {
     expect(sentForOrg().some((m) => m.text.includes('ACB ••••2222'))).toBe(false);
 
     const boss = worker.get<PgBoss>(BOSS);
-    const [job] = await boss.findJobs(QUEUE, { data: { organizationId: orgId } });
-    expect(job?.data).toMatchObject({ previousAccountId: accounts.mb, nextAccountId: accounts.vcb, actorUserId: owner.userId });
-    await expect.poll(async () => (await boss.getJobById(QUEUE, job!.id))?.state, { timeout: 10_000 }).toBe('completed');
+    const { roots, children } = await jobsForOrg();
+    expect(roots).toHaveLength(1);
+    const root = roots[0]!;
+    expect(root.data).toMatchObject({ previousAccountId: accounts.mb, nextAccountId: accounts.vcb, actorUserId: owner.userId });
+    expect(children.map((j) => j.id).sort()).toEqual(
+      [owner, ...admins].map((u) => childJobId(root.id, u.userId)).sort(),
+    );
+    for (const job of [root, ...children]) {
+      await expect.poll(async () => (await boss.getJobById(QUEUE, job.id))?.state, { timeout: 10_000 }).toBe('completed');
+    }
   });
 
-  it('gửi email lỗi → job sang trạng thái retry (pg-boss thử lại), không mất cảnh báo', async () => {
+  it('gửi email lỗi → job gốc completed, mỗi job con sang retry (pg-boss thử lại), không mất cảnh báo', async () => {
     workerEmail.failWith = new Error(`SMTP tạm hỏng ${owner.email}`);
     try {
       const token = await reauthToken(h, owner);
@@ -281,14 +324,18 @@ describe('worker', () => {
         .set(REAUTH_HEADER, token)
         .expect(200);
       const boss = worker.get<PgBoss>(BOSS);
-      const [job] = await boss.findJobs(QUEUE, { data: { organizationId: orgId } });
-      expect(job).toBeDefined();
-      await expect
-        .poll(async () => (await boss.getJobById(QUEUE, job!.id))?.state, { timeout: 15_000, interval: 100 })
-        .toBe('retry');
+      await expect.poll(async () => (await jobsForOrg()).children.length, { timeout: 15_000, interval: 100 }).toBe(3);
+      const { roots, children } = await jobsForOrg();
+      expect(roots).toHaveLength(1);
+      await expect.poll(async () => (await boss.getJobById(QUEUE, roots[0]!.id))?.state, { timeout: 10_000 }).toBe('completed');
+      for (const child of children) {
+        await expect
+          .poll(async () => (await boss.getJobById(QUEUE, child.id))?.state, { timeout: 15_000, interval: 100 })
+          .toBe('retry');
+        // Lỗi lưu vào job chỉ có tên lớp lỗi, không có địa chỉ email.
+        expect(JSON.stringify((await boss.getJobById(QUEUE, child.id))?.output)).not.toContain(owner.email);
+      }
       expect(sentForOrg()).toEqual([]);
-      // Lỗi lưu vào job chỉ có tên lớp lỗi, không có địa chỉ email.
-      expect(JSON.stringify((await boss.getJobById(QUEUE, job!.id))?.output)).not.toContain(owner.email);
     } finally {
       workerEmail.failWith = null;
     }

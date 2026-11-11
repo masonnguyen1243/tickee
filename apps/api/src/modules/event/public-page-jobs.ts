@@ -1,17 +1,9 @@
-import {
-  Inject,
-  Injectable,
-  Logger,
-  Module,
-  type DynamicModule,
-  type OnApplicationBootstrap,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger, Module, type DynamicModule, type OnApplicationBootstrap } from '@nestjs/common';
 import { EVENT_SLUG_PATTERN, JobQueue, publicEventTag } from '@tickee/contracts';
-import { sql } from 'drizzle-orm';
-import { fromDrizzle, type JobResult, type PgBoss, type Queue, type WorkOptions } from 'pg-boss';
+import type { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 import type { Tx } from '../../platform/db/index.js';
-import { BOSS } from '../../platform/jobs/index.js';
+import { BOSS, defineQueue, JOB_COMPLETED, QueueProducer, registerQueueWorker } from '../../platform/jobs/index.js';
 
 /*
  * Revalidate ngay trang Sự kiện công khai `/e/{slug}` (Story 2.11-c, AD-37). Ghi làm đổi phần tĩnh của một Sự kiện đã
@@ -20,38 +12,33 @@ import { BOSS } from '../../platform/jobs/index.js';
  * retry thì bỏ (không có dead-letter), cache tự hết hạn.
  */
 
-const QUEUE = JobQueue.EVENT_REVALIDATE_PUBLIC_PAGE;
-
 /** Route nội bộ của web nhận lệnh revalidate (`apps/web/app/api/revalidate/route.ts`). */
 export const REVALIDATE_PATH = '/api/revalidate';
 /** Web không trả lời trong chừng này mili giây → coi như lỗi, job `failed` để retry. */
 export const REVALIDATE_TIMEOUT_MS = 5_000;
-
-/** Retry 3 lần, chờ 2 giây rồi tăng dần (backoff); hết lượt thì job `failed` hẳn, không có dead-letter. */
-export const PUBLIC_PAGE_QUEUE_OPTIONS = {
-  retryLimit: 3,
-  retryDelay: 2,
-  retryBackoff: true,
-} as const satisfies Omit<Queue, 'name'>;
-
-/**
- * Lấy tối đa 10 job mỗi lần, lấy tiếp ngay khi lô đầy; các job trong lô chạy song song (mỗi lời gọi tối đa 5 giây) và
- * được chốt riêng.
- */
-const WORK_OPTIONS = { batchSize: 10, burstWhenBatchFull: true, perJobResults: true } as const satisfies WorkOptions;
 
 /** Payload của job: chỉ slug của Sự kiện. */
 export const RevalidatePublicPagePayload = z.object({ slug: z.string().max(100).regex(EVENT_SLUG_PATTERN) });
 export type RevalidatePublicPagePayload = z.infer<typeof RevalidatePublicPagePayload>;
 
 /**
- * Tạo queue revalidate (gọi lại không sao). Cả vai `api` (gửi job) lẫn `worker` (xử lý) gọi lúc khởi động: `boss.send`
- * ném lỗi khi queue chưa tồn tại. `updateQueue` áp lại `PUBLIC_PAGE_QUEUE_OPTIONS` cho môi trường đã có queue.
+ * Queue revalidate. Retry 3 lần, chờ 2 giây rồi tăng dần (backoff); hết lượt thì job `failed` hẳn, không có dead-letter.
+ * Lấy tối đa 10 job mỗi lần, lấy tiếp ngay khi lô đầy; các job trong lô chạy song song (mỗi lời gọi tối đa 5 giây) và
+ * được chốt riêng.
  */
-export async function ensurePublicPageQueues(boss: PgBoss): Promise<void> {
-  await boss.createQueue(QUEUE, PUBLIC_PAGE_QUEUE_OPTIONS);
-  await boss.updateQueue(QUEUE, PUBLIC_PAGE_QUEUE_OPTIONS);
-}
+export const PUBLIC_PAGE_QUEUE = defineQueue({
+  name: JobQueue.EVENT_REVALIDATE_PUBLIC_PAGE,
+  options: { retryLimit: 3, retryDelay: 2, retryBackoff: true },
+  work: { batchSize: 10, burstWhenBatchFull: true, perJobResults: true },
+  payload: RevalidatePublicPagePayload,
+});
+export const PUBLIC_PAGE_QUEUE_OPTIONS = PUBLIC_PAGE_QUEUE.queueOptions;
+
+/**
+ * Tạo queue revalidate (gọi lại không sao). Cả vai `api` (gửi job) lẫn `worker` (xử lý) gọi lúc khởi động: `boss.send`
+ * ném lỗi khi queue chưa tồn tại.
+ */
+export const ensurePublicPageQueues = (boss: PgBoss): Promise<void> => PUBLIC_PAGE_QUEUE.ensure(boss);
 
 /**
  * Enqueue revalidate trang `/e/{slug}` bằng chính `tx` của thay đổi: `tx` rollback thì không có job. Người gọi chỉ gọi
@@ -59,9 +46,7 @@ export async function ensurePublicPageQueues(boss: PgBoss): Promise<void> {
  * Ẩn/Kết thúc (2.12) và hủy/khóa Sự kiện (Epic 7).
  */
 export async function enqueuePublicPageRevalidation(boss: PgBoss, tx: Tx, slug: string): Promise<void> {
-  const payload: RevalidatePublicPagePayload = { slug };
-  const jobId = await boss.send(QUEUE, payload, { db: fromDrizzle(tx, sql) });
-  if (!jobId) throw new Error(`pg-boss không tạo job ${QUEUE}`);
+  await PUBLIC_PAGE_QUEUE.enqueue(boss, tx, { slug });
 }
 
 export interface PublicPageRevalidator {
@@ -105,31 +90,13 @@ export async function revalidatePublicPage(revalidator: PublicPageRevalidator, s
 }
 
 /**
- * Vai `api`: start pg-boss (chế độ `producer`) và tạo queue ngay lúc khởi động, không chặn khởi động khi DB chưa sẵn
- * sàng. Trước transaction có thể enqueue, `ready()` chờ việc đó xong (lần trước lỗi thì làm lại). Không đăng ký handler.
+ * Vai `api`: start pg-boss (producer) và tạo queue lúc khởi động; `ready()` chờ việc đó trước transaction có thể enqueue
+ * (lần trước lỗi thì làm lại). Không đăng ký handler.
  */
 @Injectable()
-export class PublicPageQueues implements OnApplicationBootstrap {
-  private readonly logger = new Logger('PublicPageQueues');
-  private pending: Promise<void> | null = null;
-
-  constructor(@Inject(BOSS) private readonly boss: PgBoss) {}
-
-  onApplicationBootstrap(): void {
-    this.ready().catch((err: unknown) =>
-      this.logger.warn({ err }, `Chưa tạo được queue ${QUEUE}; sẽ thử lại khi BTC sửa Sự kiện`),
-    );
-  }
-
-  ready(): Promise<void> {
-    this.pending ??= (async () => {
-      await this.boss.start();
-      await ensurePublicPageQueues(this.boss);
-    })().catch((err: unknown) => {
-      this.pending = null;
-      throw err;
-    });
-    return this.pending;
+export class PublicPageQueues extends QueueProducer {
+  constructor(@Inject(BOSS) boss: PgBoss) {
+    super(boss, PUBLIC_PAGE_QUEUE, 'khi BTC sửa Sự kiện');
   }
 }
 
@@ -151,37 +118,24 @@ export class PublicPageWorker implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    await ensurePublicPageQueues(this.boss);
     const revalidator: PublicPageRevalidator = {
       webOrigin: this.config.WEB_ORIGIN,
       secret: this.config.REVALIDATE_SECRET,
       fetch: (input, init) => fetch(input, init),
     };
-    // `failed` → pg-boss retry theo cấu hình queue. Payload hỏng thì retry vô ích: `deadletter` (queue không có
-    // dead-letter nên job hỏng hẳn ngay). Cùng slug trong một lô chỉ gọi web một lần.
-    await this.boss.work<unknown>(QUEUE, WORK_OPTIONS, async (jobs) => {
-      const calls = new Map<string, Promise<string | null>>();
-      return Promise.all(
-        jobs.map(async (job): Promise<JobResult> => {
-          const payload = RevalidatePublicPagePayload.safeParse(job.data);
-          if (!payload.success) return { id: job.id, status: 'deadletter', output: { error: 'Payload không hợp lệ' } };
-          const { slug } = payload.data;
-          let call = calls.get(slug);
-          if (!call) {
-            call = revalidatePublicPage(revalidator, slug).then(
-              () => null,
-              (err: unknown) => (err instanceof Error ? err.message : 'Lỗi không rõ'),
-            );
-            calls.set(slug, call);
-          }
-          const error = await call;
-          if (error === null) return { id: job.id, status: 'completed' };
-          this.logger.warn({ jobId: job.id, slug, error }, 'Revalidate trang Sự kiện công khai thất bại; pg-boss sẽ thử lại');
-          return { id: job.id, status: 'failed', output: { error } };
-        }),
-      );
+    // Payload hỏng: `deadletter` (queue không có dead-letter nên job hỏng hẳn ngay). Cùng slug trong một lô chỉ gọi web
+    // một lần.
+    await registerQueueWorker(this.boss, PUBLIC_PAGE_QUEUE, {
+      logger: this.logger,
+      label: 'Revalidate trang Sự kiện công khai',
+      logContext: ({ slug }) => ({ slug }),
+      parallel: true,
+      dedupeBy: ({ slug }) => slug,
+      handle: async ({ slug }) => {
+        await revalidatePublicPage(revalidator, slug);
+        return JOB_COMPLETED;
+      },
     });
-    this.logger.log(`Đã đăng ký job ${QUEUE}`);
   }
 }
 

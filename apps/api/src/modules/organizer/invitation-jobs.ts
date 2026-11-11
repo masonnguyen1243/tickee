@@ -1,68 +1,48 @@
-import {
-  Inject,
-  Injectable,
-  Logger,
-  Module,
-  type DynamicModule,
-  type OnApplicationBootstrap,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger, Module, type DynamicModule, type OnApplicationBootstrap } from '@nestjs/common';
 import { JobQueue, ORGANIZATION_INVITATION_PATH } from '@tickee/contracts';
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
-import { fromDrizzle, type JobResult, type PgBoss, type Queue, type WorkOptions } from 'pg-boss';
+import type { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
 import { EMAIL_TRANSPORT, type EmailTransport } from '../../platform/email/index.js';
-import { BOSS } from '../../platform/jobs/index.js';
+import { BOSS, defineQueue, JOB_COMPLETED, QueueProducer, registerQueueWorker } from '../../platform/jobs/index.js';
 import { buildAdminInvitationEmail } from './invitation-email.js';
 import { generateInvitationToken, hashInvitationToken } from './invitation-token.js';
 import { OwnershipTransferWorker } from './ownership-transfer-jobs.js';
 import { DefaultPayoutWorker } from './payout-default-jobs.js';
 import { organizationInvitations, organizations } from './schema.js';
 
-const QUEUE = JobQueue.ORGANIZER_SEND_ADMIN_INVITATION;
-const DEAD_LETTER = JobQueue.ORGANIZER_SEND_ADMIN_INVITATION_DEAD_LETTER;
-
-/**
- * Retry khi gửi lỗi (SMTP chập chờn): 8 lần, chờ 30 giây rồi tăng gấp đôi (tối đa 1 giờ) — vài giờ trước khi bỏ cuộc,
- * còn xa hạn 7 ngày của lời mời. Hết lượt thì pg-boss chép job sang dead-letter (cảnh báo dead-letter là Story 4.6).
- */
-export const ADMIN_INVITATION_QUEUE_OPTIONS = {
-  retryLimit: 8,
-  retryDelay: 30,
-  retryBackoff: true,
-  retryDelayMax: 3600,
-  deadLetter: DEAD_LETTER,
-} as const satisfies Omit<Queue, 'name'>;
-
-/**
- * Lấy tối đa 10 job mỗi lần và lấy tiếp ngay khi lô đầy (dồn job thì xả nhanh, không chờ chu kỳ poll 2 giây cho từng
- * job); mỗi job được chốt riêng nên một email lỗi không làm hỏng cả lô.
- */
-const WORK_OPTIONS = { batchSize: 10, burstWhenBatchFull: true, perJobResults: true } as const satisfies WorkOptions;
-
 /** Payload của job: chỉ id lời mời — không email, không token. */
 export const SendAdminInvitationPayload = z.object({ invitationId: z.uuid() });
 export type SendAdminInvitationPayload = z.infer<typeof SendAdminInvitationPayload>;
 
 /**
- * Tạo queue gửi lời mời và dead-letter của nó (gọi lại không sao). Cả vai `api` (gửi job) lẫn `worker` (xử lý) gọi lúc
- * khởi động: `boss.send` ném lỗi khi queue hoặc dead-letter chưa tồn tại. `createQueue` bỏ qua queue đã có (không đổi
- * cấu hình), nên `updateQueue` áp lại `ADMIN_INVITATION_QUEUE_OPTIONS` cho môi trường đã có queue.
+ * Queue gửi email mời Admin. Retry khi gửi lỗi (SMTP chập chờn): 8 lần, chờ 30 giây rồi tăng gấp đôi (tối đa 1 giờ) —
+ * vài giờ trước khi bỏ cuộc, còn xa hạn 7 ngày của lời mời. Hết lượt thì pg-boss chép job sang dead-letter (cảnh báo
+ * dead-letter là Story 4.6). Lấy tối đa 10 job mỗi lần và lấy tiếp ngay khi lô đầy (dồn job thì xả nhanh, không chờ chu
+ * kỳ poll 2 giây cho từng job); mỗi job được chốt riêng nên một email lỗi không làm hỏng cả lô.
  */
-export async function ensureAdminInvitationQueues(boss: PgBoss): Promise<void> {
-  await boss.createQueue(DEAD_LETTER);
-  await boss.createQueue(QUEUE, ADMIN_INVITATION_QUEUE_OPTIONS);
-  await boss.updateQueue(QUEUE, ADMIN_INVITATION_QUEUE_OPTIONS);
-}
+export const ADMIN_INVITATION_QUEUE = defineQueue({
+  name: JobQueue.ORGANIZER_SEND_ADMIN_INVITATION,
+  deadLetter: JobQueue.ORGANIZER_SEND_ADMIN_INVITATION_DEAD_LETTER,
+  options: { retryLimit: 8, retryDelay: 30, retryBackoff: true, retryDelayMax: 3600 },
+  work: { batchSize: 10, burstWhenBatchFull: true, perJobResults: true },
+  payload: SendAdminInvitationPayload,
+});
+export const ADMIN_INVITATION_QUEUE_OPTIONS = ADMIN_INVITATION_QUEUE.queueOptions;
+
+/**
+ * Tạo queue gửi lời mời và dead-letter của nó (gọi lại không sao). Cả vai `api` (gửi job) lẫn `worker` (xử lý) gọi lúc
+ * khởi động.
+ */
+export const ensureAdminInvitationQueues = (boss: PgBoss): Promise<void> => ADMIN_INVITATION_QUEUE.ensure(boss);
 
 /**
  * Enqueue job gửi email mời bằng chính `tx` tạo lời mời: `tx` rollback thì không có job; commit thì job chắc chắn có.
  * Email không bao giờ được gửi trong transaction.
  */
 export async function enqueueAdminInvitation(boss: PgBoss, tx: Tx, invitationId: string): Promise<void> {
-  const payload: SendAdminInvitationPayload = { invitationId };
-  const jobId = await boss.send(QUEUE, payload, { db: fromDrizzle(tx, sql) });
-  if (!jobId) throw new Error(`pg-boss không tạo job ${QUEUE}`);
+  await ADMIN_INVITATION_QUEUE.enqueue(boss, tx, { invitationId });
 }
 
 export interface AdminInvitationSender {
@@ -123,29 +103,13 @@ export async function sendAdminInvitation(sender: AdminInvitationSender, invitat
 }
 
 /**
- * Vai `api`: start pg-boss (chế độ `producer`) và tạo queue ngay lúc khởi động, không chặn khởi động khi DB chưa sẵn
- * sàng. Trước khi enqueue, `ready()` chờ việc đó xong (lần trước lỗi thì làm lại). Không đăng ký handler.
+ * Vai `api`: start pg-boss (producer) và tạo queue lúc khởi động; `ready()` chờ việc đó trước khi enqueue (lần trước lỗi
+ * thì làm lại). Không đăng ký handler.
  */
 @Injectable()
-export class AdminInvitationQueues implements OnApplicationBootstrap {
-  private readonly logger = new Logger('AdminInvitationQueues');
-  private pending: Promise<void> | null = null;
-
-  constructor(@Inject(BOSS) private readonly boss: PgBoss) {}
-
-  onApplicationBootstrap(): void {
-    this.ready().catch((err: unknown) => this.logger.warn({ err }, `Chưa tạo được queue ${QUEUE}; sẽ thử lại khi mời`));
-  }
-
-  ready(): Promise<void> {
-    this.pending ??= (async () => {
-      await this.boss.start();
-      await ensureAdminInvitationQueues(this.boss);
-    })().catch((err: unknown) => {
-      this.pending = null;
-      throw err;
-    });
-    return this.pending;
+export class AdminInvitationQueues extends QueueProducer {
+  constructor(@Inject(BOSS) boss: PgBoss) {
+    super(boss, ADMIN_INVITATION_QUEUE, 'khi mời');
   }
 }
 
@@ -168,37 +132,22 @@ export class AdminInvitationWorker implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    await ensureAdminInvitationQueues(this.boss);
     const sender: AdminInvitationSender = { db: this.db, email: this.email, webOrigin: this.config.WEB_ORIGIN };
-    // `failed` → pg-boss retry theo cấu hình queue, hết lượt thì sang dead-letter. Payload hỏng thì retry vô ích:
-    // sang dead-letter ngay.
-    await this.boss.work<unknown>(QUEUE, WORK_OPTIONS, async (jobs) => {
-      const results: JobResult[] = [];
-      for (const job of jobs) {
-        const payload = SendAdminInvitationPayload.safeParse(job.data);
-        if (!payload.success) {
-          results.push({ id: job.id, status: 'deadletter', output: { error: 'Payload không hợp lệ' } });
-          continue;
+    await registerQueueWorker(this.boss, ADMIN_INVITATION_QUEUE, {
+      logger: this.logger,
+      label: 'Gửi email mời Admin',
+      logContext: ({ invitationId }) => ({ invitationId }),
+      handle: async ({ invitationId }, job) => {
+        if ((await sendAdminInvitation(sender, invitationId)) === 'skipped') {
+          // Chỉ id (không email): lần theo khi có người báo "không nhận được email".
+          this.logger.log(
+            { jobId: job.id, invitationId },
+            'Bỏ qua job gửi lời mời: đã gửi, đã thu hồi, đã nhận, hết hạn hoặc không còn',
+          );
         }
-        const { invitationId } = payload.data;
-        try {
-          if ((await sendAdminInvitation(sender, invitationId)) === 'skipped') {
-            // Chỉ id (không email): lần theo khi có người báo "không nhận được email".
-            this.logger.log(
-              { jobId: job.id, invitationId },
-              'Bỏ qua job gửi lời mời: đã gửi, đã thu hồi, đã nhận, hết hạn hoặc không còn',
-            );
-          }
-          results.push({ id: job.id, status: 'completed' });
-        } catch (err) {
-          const error = err instanceof Error ? err.message : 'Lỗi không rõ';
-          this.logger.warn({ jobId: job.id, invitationId, error }, 'Gửi email mời Admin thất bại; pg-boss sẽ thử lại');
-          results.push({ id: job.id, status: 'failed', output: { error } });
-        }
-      }
-      return results;
+        return JOB_COMPLETED;
+      },
     });
-    this.logger.log(`Đã đăng ký job ${QUEUE}`);
   }
 }
 
