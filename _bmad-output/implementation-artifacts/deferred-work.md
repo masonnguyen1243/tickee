@@ -409,3 +409,12 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-5-nhan-ipn-va-phat-ve-dung-mot-lan.md`
   summary: IPN có `status` khác chữ thường hay đánh vần khác (`SUCCESS`, `Success`, `cancelled`) bị coi là trạng thái lạ: chỉ lưu, không phát Vé, không hết hạn Đơn; IPN trạng thái cho Đơn của BTC khác hay Đơn không còn `pending` chỉ log mức info (`stored`).
   evidence: Review 3.5 vòng 1 #14 (BH, EC; maybe-false, nếu đúng là medium). Tài liệu Tingee chỉ ghi `success`/`expired`/`canceled` chữ thường. Cách chốt: lấy IPN thật từ Tingee UAT (test hợp đồng, Story 4.7, hoặc thử tay) và xem `status` đúng chữ nào; nếu khác thì chuẩn hóa `trim().toLowerCase()` và nhận cả `cancelled`.
+
+## Deferred from: build of spec-3-6-ipn-cho-cac-truong-hop-bien.md (2026-11-11)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-6-ipn-cho-cac-truong-hop-bien.md`
+  summary: Story 4.6. Nối kênh cảnh báo vận hành thật cho tiền về không khớp Đơn nào của BTC (`unmatched`: mã đúng định dạng mà không có Đơn, hoặc Đơn thuộc BTC khác). Hiện chỉ có log mức `error` kèm trường `alert: 'payment_unmatched'` (hằng `PAYMENT_UNMATCHED_ALERT` của `payment`) và mục Cần xử lý `unmatched`.
+  evidence: `apps/api/src/modules/payment/ipn-processor.ts` (`process`, nhánh `order_not_found`/`other_organization`). Test ghim marker ở `apps/api/test/payment/ipn-edge.test.ts` ("Matrix: không khớp Đơn của BTC"). 4.6 nên bắt theo marker này (hoặc thay log bằng lời gọi kênh cảnh báo) để không ai phải đọc log mới biết tiền đã về.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-6-ipn-cho-cac-truong-hop-bien.md`
+  summary: Story 3.8. Email báo Người mua khi tiền về muộn cho Đơn đã hết hạn mà không phát được Vé (mục `orphan`, lý do `sold_out`): "BTC đã nhận tiền nhưng Hạng vé đã hết, BTC sẽ liên hệ hoàn tiền". Enqueue bằng chính `tx` của IPN, cùng hàng đợi email Người mua mà 3.8 dựng.
+  evidence: Mason chốt 11/11 khi lập spec 3.6: 3.6 chỉ tạo mục `orphan`, không thêm hàng đợi hay mẫu email; lệch có chủ đích so với câu "enqueue email báo Người mua" trong AC 3.6 của epics. Chỗ gắn: `ordering/mark-paid.ts` (`settleIpn`, nhánh `sold_out`) hoặc `payment/ipn-processor.ts` (sau `openReviewItem` loại `orphan`).

@@ -12,8 +12,10 @@ export {
   IPN_EXPIRING_STATUSES,
   IPN_SUCCESS_STATUS,
   IpnProcessor,
+  PAYMENT_UNMATCHED_ALERT,
   TingeeIpn,
   type IpnBranch,
   type IpnOutcome,
+  type IpnReviewItem,
 } from './ipn-processor.js';
 export { PaymentModule, PaymentProcessingModule, type PaymentConfig } from './payment.module.js';

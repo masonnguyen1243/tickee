@@ -4,8 +4,8 @@ import type { Harness } from '../identity/harness.js';
 import type { SignedIpn } from '../tingee-fake/server.js';
 
 /*
- * Dùng chung cho test IPN (Story 3.5): gửi IPN đã ký tới api đúng byte đã ký, đọc lại `payment_events`, và kiểm bất biến
- * tồn kho – Vé sau mỗi nhánh.
+ * Dùng chung cho test IPN (Story 3.5, 3.6): gửi IPN đã ký tới api đúng byte đã ký, đọc lại `payment_events` và
+ * `review_items`, và kiểm bất biến tồn kho – Vé sau mỗi nhánh.
  */
 
 export const ipnPath = (ipnKey: string) => `${TINGEE_IPN_PATH}/${ipnKey}`;
@@ -44,6 +44,34 @@ export async function paymentEventsOf(h: Harness, organizationId: string, provid
       WHERE organization_id = $1 AND ($2::text IS NULL OR provider_order_id = $2)
       ORDER BY received_at, id`,
     [organizationId, providerOrderId ?? null],
+  );
+  return rows;
+}
+
+export interface ReviewItemRow {
+  id: string;
+  organization_id: string;
+  order_id: string | null;
+  payment_event_id: string;
+  type: string;
+  reason: string | null;
+  status: string;
+  resolution: string | null;
+  created_at: Date;
+}
+
+/** `review_items` theo thứ tự tạo, lọc theo Đơn (`orderId`) hoặc theo khoản tiền (`paymentEventId`). */
+export async function reviewItemsOf(
+  h: Harness,
+  filter: { orderId?: string; paymentEventId?: string; organizationId?: string },
+): Promise<ReviewItemRow[]> {
+  const { rows } = await h.db.pool.query<ReviewItemRow>(
+    `SELECT * FROM review_items
+      WHERE ($1::uuid IS NULL OR order_id = $1)
+        AND ($2::uuid IS NULL OR payment_event_id = $2)
+        AND ($3::uuid IS NULL OR organization_id = $3)
+      ORDER BY created_at, id`,
+    [filter.orderId ?? null, filter.paymentEventId ?? null, filter.organizationId ?? null],
   );
   return rows;
 }

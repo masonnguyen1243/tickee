@@ -229,8 +229,8 @@ describe('markPaid đúng một lần', () => {
     const { orderId } = await pendingFreeOrder(buyer, sale.event.id, sale.tiers[0]!.id, 2);
     const db = h.app.get<Database>(DATABASE);
     const payments = h.app.get(OrderPayments);
-    expect(await db.transaction((tx) => payments.markPaid(tx, orderId, 'free', 0))).toBe('paid');
-    expect(await db.transaction((tx) => payments.markPaid(tx, orderId, 'free', 0))).toBe('lost_race');
+    expect(await db.transaction((tx) => payments.markPaid(tx, orderId, 'free', 0))).toEqual({ outcome: 'paid' });
+    expect(await db.transaction((tx) => payments.markPaid(tx, orderId, 'free', 0))).toEqual({ outcome: 'lost_race' });
     expect((await ticketsOfEvent(sale.event.id)).map((t) => t.seq)).toEqual([1, 2]);
   });
 
@@ -244,7 +244,7 @@ describe('markPaid đúng một lần', () => {
       db.transaction((tx) => payments.markPaid(tx, orderId, 'free', 0)),
       db.transaction((tx) => payments.markPaid(tx, orderId, 'free', 0)),
     ]);
-    expect([...results].sort()).toEqual(['lost_race', 'paid']);
+    expect(results.map((r) => r.outcome).sort()).toEqual(['lost_race', 'paid']);
     expect((await ticketsOfEvent(sale.event.id)).map((t) => t.seq)).toEqual([1, 2, 3]);
     const audits = await h.db.pool.query("SELECT 1 FROM audit_events WHERE action = 'order.paid' AND target_id = $1", [
       orderId,
@@ -259,7 +259,7 @@ describe('markPaid đúng một lần', () => {
     await h.db.pool.query("UPDATE orders SET status = 'expired' WHERE id = $1", [orderId]);
     const db = h.app.get<Database>(DATABASE);
     const payments = h.app.get(OrderPayments);
-    expect(await db.transaction((tx) => payments.markPaid(tx, orderId, 'free', 0))).toBe('lost_race');
+    expect(await db.transaction((tx) => payments.markPaid(tx, orderId, 'free', 0))).toEqual({ outcome: 'lost_race' });
     expect(await ticketsOfEvent(sale.event.id)).toEqual([]);
     for (const source of ['reconciliation', 'manual'] as const) {
       await expect(db.transaction((tx) => payments.markPaid(tx, orderId, source, 0))).rejects.toThrow(/chưa hỗ trợ/);
