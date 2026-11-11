@@ -304,6 +304,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-14-chuyen-quyen-owner.md`
   summary: Job email gửi nhiều người (báo chuyển quyền Owner, cảnh báo đổi tài khoản nhận tiền mặc định) gửi lại cho mọi người mỗi lần retry khi chỉ một địa chỉ lỗi.
   evidence: `notifyOwnershipTransferred` và `notifyDefaultPayoutChanged` ném lỗi khi có một email lỗi, pg-boss retry tới 8 lần và gửi lại cả danh sách; cần nhật ký đã gửi theo job hoặc tách job theo người nhận.
+- Đã xử lý (11/11/2026): mục trên được giải quyết bằng `_bmad-output/implementation-artifacts/spec-epic-2-e2-5-refactor-api.md`, theo hướng tách job theo người nhận (không làm nhật ký đã gửi, không migration). Job gốc chốt danh sách người nhận rồi tạo mỗi người một job con trong cùng queue (`fanOut`, id con suy cố định từ id gốc và `userId`, nên job gốc chạy lại không nhân đôi con); job con gửi đúng một email, SMTP lỗi thì chỉ job con đó retry. Job enqueue trước khi deploy (không có `recipientUserId`) được xử lý như job gốc.
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-1-xac-nhan-lai-khi-bat-2fa.md`
   summary: Chưa có đường khôi phục khi 2FA bị người khác bật trên tài khoản (chủ thật kẹt ở bước step-up, không có "Đặt lại TOTP" hay quy trình hỗ trợ).
@@ -326,6 +327,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: none
   summary: E2-5 phần API — helper queue/worker chung cho pg-boss (gom khung 4 file `*-jobs.ts`, sửa lỗi gửi lại email cho mọi người nhận khi retry), `escapeHtml` vào `platform/email`, formatter ngày giờ `Asia/Ho_Chi_Minh` chung trong contracts, bỏ phần `MESSAGES` không dùng trong `error.filter.ts`.
   evidence: Tách khỏi E2-5 (retro Epic 2 mục D2) theo quyết định của Mason ngày 09/11/2026: phần Web làm trước để gỡ chặn Story 3.1; phần API phải xong trước story Epic 3 đầu tiên thêm queue mới (3.5 / 3.8).
+- Đã xử lý (11/11/2026): mục trên được giải quyết bằng `_bmad-output/implementation-artifacts/spec-epic-2-e2-5-refactor-api.md`. Năm file `*-jobs.ts` dùng khung chung ở `platform/jobs/queue.ts` (`defineQueue`, `QueueProducer`, `registerQueueWorker`, `jobErrorMessage`, `fanOut`); `escapeHtml` ở `platform/email/escape-html.ts`; `formatVnDateTime` / `formatVnDate` trong `packages/contracts/src/event.ts` thay 4 chỗ tự tạo `Intl.DateTimeFormat` (api và web); `MESSAGES` của `error.filter.ts` chỉ còn 5 mã `codeForStatus` trả. `identity-janitor.ts` (job lịch cron) giữ khung riêng theo spec.
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-5-refactor-web.md`
   summary: Đăng xuất từ menu tài khoản (`components/tickee/account-menu.tsx`) thất bại thì không báo gì, người dùng tưởng đã đăng xuất.
@@ -386,3 +388,12 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-4-tao-link-thanh-toan-gateway-va-man-thanh-toan.md`
   summary: Story 4.2. BTC chưa được báo khi `create-link` bị Tingee từ chối vì cấu hình sai: key thiếu quyền "Cổng thanh toán" (`1133`), VA chưa được cho phép trên portal Gateway (`2023`), VA lỗi (`1023`/`1045`/`1024`/`1072`). Banner Owner của `payment_service_status` phải kèm câu nhắc cấp quyền hoặc cho phép VA tương ứng.
   evidence: Mason chốt 10/11 khi lập spec 3.4: 3.4 chỉ log cảnh báo (`organizationId`, mã Đơn, mã Tingee); Người mua thấy "Sự kiện tạm ngừng bán". Mục này đóng phần còn lại của deferred 2.6 ("Story 3.4 cần báo `TINGEE_CREDENTIAL_INVALID` kèm câu nhắc cấp quyền").
+
+## Deferred from: code review of spec-epic-2-e2-5-refactor-api.md (2026-11-11)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-5-refactor-api.md`
+  summary: `errorName` (lấy tên lớp lỗi để lỗi lưu vào job không chứa PII) vẫn bị chép y hệt ở `organizer/ownership-transfer-jobs.ts` và `organizer/payout-default-jobs.ts`, có thêm bản inline trong `invitation-jobs.ts`. Phần tra tên BTC cũng lặp (`organizationName()` và truy vấn trong `loadChange()`). Nên gom `errorName` vào `platform/jobs` cạnh `jobErrorMessage`.
+  evidence: Review E2-5 API #11 (BH). Phần lặp này có từ trước baseline `4cb9ff3`, không do E2-5 gây ra. Gom khi story kế tiếp thêm job email (3.8 email Vé) để nơi chặn PII chỉ còn một chỗ.
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-5-refactor-api.md`
+  summary: Chưa có test worker kiểm `PublicPageWorker` gộp theo slug (`dedupeBy`) và chạy song song (`parallel`): hai job cùng slug trong một lô phải chỉ gọi web một lần, và cả hai job đều `completed`.
+  evidence: Review E2-5 API #19 (VG). Helper đã có unit test cho `parallel` và `dedupeBy` (`test/platform/jobs-queue.test.ts`), nhưng test của public-page chỉ gửi một job mỗi slug. Nếu bỏ hai option này khỏi `public-page-jobs.ts`, mọi test vẫn qua. Trước E2-5 cũng chưa có test này; hậu quả chỉ là gọi revalidate thừa hoặc chậm hơn.

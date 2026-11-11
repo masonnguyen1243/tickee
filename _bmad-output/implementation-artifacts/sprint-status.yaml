@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-10-2026 16:31
+last_updated: 11-11-2026 08:30
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -254,12 +254,14 @@ action_items:
       helper pg-boss chung, escapeHtml/formatter ngày chung, bỏ MESSAGES chết ở error.filter.ts
       (retro D2, D3)"
     owner: "Mason"
-    status: in-progress
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
-    note: "Phần Web xong qua spec-epic-2-e2-5-refactor-web.md (PR #48). Phần API (helper
-      pg-boss chung, escapeHtml/formatter ngày chung, bỏ MESSAGES chết ở error.filter.ts)
-      đã hoãn vào deferred-work.md, phải xong trước story Epic 3 đầu tiên thêm queue
-      mới (3.5 / 3.8)"
+    note: "Phần Web xong qua spec-epic-2-e2-5-refactor-web.md (PR #48). Phần API xong qua
+      spec-epic-2-e2-5-refactor-api.md: helper pg-boss chung ở platform/jobs/queue.ts
+      (defineQueue, QueueProducer, registerQueueWorker, fanOut); hai job email gửi nhiều
+      người tách thành job gốc + job con theo người nhận, retry chỉ gửi lại người lỗi;
+      escapeHtml ở platform/email; formatVnDateTime/formatVnDate trong contracts; MESSAGES
+      còn 5 mã"
   - id: "epic-2-retro-e2-6-checklist-san-sang-epic-3"
     epic: 2
     action: "E2-6: ghi checklist sẵn sàng vào spec 3.1/3.2/3.4/3.5 — sellability lúc

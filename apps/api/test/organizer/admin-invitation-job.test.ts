@@ -10,6 +10,7 @@ import {
   ADMIN_INVITATION_QUEUE_OPTIONS,
   sendAdminInvitation,
 } from '../../src/modules/organizer/invitation-jobs.js';
+import { buildAdminInvitationEmail } from '../../src/modules/organizer/invitation-email.js';
 import { EMAIL_TRANSPORT } from '../../src/platform/email/index.js';
 import { BOSS } from '../../src/platform/jobs/index.js';
 import { WorkerModule } from '../../src/worker.module.js';
@@ -61,6 +62,18 @@ async function invitationRow(id: string) {
 }
 
 const tokenIn = (text: string | undefined) => text?.match(LINK)?.[1];
+
+describe('buildAdminInvitationEmail', () => {
+  it('hạn của link theo giờ Việt Nam, dạng HH:mm dd/MM/yyyy kèm "(giờ Việt Nam)"', () => {
+    const message = buildAdminInvitationEmail({
+      organizationName: 'BTC',
+      link: `${TEST_WEB_ORIGIN}/loi-moi-btc#token`,
+      expiresAt: new Date('2026-11-08T03:00:00.000Z'),
+    });
+    expect(message.text).toContain('tới 10:00 08/11/2026 (giờ Việt Nam),');
+    expect(message.html).toContain('tới 10:00 08/11/2026 (giờ Việt Nam),');
+  });
+});
 
 describe('sendAdminInvitation', () => {
   it('gửi một email chứa link {WEB_ORIGIN}/loi-moi-btc#token; DB chỉ lưu hash; chạy lại lần hai không gửi nữa', async () => {

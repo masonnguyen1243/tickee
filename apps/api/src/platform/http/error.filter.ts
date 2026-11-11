@@ -1,77 +1,29 @@
 import { ArgumentsHost, Catch, HttpException, Logger, type ExceptionFilter } from '@nestjs/common';
-import {
-  ErrorCode,
-  FORM_QUESTIONS_MAX,
-  FREE_EVENT_TICKET_CAP,
-  FREE_TICKET_LIMIT_MESSAGE,
-  type ErrorResponse,
-} from '@tickee/contracts';
+import { ErrorCode, type ErrorResponse } from '@tickee/contracts';
 import type { Response } from 'express';
 import { dbErrorSummary, isDatabaseError } from '../logging/index.js';
 import { AppError } from './app-error.js';
 
-const MESSAGES: Record<ErrorCode, string> = {
+/** Mã lỗi `codeForStatus` trả cho lỗi HTTP không phải `AppError` (lỗi miền mang message của chính nó). */
+type StatusErrorCode =
+  | typeof ErrorCode.NOT_FOUND
+  | typeof ErrorCode.VALIDATION_FAILED
+  | typeof ErrorCode.INTERNAL_ERROR
+  | typeof ErrorCode.SERVICE_UNAVAILABLE
+  | typeof ErrorCode.UNAUTHENTICATED;
+
+const MESSAGES: Record<StatusErrorCode, string> = {
   NOT_FOUND: 'Không tìm thấy tài nguyên.',
   VALIDATION_FAILED: 'Yêu cầu không hợp lệ.',
   INTERNAL_ERROR: 'Đã có lỗi xảy ra. Vui lòng thử lại.',
   SERVICE_UNAVAILABLE: 'Dịch vụ tạm thời không sẵn sàng.',
   UNAUTHENTICATED: 'Bạn cần đăng nhập để tiếp tục.',
-  CONSENT_REQUIRED: 'Bạn cần đồng ý xử lý dữ liệu cá nhân để tiếp tục.',
-  OTP_RATE_LIMITED: 'Bạn đã yêu cầu quá nhiều mã. Vui lòng thử lại sau.',
-  OTP_INVALID: 'Mã chưa đúng.',
-  OTP_EXPIRED: 'Mã đã hết hạn.',
-  OTP_ATTEMPTS_EXCEEDED: 'Mã đã hết hiệu lực.',
-  OTP_LOCKED: 'Bạn đã nhập sai quá nhiều lần. Vui lòng thử lại sau.',
-  NOT_A_MEMBER: 'Bạn không phải thành viên của BTC này.',
-  FORBIDDEN_ROLE: 'Vai trò của bạn không được thực hiện thao tác này.',
-  TOTP_REQUIRED: 'Bạn cần xác thực hai lớp để tiếp tục.',
-  TOTP_INVALID: 'Mã chưa đúng.',
-  TOTP_LOCKED: 'Bạn đã nhập sai quá nhiều lần. Vui lòng thử lại sau.',
-  ALREADY_A_MEMBER: 'Email này đã là thành viên của BTC.',
-  INVITATION_INVALID: 'Link mời không hợp lệ.',
-  INVITATION_EXPIRED: 'Link mời đã hết hạn.',
-  INVITATION_USED: 'Link mời đã được dùng.',
-  INVITATION_EMAIL_MISMATCH: 'Lời mời này gửi tới một email khác.',
-  INVITATION_LIMIT_REACHED: 'BTC đã gửi quá nhiều lời mời trong 24 giờ. Vui lòng thử lại sau.',
-  TWO_FACTOR_NOT_ENABLED: 'Bạn cần bật xác thực hai lớp để tiếp tục.',
-  CLOSED_BETA_TRANSITION_INVALID: 'Không chuyển được trạng thái Closed Beta của BTC này.',
-  TINGEE_CREDENTIAL_INVALID: 'Client ID hoặc Secret Token không đúng.',
-  BANK_NOT_SUPPORTED: 'Ngân hàng này chưa được hỗ trợ.',
-  PAYOUT_ACCOUNT_UNAVAILABLE: 'Tài khoản này không còn dùng được trên Tingee.',
-  PAYOUT_ACCOUNT_ALREADY_LINKED: 'Tài khoản này đã được liên kết.',
-  PAYOUT_ACCOUNT_NOT_LINKED_YET: 'BTC chưa liên kết tài khoản nhận tiền nào.',
-  MERCHANT_SUSPENDED: 'Tài khoản Tingee của BTC đang tạm khóa.',
-  PAYMENT_ACCOUNT_NOT_ALLOWED: 'Tài khoản nhận tiền chưa được phép nhận thanh toán qua Cổng thanh toán Tingee.',
-  PAYMENT_PROVIDER_UNAVAILABLE: 'Tingee tạm lỗi, thử lại sau ít phút.',
-  EVENT_NOT_FOUND: 'Không tìm thấy Sự kiện này.',
-  TICKET_TYPE_NOT_FOUND: 'Không tìm thấy Hạng vé này.',
-  CAPACITY_BELOW_COMMITTED: 'Số suất không được nhỏ hơn số đã bán và đang giữ chỗ.',
-  FREE_EVENT_CAPACITY_EXCEEDED: `Tối đa ${FREE_EVENT_TICKET_CAP} suất miễn phí mỗi Sự kiện.`,
-  TICKET_TYPE_IN_USE: 'Hạng vé đã có Đơn, không xóa được. Muốn ngừng bán thì đặt giờ kết thúc bán của Hạng vé.',
-  PAID_TICKET_TYPE_NOT_ALLOWED: 'BTC chưa đủ điều kiện bán Vé có phí.',
-  LAST_TICKET_TYPE: 'Sự kiện đã mở bán phải còn ít nhất một Hạng vé.',
-  FORM_QUESTION_NOT_FOUND: 'Không tìm thấy câu hỏi này.',
-  FORM_QUESTION_LIMIT_REACHED: `Mỗi Sự kiện tối đa ${FORM_QUESTIONS_MAX} câu hỏi.`,
-  EVENT_NOT_READY: 'Sự kiện chưa đủ điều kiện mở bán.',
-  EVENT_NOT_DRAFT: 'Sự kiện không còn ở trạng thái nháp.',
-  EVENT_CANCELLED: 'Sự kiện đã hủy, không sửa được.',
-  EVENT_STATUS_CONFLICT: 'Trạng thái Sự kiện đã đổi. Tải lại để xem trạng thái mới.',
-  EVENT_ALREADY_ENDED: 'Sự kiện đã kết thúc.',
-  EVENT_NOT_STARTED: 'Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.',
-  REAUTH_REQUIRED: 'Bạn cần xác nhận lại để tiếp tục.',
-  REAUTH_METHOD_MISMATCH: 'Cách xác nhận này không còn đúng với tài khoản. Thử lại theo cách được yêu cầu.',
-  TICKET_TYPE_SOLD_OUT: 'Hạng vé này vừa hết. Bạn chọn lại nhé.',
-  NOT_ON_SALE: 'Sự kiện hoặc Hạng vé này hiện không nhận Đơn.',
-  PENDING_ORDER_EXISTS: 'Bạn đang có một Đơn chờ thanh toán cho Sự kiện này.',
-  ORDER_RATE_LIMITED: 'Bạn gửi Đơn quá nhanh. Vui lòng thử lại sau.',
-  ORDER_NOT_FOUND: 'Không tìm thấy Đơn này.',
-  FREE_TICKET_LIMIT_REACHED: FREE_TICKET_LIMIT_MESSAGE,
 };
 
 /** Lỗi DB chỉ log `{ type, code }` (message/params có thể mang email, token session); lỗi khác log nguyên để giữ stack. */
 const loggableError = (err: unknown): unknown => (isDatabaseError(err) ? dbErrorSummary(err) : err);
 
-function codeForStatus(status: number): ErrorCode {
+function codeForStatus(status: number): StatusErrorCode {
   if (status === 401) return ErrorCode.UNAUTHENTICATED;
   if (status === 404) return ErrorCode.NOT_FOUND;
   if (status === 503) return ErrorCode.SERVICE_UNAVAILABLE;

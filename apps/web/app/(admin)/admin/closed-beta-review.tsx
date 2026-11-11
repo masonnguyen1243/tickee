@@ -6,6 +6,7 @@ import {
   ClosedBetaAction,
   ClosedBetaStatus,
   ErrorCode,
+  formatVnDate,
   type ClosedBetaOrganization,
 } from '@tickee/contracts';
 import { Building2, ShieldCheck, ShieldX } from 'lucide-react';
@@ -31,13 +32,6 @@ import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
 import { LOGIN_PATH, TOTP_ENROLL_PATH, withReturnTo } from '@/lib/auth/return-to';
 import { isTotpRequired } from '@/lib/auth/totp';
-
-const DATE_FORMAT = new Intl.DateTimeFormat('vi-VN', {
-  timeZone: 'Asia/Ho_Chi_Minh',
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-});
 
 const TABS: readonly { status: ClosedBetaStatus; label: string; empty: string; emptyDescription: string }[] = [
   {
@@ -128,7 +122,7 @@ function QueueTable({
               <TableCell>
                 <Contact organization={organization} />
               </TableCell>
-              <TableCell>{DATE_FORMAT.format(new Date(organization.createdAt))}</TableCell>
+              <TableCell>{formatVnDate(organization.createdAt)}</TableCell>
               <TableCell className="text-right">
                 {organization.closedBetaStatus === ClosedBetaStatus.APPROVED ? (
                   <Button

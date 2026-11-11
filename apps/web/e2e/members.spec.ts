@@ -126,7 +126,8 @@ test('danh sách: Owner không có nút Xóa, Admin có; lời mời chờ hiệ
   await expect(memberRow(page, ADMIN_EMAIL)).toContainText('Trần Bình');
   await expect(memberRow(page, ADMIN_EMAIL).getByRole('button', { name: `Xóa ${ADMIN_EMAIL}` })).toBeVisible();
 
-  await expect(invitationRow(page, 'cuong.le@vidu.vn')).toContainText(/Hết hạn .*2026/);
+  // expiresAt 2026-11-08T03:00:00Z = 10:00 giờ Việt Nam.
+  await expect(invitationRow(page, 'cuong.le@vidu.vn')).toContainText('Hết hạn 10:00 08/11/2026');
   await expect(invitationRow(page, 'cuong.le@vidu.vn')).not.toContainText('Đã hết hạn');
   await expect(invitationRow(page, 'dung.pham@vidu.vn')).toContainText('Đã hết hạn');
   for (const email of ['cuong.le@vidu.vn', 'dung.pham@vidu.vn']) {

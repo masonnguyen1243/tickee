@@ -231,6 +231,21 @@ export function formatEventTimeRange(startsAt: string, endsAt: string): string {
   return `${formatEventDateTime(startsAt)} – ${endText}`;
 }
 
+/**
+ * Ngày-giờ theo giờ Việt Nam, dạng `HH:mm dd/MM/yyyy` (vd. "10:04 08/11/2026"). Tính bằng offset +07:00 cố định, không
+ * dùng `Intl`: kết quả không phụ thuộc dữ liệu ICU của Node hay trình duyệt. Hậu tố " (giờ Việt Nam)" do nơi gọi thêm.
+ */
+export function formatVnDateTime(value: Date | string): string {
+  const p = vnParts(new Date(value));
+  return `${pad(p.hour)}:${pad(p.minute)} ${pad(p.day)}/${pad(p.month)}/${pad(p.year, 4)}`;
+}
+
+/** Ngày theo giờ Việt Nam, dạng `dd/MM/yyyy` (vd. "08/11/2026"); như `formatVnDateTime`, không dùng `Intl`. */
+export function formatVnDate(value: Date | string): string {
+  const p = vnParts(new Date(value));
+  return `${pad(p.day)}/${pad(p.month)}/${pad(p.year, 4)}`;
+}
+
 /** Tag cache Next.js của trang Sự kiện công khai `/e/{slug}` (SSR gắn tag; 2.11-c revalidate theo tag này). */
 export function publicEventTag(slug: string): string {
   return `event:${slug}`;

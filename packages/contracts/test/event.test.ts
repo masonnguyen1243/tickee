@@ -10,6 +10,8 @@ import {
   eventPath,
   formatEventDateTime,
   formatEventTimeRange,
+  formatVnDate,
+  formatVnDateTime,
   publicEventTag,
   slugBase,
   toEventIso,
@@ -148,6 +150,29 @@ describe('formatEventTimeRange', () => {
     expect(formatEventTimeRange('2026-11-16T23:00:00Z', '2026-11-17T10:00:00+07:00')).toBe(
       'Thứ ba, 17/11/2026 · 06:00 – 10:00',
     );
+  });
+});
+
+describe('formatVnDateTime / formatVnDate (offset +07:00 cố định, không Intl)', () => {
+  it('HH:mm dd/MM/yyyy và dd/MM/yyyy; nhận Date hoặc chuỗi ISO', () => {
+    expect(formatVnDateTime(new Date('2026-11-08T03:04:00.000Z'))).toBe('10:04 08/11/2026');
+    expect(formatVnDateTime('2026-11-08T10:04:00+07:00')).toBe('10:04 08/11/2026');
+    expect(formatVnDate(new Date('2026-11-08T03:04:00.000Z'))).toBe('08/11/2026');
+    expect(formatVnDate('2026-11-08T10:04:00+07:00')).toBe('08/11/2026');
+  });
+
+  it('qua nửa đêm giờ Việt Nam: 17:00 UTC là 00:00 hôm sau; 16:59 UTC vẫn là hôm trước', () => {
+    expect(formatVnDateTime('2026-11-16T17:00:00Z')).toBe('00:00 17/11/2026');
+    expect(formatVnDate('2026-11-16T17:00:00Z')).toBe('17/11/2026');
+    expect(formatVnDateTime('2026-11-16T16:59:00Z')).toBe('23:59 16/11/2026');
+    expect(formatVnDate('2026-11-16T16:59:00Z')).toBe('16/11/2026');
+  });
+
+  it('qua năm mới giờ Việt Nam khi UTC vẫn là 31/12', () => {
+    expect(formatVnDateTime('2026-12-31T17:30:00Z')).toBe('00:30 01/01/2027');
+    expect(formatVnDate('2026-12-31T17:30:00Z')).toBe('01/01/2027');
+    expect(formatVnDateTime('2026-12-31T16:59:00Z')).toBe('23:59 31/12/2026');
+    expect(formatVnDate('2026-12-31T16:59:00Z')).toBe('31/12/2026');
   });
 });
 

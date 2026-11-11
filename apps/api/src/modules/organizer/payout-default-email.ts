@@ -1,16 +1,5 @@
-import type { EmailMessage } from '../../platform/email/index.js';
-
-const escapeHtml = (s: string): string =>
-  s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
-
-const CHANGED_AT_FORMAT = new Intl.DateTimeFormat('vi-VN', {
-  timeZone: 'Asia/Ho_Chi_Minh',
-  hour: '2-digit',
-  minute: '2-digit',
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-});
+import { formatVnDateTime } from '@tickee/contracts';
+import { escapeHtml, type EmailMessage } from '../../platform/email/index.js';
 
 /** Tài khoản nhận tiền như email hiển thị: tên ngân hàng và 4 số cuối (không bao giờ có số đầy đủ). */
 export interface PayoutAccountLabel {
@@ -56,7 +45,7 @@ export function buildDefaultPayoutChangedEmail(input: DefaultPayoutChangedEmailI
   const keyReplaced = input.reason === 'tingee_key_replaced';
   const previous = input.previous ? payoutAccountLabel(input.previous) : NO_PREVIOUS_ACCOUNT;
   const next = input.next ? payoutAccountLabel(input.next) : NO_ACCOUNT;
-  const changedAt = `${CHANGED_AT_FORMAT.format(input.changedAt)} (giờ Việt Nam)`;
+  const changedAt = `${formatVnDateTime(input.changedAt)} (giờ Việt Nam)`;
   const effect = input.next
     ? `Đơn mới sẽ nhận tiền vào ${next}.`
     : 'BTC chưa bán được Vé có phí cho tới khi liên kết một tài khoản nhận tiền khác.';
