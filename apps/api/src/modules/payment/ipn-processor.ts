@@ -185,11 +185,15 @@ export class IpnProcessor {
    *   `review_items` của BTC `organizationId`, gắn event vừa lưu.
    * - `expired`/`canceled` cho Đơn `pending` của chính BTC → `markExpired`; còn lại chỉ lưu.
    * - trạng thái lạ → chỉ lưu.
-   * Lỗi DB (kể cả phát Vé, tạo mục) → ném, cả `tx` rollback (không lưu event, Đơn và tồn kho không đổi): Tingee gửi lại.
+   * Lỗi DB (kể cả phát Vé, enqueue email, tạo mục) → ném, cả `tx` rollback (không lưu event, Đơn và tồn kho không đổi):
+   * Tingee gửi lại.
    */
   async process(organizationId: string, ipn: TingeeIpn): Promise<IpnOutcome> {
     const kind: PaymentEventKind = ipn.status === IPN_SUCCESS_STATUS ? 'payment' : 'status';
     const validCode = ORDER_CODE_PATTERN.test(ipn.orderId);
+    // `markPaid` enqueue email Người mua trong `tx`: pg-boss đã start và queue đã có, trước transaction (lỗi → 5xx,
+    // Tingee gửi lại).
+    if (kind === 'payment' && validCode) await this.payments.ready();
     const outcome = await this.db.transaction(async (tx): Promise<IpnOutcome> => {
       const order = validCode ? await orderForPayment(tx, ipn.orderId) : null;
       const own = order && order.organizationId === organizationId ? order : null;

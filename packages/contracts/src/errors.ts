@@ -185,6 +185,17 @@ export const ErrorCode = {
    * một credential cũ mà IPN không thuộc Đơn có link tạo bằng chính credential đó. Không lưu gì.
    */
   IPN_SIGNATURE_INVALID: 'IPN_SIGNATURE_INVALID',
+  /**
+   * Link chia sẻ Vé không mở được (Story 3.8, AD-29): token sai định dạng hoặc không khớp Vé nào (kể cả link cũ đã bị
+   * "Tạo lại link"), Vé đã hủy, Sự kiện đã hủy, hoặc giờ máy chủ đã quá `effective_end_at`. Cùng một mã và câu cho mọi
+   * trường hợp để không lộ lý do.
+   */
+  SHARED_TICKET_NOT_FOUND: 'SHARED_TICKET_NOT_FOUND',
+  /**
+   * Không tìm thấy Vé của chính Người mua (Story 3.8): id sai dạng, không tồn tại, Vé của người khác, Vé đã hủy, Sự kiện
+   * đã hủy, hoặc đã quá `effective_end_at` (cùng lỗi để không lộ Vé nào có thật).
+   */
+  TICKET_NOT_FOUND: 'TICKET_NOT_FOUND',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

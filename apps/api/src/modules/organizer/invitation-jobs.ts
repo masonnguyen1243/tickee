@@ -5,7 +5,14 @@ import type { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
 import { EMAIL_TRANSPORT, type EmailTransport } from '../../platform/email/index.js';
-import { BOSS, defineQueue, JOB_COMPLETED, QueueProducer, registerQueueWorker } from '../../platform/jobs/index.js';
+import {
+  BOSS,
+  defineQueue,
+  errorName,
+  JOB_COMPLETED,
+  QueueProducer,
+  registerQueueWorker,
+} from '../../platform/jobs/index.js';
 import { buildAdminInvitationEmail } from './invitation-email.js';
 import { generateInvitationToken, hashInvitationToken } from './invitation-token.js';
 import { OwnershipTransferWorker } from './ownership-transfer-jobs.js';
@@ -90,8 +97,7 @@ export async function sendAdminInvitation(sender: AdminInvitationSender, invitat
       ...buildAdminInvitationEmail({ organizationName: org.name, link, expiresAt: pending.expiresAt }),
     });
   } catch (err) {
-    const errName = (err as { constructor?: { name?: string } } | null)?.constructor?.name ?? 'Unknown';
-    throw new Error(`Không gửi được email mời Admin (${errName})`);
+    throw new Error(`Không gửi được email mời Admin (${errorName(err)})`);
   }
 
   // Chỉ đánh dấu khi hash vẫn là của lần chạy này (không đè dấu của một lần chạy khác).

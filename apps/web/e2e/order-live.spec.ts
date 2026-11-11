@@ -36,6 +36,7 @@ const ticket = (n: number, count: number) => ({
   ticketTypeName: 'Vé VIP',
   holderName: 'Nguyễn Văn An',
   qr: `t1.${ticketId(n)}.${String(n).padStart(43, 'q')}`,
+  shareToken: `share${String(n).padStart(17, 'S')}`,
 });
 
 /** `BuyerOrderView` giả: 2 Vé VIP, đang chờ thanh toán, link 15 phút tính theo giờ máy lúc gọi. */

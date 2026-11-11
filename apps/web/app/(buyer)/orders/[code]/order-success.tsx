@@ -7,6 +7,7 @@ import { useEffect, useRef } from 'react';
 import { StageBlock } from '@/components/tickee/stage-block';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { TicketCard } from '@/components/tickee/ticket-card';
+import { TicketShareActions } from '@/components/tickee/ticket-share-actions';
 import { Wordmark } from '@/components/tickee/wordmark';
 
 /** Mỗi thẻ sau trượt lên trễ hơn thẻ trước chừng này ms. */
@@ -36,9 +37,10 @@ type OrderSuccessProps = {
  * Màn "Thành công" của Trang Đơn khi `buyerStatus = paid` (Story 3.3; 3.7 dùng lại khi Đơn có phí tự chuyển): stage có
  * wordmark, tên Sự kiện, "Vé của bạn đã sẵn sàng!" (`aria-live="polite"`; vùng live gắn cùng lúc với nội dung nên không
  * được đọc, và trình báo đổi trang của Next chỉ đọc tiêu đề trang: lúc gắn chuyển focus vào `h1` để trình đọc màn hình
- * đọc câu này ngay); mỗi Vé một `ticket-card`, thẻ đầu chồng mép dưới stage ~30px; `celebrate` thì các thẻ trượt lên từ
- * sân khấu và máy rung nhẹ. Reduced motion: hiện ngay, không trượt (quy tắc toàn cục trong globals.css tắt animation),
- * không rung. Chưa có "Đã gửi Vé tới {email}" (3.8), "Chia sẻ Vé" (3.8), "Xem Vé của tôi" (3.9) hay biên nhận (3.9).
+ * đọc câu này ngay) và "Đã gửi Vé tới {email}" (Story 3.8: email Vé đi qua hàng đợi, lỗi email không bao giờ hiện ở
+ * đây); mỗi Vé một `ticket-card` kèm "Chia sẻ Vé" / "Tạo lại link" (Story 3.8), thẻ đầu chồng mép dưới stage ~30px;
+ * `celebrate` thì các thẻ trượt lên từ sân khấu và máy rung nhẹ. Reduced motion: hiện ngay, không trượt (quy tắc toàn cục
+ * trong globals.css tắt animation), không rung. Chưa có "Xem Vé của tôi" (3.9) hay biên nhận (3.9).
  */
 export function OrderSuccess({ order, celebrate }: OrderSuccessProps) {
   useSuccessVibration(celebrate);
@@ -63,6 +65,9 @@ export function OrderSuccess({ order, celebrate }: OrderSuccessProps) {
         <h1 ref={heading} tabIndex={-1} className="text-headline">
           Vé của bạn đã sẵn sàng!
         </h1>
+        <p data-slot="order-success-email" className="mt-1 max-w-full text-meta text-stage-muted wrap-break-word">
+          Đã gửi Vé tới {order.buyer.email}
+        </p>
       </StageBlock>
       {order.tickets.length > 0 ? (
         <ol aria-label="Vé của bạn" className="relative z-10 -mt-[30px] flex flex-col gap-stack">
@@ -76,6 +81,16 @@ export function OrderSuccess({ order, celebrate }: OrderSuccessProps) {
                 holderName={ticket.holderName}
                 startsAt={order.event.startsAt}
                 qr={ticket.qr}
+                actions={
+                  <TicketShareActions
+                    orderCode={order.code}
+                    ticketId={ticket.id}
+                    shareToken={ticket.shareToken}
+                    eventName={order.event.name}
+                    seq={ticket.seq}
+                    count={ticket.count}
+                  />
+                }
                 className={celebrate ? 'animate-ticket-rise' : undefined}
                 style={celebrate ? { animationDelay: `${index * STAGGER_MS}ms` } : undefined}
               />

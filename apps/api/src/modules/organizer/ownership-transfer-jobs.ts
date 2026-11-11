@@ -9,6 +9,7 @@ import { EMAIL_TRANSPORT, type EmailTransport } from '../../platform/email/index
 import {
   BOSS,
   defineQueue,
+  errorName,
   fanOut,
   JOB_COMPLETED,
   QueueProducer,
@@ -67,9 +68,6 @@ export interface OwnershipTransferNotifier {
   db: Database;
   email: EmailTransport;
 }
-
-const errorName = (err: unknown): string =>
-  (err as { constructor?: { name?: string } } | null)?.constructor?.name ?? 'Unknown';
 
 async function organizationName(db: Database, organizationId: string): Promise<string | undefined> {
   const scope = orgScope({ organizationId });

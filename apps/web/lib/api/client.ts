@@ -58,7 +58,8 @@ export async function performApiRequest<S extends z.ZodType>(
   const url = `${requestBaseUrl()}${path}`;
   let res: Response;
   try {
-    res = await fetch(url, { ...init, headers, credentials: 'include' });
+    // Mặc định kèm cookie phiên; lời gọi công khai (vd. Vé được chia sẻ) đặt `credentials: 'omit'` trong `init`.
+    res = await fetch(url, { credentials: 'include', ...init, headers });
   } catch (cause) {
     // Hủy chủ động (TanStack Query cancel, signal abort) không phải lỗi mạng: ném lại nguyên trạng, không thử lại.
     if (init?.signal?.aborted || (cause instanceof Error && cause.name === 'AbortError')) throw cause;
@@ -86,7 +87,7 @@ export async function performApiRequest<S extends z.ZodType>(
 
 /**
  * Gọi REST `/v1` từ trình duyệt (dùng trong `queryFn`/`mutationFn` của TanStack Query).
- * Cookie session đi kèm nhờ `credentials: 'include'`. Mọi lỗi là `ApiError`.
+ * Cookie session đi kèm nhờ `credentials: 'include'` (trừ khi `init.credentials` đặt khác). Mọi lỗi là `ApiError`.
  */
 export function apiRequest<S extends z.ZodType>(path: string, options: ApiRequestOptions<S>): Promise<z.output<S>> {
   return performApiRequest(path, options);

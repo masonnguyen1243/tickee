@@ -4,6 +4,10 @@ import {
   CheckoutForm,
   IDEMPOTENCY_KEY_HEADER,
   paymentLinkApiPath,
+  SharedTicketView,
+  sharedTicketApiPath,
+  TicketShareLink,
+  ticketShareLinkApiPath,
   type CreateOrderRequest,
 } from '@tickee/contracts';
 
@@ -47,4 +51,26 @@ export function fetchBuyerOrder(code: string, signal?: AbortSignal): Promise<Buy
  */
 export function retryPaymentLink(code: string): Promise<BuyerOrderView> {
   return apiRequest(paymentLinkApiPath(code), { schema: BuyerOrderView, init: { method: 'POST' } });
+}
+
+/**
+ * `POST /v1/me/tickets/:ticketId/share-link` (Story 3.8): chủ Vé tạo lại link chia sẻ; link cũ chết ngay, Mã QR vé không
+ * đổi. Trả token mới; nơi gọi tải lại Đơn để thẻ Vé dùng link mới.
+ */
+export function regenerateShareLink(ticketId: string): Promise<TicketShareLink> {
+  return apiRequest(ticketShareLinkApiPath(ticketId), { schema: TicketShareLink, init: { method: 'POST' } });
+}
+
+/** Khóa TanStack Query: Vé được chia sẻ theo token (chỉ trong bộ nhớ của tab). */
+export const sharedTicketQueryKey = (token: string) => ['order', 'shared-ticket', token] as const;
+
+/**
+ * `GET /v1/shared-tickets/:token` (Story 3.8, công khai): không kèm cookie (`credentials: 'omit'`), nên người mở link
+ * không bị gắn với Vé dù đang đăng nhập. Token sai, Vé hủy, quá hạn → `ApiError` `SHARED_TICKET_NOT_FOUND`.
+ */
+export function fetchSharedTicket(token: string, signal?: AbortSignal): Promise<SharedTicketView> {
+  return apiRequest(sharedTicketApiPath(token), {
+    schema: SharedTicketView,
+    init: { signal, credentials: 'omit', referrerPolicy: 'no-referrer' },
+  });
 }

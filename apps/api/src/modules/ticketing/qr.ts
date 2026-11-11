@@ -42,6 +42,16 @@ export class TicketQrKeys {
     const key = this.keys.get(version);
     return key ? createHmac('sha256', key).update(payload, 'utf8').digest('base64url') : null;
   }
+
+  /**
+   * Khóa con 32 byte = HMAC-SHA256(khóa `version`, `label`), cho việc khác chữ ký QR (vd. token link chia sẻ Vé). Nhãn
+   * tách miền: khóa con không bao giờ là chữ ký của một Mã QR (`label` không có dạng `t<k>.<ticketId>`), và chữ ký QR
+   * không bao giờ dùng khóa con. Không có khóa → `null`.
+   */
+  derive(version: number, label: string): Buffer | null {
+    const key = this.keys.get(version);
+    return key ? createHmac('sha256', key).update(label, 'utf8').digest() : null;
+  }
 }
 
 /** Kết quả kiểm một Mã QR vé hợp lệ. */

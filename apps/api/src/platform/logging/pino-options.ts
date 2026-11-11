@@ -77,17 +77,45 @@ export function redactUrlQuery(url: string): string {
   return keys.length === 0 ? url.slice(0, q) : `${url.slice(0, q)}?${keys.map((k) => `${encodeURIComponent(k)}=${REDACTED}`).join('&')}`;
 }
 
-type SerializedReq = { url?: unknown; query?: unknown };
+/** Tiền tố (chữ thường) của đường công khai mang token link chia sẻ Vé trong đường dẫn (Story 3.8, AD-29). */
+const SHARED_TICKET_PREFIX = '/v1/shared-tickets/';
+
+/** Đường dẫn của `url` (`originalUrl`): nhận cả dạng tuyệt đối `http://host/…` mà router Express vẫn khớp route. */
+function pathOf(url: string): string {
+  try {
+    return new URL(url, 'http://localhost').pathname;
+  } catch {
+    return url.split('?', 1)[0]!;
+  }
+}
+
+/**
+ * Che token link chia sẻ Vé trong URL của request (cầm token là cầm Vé): đường dẫn (so chữ thường như router Express,
+ * kể cả URL dạng tuyệt đối) bắt đầu bằng `/v1/shared-tickets/` → `<tiền tố như đã gửi>[REDACTED]<phần sau token><query>`
+ * (`http://host/V1/Shared-Tickets/<token>?a=1` → `/V1/Shared-Tickets/[REDACTED]?a=1`). Đường khác giữ nguyên.
+ */
+export function redactSharedTicketPath(url: string): string {
+  const path = pathOf(url);
+  if (!path.toLowerCase().startsWith(SHARED_TICKET_PREFIX)) return url;
+  const rest = path.slice(SHARED_TICKET_PREFIX.length);
+  const slash = rest.indexOf('/');
+  const q = url.indexOf('?');
+  return `${path.slice(0, SHARED_TICKET_PREFIX.length)}${REDACTED}${slash < 0 ? '' : rest.slice(slash)}${q < 0 ? '' : url.slice(q)}`;
+}
+
+type SerializedReq = { url?: unknown; query?: unknown; params?: unknown };
 type SerializedRes = { headers?: Record<string, unknown> | null };
 
 /**
- * Serializer cho pino-http (chạy sau serializer chuẩn): che giá trị query trong `req.url`, bỏ `req.query`, và che
- * header `location` của response (URL ủy quyền Google chứa `state`; redirect về web chứa `returnTo`).
+ * Serializer cho pino-http (chạy sau serializer chuẩn): che giá trị query và token link chia sẻ Vé trong `req.url`, bỏ
+ * `req.query` và `req.params` (tham số đường dẫn như token đã có, đã che, trong `url`), và che header `location` của
+ * response (URL ủy quyền Google chứa `state`; redirect về web chứa `returnTo`).
  */
 export const httpSerializers = {
   req(req: SerializedReq): SerializedReq {
-    if (typeof req.url === 'string') req.url = redactUrlQuery(req.url);
+    if (typeof req.url === 'string') req.url = redactSharedTicketPath(redactUrlQuery(req.url));
     req.query = undefined;
+    req.params = undefined;
     return req;
   },
   res(res: SerializedRes): SerializedRes {

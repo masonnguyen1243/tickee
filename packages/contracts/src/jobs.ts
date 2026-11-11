@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /** Tên queue pg-boss (vai `worker`). Tên chỉ gồm chữ, số, `_`, `-`, `.`, `/` (luật của pg-boss). */
 export const JobQueue = {
   /** Dọn rác hết hạn của `identity` (bộ đếm giới hạn, verification, session), chạy định kỳ. */
@@ -40,5 +42,29 @@ export const JobQueue = {
   ORDERING_EXPIRE_ORDER: 'ordering.expire-order',
   /** Dead-letter của `ORDERING_EXPIRE_ORDER`: job hết lượt retry được chép sang đây. */
   ORDERING_EXPIRE_ORDER_DEAD_LETTER: 'ordering.expire-order.dead-letter',
+  /**
+   * Email cho Người mua của một Đơn (`ordering`, Story 3.8), payload `SendBuyerEmailPayload` (`{ kind, orderId }`, không
+   * email, tên hay token). `tickets`: email Vé, enqueue trong `markPaid` khi Đơn chuyển `paid` (mọi nguồn); `orphan_sold_out`:
+   * tiền về muộn mà Hạng vé đã hết, enqueue ở nhánh `sold_out` của IPN. Enqueue bằng chính `tx` của thay đổi; id job suy
+   * cố định từ (`kind`, `orderId`) nên enqueue lặp không tạo job thứ hai trong khi dòng job cũ còn trong bảng của pg-boss
+   * (job đã xong bị xóa sau `deleteAfterSeconds` của queue, mặc định 7 ngày; sau đó enqueue lại sẽ tạo job mới).
+   */
+  ORDERING_SEND_BUYER_EMAIL: 'ordering.send-buyer-email',
+  /** Dead-letter của `ORDERING_SEND_BUYER_EMAIL`: job hết lượt retry được chép sang đây. */
+  ORDERING_SEND_BUYER_EMAIL_DEAD_LETTER: 'ordering.send-buyer-email.dead-letter',
 } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];
+
+/** Loại email cho Người mua của job `ordering.send-buyer-email`. */
+export const BuyerEmailKind = {
+  /** Email Vé: mỗi Vé một link chia sẻ, kèm link về Trang Đơn. */
+  TICKETS: 'tickets',
+  /** Tiền về muộn cho Đơn đã hết hạn mà Hạng vé đã hết (mục `orphan` lý do `sold_out`): BTC sẽ liên hệ hoàn tiền. */
+  ORPHAN_SOLD_OUT: 'orphan_sold_out',
+} as const;
+export type BuyerEmailKind = (typeof BuyerEmailKind)[keyof typeof BuyerEmailKind];
+export const buyerEmailKindSchema = z.enum(BuyerEmailKind);
+
+/** Payload của job `ordering.send-buyer-email`: chỉ loại email và id Đơn (không PII, không token). */
+export const SendBuyerEmailPayload = z.object({ kind: buyerEmailKindSchema, orderId: z.uuid() });
+export type SendBuyerEmailPayload = z.infer<typeof SendBuyerEmailPayload>;

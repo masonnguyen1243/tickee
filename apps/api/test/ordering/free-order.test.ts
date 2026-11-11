@@ -137,7 +137,7 @@ function register(
 }
 
 describe('POST /v1/events/:slug/orders — Đơn tổng 0đ', () => {
-  it('đăng ký thành công: 201 paid + 2 Vé (seq 1,2, count 2, QR ký số); sold +2, held không đổi; phễu, audit, không job', async () => {
+  it('đăng ký thành công: 201 paid + 2 Vé (seq 1,2, count 2, QR ký số, link chia sẻ); sold +2, held không đổi; phễu, audit, không job hết hạn, một job email Vé', async () => {
     const buyer = await signUp(h);
     const sale = await freeEvent([5]);
     const tier = sale.tiers[0]!;
@@ -214,6 +214,10 @@ describe('POST /v1/events/:slug/orders — Đơn tổng 0đ', () => {
       { action: 'order.paid', actor_user_id: null, organization_id: org.orgId, target_type: 'order' },
     ]);
     expect(await boss.findJobs(JobQueue.ORDERING_EXPIRE_ORDER, { data: { orderId: row.id } })).toEqual([]);
+    // Story 3.8: đúng một job email Vé, cùng TX1.
+    const emails = await boss.findJobs(JobQueue.ORDERING_SEND_BUYER_EMAIL, { data: { orderId: row.id } });
+    expect(emails.map((job) => job.data)).toEqual([{ kind: 'tickets', orderId: row.id }]);
+    expect(new Set(order.tickets.map((t) => t.shareToken)).size).toBe(2);
   });
 
   it('nhiều Hạng vé 0đ (A=1, B=2) → 3 Vé, seq 1..3 theo ticket_type_id tăng dần', async () => {

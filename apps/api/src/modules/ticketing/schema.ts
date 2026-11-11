@@ -14,6 +14,10 @@ export type TicketStatus = (typeof TICKET_STATUSES)[number];
  * không lưu: tính lại khi đọc từ `id` và `qr_key_version` (phiên bản khóa ký trong `TICKET_QR_KEYS`), nên lộ DB không lộ
  * Mã QR hợp lệ.
  *
+ * Link chia sẻ Vé (AD-29, Story 3.8): `share_version` (bắt đầu 1) và `share_token_hash` (SHA-256 hex của token suy ra từ
+ * id Vé, `share_version` và khóa `qr_key_version`; unique). Không lưu token dạng rõ. "Tạo lại link" tăng `share_version`
+ * và ghi hash mới trong cùng một `UPDATE`. Vé phát trước Story 3.8 có hash `NULL` (link 404 tới khi chủ Vé tạo lại).
+ *
  * `order_id`, `organization_id`, `user_id` không có FK: `ticketing` không phụ thuộc `ordering`, `organizer` hay
  * `identity` (module-graph, AD-10). FK tới `events` và `ticket_types` (`ticketing → event`): Hạng vé đã phát Vé không
  * xóa được.
@@ -41,6 +45,8 @@ export const tickets = pgTable(
     status: text('status', { enum: TICKET_STATUSES }).notNull().default('valid'),
     cancelReason: text('cancel_reason'),
     checkedInAt: timestamptz('checked_in_at'),
+    shareVersion: integer('share_version').notNull().default(1),
+    shareTokenHash: text('share_token_hash'),
     updatedAt: timestamptz('updated_at')
       .notNull()
       .defaultNow()
@@ -48,6 +54,7 @@ export const tickets = pgTable(
   },
   (t) => [
     uniqueIndex('tickets_order_id_seq_key').on(t.orderId, t.seq),
+    uniqueIndex('tickets_share_token_hash_key').on(t.shareTokenHash),
     index('tickets_event_id_idx').on(t.eventId),
     index('tickets_user_id_event_id_idx').on(t.userId, t.eventId),
     index('tickets_ticket_type_id_idx').on(t.ticketTypeId),
@@ -56,5 +63,7 @@ export const tickets = pgTable(
     check('tickets_qr_key_version_check', sql`${t.qrKeyVersion} >= 1`),
     check('tickets_cancel_reason_check', sql`${t.status} = 'cancelled' OR ${t.cancelReason} IS NULL`),
     check('tickets_order_code_check', sql`${t.orderCode} ~ '^TK[0-9A-HJKMNP-TV-Z]{8}$'`),
+    check('tickets_share_version_check', sql`${t.shareVersion} >= 1`),
+    check('tickets_share_token_hash_check', sql`${t.shareTokenHash} ~ '^[0-9a-f]{64}$'`),
   ],
 );

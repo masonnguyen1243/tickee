@@ -270,8 +270,15 @@ export const TICKET_QR_PATTERN =
   /^t[1-9]\d{0,8}\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[A-Za-z0-9_-]{43}$/;
 
 /**
+ * Token link chia sẻ Vé (AD-29, Story 3.8): 16 byte, base64url không đệm (22 ký tự). Link là `sharedTicketUrl` (token sau
+ * `#`); máy chủ suy token bằng khóa bí mật, DB chỉ lưu hash.
+ */
+export const SHARE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{22}$/;
+
+/**
  * Một Vé của Đơn đã thanh toán (bản chụp lúc phát Vé, AD-35): `seq`/`count` là "Vé k/N" (đánh theo Hạng vé tăng dần
- * theo id), tên Hạng vé và tên Người mua lúc phát, `qr` là Mã QR vé.
+ * theo id), tên Hạng vé và tên Người mua lúc phát, `qr` là Mã QR vé. `shareToken`: token link chia sẻ hiện hành của Vé
+ * (Story 3.8; chỉ có trong response cho chủ Đơn), cùng một giá trị mỗi lần đọc tới khi chủ Vé "Tạo lại link".
  */
 export const BuyerTicket = z.object({
   id: z.uuid(),
@@ -280,6 +287,7 @@ export const BuyerTicket = z.object({
   ticketTypeName: z.string(),
   holderName: z.string(),
   qr: z.string().regex(TICKET_QR_PATTERN),
+  shareToken: z.string().regex(SHARE_TOKEN_PATTERN),
 });
 export type BuyerTicket = z.infer<typeof BuyerTicket>;
 

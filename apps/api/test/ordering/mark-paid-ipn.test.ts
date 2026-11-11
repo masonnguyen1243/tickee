@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { JobQueue } from '@tickee/contracts';
+import type { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { markExpired, OrderPayments, orderForPayment } from '../../src/modules/ordering/index.js';
 import { DATABASE, type Database } from '../../src/platform/db/index.js';
+import { BOSS } from '../../src/platform/jobs/index.js';
 import { createHarness, signUp, type Harness } from '../identity/harness.js';
 import { expectInvariants, orderState } from '../payment/ipn-fixtures.js';
 import {
@@ -92,6 +95,12 @@ const setEvent = (eventId: string, set: string) => h.db.pool.query(`UPDATE event
 const ENDED = "effective_end_at = now() - interval '1 minute'";
 const CANCELLED = "status = 'cancelled'";
 const LOCKED = "locked_at = now(), lock_reason = 'test'";
+
+/** Payload các job email Người mua của Đơn (Story 3.8). */
+async function buyerEmails(orderId: string): Promise<unknown[]> {
+  const jobs = await h.app.get<PgBoss>(BOSS).findJobs(JobQueue.ORDERING_SEND_BUYER_EMAIL, { data: { orderId } });
+  return jobs.map((job) => job.data);
+}
 
 async function auditCount(orderId: string): Promise<number> {
   const { rows } = await h.db.pool.query("SELECT 1 FROM audit_events WHERE action = 'order.paid' AND target_id = $1", [
@@ -233,6 +242,7 @@ describe('markPaid nguồn ipn: tiền về muộn cho Đơn expired', () => {
     expect(await ipnPaid(order.id, order.total, paidAt)).toEqual({ outcome: 'paid' });
     const state = await orderState(h, order.code);
     expect(state).toMatchObject({ status: 'paid', paid_source: 'ipn', paid_amount: '450000', tickets: 3 });
+    expect(await buyerEmails(order.id)).toEqual([{ kind: 'tickets', orderId: order.id }]);
     expect(state.paid_at!.toISOString()).toBe(paidAt.toISOString());
     expect(await inventory(h, order.a)).toEqual({ capacity: 5, sold: 2, held: 0 });
     expect(await inventory(h, order.b)).toEqual({ capacity: 3, sold: 1, held: 0 });
@@ -261,6 +271,8 @@ describe('markPaid nguồn ipn: tiền về muộn cho Đơn expired', () => {
     expect(await inventory(h, first)).toEqual(before.first);
     expect(await inventory(h, last)).toEqual(before.last);
     expect(await auditCount(order.id)).toBe(0);
+    // Story 3.8: email báo Người mua (BTC sẽ liên hệ hoàn tiền), không email Vé.
+    expect(await buyerEmails(order.id)).toEqual([{ kind: 'orphan_sold_out', orderId: order.id }]);
     await expectInvariants(h, order.eventId);
   });
 

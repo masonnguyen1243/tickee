@@ -42,6 +42,13 @@ describe('apiRequest', () => {
     expect(init?.credentials).toBe('include');
   });
 
+  it("lời gọi công khai đặt credentials: 'omit' → không kèm cookie", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { status: 'ok' }));
+
+    await apiRequest('/healthz', { schema: Health, init: { credentials: 'omit' } });
+    expect(fetchMock.mock.calls[0]![1]?.credentials).toBe('omit');
+  });
+
   it.each([
     [404, 'NOT_FOUND'],
     [400, 'VALIDATION_FAILED'],

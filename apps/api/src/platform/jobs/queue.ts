@@ -31,6 +31,13 @@ export interface QueueSpec<S extends z.ZodType> {
 export interface EnqueueOptions {
   /** Job chỉ chạy từ mốc này. */
   startAfter?: Date;
+  /**
+   * Id job cố định (vd. `derivedJobId` từ loại việc và id đối tượng): dòng job cùng id còn trong bảng của pg-boss thì
+   * không tạo thêm (`INSERT … ON CONFLICT DO NOTHING`), nên enqueue lặp cho cùng việc chỉ có một job. Chỉ chặn trùng
+   * trong khoảng dòng đó còn: job đã xong bị bảo trì của pg-boss xóa sau `deleteAfterSeconds` của queue (mặc định 7
+   * ngày), sau đó enqueue lại cùng id sẽ tạo job mới.
+   */
+  id?: string;
 }
 
 export interface QueueDefinition<S extends z.ZodType> {
@@ -48,7 +55,8 @@ export interface QueueDefinition<S extends z.ZodType> {
   ensure(boss: PgBoss): Promise<void>;
   /**
    * Enqueue bằng chính `tx` của thay đổi: `tx` rollback thì không có job; commit thì job chắc chắn có. Payload được
-   * parse trước khi gửi (lưu dạng đã parse). Người gọi đã `QueueProducer.ready()` trước transaction.
+   * parse trước khi gửi (lưu dạng đã parse). Người gọi đã `QueueProducer.ready()` trước transaction. Có `options.id` mà
+   * dòng job cùng id còn trong bảng (chưa bị xóa theo `deleteAfterSeconds`) → không làm gì.
    */
   enqueue(boss: PgBoss, tx: Tx, payload: z.input<S>, options?: EnqueueOptions): Promise<void>;
 }
@@ -73,8 +81,10 @@ export function defineQueue<S extends z.ZodType>(spec: QueueSpec<S>): QueueDefin
       const jobId = await boss.send(name, data, {
         db: fromDrizzle(tx, sql),
         ...(options.startAfter ? { startAfter: options.startAfter } : {}),
+        ...(options.id ? { id: options.id } : {}),
       });
-      if (!jobId) throw new Error(`pg-boss không tạo job ${name}`);
+      // Id cố định đã có job: `send` trả `null` (ON CONFLICT DO NOTHING), đúng ý người gọi.
+      if (!jobId && !options.id) throw new Error(`pg-boss không tạo job ${name}`);
     },
   };
 }
@@ -116,6 +126,14 @@ export abstract class QueueProducer implements OnApplicationBootstrap {
     });
     return this.pending;
   }
+}
+
+/**
+ * Tên lớp của lỗi (`SmtpError`, `Error`…), không bao giờ message: message của lỗi gửi email (SMTP) có thể chứa địa chỉ
+ * email, mà lỗi handler ném ra được lưu vào job và log. Handler gửi email ném lại một `Error` mới chỉ mang tên này.
+ */
+export function errorName(err: unknown): string {
+  return (err as { constructor?: { name?: string } } | null)?.constructor?.name ?? 'Unknown';
 }
 
 /**
@@ -198,12 +216,12 @@ export async function registerQueueWorker<S extends z.ZodType>(
 }
 
 /**
- * Id của job con: UUID (dạng v5) suy ra cố định từ id job gốc và khóa của con. Job gốc chạy lại tạo đúng các id cũ,
- * nên `insert` bỏ qua con đã có.
+ * Id job UUID (dạng v5) suy ra cố định từ một uuid gốc (`baseId`: id job gốc, id Đơn…) và một khóa. Cùng cặp thì cùng id,
+ * nên `insert`/`enqueue` với id này bỏ qua job đã có.
  */
-export function childJobId(parentJobId: string, key: string): string {
+export function derivedJobId(baseId: string, key: string): string {
   const hash = createHash('sha1')
-    .update(Buffer.from(parentJobId.replace(/-/g, ''), 'hex'))
+    .update(Buffer.from(baseId.replace(/-/g, ''), 'hex'))
     .update(key, 'utf8')
     .digest();
   hash[6] = (hash[6]! & 0x0f) | 0x50;
@@ -211,6 +229,12 @@ export function childJobId(parentJobId: string, key: string): string {
   const hex = hash.subarray(0, 16).toString('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+
+/**
+ * Id của job con: suy ra cố định từ id job gốc và khóa của con (`derivedJobId`). Job gốc chạy lại tạo đúng các id cũ,
+ * nên `insert` bỏ qua con đã có.
+ */
+export const childJobId = (parentJobId: string, key: string): string => derivedJobId(parentJobId, key);
 
 export interface FanOutChild<P> {
   /** Khóa của con trong job gốc (vd. `userId` người nhận); cùng khóa thì cùng id job con. */

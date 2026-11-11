@@ -1,5 +1,5 @@
 import { EVENT_SLUG_PATTERN, toEventIso, type PublicEvent } from '@tickee/contracts';
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import type { DbExecutor, Tx } from '../../platform/db/index.js';
 import { organizationNameOf } from '../organizer/index.js';
 import { notFound, UUID } from './event.service.js';
@@ -117,6 +117,39 @@ export async function saleEventById(db: DbExecutor, eventId: string): Promise<Pu
     .where(and(eq(events.id, eventId), ne(events.status, 'draft')));
   if (!row) throw notFound();
   return row;
+}
+
+/**
+ * Phần Sự kiện in trên Vé (Story 3.8): trang chia sẻ Vé (`ticketing`) và email Vé (`ordering`). Tên, giờ bắt đầu và địa
+ * điểm hiện tại, trạng thái, `effective_end_at`; `ended`: đồng hồ DB đã quá `effective_end_at` (AD-14, so tại lúc đọc,
+ * không theo đồng hồ máy chủ ứng dụng).
+ */
+export interface TicketEventRef {
+  id: string;
+  name: string;
+  startsAt: Date;
+  venue: string | null;
+  status: EventRow['status'];
+  effectiveEndAt: Date;
+  ended: boolean;
+}
+
+/** Sự kiện của Vé theo id (không lọc trạng thái: Vé đã phát thì Sự kiện đã từng mở bán). Id sai dạng, không có → `null`. */
+export async function ticketEventById(db: DbExecutor, eventId: string): Promise<TicketEventRef | null> {
+  if (!UUID.test(eventId)) return null;
+  const [row] = await db
+    .select({
+      id: events.id,
+      name: events.name,
+      startsAt: events.startsAt,
+      venue: events.venue,
+      status: events.status,
+      effectiveEndAt: events.effectiveEndAt,
+      ended: sql<boolean>`now() > ${events.effectiveEndAt}`,
+    })
+    .from(events)
+    .where(eq(events.id, eventId));
+  return row ?? null;
 }
 
 /**

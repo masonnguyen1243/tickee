@@ -13,10 +13,10 @@ import { JobsModule } from './platform/jobs/index.js';
 import { createLoggerModule } from './platform/logging/index.js';
 
 /**
- * Gốc DI của vai `worker`: không mở HTTP, chạy pg-boss, các job định kỳ, job gửi email (lời mời Admin), job revalidate
- * trang Sự kiện công khai (gọi `<WEB_ORIGIN>/api/revalidate`) và job hết hạn Giữ chỗ của Đơn. Có sẵn adapter Tingee, Vé
- * (khóa QR) và lõi xử lý IPN của `payment` (`IpnProcessor`, `OrderPayments`) để Đối soát bù (Story 4.1) đi cùng đường xử
- * lý với IPN.
+ * Gốc DI của vai `worker`: không mở HTTP, chạy pg-boss, các job định kỳ, job gửi email (lời mời Admin, email Vé và
+ * email tiền về muộn cho Người mua), job revalidate trang Sự kiện công khai (gọi `<WEB_ORIGIN>/api/revalidate`) và job
+ * hết hạn Giữ chỗ của Đơn. Có sẵn adapter Tingee, Vé (khóa QR) và lõi xử lý IPN của `payment` (`IpnProcessor`,
+ * `OrderPayments`) để Đối soát bù (Story 4.1) đi cùng đường xử lý với IPN.
  */
 @Module({})
 export class WorkerModule {
@@ -37,7 +37,7 @@ export class WorkerModule {
         IdentityJanitorModule,
         OrganizerJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN }),
         EventJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN, REVALIDATE_SECRET: config.REVALIDATE_SECRET }),
-        OrderingJobsModule,
+        OrderingJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN }),
       ],
       providers: [{ provide: APP_CONFIG, useValue: config }],
     };

@@ -9,7 +9,9 @@ export {
   lockSaleEventBySlug,
   publicEventBySlug,
   saleEventById,
+  ticketEventById,
   type PublicEventRef,
+  type TicketEventRef,
 } from './public-event.js';
 export {
   enqueuePublicPageRevalidation,
