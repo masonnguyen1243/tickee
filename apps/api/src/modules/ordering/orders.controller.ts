@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Header, Headers, HttpCode, Inject, Param, Post, Req, Res } from '@nestjs/common';
-import { IDEMPOTENCY_KEY_HEADER, type BuyerOrder, type CheckoutForm } from '@tickee/contracts';
+import { IDEMPOTENCY_KEY_HEADER, RealtimeTopic, type BuyerOrderView, type CheckoutForm } from '@tickee/contracts';
 import type { Request, Response } from 'express';
+import { RealtimeHub } from '../../platform/realtime/index.js';
 import { OrdersService, type Buyer } from './orders.service.js';
 
 /**
@@ -24,7 +25,10 @@ const clientIp = (req: Request): string => req.ip ?? req.socket.remoteAddress ??
  */
 @Controller()
 export class OrdersController {
-  constructor(@Inject(OrdersService) private readonly orders: OrdersService) {}
+  constructor(
+    @Inject(OrdersService) private readonly orders: OrdersService,
+    @Inject(RealtimeHub) private readonly realtime: RealtimeHub,
+  ) {}
 
   /** `GET /v1/events/:slug/checkout`: câu hỏi form mua + tự điền tên, SĐT, email. */
   @Get('events/:slug/checkout')
@@ -48,7 +52,7 @@ export class OrdersController {
     @Body() body: unknown,
     @Req() req: BuyerRequest,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<BuyerOrder> {
+  ): Promise<BuyerOrderView> {
     const { order, created } = await this.orders.create(buyerOf(req), clientIp(req), slug, key, body);
     res.status(created ? 201 : 200);
     return order;
@@ -60,19 +64,31 @@ export class OrdersController {
    */
   @Get('me/orders/:code')
   @Header('cache-control', 'no-store')
-  mine(@Param('code') code: string, @Req() req: BuyerRequest): Promise<BuyerOrder> {
+  mine(@Param('code') code: string, @Req() req: BuyerRequest): Promise<BuyerOrderView> {
     return this.orders.mine(buyerOf(req), code);
   }
 
   /**
+   * `GET /v1/me/orders/:code/live` (Story 3.7, AD-17): stream SSE của Đơn, cùng phiên và phép sở hữu với `GET
+   * /v1/me/orders/:code` (không đăng nhập → `401`; Đơn không có hoặc của người khác → `404 ORDER_NOT_FOUND`, không mở
+   * stream). Chỉ đẩy tín hiệu `order_changed` của đúng Đơn này (và `resync` khi hub vừa nối lại `LISTEN`), dữ liệu chỉ
+   * `{ type }`: web tự tải lại REST. Máy chủ đang tắt → `503`.
+   */
+  @Get('me/orders/:code/live')
+  async live(@Param('code') code: string, @Req() req: BuyerRequest, @Res() res: Response): Promise<void> {
+    const orderId = await this.orders.liveOrderId(buyerOf(req), code);
+    this.realtime.open(req, res, (signal) => signal.type === RealtimeTopic.ORDER_CHANGED && signal.id === orderId);
+  }
+
+  /**
    * `POST /v1/me/orders/:code/payment-link` (Story 3.4): thử tạo lại link thanh toán cho cùng Đơn sau khi Tingee từ
-   * chối. `200` với `BuyerOrder` hiện tại (Đơn không đủ điều kiện thì không gọi Tingee); không có hoặc của người khác →
+   * chối. `200` với `BuyerOrderView` hiện tại (Đơn không đủ điều kiện thì không gọi Tingee); không có hoặc của người khác →
    * `404 ORDER_NOT_FOUND`; lần thử tính vào giới hạn tốc độ tạo Đơn → quá giới hạn `429 ORDER_RATE_LIMITED`.
    */
   @Post('me/orders/:code/payment-link')
   @HttpCode(200)
   @Header('cache-control', 'no-store')
-  retryPaymentLink(@Param('code') code: string, @Req() req: BuyerRequest): Promise<BuyerOrder> {
+  retryPaymentLink(@Param('code') code: string, @Req() req: BuyerRequest): Promise<BuyerOrderView> {
     return this.orders.retryPaymentLink(buyerOf(req), clientIp(req), code);
   }
 }

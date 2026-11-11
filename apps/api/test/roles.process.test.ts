@@ -131,7 +131,7 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
     });
   });
 
-  it('vai api: /healthz 200 có x-request-id, SIGTERM → exit 0', async () => {
+  it('vai api: /healthz 200 có x-request-id, /readyz 200 (DB + LISTEN realtime), SIGTERM → exit 0', async () => {
     const port = await freePort();
     const p = start({ ...apiRoleEnv(), PORT: String(port) });
     try {
@@ -139,6 +139,7 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
       const res = await fetch(`http://127.0.0.1:${port}/healthz`);
       expect(res.status).toBe(200);
       expect(res.headers.get('x-request-id')).toBeTruthy();
+      expect((await fetch(`http://127.0.0.1:${port}/readyz`)).status).toBe(200);
       p.child.kill('SIGTERM');
       expect(await p.exit, p.output()).toBe(0);
     } finally {

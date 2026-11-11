@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { BuyerOrder, EventDetail, FormQuestion, IDEMPOTENCY_KEY_HEADER, TicketTypeDetail } from '@tickee/contracts';
+import { BuyerOrderView, EventDetail, FormQuestion, IDEMPOTENCY_KEY_HEADER, TicketTypeDetail } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import { CreateLinkError, TINGEE_CLIENT, type TingeeClient, type TingeeCredential } from '../../src/modules/tingee/index.js';
 import { parseCredentialKeys, SecretBox } from '../../src/platform/crypto/index.js';
@@ -236,7 +236,7 @@ export async function ordersOfEvent(h: Harness, eventId: string) {
   return rows;
 }
 
-export const parseOrder = (body: unknown) => BuyerOrder.parse(body);
+export const parseOrder = (body: unknown) => BuyerOrderView.parse(body);
 
 /** Xóa bộ đếm tạo Đơn: mọi request test đi từ cùng một IP. */
 export async function resetOrderRateLimit(h: Harness): Promise<void> {

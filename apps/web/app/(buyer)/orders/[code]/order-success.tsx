@@ -1,6 +1,6 @@
 'use client';
 
-import type { BuyerOrder } from '@tickee/contracts';
+import type { BuyerOrderView } from '@tickee/contracts';
 import { Check } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
@@ -14,30 +14,40 @@ const STAGGER_MS = 90;
 /** "Rung nhẹ" khi Vé hiện (EXPERIENCE.md › Interaction Primitives). */
 const VIBRATE_MS = 40;
 
-/** Rung nhẹ một lần nếu thiết bị hỗ trợ; reduced motion thì không rung. */
-function useSuccessVibration(): void {
+/** Rung nhẹ một lần nếu thiết bị hỗ trợ và đang là "khoảnh khắc"; reduced motion thì không rung. */
+function useSuccessVibration(celebrate: boolean): void {
   useEffect(() => {
+    if (!celebrate) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     if (typeof navigator.vibrate === 'function') navigator.vibrate(VIBRATE_MS);
-  }, []);
+  }, [celebrate]);
 }
 
+type OrderSuccessProps = {
+  order: BuyerOrderView;
+  /**
+   * "Khoảnh khắc" (Story 3.7): thẻ trượt lên từ sân khấu và máy rung nhẹ, chỉ khi trang đang mở thấy Đơn chuyển `paid`
+   * hoặc vừa từ Checkout / nút "Thanh toán" sang. Mở lại hay tải lại sau đó: hiện ngay, không trượt, không rung.
+   */
+  celebrate: boolean;
+};
+
 /**
- * Màn "Thành công" của Trang Đơn khi Đơn `paid` (Story 3.3; 3.7 dùng lại khi Đơn có phí tự chuyển): stage có wordmark,
- * tên Sự kiện, "Vé của bạn đã sẵn sàng!" (`aria-live="polite"`; vùng live gắn cùng lúc với nội dung nên không được đọc,
- * và trình báo đổi trang của Next chỉ đọc tiêu đề trang: lúc gắn chuyển focus vào `h1` để trình đọc màn hình đọc câu
- * này ngay sau "Đăng ký"); mỗi Vé một `ticket-card`, thẻ đầu chồng mép dưới stage
- * ~30px, các thẻ trượt lên từ sân khấu và máy rung nhẹ. Reduced motion: hiện ngay, không trượt (quy tắc toàn cục trong
- * globals.css tắt animation), không rung. Chưa có email Vé (3.8), "Chia sẻ Vé" (3.8) hay "Xem Vé của tôi" (3.9).
+ * Màn "Thành công" của Trang Đơn khi `buyerStatus = paid` (Story 3.3; 3.7 dùng lại khi Đơn có phí tự chuyển): stage có
+ * wordmark, tên Sự kiện, "Vé của bạn đã sẵn sàng!" (`aria-live="polite"`; vùng live gắn cùng lúc với nội dung nên không
+ * được đọc, và trình báo đổi trang của Next chỉ đọc tiêu đề trang: lúc gắn chuyển focus vào `h1` để trình đọc màn hình
+ * đọc câu này ngay); mỗi Vé một `ticket-card`, thẻ đầu chồng mép dưới stage ~30px; `celebrate` thì các thẻ trượt lên từ
+ * sân khấu và máy rung nhẹ. Reduced motion: hiện ngay, không trượt (quy tắc toàn cục trong globals.css tắt animation),
+ * không rung. Chưa có "Đã gửi Vé tới {email}" (3.8), "Chia sẻ Vé" (3.8), "Xem Vé của tôi" (3.9) hay biên nhận (3.9).
  */
-export function OrderSuccess({ order }: { order: BuyerOrder }) {
-  useSuccessVibration();
+export function OrderSuccess({ order, celebrate }: OrderSuccessProps) {
+  useSuccessVibration(celebrate);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     heading.current?.focus();
   }, []);
   return (
-    <div className="flex flex-col pt-2" data-slot="order-success">
+    <div className="flex flex-col pt-2" data-slot="order-success" data-celebrate={celebrate ? 'true' : 'false'}>
       <StageBlock
         aria-live="polite"
         className="flex flex-col items-center gap-1 pt-5 pb-[46px] text-center"
@@ -66,8 +76,8 @@ export function OrderSuccess({ order }: { order: BuyerOrder }) {
                 holderName={ticket.holderName}
                 startsAt={order.event.startsAt}
                 qr={ticket.qr}
-                className="animate-ticket-rise"
-                style={{ animationDelay: `${index * STAGGER_MS}ms` }}
+                className={celebrate ? 'animate-ticket-rise' : undefined}
+                style={celebrate ? { animationDelay: `${index * STAGGER_MS}ms` } : undefined}
               />
             </li>
           ))}

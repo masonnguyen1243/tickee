@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { BuyerOrder } from '@tickee/contracts';
+import { BuyerOrderView } from '@tickee/contracts';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { TingeeCredential } from '../../src/modules/tingee/index.js';
@@ -107,7 +107,7 @@ async function placeIn(sale: SaleEvent, quantities: number[]): Promise<Placed> {
   const res = await postOrder(h, buyer, sale.event.slug, orderBody(items, { funnelId }));
   expect(res.status).toBe(201);
   const order = parseOrder(res.body);
-  expect(order).toMatchObject({ status: 'pending', payment: { checkoutUrl: expect.any(String) } });
+  expect(order).toMatchObject({ buyerStatus: 'awaiting_payment', payment: { checkoutUrl: expect.any(String) } });
   const { id } = await orderState(h, order.code);
   return {
     buyer,
@@ -243,10 +243,10 @@ describe('Matrix: lệch tiền', () => {
     expect(await auditCount(placed.orderId)).toBe(0);
     await expectInvariants(h, placed.eventId);
 
-    const order = BuyerOrder.parse(
+    const order = BuyerOrderView.parse(
       (await h.http.get(`/v1/me/orders/${placed.code}`).set('cookie', placed.buyer.cookie).expect(200)).body,
     );
-    expect(order).toMatchObject({ status: 'review', tickets: [] });
+    expect(order).toMatchObject({ buyerStatus: 'under_review', tickets: [] });
   });
 
   it('Đơn expired (thừa tiền) → review, mục amount_mismatch, tồn kho không đổi', async () => {
@@ -284,7 +284,7 @@ describe('Matrix: tiền về muộn', () => {
       [placed.funnelId],
     );
     expect(funnel.rows.map((r) => r.type)).toEqual(['order_created', 'paid']);
-    const order = BuyerOrder.parse(
+    const order = BuyerOrderView.parse(
       (await h.http.get(`/v1/me/orders/${placed.code}`).set('cookie', placed.buyer.cookie).expect(200)).body,
     );
     expect(order.tickets).toHaveLength(3);

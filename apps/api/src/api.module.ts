@@ -16,6 +16,7 @@ import { EmailModule } from './platform/email/index.js';
 import { ErrorFilter, HealthController } from './platform/http/index.js';
 import { JobsModule } from './platform/jobs/index.js';
 import { createLoggerModule, type LoggingOptions } from './platform/logging/index.js';
+import { RealtimeModule } from './platform/realtime/index.js';
 
 /**
  * Gốc DI của vai `api`. Story sau thêm mô-đun miền vào `imports`.
@@ -34,6 +35,8 @@ export class ApiModule {
         EmailModule.forRoot({ url: config.SMTP_URL, from: config.EMAIL_FROM }),
         // Chỉ enqueue job (cùng `tx` của thay đổi); không bảo trì, không lịch, không handler — việc của vai `worker`.
         JobsModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-api', mode: 'producer' }),
+        // Realtime (AD-17, toàn cục): một kết nối `LISTEN` mỗi instance, SSE theo bộ lọc của mô-đun, `/readyz`.
+        RealtimeModule.forRoot({ connectionString: config.DATABASE_URL }),
         // Adapter Tingee (`TINGEE_CLIENT`, toàn cục): mọi lời gọi ký bằng credential của từng BTC (`organizer` giải mã).
         TingeeModule.forRoot({ baseUrl: config.TINGEE_BASE_URL }),
         IdentityModule.forRoot(config),

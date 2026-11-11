@@ -64,7 +64,7 @@ async function pendingOrder() {
     ),
   ).expect(201);
   const order = parseOrder(res.body);
-  expect(order.status).toBe('pending');
+  expect(order.buyerStatus).toBe('awaiting_payment');
   const { id } = await orderState(h, order.code);
   return {
     id,

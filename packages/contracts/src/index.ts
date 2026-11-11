@@ -11,6 +11,7 @@ export * from './organizer.js';
 export * from './payment.js';
 export * from './pii.js';
 export * from './publish.js';
+export * from './realtime.js';
 export * from './reporting.js';
 export * from './sellability.js';
 export * from './ticket-type.js';

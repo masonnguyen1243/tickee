@@ -146,7 +146,7 @@ describe('worker thật', () => {
     const [job] = await boss.findJobs(QUEUE, { data: { orderId: row.id } });
     await expect.poll(async () => (await boss.getJobById(QUEUE, job!.id))?.state, { timeout: 10_000 }).toBe('completed');
     const res = await h.http.get(`/v1/me/orders/${order.code}`).set('cookie', buyer.cookie).expect(200);
-    expect(parseOrder(res.body).status).toBe('expired');
+    expect(parseOrder(res.body).buyerStatus).toBe('expired');
   });
 
   it('Đơn đã có link khi job chạy → bỏ qua (completed), Đơn vẫn pending, chỗ vẫn giữ', async () => {

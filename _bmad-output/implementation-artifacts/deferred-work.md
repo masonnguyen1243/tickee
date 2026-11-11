@@ -376,9 +376,11 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md`
   summary: Story 3.7. Màn Thành công rung và chạy hiệu ứng trượt lên mỗi lần mount, kể cả khi tải lại hoặc mở lại Trang Đơn sau này. 3.7 nên chốt "khoảnh khắc" chỉ chạy khi Đơn vừa chuyển `paid` trong lúc đang xem, hoặc khi vừa từ Checkout sang.
   evidence: Review 3.3 (BH, EC) triage #15. `order-success.tsx` `useSuccessVibration` + `animate-ticket-rise` không có điều kiện. 3.3 không xử lý vì sửa phải thêm state, mà 3.7 sẽ dùng lại màn này cho chuyển trạng thái realtime.
+- Đã xử lý (11/11/2026): Story 3.7 (`spec-3-7-trang-don-tu-chuyen-thanh-cong-theo-thoi-gian-thuc.md`). `OrderSuccess` nhận `celebrate`: chỉ trượt lên + rung khi trang đang mở thấy Đơn chuyển `paid`, hoặc lần vào đầu tiên có cờ một lần trong `sessionStorage` (Checkout đặt cho Đơn 0đ, nút "Thanh toán" đặt cho Đơn có phí). Mở lại hay tải lại thì hiện ngay (`lib/order/live.ts` › `nextMoment`, e2e `order-live.spec.ts`).
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md`
   summary: Story 3.7. Trang Đơn `paid` thay toàn bộ phần tóm tắt (dòng, tổng tiền, câu trả lời) bằng màn Thành công. Với Đơn 0đ thì ổn, nhưng Đơn có phí sẽ mất phần "đã trả bao nhiêu". `expiresAt` của Đơn 0đ bằng `createdAt`, chưa ghi vào contract.
   evidence: Review 3.3 (BH) triage #19. `order-view.tsx` trả `<OrderSuccess>` cho mọi `paid`. 3.7 quyết định có hiện tóm tắt hoặc biên nhận dưới các thẻ Vé hay không.
+- Đã xử lý (11/11/2026): Mason chốt khi lập spec 3.7: không thêm biên nhận dưới thẻ Vé, giữ bố cục Thành công đã chốt (stage + thẻ Vé + Mã Đơn). Biên nhận ("đã trả bao nhiêu") để Story 3.9 (Chi tiết Vé / Vé của tôi). `BuyerOrderView` (contract) ghi rõ Đơn 0đ có `expiresAt` = `createdAt`.
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md`
   summary: Story 3.8/4.1. `TicketingModule` và `TICKET_QR_KEYS` mới chỉ nối ở vai api. Email Vé (3.8, có QR) và Đối soát bù (4.1, gọi `markPaid` nguồn `reconciliation`) chạy trong worker, nên phải thêm khóa vào `workerConfigSchema` và nối DI cho worker.
   evidence: Review 3.3 (BH) triage #18. `config.test.ts` đang ghim "Vai worker chưa cần khóa này", đúng phạm vi 3.3.
@@ -418,3 +420,25 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-6-ipn-cho-cac-truong-hop-bien.md`
   summary: Story 3.8. Email báo Người mua khi tiền về muộn cho Đơn đã hết hạn mà không phát được Vé (mục `orphan`, lý do `sold_out`): "BTC đã nhận tiền nhưng Hạng vé đã hết, BTC sẽ liên hệ hoàn tiền". Enqueue bằng chính `tx` của IPN, cùng hàng đợi email Người mua mà 3.8 dựng.
   evidence: Mason chốt 11/11 khi lập spec 3.6: 3.6 chỉ tạo mục `orphan`, không thêm hàng đợi hay mẫu email; lệch có chủ đích so với câu "enqueue email báo Người mua" trong AC 3.6 của epics. Chỗ gắn: `ordering/mark-paid.ts` (`settleIpn`, nhánh `sold_out`) hoặc `payment/ipn-processor.ts` (sau `openReviewItem` loại `orphan`).
+
+## Deferred from: build of spec-3-7-trang-don-tu-chuyen-thanh-cong-theo-thoi-gian-thuc.md (2026-11-11)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-7-trang-don-tu-chuyen-thanh-cong-theo-thoi-gian-thuc.md`
+  summary: AI-6. Ca Playwright full-stack cho Trang Đơn tự chuyển "Thành công": web build thật + api thật + Postgres + Tingee fake, Người mua đặt Đơn có phí, tab ở nền, bắn IPN từ Tingee fake, quay lại tab thấy Thành công < 3 giây; kèm kiểm CORS và cookie của `EventSource` cross-origin (`withCredentials`).
+  evidence: Mason chốt 11/11 khi lập spec 3.7: test chia hai tầng. Playwright (`apps/web/e2e/order-live.spec.ts`) giả API và luồng SSE bằng `page.route`; test tích hợp api (`apps/api/test/ordering/order-live.test.ts`) đo IPN → tín hiệu trên stream SSE thật < 1 giây. CORS và cookie của SSE thật mới kiểm bằng tay với `pnpm dev`. Lệch có chủ đích so với câu "test Playwright với Tingee fake" trong AC 3.7; gom vào phần e2e full-stack còn lại của AI-6.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-7-trang-don-tu-chuyen-thanh-cong-theo-thoi-gian-thuc.md`
+  summary: Story 3.8. Thêm "Đã gửi Vé tới {email}" vào stage của màn Thành công khi đã có email Vé (EXPERIENCE › Thanh toán & Trang Đơn › Thành công).
+  evidence: Mason chốt 11/11 khi lập spec 3.7: không hứa trước khi có tính năng (cùng tiền lệ 3.3 hoãn nút "Xem Vé của tôi"). `order-success.tsx` chưa có dòng này; e2e `purchase.spec.ts` đang ghim `not.toContainText('Đã gửi Vé tới')`, 3.8 đổi lại.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-7-trang-don-tu-chuyen-thanh-cong-theo-thoi-gian-thuc.md`
+  summary: Story 3.8/3.9. Đổi dòng mất mạng của Trang Đơn về đúng copy AC: "Mất kết nối — vé vẫn được gửi qua email và Vé của tôi." khi đã có email Vé (3.8) và Vé của tôi (3.9).
+  evidence: 3.7 dùng copy tạm "Mất kết nối — vé sẽ tự hiện khi có mạng lại." (`order-payment.tsx` › `OFFLINE_TEXT`, e2e `order-live.spec.ts` › `OFFLINE`) vì email Vé và Vé của tôi chưa có. Story nào làm xong phần sau cùng trong hai tính năng đó thì đổi copy và test.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-7-trang-don-tu-chuyen-thanh-cong-theo-thoi-gian-thuc.md`
+  summary: E2-8. Test api `test/organizer/payout-default-job.test.ts` › "gửi email lỗi → job gốc completed, mỗi job con sang retry…" chập chờn: đôi khi `sentForOrg()` có một email "MB Bank ••••1111 → ACB ••••2222" dù `workerEmail.failWith` đang đặt.
+  evidence: Phát hiện khi kiểm chứng 3.7 (11/11). Chạy riêng file: bản 3.7 fail 2/5, baseline `bfd49bc` (trước 3.7) fail 2/6, nên lỗi có từ trước, không do 3.7. Nghi job còn lại của test trước (cùng BTC, cùng người nhận; comment ở đầu file đã nhắc) được worker gửi trước khi `failWith` có hiệu lực. Nên gộp vào việc ghi các test chập chờn ở E2-8.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-7-trang-don-tu-chuyen-thanh-cong-theo-thoi-gian-thuc.md`
+  summary: Trang Đơn đã có dữ liệu mà lần tải lại lỗi không phải lỗi mạng (401 phiên hết hạn, 5xx, body sai schema) thì vẫn hiện màn chờ cũ, không báo gì, và polling 2 giây cứ lỗi tiếp.
+  evidence: Review 3.7 (EC) triage #29. `order-view.tsx` chỉ hiện banner lỗi khi `isError && !data`; hành vi này có từ 3.4 (polling 5 giây), 3.7 không đổi. Dòng mất mạng của 3.7 chỉ xét lỗi mạng (`isNetworkError`). Story nào chạm lại Trang Đơn hoặc dựng xử lý phiên hết hạn toàn cục thì thêm một dòng "Chưa cập nhật được" hoặc chuyển sang đăng nhập khi 401.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-7-trang-don-tu-chuyen-thanh-cong-theo-thoi-gian-thuc.md`
+  summary: Story 7.1. Khi hủy Sự kiện, phát `order_changed` (`realtime.notify` trong chính `tx` hủy) cho mọi Đơn bị ảnh hưởng của Sự kiện, kể cả Đơn mà `status` không đổi; hoặc thêm một tín hiệu cấp Sự kiện mà bộ lọc của `GET /v1/me/orders/:code/live` cũng nhận.
+  evidence: `buyerStatus` của Đơn `paid`/`review`/`cancelled`/`refunded` thành `event_cancelled` chỉ vì `events.status = 'cancelled'` (`ordering/buyer-status.ts`), không có CAS nào trên `orders` nên không có `order_changed`. Trang Đơn đang mở (đã `paid` hay `under_review`: không polling) sẽ đứng ở trạng thái cũ, vẫn hiện Mã QR vé, tới khi tải lại hoặc tab visible lại. Bộ lọc hiện tại ở `orders.controller.ts` › `live` chỉ nhận `order_changed` có `id` trùng Đơn.
+

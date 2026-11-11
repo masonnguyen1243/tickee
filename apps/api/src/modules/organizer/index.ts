@@ -9,7 +9,7 @@ export {
   type ClosedBetaState,
 } from './closed-beta.js';
 export { payoutAccountStatusOf, type PayoutAccountState } from './payout-account.service.js';
-export { organizationNameOf } from './organizer.service.js';
+export { organizationNameOf, organizerContactOf } from './organizer.service.js';
 export {
   defaultPayoutTargetOf,
   ipnRecipientOf,
