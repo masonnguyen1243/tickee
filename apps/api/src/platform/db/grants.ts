@@ -6,13 +6,15 @@ export const APP_DB_ROLE = 'tickee_app';
 /**
  * Bảng chỉ cho INSERT/SELECT với `tickee_app` (`schema.table`). Thu UPDATE/DELETE/TRUNCATE sau khi cấp quyền,
  * nên quyền này vẫn bị chặn sau mỗi lần migrate. `checkout_funnel_events`: phễu mua (Story 3.1). `order_items`,
- * `order_answers`: bản chụp dòng Đơn và câu trả lời form lúc đặt (Story 3.2).
+ * `order_answers`: bản chụp dòng Đơn và câu trả lời form lúc đặt (Story 3.2). `payment_events`: IPN Tingee đã nhận
+ * (Story 3.5; `INSERT … ON CONFLICT DO NOTHING` chỉ cần INSERT).
  */
 export const APPEND_ONLY_TABLES = [
   'public.audit_events',
   'public.checkout_funnel_events',
   'public.order_items',
   'public.order_answers',
+  'public.payment_events',
 ] as const;
 
 /**

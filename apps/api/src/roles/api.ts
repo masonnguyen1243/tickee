@@ -8,7 +8,7 @@ import { SHUTDOWN_SIGNALS } from './shared.js';
 
 /**
  * Tùy chọn tạo app HTTP (cả khi chạy thật lẫn trong test). Tắt body parser của Nest: Better Auth tự đọc body
- * ở `/v1/auth/*`, còn `AuthModule` gắn lại parser JSON (kèm `rawBody`) cho các route khác.
+ * ở `/v1/auth/*`, còn `AuthModule` gắn lại parser JSON cho các route khác, trừ route IPN Tingee (tự đọc byte thô).
  */
 export const API_APP_OPTIONS = { bufferLogs: true, bodyParser: false } as const satisfies NestApplicationOptions;
 

@@ -9,7 +9,7 @@ module.exports = {
   organizer: ['identity', 'tingee'],
   event: ['organizer'],
   ordering: ['ticketing', 'event', 'organizer', 'tingee'],
-  payment: ['ordering', 'tingee'],
+  payment: ['ordering', 'organizer', 'tingee'],
   ticketing: ['event'],
   checkin: ['ticketing', 'event'],
   reporting: ['ordering', 'ticketing', 'payment', 'event', 'organizer', 'integration'],

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { BuyerOrder, EventDetail, FormQuestion, IDEMPOTENCY_KEY_HEADER, TicketTypeDetail } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import { CreateLinkError, TINGEE_CLIENT, type TingeeClient, type TingeeCredential } from '../../src/modules/tingee/index.js';
@@ -50,7 +50,7 @@ export const DEFAULT_PAYOUT: PayoutSpec = {
 
 /**
  * Lưu credential (Secret Token niêm bằng `testSecretBox`) + một tài khoản nhận tiền mặc định cho BTC `orgId`, như sau
- * khi Owner kết nối Tingee (Story 2.6). Trả id tài khoản.
+ * khi Owner kết nối Tingee (Story 2.6), kể cả sinh `ipnKey` của BTC lần đầu (`ipnKeyOf`). Trả id tài khoản.
  */
 export async function linkPayoutAccount(
   org: Org,
@@ -58,6 +58,9 @@ export async function linkPayoutAccount(
   payout: PayoutSpec = DEFAULT_PAYOUT,
 ): Promise<{ credentialId: string; payoutAccountId: string }> {
   const { h, owner, orgId } = org;
+  await h.db.orm.execute(sql`
+    UPDATE organizations SET tingee_ipn_key = ${randomBytes(16).toString('base64url')}
+     WHERE id = ${orgId} AND tingee_ipn_key IS NULL`);
   const created = await h.db.orm.execute<{ id: string }>(sql`
     INSERT INTO tingee_credentials (organization_id, client_id, secret_token_ciphertext, created_by)
     VALUES (${orgId}, ${credential.clientId}, ${testSecretBox.seal(credential.secretToken)}, ${owner.userId})
@@ -71,6 +74,17 @@ export async function linkPayoutAccount(
       ${payout.vaAccountNumber.slice(-4)}, ${payout.accountName}, ${owner.userId}, true)
     RETURNING id`);
   return { credentialId, payoutAccountId: account.rows[0]!.id };
+}
+
+/** `ipnKey` của BTC (URL IPN `/v1/payments/tingee/ipn/:ipnKey`); BTC chưa kết nối Tingee → lỗi. */
+export async function ipnKeyOf(h: Harness, orgId: string): Promise<string> {
+  const { rows } = await h.db.pool.query<{ key: string | null }>(
+    'SELECT tingee_ipn_key AS key FROM organizations WHERE id = $1',
+    [orgId],
+  );
+  const key = rows[0]?.key;
+  if (!key) throw new Error('BTC chưa có ipnKey');
+  return key;
 }
 
 /** Credential giả của BTC trong test của 3.2/3.3 (Tingee là `REJECTING_TINGEE`, không bao giờ gọi HTTP). */

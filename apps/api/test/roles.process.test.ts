@@ -155,6 +155,9 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
       SMTP_URL: c.SMTP_URL,
       EMAIL_FROM: c.EMAIL_FROM,
       REVALIDATE_SECRET: TEST_REVALIDATE_SECRET,
+      TINGEE_BASE_URL: c.TINGEE_BASE_URL,
+      TINGEE_CREDENTIAL_KEYS: c.TINGEE_CREDENTIAL_KEYS,
+      TICKET_QR_KEYS: c.TICKET_QR_KEYS,
     });
     try {
       await waitForOutput(p, 'worker đã chạy');

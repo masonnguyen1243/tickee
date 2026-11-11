@@ -12,7 +12,11 @@ export { payoutAccountStatusOf, type PayoutAccountState } from './payout-account
 export { organizationNameOf } from './organizer.service.js';
 export {
   defaultPayoutTargetOf,
+  ipnRecipientOf,
+  payoutAccountCredentialOf,
   payoutRecipientOf,
+  type IpnCredential,
+  type IpnRecipient,
   type PayoutRecipient,
   type PayoutTarget,
 } from './payout-targets.js';

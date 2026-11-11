@@ -167,6 +167,23 @@ export async function releaseHeld(tx: Tx, lines: readonly InventoryLine[]): Prom
   }
 }
 
+/**
+ * Chốt bán phần đang giữ của một Đơn vừa chuyển `pending → paid` (Story 3.5, bảng phép tồn kho AD-2): `held -= n, sold
+ * += n` cho từng dòng, theo `ticket_type_id` tăng dần. `sold + held` không đổi nên không cần điều kiện số suất; CHECK
+ * `held >= 0` chặn chốt quá số đang giữ (lỗi lập trình → transaction lỗi, không âm thầm sai số).
+ */
+export async function settleHeld(tx: Tx, lines: readonly InventoryLine[]): Promise<void> {
+  for (const { ticketTypeId, quantity } of byTicketTypeId(lines)) {
+    await tx
+      .update(ticketTypeInventory)
+      .set({
+        held: sql`${ticketTypeInventory.held} - ${quantity}`,
+        sold: sql`${ticketTypeInventory.sold} + ${quantity}`,
+      })
+      .where(eq(ticketTypeInventory.ticketTypeId, ticketTypeId));
+  }
+}
+
 /** Tồn kho của các Hạng vé (không khóa), theo `ticketTypeId`. */
 export async function inventoryOf(db: DbExecutor, ticketTypeIds: readonly string[]): Promise<Map<string, InventoryRow>> {
   if (ticketTypeIds.length === 0) return new Map();

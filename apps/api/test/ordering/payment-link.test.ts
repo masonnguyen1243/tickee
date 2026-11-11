@@ -574,7 +574,7 @@ describe('hết hạn (c): Đơn đã có link', () => {
       await worker.close();
     });
 
-    it('job (c) tới hạn → worker (không cấu hình Tingee) chuyển expired và nhả chỗ', async () => {
+    it('job (c) tới hạn → worker (Tingee là cổng 1, không gọi) chuyển expired và nhả chỗ', async () => {
       const placed = await place(2);
       const { id } = await linkRow(placed.order.code);
       await h.db.orm.execute(sql`UPDATE orders SET expires_at = now() - interval '10 minutes' WHERE id = ${id}`);

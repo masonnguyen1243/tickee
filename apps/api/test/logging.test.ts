@@ -104,7 +104,7 @@ describe('che PII trong log', () => {
     for (const v of leaked) expect(out.text).not.toContain(v);
   });
 
-  it('header xác nhận lại (x-reauth-token), cookie và authorization của request bị che', () => {
+  it('header xác nhận lại (x-reauth-token), chữ ký IPN (x-signature), cookie và authorization của request bị che', () => {
     const out = new LogCapture();
     const log = pino(basePinoOptions('info'), out);
     log.info(
@@ -117,6 +117,8 @@ describe('che PII trong log', () => {
             'x-reauth-token': 'reauth-token-bi-mat',
             cookie: 'tickee.session_token=cookie-bi-mat',
             authorization: 'Bearer auth-bi-mat',
+            // Chữ ký IPN Tingee (Story 3.5).
+            'x-signature': 'chu-ky-ipn-bi-mat',
           },
         },
       },
@@ -124,10 +126,18 @@ describe('che PII trong log', () => {
     );
     expect(out.lines[0]).toMatchObject({
       req: {
-        headers: { host: 'api.tickee.test', 'x-reauth-token': REDACTED, cookie: REDACTED, authorization: REDACTED },
+        headers: {
+          host: 'api.tickee.test',
+          'x-reauth-token': REDACTED,
+          cookie: REDACTED,
+          authorization: REDACTED,
+          'x-signature': REDACTED,
+        },
       },
     });
-    for (const v of ['reauth-token-bi-mat', 'cookie-bi-mat', 'auth-bi-mat']) expect(out.text).not.toContain(v);
+    for (const v of ['reauth-token-bi-mat', 'cookie-bi-mat', 'auth-bi-mat', 'chu-ky-ipn-bi-mat']) {
+      expect(out.text).not.toContain(v);
+    }
   });
 
   it('khóa `name` ở gốc và dưới đối tượng khác giữ nguyên; `user.name` bị che ở độ sâu 0–2', () => {

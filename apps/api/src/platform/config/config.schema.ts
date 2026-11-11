@@ -47,6 +47,31 @@ const smtpUrl = z
   .string()
   .refine((v) => /^smtps?:\/\//.test(v), { message: 'phải là URL smtp:// hoặc smtps://' });
 
+/**
+ * Tingee và khóa Vé, chung cho vai api (tạo link, IPN, phát Vé) và worker (Đối soát bù của Story 4.1 đi cùng đường xử lý
+ * IPN: gọi Tingee bằng credential của BTC và phát Vé trong `markPaid`; Story 3.5 cấu hình sẵn).
+ */
+const tingeeAndTickets = {
+  /**
+   * Open API của Tingee (AD-9, Story 2.6): origin thuần, vd. `https://uat-open-api.tingee.vn`. Mọi lời gọi ký bằng API
+   * key của từng BTC (lưu mã hóa trong DB); env không có credential Tingee nào. Local chạy
+   * `pnpm --filter @tickee/api tingee:fake` và trỏ vào fake.
+   */
+  TINGEE_BASE_URL: httpOrigin,
+  /**
+   * Khóa AES-256-GCM mã hóa Secret Token Tingee của BTC (AD-9, AD-23): `v<k>:<base64 của 32 byte>`, nhiều khóa cách
+   * nhau bằng dấu phẩy, không trùng `k`. Mã hóa bằng khóa có `k` lớn nhất; giữ khóa cũ tới khi không còn dòng nào dùng.
+   * Sinh khóa: `openssl rand -base64 32`. Không bao giờ log.
+   */
+  TINGEE_CREDENTIAL_KEYS: credentialKeys,
+  /**
+   * Khóa HMAC-SHA256 ký Mã QR vé (AD-16, Story 3.3): cùng dạng `TINGEE_CREDENTIAL_KEYS` (`v<k>:<base64 của 32 byte>`,
+   * nhiều khóa cách nhau bằng dấu phẩy, không trùng `k`). Ký Vé mới bằng khóa có `k` lớn nhất; Vé lưu `k` nên QR không
+   * đổi khi xoay khóa, miễn khóa cũ còn trong danh sách. Khác khóa của `TINGEE_CREDENTIAL_KEYS`. Không bao giờ log.
+   */
+  TICKET_QR_KEYS: credentialKeys,
+};
+
 export const apiConfigSchema = z.object({
   APP_ROLE: z.literal('api'),
   ...common,
@@ -75,24 +100,7 @@ export const apiConfigSchema = z.object({
    */
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
-  /**
-   * Open API của Tingee (AD-9, Story 2.6): origin thuần, vd. `https://uat-open-api.tingee.vn`. Mọi lời gọi ký bằng API
-   * key của từng BTC (lưu mã hóa trong DB); env không có credential Tingee nào. Local chạy
-   * `pnpm --filter @tickee/api tingee:fake` và trỏ vào fake.
-   */
-  TINGEE_BASE_URL: httpOrigin,
-  /**
-   * Khóa AES-256-GCM mã hóa Secret Token Tingee của BTC (AD-9, AD-23): `v<k>:<base64 của 32 byte>`, nhiều khóa cách
-   * nhau bằng dấu phẩy, không trùng `k`. Mã hóa bằng khóa có `k` lớn nhất; giữ khóa cũ tới khi không còn dòng nào dùng.
-   * Sinh khóa: `openssl rand -base64 32`. Không bao giờ log.
-   */
-  TINGEE_CREDENTIAL_KEYS: credentialKeys,
-  /**
-   * Khóa HMAC-SHA256 ký Mã QR vé (AD-16, Story 3.3): cùng dạng `TINGEE_CREDENTIAL_KEYS` (`v<k>:<base64 của 32 byte>`,
-   * nhiều khóa cách nhau bằng dấu phẩy, không trùng `k`). Ký Vé mới bằng khóa có `k` lớn nhất; Vé lưu `k` nên QR không
-   * đổi khi xoay khóa, miễn khóa cũ còn trong danh sách. Khác khóa của `TINGEE_CREDENTIAL_KEYS`. Không bao giờ log.
-   */
-  TICKET_QR_KEYS: credentialKeys,
+  ...tingeeAndTickets,
 });
 
 export const workerConfigSchema = z.object({
@@ -112,6 +120,8 @@ export const workerConfigSchema = z.object({
    * `<WEB_ORIGIN>/api/revalidate`; web đặt cùng giá trị (chỉ ở server). Sinh bằng `openssl rand -base64 32`. Không log.
    */
   REVALIDATE_SECRET: z.string().min(32),
+  /** Cùng giá trị với vai api (Story 3.5): worker giải mã credential Tingee của BTC và phát Vé (`markPaid`). */
+  ...tingeeAndTickets,
 });
 
 export const migrateConfigSchema = z.object({
