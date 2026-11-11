@@ -74,7 +74,7 @@ describe('thử lại song song', () => {
     const results = await Promise.all([retry(buyer.cookie, order.code), retry(buyer.cookie, order.code)]);
     expect(results.map((r) => r.status)).toEqual([200, 200]);
     expect(linkCalls()).toHaveLength(1);
-    for (const r of results) expect(parseOrder(r.body)).toMatchObject({ code: order.code, status: 'pending' });
+    for (const r of results) expect(parseOrder(r.body)).toMatchObject({ code: order.code, buyerStatus: 'awaiting_payment' });
     // Một bên trả link; bên thua lượt trả Đơn hiện tại (chưa có link). Đọc lại thì có link.
     expect(results.filter((r) => parseOrder(r.body).payment?.checkoutUrl).length).toBeGreaterThanOrEqual(1);
     const again = parseOrder((await h.http.get(`/v1/me/orders/${order.code}`).set('cookie', buyer.cookie).expect(200)).body);

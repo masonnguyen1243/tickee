@@ -30,3 +30,8 @@ export function serviceUnavailableError(cause: unknown): ApiError {
 export function invalidResponseError(status: number, details: unknown = null): ApiError {
   return new ApiError(ErrorCode.INTERNAL_ERROR, 'Máy chủ trả về dữ liệu không hợp lệ.', details, status);
 }
+
+/** Lỗi mạng (không nhận được phản hồi nào từ api): `serviceUnavailableError` của API client. */
+export function isNetworkError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === null && error.code === ErrorCode.SERVICE_UNAVAILABLE;
+}

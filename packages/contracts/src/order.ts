@@ -42,7 +42,7 @@ export const PAYMENT_LINK_MINUTES = 15;
 export const PAYMENT_LINK_GRACE_SECONDS = 300;
 
 /**
- * Lý do chưa có link thanh toán của Đơn có phí (`BuyerOrder.payment.linkError`):
+ * Lý do chưa có link thanh toán của Đơn có phí (`BuyerOrderView.payment.linkError`):
  * - `provider_error`: Tingee từ chối bằng mã thường; Đơn vẫn `pending`, thử lại được cho cùng Đơn trong hạn Giữ chỗ.
  * - `sales_paused`: dịch vụ thanh toán của BTC đang tạm ngừng (merchant bị khóa, key không còn dùng được, tài khoản
  *   nhận tiền chưa được cho phép trên Cổng thanh toán) hoặc BTC không còn tài khoản nhận tiền mặc định; Đơn `expired`.
@@ -63,6 +63,11 @@ export const paymentLinkErrorSchema = z.enum(PaymentLinkError);
  */
 export const buyerOrderApiPath = (code: string): string => `/me/orders/${encodeURIComponent(code)}`;
 export const paymentLinkApiPath = (code: string): string => `${buyerOrderApiPath(code)}/payment-link`;
+/**
+ * Luồng SSE của một Đơn (`GET /v1/me/orders/:code/live`, Story 3.7): cùng phiên và phép sở hữu với
+ * `buyerOrderApiPath`; chỉ đẩy tín hiệu `{ type }` (`RealtimeStreamMessage`) khi Đơn đổi, web tự tải lại REST.
+ */
+export const buyerOrderLiveApiPath = (code: string): string => `${buyerOrderApiPath(code)}/live`;
 
 /**
  * Header chống trùng của `POST /v1/events/:slug/orders` (AD-31): một uuid cho mỗi lần mở Checkout. Gửi lại cùng khóa
@@ -303,16 +308,64 @@ export const BuyerOrderPayment = z.object({
 export type BuyerOrderPayment = z.infer<typeof BuyerOrderPayment>;
 
 /**
- * Đơn của chính Người mua: `201`/`200` của `POST /v1/events/:slug/orders`, `GET /v1/me/orders/:code` và `200` của `POST
- * /v1/me/orders/:code/payment-link`. Mọi trường trừ `status`, `expiresAt`, `serverNow`, `event`, `payment` và `tickets`
- * là bản chụp lúc đặt (BTC sửa giá, tên Hạng vé, chính sách hoàn vé hay form sau đó không đổi gì ở đây). `serverNow`:
- * giờ của máy chủ lúc trả lời, để web đếm ngược tới `expiresAt` không theo đồng hồ máy. `event.startsAt`: giờ bắt đầu
- * hiện tại của Sự kiện (thẻ Vé). `payment`: `null` với Đơn tổng 0đ. `tickets`: các Vé theo `seq` khi Đơn `paid`; chưa
- * `paid` thì rỗng.
+ * Trạng thái Đơn phía Người mua (`BuyerOrderView.buyerStatus`, AD-17, Story 3.7), máy chủ tính từ trạng thái Đơn
+ * (`OrderStatus`), giờ máy chủ và Sự kiện; không lộ loại Cần xử lý hay số tiền lệch:
+ *
+ * | Đơn | Sự kiện | `buyerStatus` |
+ * |---|---|---|
+ * | `pending`, giờ máy chủ < `expires_at` | bất kỳ | `awaiting_payment` |
+ * | `pending`, giờ máy chủ ≥ `expires_at` | bất kỳ | `confirming` |
+ * | `expired` | bất kỳ | `expired` |
+ * | `paid`/`review`/`cancelled`/`refunded` | đã hủy | `event_cancelled` |
+ * | `paid` | chưa hủy | `paid` |
+ * | `review` | chưa hủy | `under_review` |
+ * | `cancelled`/`refunded` | chưa hủy | `cancelled_by_organizer` |
  */
-export const BuyerOrder = z.object({
+export const BuyerOrderStatus = {
+  AWAITING_PAYMENT: 'awaiting_payment',
+  CONFIRMING: 'confirming',
+  UNDER_REVIEW: 'under_review',
+  PAID: 'paid',
+  EXPIRED: 'expired',
+  CANCELLED_BY_ORGANIZER: 'cancelled_by_organizer',
+  EVENT_CANCELLED: 'event_cancelled',
+} as const;
+export type BuyerOrderStatus = (typeof BuyerOrderStatus)[keyof typeof BuyerOrderStatus];
+export const BUYER_ORDER_STATUSES = Object.values(BuyerOrderStatus) as [BuyerOrderStatus, ...BuyerOrderStatus[]];
+export const buyerOrderStatusSchema = z.enum(BuyerOrderStatus);
+
+/** `buyerStatus` có phải một giá trị web biết không (máy chủ mới hơn bản web có thể trả giá trị mới). */
+export const isBuyerOrderStatus = (value: string): value is BuyerOrderStatus =>
+  (BUYER_ORDER_STATUSES as readonly string[]).includes(value);
+
+/**
+ * Kênh liên hệ BTC của Đơn (Story 3.7): tên BTC, SĐT và email liên hệ BTC đã nhập khi tạo BTC (`null` khi BTC không
+ * nhập). Trang Đơn hiện khi Người mua cần liên hệ BTC (BTC đang kiểm tra thanh toán, Đơn bị hủy, Sự kiện hủy).
+ */
+export const BuyerOrderOrganizer = z.object({
+  name: z.string(),
+  contactPhone: z.string().nullable(),
+  contactEmail: z.string().nullable(),
+});
+export type BuyerOrderOrganizer = z.infer<typeof BuyerOrderOrganizer>;
+
+/**
+ * Đơn của chính Người mua (AD-17): `201`/`200` của `POST /v1/events/:slug/orders`, `GET /v1/me/orders/:code` và `200`
+ * của `POST /v1/me/orders/:code/payment-link`. Mọi trường trừ `buyerStatus`, `expiresAt`, `serverNow`, `event`,
+ * `payment`, `tickets` và `organizer` là bản chụp lúc đặt (BTC sửa giá, tên Hạng vé, chính sách hoàn vé hay form sau đó
+ * không đổi gì ở đây).
+ * - `buyerStatus`: `BuyerOrderStatus` theo giờ máy chủ lúc trả lời. Web nhận cả chuỗi lạ (máy chủ mới hơn bản web) để
+ *   hiện trạng thái an toàn thay vì lỗi parse; thu hẹp bằng `isBuyerOrderStatus`.
+ * - `serverNow`: giờ của máy chủ lúc trả lời, để web đếm ngược tới `expiresAt` không theo đồng hồ máy. Đơn 0đ có
+ *   `expiresAt` = `createdAt` (không Giữ chỗ).
+ * - `event.startsAt`: giờ bắt đầu hiện tại của Sự kiện (thẻ Vé).
+ * - `payment`: `null` với Đơn tổng 0đ.
+ * - `tickets`: các Vé theo `seq`, chỉ khi `buyerStatus = paid`; trạng thái khác thì rỗng.
+ * - `organizer`: tên và kênh liên hệ BTC hiện tại.
+ */
+export const BuyerOrderView = z.object({
   code: z.string().regex(ORDER_CODE_PATTERN),
-  status: orderStatusSchema,
+  buyerStatus: z.union([buyerOrderStatusSchema, z.string()]),
   event: z.object({ slug: z.string(), name: z.string(), startsAt: EventDateTime }),
   items: z.array(BuyerOrderItem).min(1),
   totalAmount: z.number().int().min(0),
@@ -324,8 +377,9 @@ export const BuyerOrder = z.object({
   serverNow: EventDateTime,
   payment: BuyerOrderPayment.nullable(),
   tickets: z.array(BuyerTicket),
+  organizer: BuyerOrderOrganizer,
 });
-export type BuyerOrder = z.infer<typeof BuyerOrder>;
+export type BuyerOrderView = z.infer<typeof BuyerOrderView>;
 
 /** `details` của `409 TICKET_TYPE_SOLD_OUT`: Hạng vé không còn đủ chỗ (dòng đầu tiên thiếu, theo id tăng dần). */
 export const TicketTypeSoldOutDetails = z.object({ ticketTypeId: z.uuid(), ticketTypeName: z.string() });

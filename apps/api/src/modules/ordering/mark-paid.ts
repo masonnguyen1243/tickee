@@ -6,6 +6,7 @@ import type { DbExecutor, Tx } from '../../platform/db/index.js';
 import { lockEventByIdForShare, organizationLocked, type PublicEventRef } from '../event/index.js';
 import { TicketsService } from '../ticketing/index.js';
 import { sellInventory, settleHeld } from './inventory.service.js';
+import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
 import { releaseOrderHeld } from './order-jobs.js';
 import { checkoutFunnelEvents, orderItems, orders, type PaidSource } from './schema.js';
 
@@ -123,16 +124,18 @@ const isReviewable = (status: OrderStatus): status is Reviewable =>
 
 /**
  * CAS `from → review` (Đơn đã khóa nên không thể thua đua; 0 dòng là lỗi lập trình → ném, cả `tx` rollback). `pending`
- * thì nhả chỗ đang giữ (`held -= n`); `expired` đã nhả lúc hết hạn.
+ * thì nhả chỗ đang giữ (`held -= n`); `expired` đã nhả lúc hết hạn. Phát `order_changed` trong `tx` (Trang Đơn hiện "BTC
+ * đang kiểm tra thanh toán").
  */
 async function moveToReview(tx: Tx, orderId: string, from: Reviewable): Promise<void> {
   const [moved] = await tx
     .update(orders)
     .set({ status: OrderStatus.REVIEW })
     .where(and(eq(orders.id, orderId), eq(orders.status, from)))
-    .returning({ id: orders.id });
+    .returning(orderSignalColumns);
   if (!moved) throw new Error(`markPaid: CAS ${from} → review thua dù đã khóa Đơn`);
   if (from === OrderStatus.PENDING) await releaseOrderHeld(tx, orderId);
+  await notifyOrderChanged(tx, moved);
 }
 
 const orphan = (reason: ReviewItemReason): MarkPaidResult => ({ outcome: 'orphan', reason });
@@ -141,8 +144,9 @@ const orphan = (reason: ReviewItemReason): MarkPaidResult => ({ outcome: 'orphan
  * Đường duy nhất phát Vé (AD-1, Story 3.3): mọi nguồn ghi nhận thanh toán (`PAID_SOURCES`) đi qua `markPaid` trong `tx`
  * của bên gọi. Một transaction: khóa Sự kiện `FOR SHARE` → (nguồn có phí: khóa Đơn, thứ tự kiểm 3–7 của AD-7) → CAS Đơn
  * → `paid` (kèm `paid_at`, `paid_amount`, `paid_source`) → phép tồn kho theo nguồn → phát N Vé (`ticketing`) → audit
- * `order.paid` → phễu `paid`. Không bao giờ phát Vé từ request của trình duyệt hay `returnUrl`. Email Vé (Story 3.8) sẽ
- * enqueue ở đây cho mọi nguồn.
+ * `order.paid` → phễu `paid` → tín hiệu `order_changed` (trừ nguồn `free`). Mọi lần Đơn chuyển `review` cũng phát
+ * `order_changed`. Không bao giờ phát Vé từ request của trình duyệt hay `returnUrl`. Email Vé (Story 3.8) sẽ enqueue ở
+ * đây cho mọi nguồn.
  */
 @Injectable()
 export class OrderPayments {
@@ -267,8 +271,9 @@ export class OrderPayments {
 
   /**
    * CAS `from → paid` (kèm `paid_at`, `paid_amount`, `paid_source`) → phát N Vé (`issued_at` = `issuedAt`, thiếu →
-   * `paid_at`) → audit `order.paid` → phễu `paid`. Phép tồn kho do bên gọi làm. 0 dòng (Đơn không còn ở `from`) →
-   * `false`, không làm gì.
+   * `paid_at`) → audit `order.paid` → phễu `paid` → `order_changed` (trừ nguồn `free`: Đơn 0đ thành `paid` ngay trong
+   * TX1, không `NOTIFY` trong TX1, response tạo Đơn đã mang kết quả). Phép tồn kho do bên gọi làm. 0 dòng (Đơn không còn
+   * ở `from`) → `false`, không làm gì.
    */
   private async pay(tx: Tx, orderId: string, input: PayInput): Promise<boolean> {
     const [order] = await tx
@@ -308,6 +313,9 @@ export class OrderPayments {
         .insert(checkoutFunnelEvents)
         .values({ eventId: order.eventId, type: FunnelEventType.PAID, funnelId: order.funnelId })
         .onConflictDoNothing({ target: [checkoutFunnelEvents.funnelId, checkoutFunnelEvents.type] });
+    }
+    if (input.source !== 'free') {
+      await notifyOrderChanged(tx, { id: order.id, organizationId: order.organizationId, eventId: order.eventId });
     }
     return true;
   }

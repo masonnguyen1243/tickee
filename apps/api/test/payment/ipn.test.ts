@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { BuyerOrder, ErrorResponse } from '@tickee/contracts';
+import { BuyerOrderView, ErrorResponse } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { parsesAsJson } from '../../src/modules/identity/identity.module.js';
@@ -105,7 +105,7 @@ async function place(
   expect(res.status).toBe(201);
   const order = parseOrder(res.body);
   expect(order).toMatchObject({
-    status: 'pending',
+    buyerStatus: 'awaiting_payment',
     payment: { checkoutUrl: withLink ? expect.any(String) : null },
   });
   const { id } = await orderState(h, order.code);
@@ -203,10 +203,10 @@ describe('IPN đúng', () => {
     expect(funnel.rows.map((r) => r.type)).toEqual(['order_created', 'paid']);
 
     // Trang Đơn của Người mua thấy Thành công kèm Vé.
-    const order = BuyerOrder.parse(
+    const order = BuyerOrderView.parse(
       (await h.http.get(`/v1/me/orders/${placed.code}`).set('cookie', placed.buyer.cookie).expect(200)).body,
     );
-    expect(order.status).toBe('paid');
+    expect(order.buyerStatus).toBe('paid');
     expect(order.tickets).toHaveLength(2);
     await expectInvariants(h, placed.eventId);
 

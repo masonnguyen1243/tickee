@@ -5,14 +5,17 @@ import { JobQueue } from '../src/jobs.js';
 import {
   answerIssues,
   answerSnapshot,
-  BuyerOrder,
+  BUYER_ORDER_STATUSES,
   BuyerOrderPayment,
+  BuyerOrderView,
   buyerOrderApiPath,
+  buyerOrderLiveApiPath,
   BuyerPhone,
   BuyerTicket,
   CreateOrderRequest,
   FREE_TICKET_LIMIT_MESSAGE,
   IdempotencyKey,
+  isBuyerOrderStatus,
   localBuyerPhone,
   NotOnSaleDetails,
   ORDER_CODE_ALPHABET,
@@ -210,39 +213,71 @@ describe('answerSnapshot', () => {
   });
 });
 
-describe('BuyerOrder và lỗi', () => {
-  it('BuyerOrder nhận đúng dạng API trả', () => {
-    const order = {
-      code: 'TK8F3Q2AXM',
-      status: 'pending',
-      event: { slug: 'giai-chay-ab12', name: 'Giải chạy', startsAt: '2026-11-16T07:00:00+07:00' },
-      items: [{ ticketTypeId: A, name: 'Đơn nam', unitPrice: 300_000, quantity: 2, amount: 600_000 }],
-      totalAmount: 600_000,
-      buyer: { name: 'An', phone: '+84912345678', email: 'an@vidu.vn' },
-      answers: [{ questionId: Q_TEXT, label: 'Size áo', answer: 'M' }],
-      refundPolicy: 'Hoàn 100% trước 7 ngày.',
-      createdAt: '2026-11-10T08:00:00.000Z',
-      expiresAt: '2026-11-10T08:01:00.000Z',
-      serverNow: '2026-11-10T08:00:00.123Z',
-      payment: {
-        checkoutUrl: 'https://pay.tingee.vn/checkout/abc?x=1',
-        linkError: null,
-        recipient: { organizationName: 'CLB ABC', accountName: 'NGUYEN VAN TUAN', bankName: 'Vietcombank' },
-      },
-      tickets: [],
-    };
-    expect(BuyerOrder.parse(order)).toEqual(order);
-    const paid = { ...order, status: 'paid', tickets: [ticket(1, 2), ticket(2, 2)] };
-    expect(BuyerOrder.parse(paid)).toEqual(paid);
+describe('BuyerOrderView và lỗi', () => {
+  const order = {
+    code: 'TK8F3Q2AXM',
+    buyerStatus: 'awaiting_payment',
+    event: { slug: 'giai-chay-ab12', name: 'Giải chạy', startsAt: '2026-11-16T07:00:00+07:00' },
+    items: [{ ticketTypeId: A, name: 'Đơn nam', unitPrice: 300_000, quantity: 2, amount: 600_000 }],
+    totalAmount: 600_000,
+    buyer: { name: 'An', phone: '+84912345678', email: 'an@vidu.vn' },
+    answers: [{ questionId: Q_TEXT, label: 'Size áo', answer: 'M' }],
+    refundPolicy: 'Hoàn 100% trước 7 ngày.',
+    createdAt: '2026-11-10T08:00:00.000Z',
+    expiresAt: '2026-11-10T08:01:00.000Z',
+    serverNow: '2026-11-10T08:00:00.123Z',
+    payment: {
+      checkoutUrl: 'https://pay.tingee.vn/checkout/abc?x=1',
+      linkError: null,
+      recipient: { organizationName: 'CLB ABC', accountName: 'NGUYEN VAN TUAN', bankName: 'Vietcombank' },
+    },
+    tickets: [],
+    organizer: { name: 'CLB ABC', contactPhone: '0901234567', contactEmail: 'lienhe@clbabc.vn' },
+  };
+
+  it('BuyerOrderView nhận đúng dạng API trả', () => {
+    expect(BuyerOrderView.parse(order)).toEqual(order);
+    const paid = { ...order, buyerStatus: 'paid', tickets: [ticket(1, 2), ticket(2, 2)] };
+    expect(BuyerOrderView.parse(paid)).toEqual(paid);
     // Đơn 0đ: không có phần thanh toán; thiếu `payment` (API cũ) → không nhận.
-    expect(BuyerOrder.parse({ ...order, payment: null }).payment).toBeNull();
+    expect(BuyerOrderView.parse({ ...order, payment: null }).payment).toBeNull();
     const { payment: _payment, ...noPayment } = order;
-    expect(BuyerOrder.safeParse(noPayment).success).toBe(false);
+    expect(BuyerOrderView.safeParse(noPayment).success).toBe(false);
     // Thiếu `tickets` hay `event.startsAt` (API cũ) → không nhận.
     const { tickets: _tickets, ...noTickets } = order;
-    expect(BuyerOrder.safeParse(noTickets).success).toBe(false);
-    expect(BuyerOrder.safeParse({ ...order, event: { slug: 'giai-chay-ab12', name: 'Giải chạy' } }).success).toBe(false);
+    expect(BuyerOrderView.safeParse(noTickets).success).toBe(false);
+    expect(BuyerOrderView.safeParse({ ...order, event: { slug: 'giai-chay-ab12', name: 'Giải chạy' } }).success).toBe(
+      false,
+    );
+    // BTC không nhập kênh liên hệ → `null`; thiếu `organizer` (API cũ) → không nhận.
+    const noContact = { ...order, organizer: { name: 'CLB ABC', contactPhone: null, contactEmail: null } };
+    expect(BuyerOrderView.parse(noContact)).toEqual(noContact);
+    const { organizer: _organizer, ...noOrganizer } = order;
+    expect(BuyerOrderView.safeParse(noOrganizer).success).toBe(false);
     expect(ORDER_STATUSES).toEqual(['pending', 'paid', 'expired', 'review', 'cancelled', 'refunded']);
+  });
+
+  it('buyerStatus: bảy giá trị; giá trị lạ vẫn parse (web hiện trạng thái an toàn); thiếu hoặc không phải chuỗi → không nhận', () => {
+    expect(BUYER_ORDER_STATUSES).toEqual([
+      'awaiting_payment',
+      'confirming',
+      'under_review',
+      'paid',
+      'expired',
+      'cancelled_by_organizer',
+      'event_cancelled',
+    ]);
+    for (const buyerStatus of BUYER_ORDER_STATUSES) {
+      expect(BuyerOrderView.parse({ ...order, buyerStatus }).buyerStatus).toBe(buyerStatus);
+      expect(isBuyerOrderStatus(buyerStatus)).toBe(true);
+    }
+    expect(BuyerOrderView.parse({ ...order, buyerStatus: 'refund_pending' }).buyerStatus).toBe('refund_pending');
+    expect(isBuyerOrderStatus('refund_pending')).toBe(false);
+    // `status` thô của Đơn không còn trong view.
+    expect(BuyerOrderView.parse({ ...order, status: 'review' })).not.toHaveProperty('status');
+    const { buyerStatus: _status, ...noStatus } = order;
+    expect(BuyerOrderView.safeParse(noStatus).success).toBe(false);
+    expect(BuyerOrderView.safeParse({ ...order, buyerStatus: 3 }).success).toBe(false);
   });
 
   it('mã lỗi mới, queue hết hạn, NotOnSaleDetails', () => {
@@ -298,6 +333,8 @@ describe('Thanh toán (Story 3.4)', () => {
     expect(buyerOrderApiPath('TK8F3Q2AXM')).toBe('/me/orders/TK8F3Q2AXM');
     expect(paymentLinkApiPath('TK8F3Q2AXM')).toBe('/me/orders/TK8F3Q2AXM/payment-link');
     expect(paymentLinkApiPath('a/b')).toBe('/me/orders/a%2Fb/payment-link');
+    expect(buyerOrderLiveApiPath('TK8F3Q2AXM')).toBe('/me/orders/TK8F3Q2AXM/live');
+    expect(buyerOrderLiveApiPath('a/b')).toBe('/me/orders/a%2Fb/live');
     expect(ErrorCode.PAYMENT_ACCOUNT_NOT_ALLOWED).toBe('PAYMENT_ACCOUNT_NOT_ALLOWED');
   });
 });

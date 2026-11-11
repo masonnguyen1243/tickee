@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BUYER_NAME_MAX,
+  BuyerOrderStatus,
   ErrorCode,
   eventPagePath,
   FormQuestionKind,
@@ -36,6 +37,7 @@ import { newFunnelId } from '@/lib/event/funnel';
 import { availabilityQueryKey } from '@/lib/event/public-api';
 import { priceLabel, withSelection } from '@/lib/event/selection';
 import { buyerOrderQueryKey, checkoutFormQueryKey, createOrder, fetchCheckoutForm } from '@/lib/order/api';
+import { markOrderMoment } from '@/lib/order/live';
 import {
   fieldErrors,
   firstErrorField,
@@ -201,6 +203,8 @@ export function CheckoutOrderForm({ slug, organizationName, ticketTypes, items, 
     mutationFn: (body: CreateOrderRequest) => createOrder(slug, idempotencyKey, body),
     onSuccess: (order) => {
       queryClient.setQueryData(buyerOrderQueryKey(order.code), order);
+      // Đơn 0đ đã `paid` ngay: Trang Đơn chạy "khoảnh khắc" Thành công ở lần vào đầu tiên (Story 3.7).
+      if (order.buyerStatus === BuyerOrderStatus.PAID) markOrderMoment(order.code);
       leave(orderPath(order.code));
     },
     onError,

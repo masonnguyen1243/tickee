@@ -1,9 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   answerSnapshot,
+  BuyerOrderStatus,
   CreateOrderRequest,
   ErrorCode,
   EVENT_UNAVAILABLE_REASONS,
+  EventStatus,
   FREE_TICKET_LIMIT_MESSAGE,
   FunnelEventType,
   IDEMPOTENCY_KEY_HEADER,
@@ -16,8 +18,8 @@ import {
   ticketCount,
   TierSaleStatus,
   toEventIso,
-  type BuyerOrder,
   type BuyerOrderPayment,
+  type BuyerOrderView,
   type CheckoutForm,
   type EventAvailability,
   type NotOnSaleDetails,
@@ -37,8 +39,9 @@ import {
   saleEventById,
   type TicketTypeRow,
 } from '../event/index.js';
-import { payoutRecipientOf } from '../organizer/index.js';
+import { organizerContactOf, payoutRecipientOf } from '../organizer/index.js';
 import { TicketsService } from '../ticketing/index.js';
+import { buyerStatusOf } from './buyer-status.js';
 import { holdInventory, sellInventory, type InventoryLine } from './inventory.service.js';
 import { OrderPayments } from './mark-paid.js';
 import { ORDER_CODE_ATTEMPTS, ORDER_CODE_GENERATOR, type OrderCodeGenerator } from './order-code.js';
@@ -198,7 +201,7 @@ export class OrdersService {
     slug: string,
     rawKey: unknown,
     body: unknown,
-  ): Promise<{ order: BuyerOrder; created: boolean }> {
+  ): Promise<{ order: BuyerOrderView; created: boolean }> {
     const key = idempotencyKeyOf(rawKey);
     parseRequest(CreateOrderRequest, body);
     const existing = await this.byKey(buyer.id, key);
@@ -243,17 +246,25 @@ export class OrdersService {
   }
 
   /** `GET /v1/me/orders/:code`: Đơn của chính Người mua. Mã sai dạng, không có hoặc của người khác → `404 ORDER_NOT_FOUND`. */
-  async mine(buyer: Buyer, code: string): Promise<BuyerOrder> {
+  async mine(buyer: Buyer, code: string): Promise<BuyerOrderView> {
     return this.view(await this.ownOrder(buyer, code));
+  }
+
+  /**
+   * Id Đơn cho stream `GET /v1/me/orders/:code/live` (Story 3.7): cùng phép sở hữu với `mine` (mã sai dạng, không có
+   * hoặc của người khác → `404 ORDER_NOT_FOUND`, không mở stream).
+   */
+  async liveOrderId(buyer: Buyer, code: string): Promise<string> {
+    return (await this.ownOrder(buyer, code)).id;
   }
 
   /**
    * `POST /v1/me/orders/:code/payment-link` (Story 3.4): thử tạo lại link cho cùng Đơn sau khi Tingee từ chối rõ ràng.
    * Đơn đủ điều kiện (`pending`, chưa có link, còn lượt, còn hạn) → hàm bảo đảm link (tính vào giới hạn tốc độ tạo Đơn);
-   * không đủ → không gọi Tingee. Trả `BuyerOrder` hiện tại. Đơn của người khác hay mã sai → `404 ORDER_NOT_FOUND`; quá
-   * giới hạn tốc độ → `429 ORDER_RATE_LIMITED`, không gọi Tingee.
+   * không đủ → không gọi Tingee. Trả `BuyerOrderView` hiện tại. Đơn của người khác hay mã sai → `404 ORDER_NOT_FOUND`;
+   * quá giới hạn tốc độ → `429 ORDER_RATE_LIMITED`, không gọi Tingee.
    */
-  async retryPaymentLink(buyer: Buyer, ip: string, code: string): Promise<BuyerOrder> {
+  async retryPaymentLink(buyer: Buyer, ip: string, code: string): Promise<BuyerOrderView> {
     return this.withPaymentLink(await this.ownOrder(buyer, code), buyer, ip);
   }
 
@@ -269,12 +280,12 @@ export class OrdersService {
   }
 
   /**
-   * Hàm bảo đảm link (CAS giành lượt; Đơn không đủ điều kiện thì không làm gì) rồi `BuyerOrder` của trạng thái sau đó.
+   * Hàm bảo đảm link (CAS giành lượt; Đơn không đủ điều kiện thì không làm gì) rồi `BuyerOrderView` của trạng thái sau đó.
    * Đơn đủ điều kiện: tính một lần thử vào giới hạn tốc độ tạo Đơn của Người mua trước khi giành lượt (mỗi lần Tingee từ
    * chối rõ ràng lại trả lượt, nên không có giới hạn này thì vòng thử lại gọi Tingee bằng key của BTC không ngừng); quá
    * giới hạn → `429 ORDER_RATE_LIMITED`. Không có lời gọi Tingee thì không đọc lại Đơn.
    */
-  private async withPaymentLink(row: OrderRow, buyer: Buyer, ip: string): Promise<BuyerOrder> {
+  private async withPaymentLink(row: OrderRow, buyer: Buyer, ip: string): Promise<BuyerOrderView> {
     const attempted = await this.links.ensure(row, {
       claimed: false,
       beforeClaim: () => this.limiter.consume(buyer.id, ip),
@@ -486,11 +497,12 @@ export class OrdersService {
   }
 
   /**
-   * Đơn + bản chụp + Sự kiện (tên, slug, giờ bắt đầu hiện tại) → `BuyerOrder`, kèm `serverNow`; Đơn `paid` kèm Vé theo
-   * `seq` và Mã QR vé; Đơn có phí kèm phần thanh toán (`paymentOf`).
+   * Đơn + bản chụp + Sự kiện (tên, slug, giờ bắt đầu hiện tại, đã hủy chưa) + BTC → `BuyerOrderView`, kèm `serverNow`.
+   * `buyerStatus` theo bảng của `buyerStatusOf` tại `serverNow`; Vé (theo `seq`, kèm Mã QR vé) chỉ khi `buyerStatus =
+   * paid`; Đơn có phí kèm phần thanh toán (`paymentOf`); `organizer` là tên và kênh liên hệ BTC hiện tại.
    */
-  private async view(row: OrderRow, db: DbExecutor = this.db.orm): Promise<BuyerOrder> {
-    const [items, answers, event, tickets, payment] = await Promise.all([
+  private async view(row: OrderRow, db: DbExecutor = this.db.orm): Promise<BuyerOrderView> {
+    const [items, answers, event, tickets, payment, organizer] = await Promise.all([
       db
         .select()
         .from(orderItems)
@@ -504,10 +516,17 @@ export class OrdersService {
       saleEventById(db, row.eventId),
       row.status === OrderStatus.PAID ? this.tickets.ticketsOfOrder(db, row.id) : Promise.resolve([]),
       this.paymentOf(row, db),
+      organizerContactOf(db, { organizationId: row.organizationId }),
     ]);
+    if (!organizer) throw new Error('Không đọc được BTC của Đơn');
+    const now = new Date();
+    const buyerStatus = buyerStatusOf(
+      { status: row.status, expiresAt: row.expiresAt, eventCancelled: event.status === EventStatus.CANCELLED },
+      now,
+    );
     return {
       code: row.code,
-      status: row.status,
+      buyerStatus,
       event: { slug: event.slug, name: event.name, startsAt: toEventIso(event.startsAt) },
       items: items.map((i) => ({
         ticketTypeId: i.ticketTypeId,
@@ -522,9 +541,11 @@ export class OrdersService {
       refundPolicy: row.refundPolicy,
       createdAt: row.createdAt.toISOString(),
       expiresAt: row.expiresAt.toISOString(),
-      serverNow: new Date().toISOString(),
+      serverNow: now.toISOString(),
       payment,
-      tickets,
+      // Sự kiện đã hủy: không bao giờ hiện Mã QR vé.
+      tickets: buyerStatus === BuyerOrderStatus.PAID ? tickets : [],
+      organizer,
     };
   }
 

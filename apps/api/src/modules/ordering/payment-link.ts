@@ -15,6 +15,7 @@ import { BOSS } from '../../platform/jobs/index.js';
 import { defaultPayoutTargetOf, type PayoutTarget } from '../organizer/index.js';
 import { CreateLinkError, TINGEE_CLIENT, type TingeeClient } from '../tingee/index.js';
 import { releaseHeld } from './inventory.service.js';
+import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
 import { enqueueOrderExpiry, OrderQueues } from './order-jobs.js';
 import { orders, orderItems } from './schema.js';
 
@@ -184,7 +185,8 @@ export class PaymentLinks {
   /**
    * TX2: CAS gắn link, chụp tài khoản nhận tiền, `expires_at` = lượt + `PAYMENT_LINK_MINUTES` (đồng hồ DB lúc giành lượt,
    * trước khi gửi request: không bao giờ muộn hơn hạn thật của link), rồi enqueue job (c) bằng chính `tx` chạy từ
-   * `expires_at + PAYMENT_LINK_GRACE_SECONDS`. 0 dòng: Đơn đã hết hạn trước khi gắn link (job (a) thắng) → không làm gì.
+   * `expires_at + PAYMENT_LINK_GRACE_SECONDS` và phát `order_changed`. 0 dòng: Đơn đã hết hạn trước khi gắn link (job (a)
+   * thắng) → không làm gì.
    */
   private async attach(order: LinkCandidate, checkoutUrl: string, payoutAccountId: string): Promise<void> {
     const attached = await this.db.transaction(async (tx) => {
@@ -204,10 +206,11 @@ export class PaymentLinks {
             isNotNull(orders.paymentLinkAttemptAt),
           ),
         )
-        .returning({ expiresAt: orders.expiresAt });
+        .returning({ ...orderSignalColumns, expiresAt: orders.expiresAt });
       if (!row) return false;
       const startAfter = new Date(row.expiresAt.getTime() + PAYMENT_LINK_GRACE_SECONDS * 1000);
       await enqueueOrderExpiry(this.boss, tx, order.id, startAfter, 'link');
+      await notifyOrderChanged(tx, row);
       return true;
     });
     if (!attached) {
@@ -234,7 +237,7 @@ export class PaymentLinks {
 
   /**
    * Một transaction: CAS `pending → expired` (chưa có link) kèm lý do, rồi nhả chỗ (`held -= n`, theo `ticket_type_id`
-   * tăng dần). Lượt không được trả. 0 dòng (job (a) đã hết hạn Đơn) → không làm gì.
+   * tăng dần) và phát `order_changed`. Lượt không được trả. 0 dòng (job (a) đã hết hạn Đơn) → không làm gì.
    */
   private async expire(orderId: string, reason: PaymentLinkError): Promise<void> {
     await this.db.transaction(async (tx) => {
@@ -242,7 +245,7 @@ export class PaymentLinks {
         .update(orders)
         .set({ status: OrderStatus.EXPIRED, paymentLinkError: reason })
         .where(and(eq(orders.id, orderId), eq(orders.status, OrderStatus.PENDING), isNull(orders.paymentLink)))
-        .returning({ id: orders.id });
+        .returning(orderSignalColumns);
       if (!expired) return;
       const lines = await tx
         .select({ ticketTypeId: orderItems.ticketTypeId, quantity: orderItems.quantity })
@@ -250,6 +253,7 @@ export class PaymentLinks {
         .where(eq(orderItems.orderId, orderId))
         .orderBy(asc(orderItems.ticketTypeId));
       await releaseHeld(tx, lines);
+      await notifyOrderChanged(tx, expired);
     });
   }
 }

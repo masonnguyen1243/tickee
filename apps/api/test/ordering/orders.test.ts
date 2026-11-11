@@ -114,7 +114,7 @@ describe('POST /v1/events/:slug/orders — đặt thành công', () => {
     const order = parseOrder(res.body);
 
     expect(order).toMatchObject({
-      status: 'pending',
+      buyerStatus: 'awaiting_payment',
       event: { slug: s.event.slug, name: s.event.name },
       items: [
         { ticketTypeId: s.a.id, name: 'Đơn nam', unitPrice: 300_000, quantity: 2, amount: 600_000 },
@@ -178,7 +178,7 @@ describe('POST /v1/events/:slug/orders — đặt thành công', () => {
       201,
     );
     const order = parseOrder(res.body);
-    expect(order).toMatchObject({ status: 'paid', totalAmount: 0, answers: [] });
+    expect(order).toMatchObject({ buyerStatus: 'paid', totalAmount: 0, answers: [] });
     expect(order.tickets).toHaveLength(3);
     expect(await inventory(h, tier.id)).toEqual({ capacity: 3, sold: 3, held: 0 });
     const funnel = await h.db.pool.query('SELECT 1 FROM checkout_funnel_events WHERE event_id = $1', [sale.event.id]);
@@ -441,7 +441,7 @@ describe('POST /v1/events/:slug/orders — chống trùng và Đơn chờ', () =
     expect(replay.headers['cache-control']).toBe('no-store');
     const again = parseOrder(replay.body);
     expect(again.code).toBe(first.code);
-    expect(again.status).toBe('pending');
+    expect(again.buyerStatus).toBe('awaiting_payment');
     // Thân request khác (vd. sửa form sau khi mất mạng) vẫn trả Đơn đã tạo.
     const changed = orderBody([{ ticketTypeId: s.b.id, quantity: 1 }], { answers: s.answers });
     expect(parseOrder((await postOrder(h, buyer, s.event.slug, changed, key).expect(200)).body).code).toBe(first.code);
@@ -453,7 +453,7 @@ describe('POST /v1/events/:slug/orders — chống trùng và Đơn chờ', () =
 
     // Đơn đã hết hạn: gửi lại cùng khóa trả trạng thái hiện tại, không thử tạo link nên không tính lần thử.
     await h.db.orm.execute(sql`UPDATE orders SET status = 'expired' WHERE code = ${first.code}`);
-    expect(parseOrder((await postOrder(h, buyer, s.event.slug, body, key).expect(200)).body).status).toBe('expired');
+    expect(parseOrder((await postOrder(h, buyer, s.event.slug, body, key).expect(200)).body).buyerStatus).toBe('expired');
     expect(await attempts()).toBe(3);
   });
 

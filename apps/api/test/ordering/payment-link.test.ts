@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import type { INestApplicationContext } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { ErrorResponse, JobQueue, PAYMENT_LINK_GRACE_SECONDS, type BuyerOrder } from '@tickee/contracts';
+import { ErrorResponse, JobQueue, PAYMENT_LINK_GRACE_SECONDS, type BuyerOrderView } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -114,7 +114,7 @@ interface Placed {
   tierId: string;
   key: string;
   status: number;
-  order: BuyerOrder;
+  order: BuyerOrderView;
   elapsedMs: number;
 }
 
@@ -193,7 +193,7 @@ describe('tạo link khi gửi Đơn', () => {
     const { order } = placed;
     const [call] = linkCalls();
     expect(linkCalls()).toHaveLength(1);
-    expect(order.status).toBe('pending');
+    expect(order.buyerStatus).toBe('awaiting_payment');
     expect(order.payment).toEqual({
       checkoutUrl: `${fake.url}/checkout/${order.code}?r=${String(call!.body.requestId)}`,
       linkError: null,
@@ -243,7 +243,7 @@ describe('tạo link khi gửi Đơn', () => {
     fake.merchant(MAIN.clientId).linkReplies = [{ code: '1006' }];
     const placed = await place(2);
     expect(placed.status).toBe(201);
-    expect(placed.order).toMatchObject({ status: 'pending' });
+    expect(placed.order).toMatchObject({ buyerStatus: 'awaiting_payment' });
     expect(placed.order.payment).toMatchObject({ checkoutUrl: null, linkError: 'provider_error' });
     // Chưa chụp tài khoản: người nhận là tài khoản mặc định hiện tại.
     expect(placed.order.payment!.recipient).toEqual({
@@ -263,7 +263,7 @@ describe('tạo link khi gửi Đơn', () => {
     const res = await retry(placed.buyer, placed.order.code).expect(200);
     expect(res.headers['cache-control']).toBe('no-store');
     const retried = parseOrder(res.body);
-    expect(retried.status).toBe('pending');
+    expect(retried.buyerStatus).toBe('awaiting_payment');
     expect(retried.payment).toMatchObject({ checkoutUrl: expect.stringContaining(`/checkout/${placed.order.code}`), linkError: null });
     expect(linkCalls()).toHaveLength(2);
     expect((await linkRow(placed.order.code)).deadline_from_attempt).toBe(true);
@@ -298,7 +298,7 @@ describe('tạo link khi gửi Đơn', () => {
     expect(elapsed).toBeGreaterThanOrEqual(4_500);
     expect(elapsed).toBeLessThan(6_500);
     const order = parseOrder(res.body);
-    expect(order.status).toBe('expired');
+    expect(order.buyerStatus).toBe('expired');
     expect(order.payment).toMatchObject({ checkoutUrl: null, linkError: 'timeout' });
     expect(await inventory(h, tierId)).toEqual({ capacity: 5, sold: 0, held: 0 });
     await expectInventoryConsistent(sale.event.id);
@@ -307,9 +307,9 @@ describe('tạo link khi gửi Đơn', () => {
     const warning = h.logs.lines.find((l) => l.orderCode === order.code && l.reason === 'timeout');
     expect(warning).toMatchObject({ organizationId: org.orgId });
 
-    expect(parseOrder((await retry(buyer, order.code).expect(200)).body).status).toBe('expired');
+    expect(parseOrder((await retry(buyer, order.code).expect(200)).body).buyerStatus).toBe('expired');
     const replay = await postOrder(h, buyer, sale.event.slug, orderBody([{ ticketTypeId: tierId, quantity: 2 }]), key).expect(200);
-    expect(parseOrder(replay.body)).toMatchObject({ code: order.code, status: 'expired' });
+    expect(parseOrder(replay.body)).toMatchObject({ code: order.code, buyerStatus: 'expired' });
     expect(linkCalls()).toHaveLength(1);
   });
 
@@ -321,7 +321,7 @@ describe('tạo link khi gửi Đơn', () => {
     for (const { reply, log } of cases) {
       fake.merchant(MAIN.clientId).linkReplies = [reply];
       const placed = await place(1);
-      expect(placed.order).toMatchObject({ status: 'expired', payment: { checkoutUrl: null, linkError: 'timeout' } });
+      expect(placed.order).toMatchObject({ buyerStatus: 'expired', payment: { checkoutUrl: null, linkError: 'timeout' } });
       expect(await inventory(h, placed.tierId)).toMatchObject({ held: 0 });
       await expectInventoryConsistent(placed.eventId);
       const warning = h.logs.lines.find((l) => l.orderCode === placed.order.code && l.reason === log.reason);
@@ -339,7 +339,7 @@ describe('tạo link khi gửi Đơn', () => {
     );
     const placed = await place(2, own);
     expect(placed.status).toBe(201);
-    expect(placed.order).toMatchObject({ status: 'pending', payment: { checkoutUrl: null, linkError: 'provider_error' } });
+    expect(placed.order).toMatchObject({ buyerStatus: 'awaiting_payment', payment: { checkoutUrl: null, linkError: 'provider_error' } });
     expect(await linkRow(placed.order.code)).toMatchObject({ status: 'pending', payment_link_attempt_at: null });
     expect(linkCalls()).toHaveLength(0);
     expect(await inventory(h, placed.tierId)).toEqual({ capacity: 5, sold: 0, held: 2 });
@@ -354,13 +354,13 @@ describe('tạo link khi gửi Đơn', () => {
     fake.merchant(MAIN.clientId).linkReplies = [{ code }];
     const placed = await place(2);
     expect(placed.status).toBe(201);
-    expect(placed.order.status).toBe('expired');
+    expect(placed.order.buyerStatus).toBe('expired');
     expect(placed.order.payment).toMatchObject({ checkoutUrl: null, linkError: 'sales_paused' });
     expect(await inventory(h, placed.tierId)).toEqual({ capacity: 5, sold: 0, held: 0 });
     await expectInventoryConsistent(placed.eventId);
     const warning = h.logs.lines.find((l) => l.orderCode === placed.order.code && l.tingeeCode === code);
     expect(warning).toMatchObject({ organizationId: org.orgId });
-    expect(parseOrder((await retry(placed.buyer, placed.order.code).expect(200)).body).status).toBe('expired');
+    expect(parseOrder((await retry(placed.buyer, placed.order.code).expect(200)).body).buyerStatus).toBe('expired');
     expect(linkCalls()).toHaveLength(1);
   });
 
@@ -368,12 +368,12 @@ describe('tạo link khi gửi Đơn', () => {
     const own = await paidReadyOrg(h, { name: 'CLB Cầu lông', credential: MAIN, payout: MAIN_PAYOUT });
     fake.merchant(MAIN.clientId).linkReplies = [{ code: '1006' }];
     const placed = await place(1, own);
-    expect(placed.order).toMatchObject({ status: 'pending', payment: { linkError: 'provider_error' } });
+    expect(placed.order).toMatchObject({ buyerStatus: 'awaiting_payment', payment: { linkError: 'provider_error' } });
     await h.db.orm.execute(
       sql`UPDATE payout_accounts SET is_default = false, retired_at = now() WHERE organization_id = ${own.orgId}`,
     );
     const order = parseOrder((await retry(placed.buyer, placed.order.code).expect(200)).body);
-    expect(order.status).toBe('expired');
+    expect(order.buyerStatus).toBe('expired');
     expect(order.payment).toEqual({
       checkoutUrl: null,
       linkError: 'sales_paused',
@@ -386,7 +386,7 @@ describe('tạo link khi gửi Đơn', () => {
     expect(warning).toMatchObject({ organizationId: own.orgId });
   });
 
-  it('thua job (a): Đơn hết hạn trước TX2 → BuyerOrder expired, không có URL, nhả chỗ đúng một lần, không có job (c)', async () => {
+  it('thua job (a): Đơn hết hạn trước TX2 → BuyerOrderView expired, không có URL, nhả chỗ đúng một lần, không có job (c)', async () => {
     afterNextLink = async (input) => {
       const { rows } = await h.db.pool.query<{ id: string }>(
         `UPDATE orders SET expires_at = now() - interval '1 second' WHERE code = $1 RETURNING id`,
@@ -396,7 +396,7 @@ describe('tạo link khi gửi Đơn', () => {
     };
     const placed = await place(2);
     expect(placed.status).toBe(201);
-    expect(placed.order.status).toBe('expired');
+    expect(placed.order.buyerStatus).toBe('expired');
     expect(placed.order.payment).toMatchObject({ checkoutUrl: null, linkError: null });
     const row = await linkRow(placed.order.code);
     expect(row).toMatchObject({ status: 'expired', payment_link: null, payout_account_id: null });
@@ -428,7 +428,7 @@ describe('job (a) hết hạn Đơn trong lúc chờ Tingee', () => {
     };
     const res = await postOrder(h, buyer, sale.event.slug, orderBody([{ ticketTypeId: tierId, quantity: 2 }])).expect(201);
     const order = parseOrder(res.body);
-    expect(order).toMatchObject({ status: 'expired', payment: { checkoutUrl: null, linkError: null } });
+    expect(order).toMatchObject({ buyerStatus: 'expired', payment: { checkoutUrl: null, linkError: null } });
     expect(await linkRow(order.code)).toMatchObject({ status: 'expired', payment_link: null, payment_link_error: null });
     expect(await inventory(h, tierId)).toEqual({ capacity: 5, sold: 0, held: 1 });
     await expectInventoryConsistent(sale.event.id);
@@ -452,7 +452,7 @@ describe('gửi lại cùng khóa', () => {
     expect(placed.order.payment?.checkoutUrl).toBeNull();
     const body = orderBody([{ ticketTypeId: placed.tierId, quantity: 1 }]);
     const replay = parseOrder((await postOrder(h, placed.buyer, placed.slug, body, placed.key).expect(200)).body);
-    expect(replay).toMatchObject({ code: placed.order.code, status: 'pending' });
+    expect(replay).toMatchObject({ code: placed.order.code, buyerStatus: 'awaiting_payment' });
     expect(replay.payment?.checkoutUrl).toContain(`/checkout/${placed.order.code}`);
     expect(linkCalls()).toHaveLength(2);
   });
@@ -480,7 +480,7 @@ describe('POST /v1/me/orders/:code/payment-link', () => {
     const late = await place(1);
     await h.db.orm.execute(sql`UPDATE orders SET expires_at = now() - interval '1 second' WHERE code = ${late.order.code}`);
     expect(parseOrder((await retry(late.buyer, late.order.code).expect(200)).body)).toMatchObject({
-      status: 'pending',
+      buyerStatus: 'confirming',
       payment: { checkoutUrl: null },
     });
     expect(linkCalls()).toHaveLength(2);
@@ -532,7 +532,7 @@ describe('hết hạn (c): Đơn đã có link', () => {
     await expectInventoryConsistent(placed.eventId);
     // Đơn hết hạn không còn trả checkout URL.
     const order = parseOrder((await h.http.get(`/v1/me/orders/${placed.order.code}`).set('cookie', placed.buyer.cookie)).body);
-    expect(order).toMatchObject({ status: 'expired', payment: { checkoutUrl: null } });
+    expect(order).toMatchObject({ buyerStatus: 'expired', payment: { checkoutUrl: null } });
   });
 
   it('Đơn chưa có link → (c) bỏ qua; payload cũ không có cờ là (a)', async () => {
@@ -613,7 +613,7 @@ describe('đổi tài khoản nhận tiền giữa hai Đơn', () => {
     const b = parseOrder(
       (await postOrder(h, buyerB, sale.event.slug, orderBody([{ ticketTypeId: tierId, quantity: 2 }])).expect(201)).body,
     );
-    expect(b.status).toBe('pending');
+    expect(b.buyerStatus).toBe('awaiting_payment');
     const [callA, callB] = linkCalls();
     expect(callA).toMatchObject({ clientId: MAIN.clientId, signatureValid: true, body: { vaAccountNumber: MAIN_PAYOUT.vaAccountNumber } });
     expect(callB).toMatchObject({
@@ -641,8 +641,8 @@ describe('Đơn 0đ (Story 3.3 không đổi)', () => {
     const sale = await eventOnSale(org, [{ name: 'Vé cổ vũ', price: 0, capacity: 5 }]);
     const res = await postOrder(h, buyer, sale.event.slug, orderBody([{ ticketTypeId: sale.tiers[0]!.id, quantity: 1 }])).expect(201);
     const order = parseOrder(res.body);
-    expect(order).toMatchObject({ status: 'paid', payment: null });
-    expect(parseOrder((await retry(buyer, order.code).expect(200)).body)).toMatchObject({ status: 'paid', payment: null });
+    expect(order).toMatchObject({ buyerStatus: 'paid', payment: null });
+    expect(parseOrder((await retry(buyer, order.code).expect(200)).body)).toMatchObject({ buyerStatus: 'paid', payment: null });
     expect(linkCalls()).toHaveLength(0);
   });
 });

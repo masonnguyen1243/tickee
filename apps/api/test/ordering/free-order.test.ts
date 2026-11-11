@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ErrorResponse, JobQueue, TICKET_QR_PATTERN, type BuyerOrder } from '@tickee/contracts';
+import { ErrorResponse, JobQueue, TICKET_QR_PATTERN, type BuyerOrderView } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -151,7 +151,7 @@ describe('POST /v1/events/:slug/orders — Đơn tổng 0đ', () => {
     expect(res.headers['cache-control']).toBe('no-store');
     const order = parseOrder(res.body);
     expect(order).toMatchObject({
-      status: 'paid',
+      buyerStatus: 'paid',
       totalAmount: 0,
       event: { slug: sale.event.slug, name: sale.event.name, startsAt: '2099-11-16T07:00:00+07:00' },
       buyer: { name: 'Nguyễn Văn An', phone: '+84912345678', email: buyer.email },
@@ -307,7 +307,7 @@ describe('POST /v1/events/:slug/orders — Đơn tổng 0đ', () => {
     const paidOrder = parseOrder(
       (await register(buyer, sale.event.slug, [{ ticketTypeId: paidTier.id, quantity: 10 }]).expect(201)).body,
     );
-    expect(paidOrder.status).toBe('pending');
+    expect(paidOrder.buyerStatus).toBe('awaiting_payment');
     // Thanh toán có phí là Story 3.5: giả lập Đơn đã trả.
     await h.db.orm.execute(sql`
       UPDATE orders SET status = 'paid', paid_at = now(), paid_amount = total_amount, paid_source = 'ipn'
@@ -315,7 +315,7 @@ describe('POST /v1/events/:slug/orders — Đơn tổng 0đ', () => {
 
     const res = await register(buyer, sale.event.slug, [{ ticketTypeId: freeTier.id, quantity: 2 }]).expect(201);
     const order = parseOrder(res.body);
-    expect(order.status).toBe('paid');
+    expect(order.buyerStatus).toBe('paid');
     expect(order.tickets).toHaveLength(2);
   });
 
@@ -331,7 +331,7 @@ describe('POST /v1/events/:slug/orders — Đơn tổng 0đ', () => {
       { ticketTypeId: freeTier.id, quantity: 2 },
     ]).expect(201);
     const order = parseOrder(res.body);
-    expect(order).toMatchObject({ status: 'pending', totalAmount: 100_000, tickets: [] });
+    expect(order).toMatchObject({ buyerStatus: 'awaiting_payment', totalAmount: 100_000, tickets: [] });
     expect(await inventory(h, paidTier.id)).toMatchObject({ sold: 0, held: 1 });
     expect(await inventory(h, freeTier.id)).toMatchObject({ sold: 0, held: 2 });
     expect(await ticketsOfEvent(sale.event.id)).toBe(0);
@@ -351,7 +351,7 @@ describe('POST /v1/events/:slug/orders — Đơn tổng 0đ', () => {
     const replay = await register(buyer, sale.event.slug, items, {}, key).expect(200);
     const again = parseOrder(replay.body);
     expect(again.code).toBe(first.code);
-    expect(again.status).toBe('paid');
+    expect(again.buyerStatus).toBe('paid');
     expect(again.tickets).toEqual(first.tickets);
     expect(await ticketsOfEvent(sale.event.id)).toBe(2);
     expect(await inventory(h, tier.id)).toMatchObject({ sold: 2, held: 0 });
@@ -414,7 +414,7 @@ describe('GET /v1/me/orders/:code — Đơn đã trả', () => {
     );
     const res = await h.http.get(`/v1/me/orders/${created.code}`).set('cookie', buyer.cookie).expect(200);
     expect(res.headers['cache-control']).toBe('no-store');
-    const order: BuyerOrder = parseOrder(res.body);
+    const order: BuyerOrderView = parseOrder(res.body);
     expect({ ...order, serverNow: '' }).toEqual({ ...created, serverNow: '' });
     expect(order.event.startsAt).toBe('2099-11-16T07:00:00+07:00');
     expect(order.tickets.map((t) => `Vé ${t.seq}/${t.count}`)).toEqual(['Vé 1/3', 'Vé 2/3', 'Vé 3/3']);

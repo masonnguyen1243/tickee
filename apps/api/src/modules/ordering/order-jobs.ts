@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
 import { BOSS, defineQueue, JOB_COMPLETED, QueueProducer, registerQueueWorker } from '../../platform/jobs/index.js';
 import { releaseHeld } from './inventory.service.js';
+import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
 import { orderItems, orders } from './schema.js';
 
 /*
@@ -76,7 +77,8 @@ export type ExpireOrderResult = 'expired' | 'skipped' | 'not_yet';
 /**
  * Hết hạn trong một transaction. (a) `hold`: `UPDATE orders SET status = 'expired' WHERE id = :id AND status = 'pending'
  * AND payment_link IS NULL AND expires_at < now()`. (c) `link`: `… AND payment_link IS NOT NULL AND expires_at + 5 phút <
- * now()`. Rồi `held -= n` cho từng dòng (theo `ticket_type_id` tăng dần). 0 dòng: Đơn còn `pending`, đúng loại và chưa
+ * now()`. Rồi `held -= n` cho từng dòng (theo `ticket_type_id` tăng dần) và `order_changed` (Trang Đơn hiện Hết hạn),
+ * cùng transaction. 0 dòng: Đơn còn `pending`, đúng loại và chưa
  * tới hạn → `not_yet` (job chạy sớm: retry); còn lại (đã có link với (a), chưa có link với (c), không còn `pending`, không
  * có) → `skipped`. Gọi song song cho cùng Đơn thì chỉ một lần nhả chỗ (CAS).
  */
@@ -94,7 +96,7 @@ export async function expireOrder(db: Database, orderId: string, kind: ExpiryKin
           lt(deadline, sql`now()`),
         ),
       )
-      .returning({ id: orders.id });
+      .returning(orderSignalColumns);
     if (!expired) {
       const [early] = await tx
         .select({ id: orders.id })
@@ -110,6 +112,7 @@ export async function expireOrder(db: Database, orderId: string, kind: ExpiryKin
       return early ? 'not_yet' : 'skipped';
     }
     await releaseOrderHeld(tx, orderId);
+    await notifyOrderChanged(tx, expired);
     return 'expired';
   });
 }
@@ -133,7 +136,7 @@ export type MarkExpiredResult = 'expired' | 'skipped';
 /**
  * Hết hạn (b) của AD-4 (Story 3.5): Tingee báo link `expired`/`canceled` (IPN, sau này cả tra trạng thái của Story 4.1).
  * Trong `tx` của bên gọi: CAS `UPDATE orders SET status = 'expired' WHERE id = :id AND status = 'pending'`, không xét
- * hạn (Tingee đã xác nhận link không còn trả được), rồi `held -= n` cho từng dòng. 0 dòng (Đơn không còn `pending` hoặc
+ * hạn (Tingee đã xác nhận link không còn trả được), rồi `held -= n` cho từng dòng và `order_changed`. 0 dòng (Đơn không còn `pending` hoặc
  * không có) → `skipped`, không đổi gì. Gọi song song với job (a)/(c) cho cùng Đơn thì chỉ một bên thắng CAS, nên chỗ
  * chỉ được nhả một lần. Song song với `markPaid` (khóa Đơn rồi đọc lại trạng thái): `markPaid` thắng trước thì Đơn
  * `paid`, hết hạn bỏ qua; hết hạn thắng trước thì chỗ đã nhả, khoản tiền về muộn đi nhánh bán lại có điều kiện của
@@ -144,9 +147,10 @@ export async function markExpired(tx: Tx, orderId: string): Promise<MarkExpiredR
     .update(orders)
     .set({ status: OrderStatus.EXPIRED })
     .where(and(eq(orders.id, orderId), eq(orders.status, OrderStatus.PENDING)))
-    .returning({ id: orders.id });
+    .returning(orderSignalColumns);
   if (!expired) return 'skipped';
   await releaseOrderHeld(tx, orderId);
+  await notifyOrderChanged(tx, expired);
   return 'expired';
 }
 

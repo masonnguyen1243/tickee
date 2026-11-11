@@ -117,7 +117,7 @@ describe('trần Vé miễn phí khi một Người mua gửi song song', () => 
 
     expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
     const winner = parseOrder(results.find((r) => r.status === 201)!.body);
-    expect(winner.status).toBe('paid');
+    expect(winner.buyerStatus).toBe('paid');
     expect(winner.tickets).toHaveLength(6);
     // DI thật (không thay `TicketsService`): QR ký bằng đúng `TICKET_QR_KEYS` của cấu hình.
     const qrKeys = TicketQrKeys.parse(TEST_TICKET_QR_KEYS);
@@ -156,7 +156,7 @@ describe('không bao giờ bán quá số suất', () => {
     expect(statuses.filter((s) => s === 201)).toHaveLength(10);
     expect(statuses.filter((s) => s === 409)).toHaveLength(20);
     for (const r of results.filter((x) => x.status === 409)) expect(errorOf(r.body).code).toBe('TICKET_TYPE_SOLD_OUT');
-    for (const r of results.filter((x) => x.status === 201)) expect(parseOrder(r.body).status).toBe('paid');
+    for (const r of results.filter((x) => x.status === 201)) expect(parseOrder(r.body).buyerStatus).toBe('paid');
 
     const stock = (await inventory(h, tier.id))!;
     expect(stock).toEqual({ capacity: 10, sold: 10, held: 0 });

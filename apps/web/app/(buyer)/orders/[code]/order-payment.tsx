@@ -1,10 +1,11 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { formatVnd, type BuyerOrder, type BuyerOrderPayment } from '@tickee/contracts';
+import { BuyerOrderStatus, formatVnd, type BuyerOrderPayment, type BuyerOrderView } from '@tickee/contracts';
 import { useEffect, useState } from 'react';
 
 import { CountdownChip } from '@/components/tickee/countdown-chip';
+import { ReassuranceLine } from '@/components/tickee/reassurance-line';
 import { RecipientTrustBlock } from '@/components/tickee/recipient-trust-block';
 import { StageBlock } from '@/components/tickee/stage-block';
 import { Button } from '@/components/ui/button';
@@ -19,14 +20,22 @@ import {
 } from '@/components/ui/sheet';
 import { messageOf } from '@/lib/api/message-of';
 import { buyerOrderQueryKey, retryPaymentLink } from '@/lib/order/api';
+import { markOrderMoment } from '@/lib/order/live';
 import { useServerCountdown } from '@/lib/order/use-server-countdown';
 
 type OrderPaymentProps = {
-  order: BuyerOrder;
+  order: BuyerOrderView;
   payment: BuyerOrderPayment;
   /** Giờ máy lúc nhận `order` (`dataUpdatedAt`), để bù lệch đồng hồ với `serverNow`. */
   receivedAt: number;
+  /** Đã chờ lâu trong lần mở trang này (Story 3.7): `reassurance-line` thay dòng chờ. */
+  longWait: boolean;
+  /** Mất mạng (trình duyệt báo offline hoặc lần tải lại gần nhất lỗi mạng): dòng nhỏ trấn an. */
+  offline: boolean;
 };
+
+/** Copy tạm của dòng mất mạng (Story 3.7); 3.8/3.9 đổi thành "… vé vẫn được gửi qua email và Vé của tôi." */
+export const OFFLINE_TEXT = 'Mất kết nối — vé sẽ tự hiện khi có mạng lại.';
 
 /** Chính sách hoàn vé của Đơn (bản chụp lúc đặt) trong `Sheet` từ dưới lên: đọc mà không rời Trang Đơn. */
 function RefundPolicySheet({ policy }: { policy: string }) {
@@ -67,15 +76,18 @@ function WaitingDot() {
  * "Chính sách hoàn vé" (`Sheet`) → dòng chờ → nút → "Tickee không giữ tiền của bạn"; tóm tắt Đơn nằm dưới (`OrderView`).
  * Mục đầu tới chân thấy được không cần cuộn ở 375×667.
  *
- * - Đã có link: "Thanh toán" hiện spinner rồi redirect toàn trang sang trang Tingee (không popup). Đồng hồ về 0 mà Đơn
- *   vẫn chờ → "Đang xác nhận thanh toán", ẩn nút; chỉ hiện Hết hạn khi máy chủ báo.
- * - Chưa có link: "Chưa tạo được link thanh toán" + "Thử lại" (gọi lại cho cùng Đơn, spinner, chặn bấm lặp); đồng hồ về 0
- *   thì ẩn "Thử lại" và chờ máy chủ báo hết hạn.
+ * - Đã có link: "Thanh toán" đặt cờ "khoảnh khắc" (Story 3.7), hiện spinner rồi redirect toàn trang sang trang Tingee
+ *   (không popup). Máy chủ báo `confirming` hoặc đồng hồ về 0 mà Đơn vẫn chờ → "Đang xác nhận thanh toán", ẩn nút; chỉ
+ *   hiện Hết hạn khi máy chủ báo.
+ * - Chờ lâu (`longWait`): `reassurance-line` thay dòng chờ; mất mạng (`offline`, có link hay chưa): thêm dòng nhỏ trấn
+ *   an. Cả hai trong vùng `aria-live="polite"` của dòng chờ.
+ * - Chưa có link: "Chưa tạo được link thanh toán" + "Thử lại" (gọi lại cho cùng Đơn, spinner, chặn bấm lặp); hết giờ thì
+ *   ẩn "Thử lại" và chờ máy chủ báo hết hạn.
  */
-export function OrderPayment({ order, payment, receivedAt }: OrderPaymentProps) {
+export function OrderPayment({ order, payment, receivedAt, longWait, offline }: OrderPaymentProps) {
   const queryClient = useQueryClient();
   const seconds = useServerCountdown(order.expiresAt, order.serverNow, receivedAt);
-  const timeUp = seconds === 0;
+  const timeUp = seconds === 0 || order.buyerStatus === BuyerOrderStatus.CONFIRMING;
   const checkoutUrl = payment.checkoutUrl;
   const confirming = timeUp && checkoutUrl !== null;
 
@@ -91,6 +103,8 @@ export function OrderPayment({ order, payment, receivedAt }: OrderPaymentProps) 
   const pay = () => {
     if (!checkoutUrl || redirecting) return;
     setRedirecting(true);
+    // Quay về từ Tingee mà Đơn đã `paid`: lần vào trang đó chạy "khoảnh khắc" Thành công.
+    markOrderMoment(order.code);
     window.location.assign(checkoutUrl);
   };
 
@@ -127,23 +141,33 @@ export function OrderPayment({ order, payment, receivedAt }: OrderPaymentProps) 
 
       {order.refundPolicy ? <RefundPolicySheet policy={order.refundPolicy} /> : null}
 
-      {/* Đổi sang "Đang xác nhận…" hay báo lỗi tạo link được đọc cho trình đọc màn hình. */}
-      <div aria-live="polite" data-slot="payment-status">
+      {/* Đổi sang "Đang xác nhận…", dòng trấn an khi chờ lâu, mất mạng hay báo lỗi tạo link được đọc cho trình đọc màn hình. */}
+      <div aria-live="polite" data-slot="payment-status" className="flex flex-col gap-2">
         {checkoutUrl ? (
-          <p data-slot="payment-waiting" className="flex gap-2 text-meta text-muted-foreground">
-            <WaitingDot />
-            <span>
-              {confirming
-                ? 'Đang xác nhận thanh toán. Nếu bạn đã trả, vé sẽ tự hiện — đừng trả lại.'
-                : 'Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền.'}
-            </span>
-          </p>
+          longWait ? (
+            <ReassuranceLine />
+          ) : (
+            <p data-slot="payment-waiting" className="flex gap-2 text-meta text-muted-foreground">
+              <WaitingDot />
+              <span>
+                {confirming
+                  ? 'Đang xác nhận thanh toán. Nếu bạn đã trả, vé sẽ tự hiện — đừng trả lại.'
+                  : 'Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền.'}
+              </span>
+            </p>
+          )
         ) : (
           <div data-slot="payment-link-error" className="flex flex-col gap-1">
             <p className="text-label">Chưa tạo được link thanh toán</p>
             {retry.isError ? <p className="text-meta text-danger-text">{messageOf(retry.error)}</p> : null}
           </div>
         )}
+        {/* Mất mạng ở mọi màn chờ, có link hay chưa. */}
+        {offline ? (
+          <p data-slot="offline-line" className="text-meta text-muted-foreground">
+            {OFFLINE_TEXT}
+          </p>
+        ) : null}
       </div>
 
       {checkoutUrl && !confirming ? (

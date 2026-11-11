@@ -27,6 +27,22 @@ export async function organizationNameOf(
   return row?.name ?? null;
 }
 
+/**
+ * Read model cho Trang Đơn của Người mua (Story 3.7): tên và kênh liên hệ BTC (SĐT, email đã nhập khi tạo BTC; `null`
+ * khi không nhập) trong `scope`; BTC không còn → `null`. Kênh liên hệ là PII của BTC: chỉ trả cho Người mua của Đơn,
+ * không log.
+ */
+export async function organizerContactOf(
+  db: DbExecutor,
+  scope: Pick<AccessContext, 'organizationId'>,
+): Promise<{ name: string; contactPhone: string | null; contactEmail: string | null } | null> {
+  const [row] = await db
+    .select({ name: organizations.name, contactPhone: organizations.contactPhone, contactEmail: organizations.contactEmail })
+    .from(organizations)
+    .where(orgScope(scope)({ organizationId: organizations.id }));
+  return row ?? null;
+}
+
 /** Body `POST /v1/orgs` sau khi qua schema (tên đã trim, liên hệ trống → `null`). */
 export type CreateOrganizationInput = z.output<typeof CreateOrganizationRequest>;
 
