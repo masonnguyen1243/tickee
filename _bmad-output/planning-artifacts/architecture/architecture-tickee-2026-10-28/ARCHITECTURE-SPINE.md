@@ -7,7 +7,7 @@ paradigm: 'Modular monolith (NestJS) — một codebase, ba vai chạy: api, wor
 scope: 'Toàn bộ Tickee MVP v1: trang mua Vé, dashboard BTC, check-in CTV, Quản trị Tingee, tích hợp Tingee Payment Gateway'
 status: final
 created: '2026-10-28'
-updated: '2026-11-09'
+updated: '2026-11-11'
 binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37, FR-38, NFR-1, NFR-2, NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-8, NFR-9, NFR-10, NFR-11, NFR-12]
 sources:
   - _bmad-output/planning-artifacts/prds/prd-tickee-2026-10-27/prd.md
@@ -79,7 +79,7 @@ flowchart TD
 
 - **Binds:** FR-11, FR-14, FR-19, FR-20, FR-21, FR-22, FR-33; `ordering`, `ticketing`, `payment`
 - **Prevents:** Phát Vé trùng khi IPN, IPN lặp, Đối soát bù và duyệt tay cùng đến; phát Vé khi chưa nhận tiền; phát Vé cho Sự kiện đã hủy.
-- **Rule:** Vé chỉ được tạo bên trong `ordering.markPaid(tx, orderId, source, paidAmount)`. Hàm này đọc Sự kiện `FOR SHARE`, rồi làm compare-and-set trên Đơn theo AD-3 cùng phép tồn kho tương ứng ở bảng AD-2. Kết quả trả về là một trong: `paid`, `orphan` (hết chỗ), `mismatch` (lệch số tiền), `event_cancelled`, `lost_race`. Chỉ `paid` mới phát N Vé (AD-35), enqueue email/Sheets và ghi audit, tất cả trong cùng transaction; các kết quả khác để bên gọi (`payment`) tạo `review_item` trong cùng `tx`. `source` chỉ có bốn giá trị: `ipn`, `reconciliation`, `manual` (Owner/Admin duyệt tay), `free`. Không bao giờ phát Vé từ `returnUrl`, callback SDK Tingee hay bất kỳ request nào của trình duyệt người mua.
+- **Rule:** Vé chỉ được tạo bên trong `ordering.markPaid(tx, orderId, source, paidAmount)`. Hàm này đọc Sự kiện `FOR SHARE`, rồi làm compare-and-set trên Đơn theo AD-3 cùng phép tồn kho tương ứng ở bảng AD-2. Nguồn `ipn` (và `reconciliation` của Story 4.1) khóa thêm Đơn (`FOR NO KEY UPDATE`) rồi chạy bước 3–7 của thứ tự kiểm ở AD-7 trên trạng thái đã khóa (Story 3.6). Nguồn `manual` (Story 4.4, `review` → `paid` bán có điều kiện) cần đường riêng, không đi bước 3–7 (bước 4 trả `duplicate_payment` cho Đơn `review`). Kết quả trả về là một trong: `paid`, `orphan` (tiền về muộn mà không phát được Vé, kèm lý do: đã kết thúc `event_ended`, bị khóa `event_locked`, hết chỗ `sold_out`), `mismatch` (lệch số tiền), `event_cancelled`, `duplicate_payment` (Đơn đã `paid`/`cancelled`/`refunded`/`review`), `lost_race` (chỉ nguồn `free`: Đơn không còn `pending`). Chỉ `paid` mới phát N Vé (AD-35), enqueue email/Sheets và ghi audit, tất cả trong cùng transaction. Với `mismatch`, `orphan`, `event_cancelled`, chính `markPaid` chuyển Đơn `pending`/`expired` sang `review` (Đơn ở trạng thái khác giữ nguyên); mọi kết quả khác `paid` để bên gọi (`payment`) tạo `review_item` trong cùng `tx`. `source` chỉ có bốn giá trị: `ipn`, `reconciliation`, `manual` (Owner/Admin duyệt tay), `free`. Không bao giờ phát Vé từ `returnUrl`, callback SDK Tingee hay bất kỳ request nào của trình duyệt người mua.
 
 ### AD-2 — Tồn kho nằm trong PostgreSQL, mỗi chuyển trạng thái có một phép tồn kho
 
@@ -93,16 +93,17 @@ flowchart TD
 | tạo Đơn tổng 0đ → `pending` → `paid` (`free`) | bán có điều kiện `+n` | không tạo Đơn, báo Hạng vé hết |
 | `pending` → `paid` | `held -= n`, `sold += n` | — |
 | `pending` → `expired` | `held -= n` | — |
-| `pending` → `review` (lệch số tiền, Sự kiện đã hủy) | `held -= n` | — |
+| `pending` → `review` (lệch số tiền, Sự kiện đã hủy, tiền về sau khi đã kết thúc) | `held -= n` | — |
+| `expired` → `review` (lệch số tiền, Sự kiện đã hủy, đã kết thúc, bị khóa, hết chỗ) | — (không đổi: chỗ đã nhả lúc hết hạn) | — |
 | `pending` → `cancelled` (hủy Sự kiện) | `held -= n` | — |
-| `expired` → `paid`, `review` → `paid` | bán có điều kiện `+n` | `expired` → `review` (Thanh toán mồ côi); `review` giữ nguyên, báo "hết chỗ" |
+| `expired` → `paid`, `review` → `paid` | bán có điều kiện `+n` (nhiều Hạng vé: trong một savepoint, thiếu một hạng → rollback savepoint, không bán dòng nào) | `expired` → `review` (Thanh toán mồ côi, lý do `sold_out`); `review` giữ nguyên, báo "hết chỗ" |
 | `paid` → `cancelled`, `cancelled` → `refunded` | không đổi (chỗ không trả lại) | — |
 
 ### AD-3 — Đơn là máy trạng thái compare-and-set
 
 - **Binds:** FR-14, FR-19, FR-20, FR-21, FR-33; `ordering`
 - **Prevents:** Job hết hạn, IPN và thao tác tay ghi đè trạng thái của nhau.
-- **Rule:** Chỉ `ordering` ghi `orders.status`, qua một hàm chuyển trạng thái chạy `UPDATE orders SET status=:to … WHERE id=:id AND status=:from`. Chỉ các chuyển trong sơ đồ hợp lệ. 0 dòng = thua cuộc đua → đọc lại trạng thái hiện tại và xử lý theo nó. Thao tác do thành viên BTC khởi xướng (duyệt tay, từ chối, ghép, đánh dấu hoàn tay) thêm `AND organization_id = :ctxOrg` vào câu compare-and-set, và `review_item` phải cùng `organization_id` với Đơn. TX2 gắn link chạy `WHERE status='pending' AND payment_link IS NULL`, nên đua với hết hạn (a) của AD-4 thì chỉ một bên thắng. `cancelled` mang `cancel_reason` (`rejected` | `event_cancelled`); `review` mang loại do `payment` ghi (AD-7).
+- **Rule:** Chỉ `ordering` ghi `orders.status`, qua một hàm chuyển trạng thái chạy `UPDATE orders SET status=:to … WHERE id=:id AND status=:from`. Chỉ các chuyển trong sơ đồ hợp lệ. 0 dòng = thua cuộc đua → đọc lại trạng thái hiện tại và xử lý theo nó. Thao tác do thành viên BTC khởi xướng (duyệt tay, từ chối, ghép, đánh dấu hoàn tay) thêm `AND organization_id = :ctxOrg` vào câu compare-and-set, và `review_item` phải cùng `organization_id` với Đơn. TX2 gắn link chạy `WHERE status='pending' AND payment_link IS NULL`, nên đua với hết hạn (a) của AD-4 thì chỉ một bên thắng. `cancelled` mang `cancel_reason` (`rejected` | `event_cancelled`); `review` mang loại do `payment` ghi (AD-7). Tiền về cho Đơn `cancelled` (kể cả do hủy Sự kiện), `paid`, `refunded` hay `review` không đổi trạng thái Đơn, chỉ tạo `review_item` (Story 3.6).
 
 ```mermaid
 stateDiagram-v2
@@ -114,11 +115,11 @@ stateDiagram-v2
   state "Đã hoàn tay" as refunded
   [*] --> pending: tạo Đơn (TX1)
   pending --> paid: IPN, Đối soát bù hoặc Đơn 0đ, số tiền khớp
-  pending --> review: lệch số tiền hoặc Sự kiện đã hủy
+  pending --> review: lệch số tiền, Sự kiện đã hủy hoặc đã kết thúc
   pending --> expired: Tingee xác nhận chưa trả, chưa có link sau 60s, hoặc quá trần cứng
   pending --> cancelled: Sự kiện bị hủy
   expired --> paid: tiền về muộn, còn chỗ
-  expired --> review: tiền về muộn, hết chỗ hoặc lệch tiền
+  expired --> review: tiền về muộn mà hết chỗ, đã kết thúc hoặc bị khóa; lệch tiền; Sự kiện đã hủy
   review --> paid: Owner/Admin duyệt tay, còn chỗ
   review --> cancelled: Owner/Admin từ chối
   paid --> cancelled: Sự kiện bị hủy
@@ -149,19 +150,22 @@ stateDiagram-v2
 - **Prevents:** IPN giả; IPN retry xử lý hai lần; tiền về cho một Đơn không còn chờ mà không ai biết.
 - **Rule:** Endpoint IPN là `POST /v1/payments/tingee/ipn/:ipnKey`, public đối với guard xác thực người dùng. `ipnKey` là chuỗi ngẫu nhiên 128 bit (base64url), mỗi BTC một chuỗi, không phải secret. Server tìm BTC theo `ipnKey` **trước khi** đọc body; `ipnKey` lạ → trả 404 và log. Sau đó đọc raw body và kiểm `x-signature` = `HMAC_SHA512(x-request-timestamp + ':' + rawBody, secret)` bằng `timingSafeEqual`, với `secret` là Secret Token hiện hành của BTC, rồi tới các credential cũ còn giữ (AD-35); sai chữ ký → từ chối và ghi lại. Secret của credential cũ chỉ có hiệu lực với IPN có `orderId` là Đơn của chính BTC đó mà `orders.payout_account_id` thuộc đúng credential ấy (Đơn có link tạo trước khi đổi key); không ràng được → từ chối như sai chữ ký, không lưu (Story 3.5: đổi key vì secret cũ bị lộ thì secret cũ không ký giả được IPN cho Đơn mới). `x-request-timestamp` lệch quá 10 phút → từ chối. IPN hợp lệ lưu vào `payment_events` (chỉ các field trong whitelist, bỏ dữ liệu ngân hàng của người trả) với khóa unique theo từng BTC: `(organization_id, providerTransactionCode)` cho sự kiện thanh toán, `(organization_id, orderId, status)` cho sự kiện trạng thái (`organization_id` là BTC sở hữu `ipnKey`; có BTC trong khóa để một BTC, tự ký được IPN bằng secret của mình, không chiếm trước mã giao dịch thật của BTC khác); trùng khóa → trả thành công, không làm gì. Ghi event và gọi `ordering` trong một transaction, trả `{"code":"00","message":"Success"}` trong dưới 5 giây. Xử lý theo bảng:
 
-| Trường hợp | Hành động |
-| --- | --- |
-| `success`, Đơn `pending`/`expired`, `paidAmount` = `total_amount` | `markPaid` (AD-1) |
-| `success`, `paidAmount` ≠ `total_amount` | Đơn → `review` loại `amount_mismatch`, không phát Vé |
-| `success`, Sự kiện đã hủy | Đơn → `review` loại `event_cancelled`, vào danh sách hoàn tiền |
-| `success`, Đơn đã `paid`/`cancelled`/`refunded` | `review_item` loại `duplicate_payment` gắn Đơn |
-| `orderId` không tồn tại | không theo định dạng mã Đơn Tickee (AD-20) → lưu `payment_events`, trả `00`, không tạo `review_item` (BTC dùng Tingee cho việc khác); đúng định dạng → lưu `payment_events` với `order_id` null, `review_item` loại `unmatched` gắn BTC sở hữu `ipnKey`, cảnh báo |
-| Đơn của `orderId` không thuộc BTC sở hữu `ipnKey` | nhánh Tài khoản lệch: từ chối xử lý, lưu và cảnh báo |
-| `canceled`/`expired` | AD-4 (b) |
+IPN `success` đi theo thứ tự kiểm cố định, dừng ở nhánh đầu khớp (Đối soát bù AD-8 dùng lại). Bước 1–2 ở `payment` (dữ liệu không đổi của Đơn); bước 3–7 trong `markPaid` (AD-1), dưới khóa Sự kiện `FOR SHARE` và khóa Đơn `FOR NO KEY UPDATE`. "→ `review`" chỉ áp cho Đơn đang `pending` (nhả `held`) hoặc `expired`; Đơn ở trạng thái khác giữ nguyên. Mọi nhánh trả `00`; lưu event, đổi Đơn, đổi tồn kho, tạo mục cùng một transaction.
+
+| Bước | Trường hợp | Hành động |
+| --- | --- | --- |
+| 1 | `orderId` không tồn tại | không theo định dạng mã Đơn Tickee (AD-20) → lưu `payment_events`, không tạo `review_item` (BTC dùng Tingee cho việc khác); đúng định dạng → lưu `payment_events` với `order_id` null, `review_item` loại `unmatched` gắn BTC sở hữu `ipnKey`, cảnh báo |
+| 2 | Đơn của `orderId` không thuộc BTC sở hữu `ipnKey` (Tài khoản lệch) | lưu với `order_id` null, `review_item` loại `unmatched` gắn BTC sở hữu `ipnKey`, cảnh báo; không đụng Đơn của BTC kia |
+| 3 | Sự kiện đã hủy | Đơn → `review`; `review_item` loại `event_cancelled` (mỗi khoản tiền một mục), vào danh sách hoàn tiền |
+| 4 | Đơn đã `paid`/`cancelled`/`refunded`/`review` | `review_item` loại `duplicate_payment` gắn Đơn, Đơn giữ nguyên |
+| 5 | `paidAmount` ≠ `total_amount` | Đơn → `review`; `review_item` loại `amount_mismatch`, không phát Vé |
+| 6 | Tiền về muộn: Đơn `expired`, hoặc đồng hồ DB đã quá `effective_end_at` | đã kết thúc → `orphan` lý do `event_ended`; Đơn `expired` mà Sự kiện hoặc BTC bị khóa → `orphan` `event_locked` (Đơn `pending` của Sự kiện bị khóa đi bước 7); còn lại bán có điều kiện cả Đơn (AD-2): đủ chỗ → `expired` → `paid` + phát Vé, thiếu chỗ → `orphan` `sold_out`. `orphan` → Đơn `review` |
+| 7 | Đơn `pending` | `markPaid` (AD-1): `pending` → `paid`, phát Vé |
+| — | `canceled`/`expired` | AD-4 (b) |
 
 IPN của Cổng thanh toán không có trường số tài khoản/VA, nên không kiểm được tiền vào VA nào; tài khoản nhận tiền của Đơn lấy từ `orders.payout_account_id`.
 
-`review_items` do `payment` sở hữu, có `status` `open` | `resolved` và `resolution` (`approved`, `rejected`, `refunded`, `dismissed`); mỗi Đơn tối đa một mục `open` cho mỗi loại. Duyệt tay gọi `markPaid(source=manual)`; kết quả khác `paid` thì mục vẫn `open` kèm lý do. Mục `duplicate_payment` và `unmatched` chỉ kết thúc bằng `refunded` hoặc `dismissed`, không phát Vé.
+`review_items` do `payment` sở hữu (Story 3.6): `organization_id` (BTC sở hữu `ipnKey`, luôn có; bằng BTC của Đơn khi có Đơn), `order_id` (null đúng khi loại `unmatched`), `payment_event_id` (khoản tiền của mục, unique: mỗi khoản tiền về không thành Vé là đúng một mục), loại, `reason` (chỉ và bắt buộc với `orphan`: `event_ended` | `event_locked` | `sold_out`), `status` `open` | `resolved` và `resolution` (`approved`, `rejected`, `refunded`, `dismissed`; có đúng khi `resolved`). Unique một phần `(order_id, type) WHERE status = 'open' AND type IN ('amount_mismatch', 'orphan')`: hai loại này đưa Đơn vào `review` nên khoản sau cho cùng Đơn đã là `duplicate_payment`; `event_cancelled` và `duplicate_payment` thì mỗi khoản tiền một mục (BTC hoàn đủ từng khoản). Ràng buộc bằng CHECK; `tickee_app` chỉ UPDATE được `status`, `resolution`. Duyệt tay gọi `markPaid(source=manual)`; kết quả khác `paid` thì mục vẫn `open` kèm lý do. Mục `event_cancelled`, `duplicate_payment` và `unmatched` chỉ kết thúc bằng `refunded` hoặc `dismissed`, không phát Vé.
 
 ### AD-8 — Đối soát bù dùng chung đường xử lý với IPN
 
@@ -315,7 +319,7 @@ Client dùng một hook duy nhất: gọi REST khi kết nối, khi nhận tín 
 
 - **Binds:** FR-33, FR-35, FR-37; `flows`, `event`, `ordering`, `ticketing`
 - **Prevents:** Vé hợp lệ được phát hoặc còn quét xanh cho Sự kiện đã hủy; danh sách hoàn tiền thiếu người trả tiền sau khi hủy.
-- **Rule:** `flows.cancelEvent` trong một transaction: khóa dòng Sự kiện `FOR UPDATE` và chuyển `cancelled`; Đơn `pending` → `cancelled` (nhả chỗ); Đơn `paid` → `cancelled` với `cancel_reason = event_cancelled`; mọi Vé `valid` → `cancelled`; enqueue email cho người mua. Tiền về sau đó đi theo AD-7 (`review` loại `event_cancelled`). Danh sách hoàn tiền là truy vấn động: mọi Đơn có `paid_amount` > 0 thuộc Sự kiện, chưa `refunded`. Khóa Sự kiện hoặc BTC chỉ chặn bán (AD-21); Đơn `pending` vẫn được trả tiền và phát Vé. `flows.voidTickets` (Quản trị Tingee chọn vô hiệu) chuyển Vé `valid` → `cancelled` với `cancel_reason = voided`, ghi audit.
+- **Rule:** `flows.cancelEvent` trong một transaction: khóa dòng Sự kiện `FOR UPDATE` và chuyển `cancelled`; Đơn `pending` → `cancelled` (nhả chỗ); Đơn `paid` → `cancelled` với `cancel_reason = event_cancelled`; mọi Vé `valid` → `cancelled`; enqueue email cho người mua. Tiền về sau đó đi theo AD-7 (bước 3): mỗi khoản một `review_item` loại `event_cancelled`; Đơn `pending`/`expired` → `review`, Đơn `cancelled` (và `paid`, `review`) giữ nguyên. Danh sách hoàn tiền là truy vấn động: mọi Đơn có `paid_amount` > 0 thuộc Sự kiện, chưa `refunded`, cộng mọi `review_items` loại `event_cancelled` chưa `resolved` của Sự kiện (khoản tiền về sau khi hủy: Đơn `review`/`cancelled` không ghi `paid_amount`; số tiền lấy từ `payment_events` của mục). Khóa Sự kiện hoặc BTC chỉ chặn bán (AD-21); Đơn `pending` vẫn được trả tiền và phát Vé, Đơn `expired` thì không được bán lại (AD-7 bước 6: `orphan` `event_locked`). `flows.voidTickets` (Quản trị Tingee chọn vô hiệu) chuyển Vé `valid` → `cancelled` với `cancel_reason = voided`, ghi audit.
 
 ### AD-29 — Link chia sẻ Vé
 
@@ -381,7 +385,7 @@ Client dùng một hook duy nhất: gọi REST khi kết nối, khi nhận tín 
 | Concern | Convention |
 | --- | --- |
 | Thuật ngữ trong code | Tài khoản Tickee = `user`; BTC = `organization`; Owner/Admin = `member.role` `owner`/`admin`; CTV = `checker`; Sự kiện = `event`; Hạng vé = `ticket_type`; Đơn = `order`; dòng Đơn = `order_item`; Vé = `ticket`; Giữ chỗ = `hold`; Cần xử lý = `review_item`; Đối soát bù = `reconciliation`; Quản trị Tingee = `platform_admin` |
-| Loại `review_item` | `amount_mismatch`, `orphan`, `event_cancelled`, `duplicate_payment`, `unmatched` |
+| Loại `review_item` | `amount_mismatch`, `orphan` (lý do `event_ended`, `event_locked`, `sold_out`), `event_cancelled`, `duplicate_payment`, `unmatched` |
 | Đặt tên | Bảng và cột `snake_case`, tên bảng số nhiều; TypeScript `camelCase`; thư mục mô-đun `kebab-case`; mã lỗi miền `UPPER_SNAKE` khai báo trong `packages/contracts`; queue `<module xử lý>.<action>`; topic realtime theo AD-17 |
 | ID | Khóa chính UUIDv7 (`uuidv7()` của PG 18, Better Auth cấu hình sinh UUIDv7); mã Đơn theo AD-20 |
 | Tiền | `bigint` theo đồng, không dùng số thực; tổng tiền chỉ tính ở server, từ bản chụp (AD-35) |

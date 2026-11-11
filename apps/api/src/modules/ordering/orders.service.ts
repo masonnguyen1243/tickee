@@ -373,7 +373,7 @@ export class OrdersService {
     await this.assertFreeTicketLimit(tx, buyer.id, event.id, ticketCount(lines), event.maxTicketsPerOrder);
     const result = await this.payments.markPaid(tx, order.id, 'free', 0);
     // Đơn vừa chèn `pending` trong chính `tx` này: không bên nào khác chuyển được trước.
-    if (result !== 'paid') throw new Error(`markPaid trả ${result} cho Đơn 0đ vừa tạo`);
+    if (result.outcome !== 'paid') throw new Error(`markPaid trả ${result.outcome} cho Đơn 0đ vừa tạo`);
     return order.id;
   }
 

@@ -114,8 +114,11 @@ export async function expireOrder(db: Database, orderId: string, kind: ExpiryKin
   });
 }
 
-/** Nhả toàn bộ chỗ đang giữ của Đơn vừa rời `pending` (`held -= n` từng dòng, theo `ticket_type_id` tăng dần). */
-async function releaseOrderHeld(tx: Tx, orderId: string): Promise<void> {
+/**
+ * Nhả toàn bộ chỗ đang giữ của Đơn vừa rời `pending` (`held -= n` từng dòng, theo `ticket_type_id` tăng dần): hết hạn
+ * (job, IPN `expired`/`canceled`) và `pending → review` của `markPaid` (Story 3.6).
+ */
+export async function releaseOrderHeld(tx: Tx, orderId: string): Promise<void> {
   const lines = await tx
     .select({ ticketTypeId: orderItems.ticketTypeId, quantity: orderItems.quantity })
     .from(orderItems)
@@ -131,8 +134,10 @@ export type MarkExpiredResult = 'expired' | 'skipped';
  * Hết hạn (b) của AD-4 (Story 3.5): Tingee báo link `expired`/`canceled` (IPN, sau này cả tra trạng thái của Story 4.1).
  * Trong `tx` của bên gọi: CAS `UPDATE orders SET status = 'expired' WHERE id = :id AND status = 'pending'`, không xét
  * hạn (Tingee đã xác nhận link không còn trả được), rồi `held -= n` cho từng dòng. 0 dòng (Đơn không còn `pending` hoặc
- * không có) → `skipped`, không đổi gì. Gọi song song với job (a)/(c) hay `markPaid` cho cùng Đơn thì chỉ một bên thắng
- * CAS, nên chỗ chỉ được nhả (hoặc chốt bán) một lần.
+ * không có) → `skipped`, không đổi gì. Gọi song song với job (a)/(c) cho cùng Đơn thì chỉ một bên thắng CAS, nên chỗ
+ * chỉ được nhả một lần. Song song với `markPaid` (khóa Đơn rồi đọc lại trạng thái): `markPaid` thắng trước thì Đơn
+ * `paid`, hết hạn bỏ qua; hết hạn thắng trước thì chỗ đã nhả, khoản tiền về muộn đi nhánh bán lại có điều kiện của
+ * `markPaid` (Story 3.6), nên không bao giờ vượt số suất.
  */
 export async function markExpired(tx: Tx, orderId: string): Promise<MarkExpiredResult> {
   const [expired] = await tx

@@ -12,6 +12,7 @@ export {
   OrderPaymentsModule,
   orderForPayment,
   type MarkPaidOptions,
+  type MarkPaidOutcome,
   type MarkPaidResult,
   type OrderForPayment,
 } from './mark-paid.js';

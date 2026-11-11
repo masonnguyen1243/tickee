@@ -22,7 +22,7 @@ import {
   type User,
 } from '../ordering/order-fixtures.js';
 import { fakeAccount, fakeIpnPayload, signIpn, startTingeeFake, type FakeIpnPayload, type TingeeFake } from '../tingee-fake/server.js';
-import { ACK_TEXT, expectInvariants, ipnPath, orderState, paymentEventsOf, postIpn } from './ipn-fixtures.js';
+import { ACK_TEXT, expectInvariants, ipnPath, orderState, paymentEventsOf, postIpn, reviewItemsOf } from './ipn-fixtures.js';
 
 /*
  * Story 3.5: `POST /v1/payments/tingee/ipn/:ipnKey` trên Postgres thật và Tingee fake (link thanh toán thật, IPN ký bằng
@@ -363,7 +363,7 @@ describe('key cũ sau khi đổi key (AD-35): chỉ có hiệu lực với Đơn
       expect(await inventory(h, placed.tierId)).toMatchObject({ held: 1, sold: 0 });
       await expectInvariants(h, placed.eventId);
     }
-    // Ký bằng key hiện hành: body hỏng là 400 như thường; Đơn của BTC khác đi nhánh lưu (other_organization).
+    // Ký bằng key hiện hành: body hỏng là 400 như thường; Đơn của BTC khác đi nhánh other_organization (mục unmatched).
     expect((await postIpn(h, key, signIpn(NEXT.secretToken, `{"orderId": "${before.code}",`))).status).toBe(400);
     await send(paid(foreign), NEXT, key).expect(200);
     expect(await paymentEventsOf(h, own.orgId, foreign.code)).toHaveLength(1);
@@ -546,72 +546,31 @@ describe('hết hạn / hủy', () => {
   });
 });
 
-describe('nhánh của Story 3.6: 200 00, chỉ lưu event, log warn kèm nhánh; Đơn, tồn kho, Vé không đổi', () => {
-  /** Gửi IPN, kiểm 200 + event đã lưu + log warn đúng nhánh; trả event. */
-  async function expectStoredOnly(payload: FakeIpnPayload, branch: string) {
+describe('IPN không khớp Đơn của BTC, mã lạ, trạng thái lạ (Story 3.6 thêm mục Cần xử lý; đủ Matrix ở ipn-edge.test.ts)', () => {
+  /** Gửi IPN, kiểm 200 + event đã lưu + log đúng nhánh và mức; trả event. */
+  async function expectStored(payload: FakeIpnPayload, branch: string, level: number) {
     const res = await send(payload).expect(200);
     expect(res.text).toBe(ACK_TEXT);
     const events = await paymentEventsOf(h, org.orgId, String(payload.orderId));
     const event = events.find((e) => e.provider_transaction_code === payload.providerTransactionCode && e.status === payload.status);
     expect(event, branch).toBeDefined();
-    const warning = h.logs.lines.find((l) => l.paymentEventId === event!.id);
-    expect(warning).toMatchObject({ level: 40, organizationId: org.orgId, branch });
+    const logged = h.logs.lines.find((l) => l.paymentEventId === event!.id);
+    expect(logged).toMatchObject({ level, organizationId: org.orgId, branch });
     return event!;
   }
 
-  it('lệch tiền (thiếu hay thừa) → mismatch, gắn Đơn', async () => {
-    const placed = await place(2);
-    for (const delta of [-1_000, 1_000]) {
-      const event = await expectStoredOnly(paid(placed, { paidAmount: placed.total + delta }), 'mismatch');
-      expect(event.order_id).toBe(placed.orderId);
-    }
-    expect(await orderState(h, placed.code)).toMatchObject({ status: 'pending', paid_at: null, tickets: 0 });
-    expect(await inventory(h, placed.tierId)).toEqual({ capacity: 5, sold: 0, held: 2 });
-    await expectInvariants(h, placed.eventId);
-  });
-
-  it('Sự kiện đã hủy → event_cancelled (thắng cả lệch tiền)', async () => {
-    const placed = await place(1);
-    await h.db.orm.execute(sql`UPDATE events SET status = 'cancelled' WHERE id = ${placed.eventId}`);
-    await expectStoredOnly(paid(placed, { paidAmount: 1 }), 'event_cancelled');
-    await expectStoredOnly(paid(placed), 'event_cancelled');
-    expect(await orderState(h, placed.code)).toMatchObject({ status: 'pending', tickets: 0 });
-    await expectInvariants(h, placed.eventId);
-  });
-
-  it('quá effective_end_at → orphan; Sự kiện bị khóa (chưa kết thúc) vẫn phát Vé', async () => {
-    const ended = await place(1);
-    await h.db.orm.execute(
-      sql`UPDATE events SET effective_end_at = now() - interval '1 minute' WHERE id = ${ended.eventId}`,
-    );
-    await expectStoredOnly(paid(ended), 'orphan');
-    expect(await orderState(h, ended.code)).toMatchObject({ status: 'pending', tickets: 0 });
-    await expectInvariants(h, ended.eventId);
-
-    const locked = await place(2);
-    await h.db.orm.execute(sql`UPDATE events SET locked_at = now(), lock_reason = 'test' WHERE id = ${locked.eventId}`);
-    await send(paid(locked)).expect(200);
-    expect(await orderState(h, locked.code)).toMatchObject({ status: 'paid', tickets: 2 });
-    await expectInvariants(h, locked.eventId);
-  });
-
-  it('Đơn không còn pending (tiền về sau khi đã hết hạn) → order_not_pending, gắn Đơn', async () => {
-    const placed = await place(2);
-    await send(statusIpn(placed.code, 'expired')).expect(200);
-    const event = await expectStoredOnly(paid(placed), 'order_not_pending');
-    expect(event.order_id).toBe(placed.orderId);
-    expect(await orderState(h, placed.code)).toMatchObject({ status: 'expired', tickets: 0 });
-    expect(await inventory(h, placed.tierId)).toEqual({ capacity: 5, sold: 0, held: 0 });
-    await expectInvariants(h, placed.eventId);
-  });
-
-  it('Đơn thuộc BTC khác (IPN lạc, ký đúng secret của BTC này) → other_organization, không gắn Đơn; khóa chống lặp theo BTC: cùng mã giao dịch ký lại gửi vào URL BTC kia vẫn phát Vé', async () => {
+  it('Đơn thuộc BTC khác (IPN lạc, ký đúng secret của BTC này) → other_organization: mục unmatched của BTC này, không gắn Đơn, log error alert; khóa chống lặp theo BTC: cùng mã giao dịch ký lại gửi vào URL BTC kia vẫn phát Vé', async () => {
     const foreign = await place(1, other);
     const payload = paid(foreign);
-    const event = await expectStoredOnly(payload, 'other_organization');
+    const event = await expectStored(payload, 'other_organization', 50);
     expect(event).toMatchObject({ organization_id: org.orgId, order_id: null });
+    expect(await reviewItemsOf(h, { paymentEventId: event.id })).toEqual([
+      expect.objectContaining({ organization_id: org.orgId, order_id: null, type: 'unmatched', reason: null, status: 'open' }),
+    ]);
+    expect(logsWith({ paymentEventId: event.id, alert: 'payment_unmatched' })).toHaveLength(1);
     expect(await orderState(h, foreign.code)).toMatchObject({ status: 'pending', tickets: 0 });
     expect(await paymentEventsOf(h, other.orgId)).toEqual([]);
+    expect(await reviewItemsOf(h, { orderId: foreign.orderId })).toEqual([]);
     await expectInvariants(h, foreign.eventId);
     // Ký bằng secret của BTC kia (chủ Đơn) nhưng gửi vào URL BTC này → sai chữ ký.
     expect((await send(payload, OTHER, ipnKey)).status).toBe(401);
@@ -625,11 +584,12 @@ describe('nhánh của Story 3.6: 200 00, chỉ lưu event, log warn kèm nhánh
       order_id: foreign.orderId,
       provider_transaction_code: payload.providerTransactionCode,
     });
+    expect(await reviewItemsOf(h, { organizationId: other.orgId })).toEqual([]);
     expect(await paymentEventsOf(h, org.orgId, foreign.code)).toHaveLength(1);
     await expectInvariants(h, foreign.eventId);
   });
 
-  it('IPN expired ký đúng gửi vào URL BTC này với mã Đơn pending của BTC khác → chỉ lưu dưới BTC này (order_id null); Đơn kia vẫn pending, held không đổi', async () => {
+  it('IPN expired ký đúng gửi vào URL BTC này với mã Đơn pending của BTC khác → chỉ lưu dưới BTC này (order_id null), không mục; Đơn kia vẫn pending, held không đổi', async () => {
     const foreign = await place(2, other);
     const res = await send(statusIpn(foreign.code, 'expired', foreign.total)).expect(200);
     expect(res.text).toBe(ACK_TEXT);
@@ -638,24 +598,30 @@ describe('nhánh của Story 3.6: 200 00, chỉ lưu event, log warn kèm nhánh
     const events = await paymentEventsOf(h, org.orgId, foreign.code);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ organization_id: org.orgId, order_id: null, kind: 'status', status: 'expired' });
+    expect(await reviewItemsOf(h, { paymentEventId: events[0]!.id })).toEqual([]);
     expect(await paymentEventsOf(h, other.orgId, foreign.code)).toEqual([]);
     expect(logsWith({ paymentEventId: events[0]!.id, branch: 'stored' })).toHaveLength(1);
     await expectInvariants(h, foreign.eventId);
   });
 
-  it('mã đúng định dạng nhưng không có Đơn → order_not_found; mã khác định dạng Tickee → invalid_order_code (không log mã)', async () => {
-    const missing = await expectStoredOnly(fakeIpnPayload('TK00000000', 50_000), 'order_not_found');
+  it('mã đúng định dạng nhưng không có Đơn → order_not_found, mục unmatched; mã khác định dạng Tickee → invalid_order_code, chỉ lưu, log info (không log mã)', async () => {
+    const missing = await expectStored(fakeIpnPayload('TK00000000', 50_000), 'order_not_found', 50);
     expect(missing.order_id).toBeNull();
+    expect(await reviewItemsOf(h, { paymentEventId: missing.id })).toEqual([
+      expect.objectContaining({ organization_id: org.orgId, order_id: null, type: 'unmatched' }),
+    ]);
     const foreignCode = `SDK-${Date.now()}`;
-    const invalid = await expectStoredOnly(fakeIpnPayload(foreignCode, 50_000), 'invalid_order_code');
+    const invalid = await expectStored(fakeIpnPayload(foreignCode, 50_000), 'invalid_order_code', 30);
     expect(invalid).toMatchObject({ order_id: null, provider_order_id: foreignCode });
+    expect(await reviewItemsOf(h, { paymentEventId: invalid.id })).toEqual([]);
     expect(h.logs.text).not.toContain(foreignCode);
   });
 
-  it('status lạ → chỉ lưu (kind status), log warn unknown_status', async () => {
+  it('status lạ → chỉ lưu (kind status), không mục, log warn unknown_status', async () => {
     const placed = await place(1);
-    const event = await expectStoredOnly(statusIpn(placed.code, 'pending', placed.total), 'unknown_status');
+    const event = await expectStored(statusIpn(placed.code, 'pending', placed.total), 'unknown_status', 40);
     expect(event).toMatchObject({ kind: 'status', status: 'pending', order_id: placed.orderId });
+    expect(await reviewItemsOf(h, { orderId: placed.orderId })).toEqual([]);
     expect((await orderState(h, placed.code)).status).toBe('pending');
     await expectInvariants(h, placed.eventId);
   });

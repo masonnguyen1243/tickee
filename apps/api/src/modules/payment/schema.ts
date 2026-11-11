@@ -1,6 +1,7 @@
+import { REVIEW_ITEM_REASONS, REVIEW_ITEM_RESOLUTIONS, REVIEW_ITEM_STATUSES, REVIEW_ITEM_TYPES } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import { bigint, check, index, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
-import { id, timestamptz } from '../../platform/db/index.js';
+import { createdAt, id, timestamptz } from '../../platform/db/index.js';
 import { orders } from '../ordering/schema.js';
 import { organizations } from '../organizer/schema.js';
 
@@ -62,6 +63,69 @@ export const paymentEvents = pgTable(
     check(
       'payment_events_transaction_code_check',
       sql`${t.kind} <> 'payment' OR ${t.providerTransactionCode} IS NOT NULL`,
+    ),
+  ],
+);
+
+/**
+ * Mục Cần xử lý (Story 3.6, AD-7): mỗi khoản tiền về (`payment_events` loại `payment`) không thành Vé là đúng một mục,
+ * tạo trong cùng transaction với event. `payment` sở hữu; hàng Cần xử lý (Story 4.3) và duyệt/từ chối/đánh dấu đã hoàn
+ * (Story 4.4) đọc và ghi bảng này.
+ *
+ * - `organization_id`: BTC sở hữu `ipnKey` của IPN (luôn có); bằng BTC của Đơn khi có Đơn (IPN chỉ gắn Đơn của chính
+ *   BTC đó).
+ * - `order_id`: `null` đúng khi loại `unmatched` (không có Đơn, hoặc Đơn thuộc BTC khác: không gắn Đơn của BTC kia).
+ * - `payment_event_id`: khoản tiền của mục; unique (một khoản tiền một mục).
+ * - `reason`: chỉ loại `orphan`, và bắt buộc với loại đó (`REVIEW_ITEM_REASONS`).
+ * - `resolution`: có đúng khi `status = 'resolved'`; `event_cancelled`/`duplicate_payment`/`unmatched` chỉ
+ *   `refunded`/`dismissed` (không phát Vé).
+ * - Unique một phần `(order_id, type) WHERE status = 'open' AND type IN ('amount_mismatch', 'orphan')`: hai loại này đưa
+ *   Đơn vào `review`, nên khoản tiền sau cho cùng Đơn đã là `duplicate_payment`. `event_cancelled` và
+ *   `duplicate_payment` không unique theo Đơn: mỗi khoản tiền một mục, BTC hoàn đủ từng khoản.
+ *
+ * `tickee_app` chỉ UPDATE được `status`, `resolution` (`UPDATE_PROTECTED_COLUMNS`).
+ */
+export const reviewItems = pgTable(
+  'review_items',
+  {
+    id: id(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id),
+    orderId: uuid('order_id').references(() => orders.id),
+    paymentEventId: uuid('payment_event_id')
+      .notNull()
+      .references(() => paymentEvents.id),
+    type: text('type', { enum: REVIEW_ITEM_TYPES }).notNull(),
+    reason: text('reason', { enum: REVIEW_ITEM_REASONS }),
+    status: text('status', { enum: REVIEW_ITEM_STATUSES }).notNull().default('open'),
+    resolution: text('resolution', { enum: REVIEW_ITEM_RESOLUTIONS }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('review_items_payment_event_id_key').on(t.paymentEventId),
+    uniqueIndex('review_items_open_order_type_key')
+      .on(t.orderId, t.type)
+      .where(sql`${t.status} = 'open' AND ${t.type} IN ('amount_mismatch', 'orphan')`),
+    index('review_items_organization_id_status_created_at_idx').on(t.organizationId, t.status, t.createdAt),
+    index('review_items_order_id_idx').on(t.orderId),
+    check(
+      'review_items_type_check',
+      sql`${t.type} IN ('amount_mismatch', 'orphan', 'event_cancelled', 'duplicate_payment', 'unmatched')`,
+    ),
+    check('review_items_order_check', sql`(${t.type} = 'unmatched') = (${t.orderId} IS NULL)`),
+    check(
+      'review_items_reason_check',
+      sql`(${t.type} = 'orphan') = (${t.reason} IS NOT NULL) AND (${t.reason} IS NULL OR ${t.reason} IN ('event_ended', 'event_locked', 'sold_out'))`,
+    ),
+    check('review_items_status_check', sql`${t.status} IN ('open', 'resolved')`),
+    check(
+      'review_items_resolution_check',
+      sql`(${t.status} = 'resolved') = (${t.resolution} IS NOT NULL) AND (${t.resolution} IS NULL OR ${t.resolution} IN ('approved', 'rejected', 'refunded', 'dismissed'))`,
+    ),
+    check(
+      'review_items_refund_only_check',
+      sql`${t.type} NOT IN ('event_cancelled', 'duplicate_payment', 'unmatched') OR ${t.resolution} IS NULL OR ${t.resolution} IN ('refunded', 'dismissed')`,
     ),
   ],
 );

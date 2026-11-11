@@ -60,6 +60,9 @@ export const UPDATE_PROTECTED_COLUMNS: Readonly<Record<string, readonly string[]
     'order_code',
     'issued_at',
   ],
+  // Mục Cần xử lý (Story 3.6): khoản tiền, Đơn, BTC, loại và lý do cố định từ lúc tạo. Ghi được: `status`, `resolution`
+  // (và cột thêm sau).
+  'public.review_items': ['id', 'organization_id', 'order_id', 'payment_event_id', 'type', 'reason', 'created_at'],
 };
 
 const quoteIdent = (name: string) => `"${name.replaceAll('"', '""')}"`;
