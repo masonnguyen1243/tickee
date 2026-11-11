@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { isBlockedBankBin } from '@tickee/contracts';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { isBlockedBankBin, tingeeIpnUrl } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { paidSalesAllowed } from '../../src/modules/event/index.js';
@@ -7,13 +7,20 @@ import { HttpTingeeClient } from '../../src/modules/tingee/index.js';
 import { parseCredentialKeys, SecretBox } from '../../src/platform/crypto/index.js';
 import { Database } from '../../src/platform/db/index.js';
 import { migrationDatabaseUrl, TEST_CREDENTIAL_KEYS } from '../helpers.js';
-import { DEMO_MERCHANTS, SEED_MERCHANT, SEED_PAYOUT_ACCOUNT } from '../tingee-fake/demo-merchants.js';
+import {
+  DEFAULT_API_PUBLIC_URL,
+  DEMO_MERCHANTS,
+  fakeDemoMerchants,
+  SEED_IPN_KEY,
+  SEED_MERCHANT,
+  SEED_PAYOUT_ACCOUNT,
+} from '../tingee-fake/demo-merchants.js';
 import { startTingeeFake } from '../tingee-fake/server.js';
 import { DEFAULT_SEED_EMAIL, DEMO_ORGANIZATION_NAME, runDevSeed, seedDevData, type DevSeedIo } from './seed.js';
 
 /*
  * E2-7: seed dev (`pnpm db:seed`) trên Postgres thật (DB `tickee_test`, role `tickee_migrator` như CLI). DB test không
- * bị xóa giữa các lần chạy, nên mỗi test dùng email mới.
+ * bị xóa giữa các lần chạy, nên mỗi test dùng email mới; test cần `SEED_IPN_KEY` còn trống thì tự giải phóng khóa trước.
  */
 
 let db: Database;
@@ -162,7 +169,147 @@ describe('seedDevData', () => {
   });
 });
 
+/** `ipnKey` hiện tại của BTC. */
+async function ipnKeyOf(organizationId: string): Promise<string | null> {
+  const result = await db.orm.execute<{ tingee_ipn_key: string | null }>(
+    sql`SELECT tingee_ipn_key FROM organizations WHERE id = ${organizationId}`,
+  );
+  return result.rows[0]!.tingee_ipn_key;
+}
+
+/** Giải phóng `SEED_IPN_KEY`: BTC đang giữ (của lần chạy hay test trước) nhận khóa ngẫu nhiên. */
+async function releaseSeedIpnKey(): Promise<void> {
+  await db.orm.execute(sql`
+    UPDATE organizations SET tingee_ipn_key = ${randomBytes(16).toString('base64url')}
+     WHERE tingee_ipn_key = ${SEED_IPN_KEY}`);
+}
+
+describe('seedDevData: khóa IPN cố định của merchant demo (SEED_IPN_KEY)', () => {
+  it('chưa BTC nào giữ: BTC demo mới nhận SEED_IPN_KEY, báo thay đổi; chạy lại không đổi', async () => {
+    await releaseSeedIpnKey();
+    const email = newEmail();
+
+    const result = await seedDevData(db, { secretBox, email });
+
+    expect(await ipnKeyOf(result.organizationId)).toBe(SEED_IPN_KEY);
+    expect(result.changes.filter((c) => c.includes(SEED_IPN_KEY))).toHaveLength(1);
+    expect((await seedDevData(db, { secretBox, email })).changes).toEqual([]);
+    expect(await ipnKeyOf(result.organizationId)).toBe(SEED_IPN_KEY);
+  });
+
+  it('chưa BTC nào giữ: BTC demo seed trước đây (khóa ngẫu nhiên) nhận SEED_IPN_KEY, báo đúng một thay đổi', async () => {
+    const email = newEmail();
+    const first = await seedDevData(db, { secretBox, email });
+    // BTC này đang giữ khóa (nếu vừa nhận) thì giải phóng: nó còn khóa ngẫu nhiên như BTC demo seed trước spec này.
+    await releaseSeedIpnKey();
+    const before = await ipnKeyOf(first.organizationId);
+    expect(before).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(before).not.toBe(SEED_IPN_KEY);
+    const rows = await rowCounts();
+
+    const second = await seedDevData(db, { secretBox, email });
+
+    expect(second.organizationId).toBe(first.organizationId);
+    expect(second.changes).toHaveLength(1);
+    expect(second.changes[0]).toContain(SEED_IPN_KEY);
+    expect(await ipnKeyOf(first.organizationId)).toBe(SEED_IPN_KEY);
+    expect(await rowCounts()).toEqual(rows);
+    expect((await seedDevData(db, { secretBox, email })).changes).toEqual([]);
+  });
+
+  it('BTC khác đang giữ: BTC demo mới nhận khóa ngẫu nhiên, BTC demo cũ giữ nguyên khóa, BTC đang giữ không đổi', async () => {
+    await releaseSeedIpnKey();
+    const holder = await seedDevData(db, { secretBox, email: newEmail() });
+    expect(await ipnKeyOf(holder.organizationId)).toBe(SEED_IPN_KEY);
+
+    const email = newEmail();
+    const fresh = await seedDevData(db, { secretBox, email });
+    const freshKey = await ipnKeyOf(fresh.organizationId);
+    expect(freshKey).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(freshKey).not.toBe(SEED_IPN_KEY);
+    // Báo khóa ngẫu nhiên: IPN của merchant demo về BTC kia, BTC này phải dán URL IPN vào trang thanh toán giả.
+    const randomLines = fresh.changes.filter((c) => c.includes('ngẫu nhiên'));
+    expect(randomLines).toHaveLength(1);
+    expect(randomLines[0]).toContain(`${SEED_IPN_KEY} thuộc BTC khác`);
+    expect(randomLines[0]).toContain('Đường dẫn IPN');
+    expect(randomLines[0]).toContain('trang thanh toán giả');
+    expect(await paidSalesAllowed(db.orm, { organizationId: fresh.organizationId })).toEqual({
+      closedBetaApproved: true,
+      payoutLinked: true,
+    });
+
+    const again = await seedDevData(db, { secretBox, email });
+
+    expect(again.changes).toEqual([]);
+    expect(await ipnKeyOf(fresh.organizationId)).toBe(freshKey);
+    expect(await ipnKeyOf(holder.organizationId)).toBe(SEED_IPN_KEY);
+  });
+});
+
+describe('seedDevData: BTC demo cũ có ipnKey NULL', () => {
+  /** BTC demo đã seed, rồi `tingee_ipn_key` bị xóa về NULL. */
+  async function seededWithNullKey(email: string): Promise<string> {
+    const { organizationId } = await seedDevData(db, { secretBox, email });
+    await db.orm.execute(sql`UPDATE organizations SET tingee_ipn_key = NULL WHERE id = ${organizationId}`);
+    return organizationId;
+  }
+
+  it('BTC khác đang giữ SEED_IPN_KEY → khóa ngẫu nhiên 22 ký tự, đúng một thay đổi "Khóa định tuyến IPN của BTC"', async () => {
+    const email = newEmail();
+    const orgId = await seededWithNullKey(email);
+    await releaseSeedIpnKey();
+    const holder = await seedDevData(db, { secretBox, email: newEmail() });
+    expect(await ipnKeyOf(holder.organizationId)).toBe(SEED_IPN_KEY);
+
+    const again = await seedDevData(db, { secretBox, email });
+
+    expect(again.changes).toEqual(['Khóa định tuyến IPN của BTC']);
+    const key = await ipnKeyOf(orgId);
+    expect(key).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(key).not.toBe(SEED_IPN_KEY);
+    expect(await ipnKeyOf(holder.organizationId)).toBe(SEED_IPN_KEY);
+  });
+
+  it('SEED_IPN_KEY còn trống → nhận SEED_IPN_KEY', async () => {
+    const email = newEmail();
+    const orgId = await seededWithNullKey(email);
+    await releaseSeedIpnKey();
+
+    const again = await seedDevData(db, { secretBox, email });
+
+    expect(again.changes).toHaveLength(1);
+    expect(again.changes[0]).toContain(SEED_IPN_KEY);
+    expect(await ipnKeyOf(orgId)).toBe(SEED_IPN_KEY);
+  });
+});
+
 describe('dữ liệu demo dùng chung với Tingee fake', () => {
+  it('fakeDemoMerchants: merchant của seed biết sẵn URL IPN của SEED_IPN_KEY; API_PUBLIC_URL thiếu/rỗng → mặc định; merchant khác không có', () => {
+    const custom = fakeDemoMerchants('http://api.tickee.test:3001');
+    expect(custom.find((m) => m.clientId === SEED_MERCHANT.clientId)?.ipnUrl).toBe(
+      tingeeIpnUrl('http://api.tickee.test:3001', SEED_IPN_KEY),
+    );
+    expect(DEFAULT_API_PUBLIC_URL).toBe('http://localhost:3001');
+    for (const unset of [undefined, '']) {
+      expect(fakeDemoMerchants(unset).find((m) => m.clientId === SEED_MERCHANT.clientId)?.ipnUrl).toBe(
+        tingeeIpnUrl('http://localhost:3001', SEED_IPN_KEY),
+      );
+    }
+    const others = custom.filter((m) => m.clientId !== SEED_MERCHANT.clientId);
+    expect(others).toHaveLength(DEMO_MERCHANTS.length - 1);
+    for (const merchant of others) expect(merchant.ipnUrl).toBeUndefined();
+    // Không lộ `ipnKey`, không sửa dữ liệu dùng chung.
+    for (const merchant of custom) expect(merchant).not.toHaveProperty('ipnKey');
+    expect(SEED_MERCHANT).not.toHaveProperty('ipnUrl');
+  });
+
+  it('merchant demo của seed biết sẵn ipnKey cố định: 22 ký tự base64url (128 bit) như khóa api sinh', () => {
+    expect(SEED_MERCHANT.ipnKey).toBe(SEED_IPN_KEY);
+    expect(SEED_IPN_KEY).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(Buffer.from(SEED_IPN_KEY, 'base64url')).toHaveLength(16);
+    expect(DEMO_MERCHANTS.filter((m) => m.ipnKey !== undefined)).toEqual([SEED_MERCHANT]);
+  });
+
   it('VA seed liên kết là một tài khoản fake trả về cho key demo và chọn được (ngân hàng không bị chặn)', async () => {
     const fake = await startTingeeFake({ merchants: DEMO_MERCHANTS });
     try {

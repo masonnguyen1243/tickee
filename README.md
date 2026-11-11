@@ -42,7 +42,8 @@ pnpm db:seed
   (cần `REVALIDATE_SECRET`, có sẵn trong `.env.example`). Gửi email từ job (lời mời Admin…) và revalidate trang Sự kiện
   công khai.
 - Tingee fake (`dev:tingee`): Tingee giả ở cổng 4010 (`.env.example` đã trỏ `TINGEE_BASE_URL` vào đây), có hai merchant
-  demo (`apps/api/test/tingee-fake/demo-merchants.ts`). Không bao giờ gọi Tingee thật.
+  demo (`apps/api/test/tingee-fake/demo-merchants.ts`) và trang thanh toán giả gửi IPN tới api (xem "Thanh toán Đơn có
+  phí ở local"). Không bao giờ gọi Tingee thật.
 - web: `next dev`, đọc `apps/web/.env.development` (`NEXT_PUBLIC_API_BASE_URL`, `TICKEE_UI_KIT=1`).
 - contracts: `tsc --watch`.
 
@@ -58,7 +59,11 @@ Trong một transaction, seed tạo phần còn thiếu:
 - Tài khoản Tickee (đã đồng ý NĐ 13; tài khoản có sẵn thì giữ nguyên);
 - BTC "BTC Demo" do tài khoản đó làm Owner, đã duyệt Closed Beta;
 - key Tingee của merchant demo `demo-btc-co-tai-khoan` (Secret Token mã hóa bằng `TINGEE_CREDENTIAL_KEYS` như api) và tài
-  khoản nhận tiền mặc định MB Bank ••••4567, khớp VA mà Tingee fake trả về.
+  khoản nhận tiền mặc định MB Bank ••••4567, khớp VA mà Tingee fake trả về;
+- khóa định tuyến IPN cố định `SEED_IPN_KEY` (`demo-merchants.ts`), nếu chưa BTC nào giữ: Tingee fake biết sẵn URL IPN
+  của BTC này. BTC demo seed trước đây (khóa ngẫu nhiên) cũng nhận khóa này khi chạy lại seed. Đã có BTC khác giữ (vd.
+  BTC demo của `--email` trước) thì BTC demo mới nhận khóa ngẫu nhiên (seed báo: phải dán URL IPN của BTC này vào ô
+  "Đường dẫn IPN" trên trang thanh toán giả) và BTC cũ giữ nguyên khóa.
 
 Xong thì in email đăng nhập: đăng nhập OTP ở `http://localhost:3000/dang-nhap` (mã ở Mailpit), tạo Sự kiện có Hạng vé có
 phí rồi bấm "Mở bán" được ngay. Chạy lại không tạo trùng (báo "Không đổi"); tài khoản nhận tiền đã hủy liên kết hay
@@ -66,6 +71,32 @@ Closed Beta đã thu hồi thì seed thêm lại. Seed chạy bằng `tickee_mig
 Tingee, không ghi audit, và từ chối chạy khi `NODE_ENV=production`. Key demo là key giả, chỉ có nghĩa với Tingee fake.
 
 Mailpit: SMTP `localhost:1025`, giao diện `http://localhost:8025`.
+
+### Thanh toán Đơn có phí ở local
+
+Đơn có phí nhận link thanh toán trỏ về trang thanh toán giả của Tingee fake (`http://localhost:4010/checkout/{mã Đơn}`);
+không có tiền nào được chuyển. Trang có ô "Đường dẫn IPN" (như ô cùng tên trên portal Tingee) và ba nút:
+
+- "Đã thanh toán (giả lập)": fake ký IPN `success` (số tiền đúng bằng số tiền của link) bằng Secret Token của merchant
+  tạo link, gửi tới Đường dẫn IPN, rồi đưa trình duyệt về Trang Đơn. Trang Đơn hiện Vé.
+- "Hết hạn" / "Hủy": IPN `expired` / `canceled`. Đơn hết hạn, chỗ được nhả.
+
+Trang giả chỉ chuyển trang khi api trả ACK (HTTP 2xx kèm JSON `"code":"00"`). api từ chối, URL trỏ nhầm dịch vụ khác
+(trả 2xx nhưng không phải ACK), không tới được hoặc quá 10 giây không trả lời thì trang giả báo lỗi (kèm HTTP status và
+body nhận được) và không chuyển trang. Quá 10 giây thì IPN đã được gửi và có thể api đã xử lý: xem Trang Đơn trước khi
+bấm lại. Mỗi lần bấm gửi một IPN mới (`requestId` mới); riêng IPN `success` mang mã giao dịch mới, IPN `expired` /
+`canceled` không có mã giao dịch.
+
+Với BTC demo của `pnpm db:seed` thì không cần cấu hình gì thêm: đăng nhập bằng email BTC demo, tạo Sự kiện có Hạng vé có
+phí, bấm "Mở bán", mua Vé rồi bấm "Đã thanh toán (giả lập)". Seed gán cho BTC demo khóa cố định `SEED_IPN_KEY`, nên fake
+điền sẵn `{API_PUBLIC_URL}/v1/payments/tingee/ipn/{SEED_IPN_KEY}` (`API_PUBLIC_URL` đọc từ `.env`, in ra khi fake khởi
+động).
+
+BTC khác (nhập key merchant demo ở trang Tài khoản nhận tiền, hoặc BTC demo thứ hai của `--email` dùng chung merchant
+demo): chép "URL IPN" ở trang Tài khoản nhận tiền của BTC đó, dán vào ô "Đường dẫn IPN" trên trang giả rồi bấm nút. Như
+Tingee, mỗi merchant có một Đường dẫn IPN: api trả ACK thì fake nhớ URL đó cho merchant (Đơn sau điền sẵn) tới khi fake
+khởi động lại. IPN của Đơn thuộc BTC khác gửi vào URL này thì api chỉ lưu và vẫn trả 200: trang giả vẫn về Trang Đơn
+nhưng Đơn còn chờ thanh toán. Khi đó dán URL IPN của đúng BTC rồi bấm lại.
 
 ### Chạy từ bản build
 
@@ -188,7 +219,7 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `PORT`                   | api         | mặc định `3001`                |
 | `TRUST_PROXY_HOPS`       | api         | mặc định `0`; số proxy tin cậy trước api (vd. `1` sau load balancer) để `req.ip` là IP thật — bắt buộc đặt khi có LB, nếu không mọi người dùng chung giới hạn 20 OTP/giờ theo IP của LB |
 | `BETTER_AUTH_SECRET`     | api         | ≥ 32 ký tự; ký session/cookie và khóa gốc HMAC bộ đếm OTP |
-| `API_PUBLIC_URL`         | api         | origin công khai của api; Better Auth ở `/v1/auth` |
+| `API_PUBLIC_URL`         | api         | origin công khai của api; Better Auth ở `/v1/auth`, URL IPN của BTC ở `/v1/payments/tingee/ipn/{ipnKey}`. Tingee fake (local) cũng đọc để biết URL IPN của BTC demo |
 | `WEB_ORIGIN`             | api, worker | api: origin duy nhất được CORS kèm cookie; worker: gốc link trong email (lời mời Admin `<WEB_ORIGIN>/loi-moi-btc#…`) và nơi gọi `<WEB_ORIGIN>/api/revalidate` |
 | `REVALIDATE_SECRET`      | worker, web | worker: bắt buộc, ≥ 32 ký tự; gửi `Authorization: Bearer …` tới `<WEB_ORIGIN>/api/revalidate`. web: server-only, cùng giá trị; thiếu thì route trả 503 (trang chỉ tự làm mới sau 30 giây). Sinh bằng `openssl rand -base64 32` |
 | `AUTH_COOKIE_DOMAIN`     | api         | tùy chọn; tên miền cha cho cookie session (vd. `tickee.vn`) |

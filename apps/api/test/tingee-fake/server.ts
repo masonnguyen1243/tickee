@@ -14,13 +14,23 @@ import { parseTingeeTimestamp, sign, tingeeTimestamp, verifySignature } from '..
  * Cổng thanh toán (Story 3.4): `create-link` ký bằng timestamp `yyyyMMddHHmmssSSS` như API Tài khoản; UNIX ms → 90 như
  * Tingee production (dù trang tài liệu `create-link` ghi UNIX ms; chẩn đoán 10/11/2026). Kiểm body như tài liệu
  * (`requestId` uuid v4, `orderId`, `amount` ≥ 2.000, không `merchantId`), VA phải là tài khoản `active` của merchant
- * (không thì 2023), rồi trả `00` với checkout URL trỏ về chính
- * fake (`GET /checkout/:orderId` hiện một trang tối giản có link quay về `returnUrl`). `linkReplies` cài trước phản hồi
- * của từng lần gọi kế tiếp (mã lỗi, HTTP lạ, `data` sai dạng, treo); `linkDelayMs` giả Tingee chậm.
+ * (không thì 2023), rồi trả `00` với checkout URL trỏ về chính fake (`GET /checkout/:orderId`, trang thanh toán giả).
+ * `linkReplies` cài trước phản hồi của từng lần gọi kế tiếp (mã lỗi, HTTP lạ, `data` sai dạng, treo); `linkDelayMs` giả
+ * Tingee chậm.
  *
  * IPN (Story 3.5): `signIpn` / `fake.signIpn(clientId, …)` ký body IPN bằng Secret Token của từng merchant như Tingee
  * (`x-request-timestamp` `yyyyMMddHHmmssSSS` giờ Việt Nam, `x-signature` = HMAC-SHA512 của `timestamp:rawBody`) và trả
- * đúng chuỗi byte đã ký; `fakeIpnPayload` dựng body đủ 14 trường như tài liệu Cổng thanh toán.
+ * đúng chuỗi byte đã ký; `fakeIpnPayload` dựng body đủ 14 trường như tài liệu Cổng thanh toán, `fakeStatusIpnPayload`
+ * body IPN trạng thái (`expired`, `canceled`).
+ *
+ * Trang thanh toán giả (dev local): số tiền, mã Đơn, link quay về `returnUrl`, và một form có ô "Đường dẫn IPN" (như ô
+ * cùng tên trên portal Tingee: một URL cho mỗi merchant, điền sẵn `ipnUrl` của merchant tạo link) cùng ba nút "Đã thanh
+ * toán (giả lập)", "Hết hạn", "Hủy". Bấm nút (`POST /checkout/:orderId`, `ipnUrl` + `status`): fake ký IPN bằng Secret
+ * Token của merchant tạo link rồi POST nguyên chuỗi đã ký tới URL đó (timeout `ipnTimeoutMs`, mặc định 10 giây). Bên
+ * nhận trả 2xx kèm JSON `code: '00'` (ACK của api Tickee) → lưu URL vào merchant, 303 về `returnUrl` (không có thì trang
+ * kết quả); phản hồi khác (HTTP ≠ 2xx, hoặc 2xx mà không phải ACK, vd. URL trỏ nhầm dịch vụ khác) → 502 kèm HTTP status
+ * và body bên nhận; lỗi mạng hay timeout → 502; URL không phải http(s) hay `status` lạ → 400, không gửi gì; link lạ →
+ * 404. Mỗi lần gửi được ghi lại (`ipnDeliveries`). Không bao giờ log hay hiện secret, chữ ký.
  */
 
 /** `create-link` của Cổng thanh toán (`developers.tingee.vn/docs/payment-gateway/create-payment-link`). */
@@ -29,6 +39,13 @@ export const CREATE_LINK_PATH = '/v1/payment-gateway/create-link';
 /** Timestamp cũ hơn chừng này (hoặc ở tương lai quá 1 phút) bị từ chối. */
 const MAX_SKEW_MS = 10 * 60 * 1000;
 const MAX_FUTURE_MS = 60 * 1000;
+
+/** Trang thanh toán giả chờ bên nhận IPN tối đa chừng này (mặc định của `ipnTimeoutMs`). */
+export const CHECKOUT_IPN_TIMEOUT_MS = 10_000;
+
+/** `status` của IPN mà ba nút trên trang thanh toán giả gửi. */
+export const CHECKOUT_IPN_STATUSES = ['success', 'expired', 'canceled'] as const;
+export type CheckoutIpnStatus = (typeof CHECKOUT_IPN_STATUSES)[number];
 
 /** Một dòng `items[]` của `get-va-paging` theo dạng của Tingee (để `Record` để test cài được dòng sai dạng). */
 export type FakeAccount = Record<string, unknown>;
@@ -48,6 +65,11 @@ export interface FakeMerchant {
   linkReplies?: FakeLinkReply[];
   /** Hoãn mọi phản hồi `create-link` chừng này ms (giả Tingee chậm, để test gọi song song chồng nhau). */
   linkDelayMs?: number;
+  /**
+   * "Đường dẫn IPN" của merchant (như ô cùng tên trên portal Tingee: một URL cho mỗi merchant). Trang thanh toán giả
+   * điền sẵn URL này, và lưu đè bằng URL vừa gửi IPN thành công (api trả ACK: 2xx + `code: '00'`).
+   */
+  ipnUrl?: string;
 }
 
 export interface TingeeFakeOptions {
@@ -57,6 +79,8 @@ export interface TingeeFakeOptions {
   host?: string;
   /** Kịch bản "treo": giữ request tới khi client hủy hoặc hết chừng này (mặc định 30 giây). */
   hangMs?: number;
+  /** Trang thanh toán giả bỏ một lần gửi IPN sau chừng này ms không xong (mặc định `CHECKOUT_IPN_TIMEOUT_MS`). */
+  ipnTimeoutMs?: number;
   /** In một dòng cho mỗi request (dev local). */
   log?: (line: string) => void;
 }
@@ -104,6 +128,28 @@ export function fakeIpnPayload(orderId: string, amount: number, overrides: FakeI
   };
 }
 
+/**
+ * Body IPN trạng thái (`expired`, `canceled`, …) như Tingee gửi cho `orderId` khi link không còn trả được: `statusCode`
+ * `01`, chưa có giao dịch nên `paidAmount`, `providerTransactionCode`, `paidAt`, `paymentMethod` là `null`; `amount` và
+ * `requestId` như `fakeIpnPayload`. `overrides` thay hoặc thêm trường.
+ */
+export function fakeStatusIpnPayload(
+  orderId: string,
+  amount: number,
+  status: string,
+  overrides: FakeIpnPayload = {},
+): FakeIpnPayload {
+  return fakeIpnPayload(orderId, amount, {
+    status,
+    statusCode: '01',
+    paidAmount: null,
+    providerTransactionCode: null,
+    paidAt: null,
+    paymentMethod: null,
+    ...overrides,
+  });
+}
+
 /** Một IPN đã ký: header như Tingee gửi và đúng chuỗi body đã ký (gửi nguyên văn, không serialize lại). */
 export interface SignedIpn {
   headers: { 'content-type': string; 'x-request-timestamp': string; 'x-signature': string };
@@ -134,9 +180,30 @@ export function signIpn(secretToken: string, body: string | FakeIpnPayload, opti
   };
 }
 
+/** Kết quả một lần gửi IPN: phản hồi của bên nhận (mọi HTTP status), hoặc không tới được. */
+export type IpnDeliveryResult =
+  | { kind: 'replied'; httpStatus: number; body: string }
+  /** `network`: không kết nối được hay bị ngắt (`code` như `ECONNREFUSED` nếu có); `timeout`: quá `ipnTimeoutMs`. */
+  | { kind: 'failed'; reason: 'network' | 'timeout'; code: string | null };
+
+/** Một lần trang thanh toán giả gửi IPN (chỉ nằm trong bộ nhớ của test: có chữ ký). */
+export interface IpnDelivery {
+  orderId: string;
+  /** Merchant tạo link, ký IPN bằng Secret Token của merchant này. */
+  clientId: string;
+  url: string;
+  status: CheckoutIpnStatus;
+  /** Header và đúng chuỗi body đã gửi. */
+  ipn: SignedIpn;
+  result: IpnDeliveryResult;
+  sentAt: Date;
+}
+
 export interface TingeeFake {
   url: string;
   requests: RecordedRequest[];
+  /** Các lần trang thanh toán giả gửi IPN, theo thứ tự. */
+  ipnDeliveries: IpnDelivery[];
   /** Merchant theo Client ID (cùng object đã truyền vào, sửa được). */
   merchant(clientId: string): FakeMerchant;
   /** Ký IPN bằng Secret Token của merchant `clientId` (`signIpn`). */
@@ -178,6 +245,8 @@ type Reply = { httpStatus?: number; code: string; message: string; data?: unknow
 
 /** Một link đã tạo: trang `GET /checkout/:orderId` của fake đọc lại. */
 interface FakeLink {
+  /** Merchant tạo link: ký IPN bằng Secret Token của merchant này và gửi tới `ipnUrl` của nó. */
+  clientId: string;
   orderId: string;
   amount: number;
   description: string;
@@ -207,12 +276,101 @@ function readBody(req: IncomingMessage): Promise<string> {
 const nonNegativeInt = (v: unknown, fallback: number) =>
   typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : fallback;
 
+/** Nhãn ba nút của trang thanh toán giả, theo `status` IPN mà nút gửi. */
+const CHECKOUT_BUTTONS: Record<CheckoutIpnStatus, string> = {
+  success: 'Đã thanh toán (giả lập)',
+  expired: 'Hết hạn',
+  canceled: 'Hủy',
+};
+
+const isCheckoutIpnStatus = (value: unknown): value is CheckoutIpnStatus =>
+  (CHECKOUT_IPN_STATUSES as readonly unknown[]).includes(value);
+
+/** `raw` nếu là URL tuyệt đối http(s), không thì `null`. */
+function httpUrlOrNull(raw: string): string | null {
+  try {
+    const { protocol } = new URL(raw);
+    return protocol === 'http:' || protocol === 'https:' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Đoạn đường dẫn đã giải mã; mã `%` hỏng → `null`. */
+function decodeSegment(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+}
+
+const formatMs = (ms: number) => (ms % 1000 === 0 ? `${ms / 1000} giây` : `${ms} ms`);
+
+/** Body bên nhận trả về dài hơn chừng này ký tự thì cắt khi hiện trên trang. */
+const MAX_SHOWN_REPLY = 4_000;
+const shownReply = (body: string) =>
+  body.length > MAX_SHOWN_REPLY ? `${body.slice(0, MAX_SHOWN_REPLY)}… (cắt, ${body.length} ký tự)` : body;
+
+/** Gợi ý theo HTTP status api trả cho IPN (dev local). */
+const IPN_REPLY_HINTS: Record<number, string> = {
+  401: 'api từ chối chữ ký: Đường dẫn IPN có phải của BTC đang dùng key của merchant này không?',
+  404: 'ipnKey không thuộc BTC nào hoặc đường dẫn sai (thiếu /v1, sai cổng…): chép lại URL IPN ở trang Tài khoản nhận tiền của BTC.',
+};
+
+/** Phản hồi 2xx có body JSON `code: '00'`: ACK mà api Tickee trả khi đã nhận IPN. */
+function isIpnAck(result: IpnDeliveryResult): boolean {
+  if (result.kind !== 'replied' || result.httpStatus < 200 || result.httpStatus >= 300) return false;
+  try {
+    const json = JSON.parse(result.body) as unknown;
+    return typeof json === 'object' && json !== null && (json as { code?: unknown }).code === '00';
+  } catch {
+    return false;
+  }
+}
+
+/** Kết quả một lần bấm nút, hiện trên trang thanh toán giả. */
+interface CheckoutNotice {
+  title: string;
+  lines: string[];
+  /** Body bên nhận trả về, hiện nguyên văn. */
+  reply?: string;
+}
+
+/** Trang thanh toán giả của `link`: ô "Đường dẫn IPN" điền sẵn `ipnUrl`, ba nút gửi IPN, link quay về `returnUrl`. */
+function checkoutHtml(link: FakeLink, ipnUrl: string, notice: CheckoutNotice | null): string {
+  const buttons = CHECKOUT_IPN_STATUSES.map(
+    (status) => `<button type="submit" name="status" value="${status}">${CHECKOUT_BUTTONS[status]}</button>`,
+  ).join(' ');
+  const shown = notice
+    ? `<section role="status"><h2>${escapeHtml(notice.title)}</h2>` +
+      notice.lines.map((line) => `<p>${escapeHtml(line)}</p>`).join('') +
+      (notice.reply === undefined ? '' : `<pre>${escapeHtml(shownReply(notice.reply))}</pre>`) +
+      `</section>`
+    : '';
+  const back = link.returnUrl ? `<p><a href="${escapeHtml(link.returnUrl)}">Quay lại Tickee</a></p>` : '';
+  return (
+    `<!doctype html><html lang="vi"><meta charset="utf-8">` +
+    `<meta name="viewport" content="width=device-width, initial-scale=1"><title>Tingee fake · Thanh toán</title>` +
+    `<h1>Tingee fake · Thanh toán</h1><p>${escapeHtml(link.description)}</p>` +
+    `<p>Mã Đơn ${escapeHtml(link.orderId)} · ${link.amount} đồng</p>` +
+    `<p>Đây là trang giả: không có tiền nào được chuyển.</p>${shown}` +
+    `<form method="post" action="/checkout/${encodeURIComponent(link.orderId)}">` +
+    `<p><label for="ipnUrl">Đường dẫn IPN</label><br>` +
+    `<input id="ipnUrl" name="ipnUrl" type="url" size="80" required value="${escapeHtml(ipnUrl)}"></p>` +
+    `<p>Mỗi nút ký một IPN bằng Secret Token của merchant tạo link rồi gửi tới đường dẫn trên, như Tingee.</p>` +
+    `<p>${buttons}</p></form>${back}</html>`
+  );
+}
+
 export async function startTingeeFake(options: TingeeFakeOptions): Promise<TingeeFake> {
   const requests: RecordedRequest[] = [];
+  const ipnDeliveries: IpnDelivery[] = [];
   const waiters = new Set<() => void>();
   const hanging = new Set<ServerResponse>();
   const findMerchant = (clientId: string | undefined) => options.merchants.find((m) => m.clientId === clientId);
   const links = new Map<string, FakeLink>();
+  const ipnTimeoutMs = options.ipnTimeoutMs ?? CHECKOUT_IPN_TIMEOUT_MS;
   let baseUrl = '';
 
   function route(path: string, body: Record<string, unknown>, merchant: FakeMerchant): Reply {
@@ -245,6 +403,7 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
         );
         if (vaAccountNumber !== undefined && !allowed) return fail('2023', 'VA chưa được cho phép trên Cổng thanh toán');
         links.set(orderId, {
+          clientId: merchant.clientId,
           orderId,
           amount,
           description: typeof description === 'string' ? description : '',
@@ -257,22 +416,120 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
     }
   }
 
-  /** Trang thanh toán giả của một link (dev local): số tiền, mã Đơn và link quay về `returnUrl`. */
-  function checkoutPage(res: ServerResponse, orderId: string): void {
-    const link = links.get(orderId);
-    if (!link) {
-      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-      res.end('Tingee fake: không có link thanh toán này');
+  function sendHtml(res: ServerResponse, httpStatus: number, html: string): void {
+    res.writeHead(httpStatus, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(html);
+  }
+
+  function linkNotFound(res: ServerResponse): void {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Tingee fake: không có link thanh toán này');
+  }
+
+  /** Link của `orderId` và merchant tạo link; `null` khi fake chưa tạo link này. */
+  function linkOf(orderId: string | null): { link: FakeLink; merchant: FakeMerchant } | null {
+    const link = orderId === null ? undefined : links.get(orderId);
+    const merchant = link && findMerchant(link.clientId);
+    return link && merchant ? { link, merchant } : null;
+  }
+
+  /** `GET /checkout/:orderId`: trang thanh toán giả, ô "Đường dẫn IPN" điền sẵn `ipnUrl` của merchant tạo link. */
+  function showCheckout(res: ServerResponse, orderId: string | null): void {
+    const found = linkOf(orderId);
+    if (!found) return linkNotFound(res);
+    sendHtml(res, 200, checkoutHtml(found.link, found.merchant.ipnUrl ?? '', null));
+  }
+
+  /** POST body IPN đã ký (nguyên chuỗi đã ký) tới `url`; không ném. Không theo redirect (3xx là phản hồi lỗi). */
+  async function deliverIpn(url: string, ipn: SignedIpn): Promise<IpnDeliveryResult> {
+    const signal = AbortSignal.timeout(ipnTimeoutMs);
+    try {
+      const response = await fetch(url, { method: 'POST', headers: ipn.headers, body: ipn.body, redirect: 'manual', signal });
+      return { kind: 'replied', httpStatus: response.status, body: await response.text() };
+    } catch (err) {
+      if (signal.aborted) return { kind: 'failed', reason: 'timeout', code: null };
+      const code = (err as { cause?: { code?: unknown } } | null)?.cause?.code;
+      return { kind: 'failed', reason: 'network', code: typeof code === 'string' ? code : null };
+    }
+  }
+
+  /**
+   * `POST /checkout/:orderId` (một nút trên trang thanh toán giả, form `ipnUrl` + `status`): đầu vào sai → 400, không
+   * gửi gì; không thì ký IPN bằng Secret Token của merchant tạo link, gửi tới `ipnUrl`, rồi 303 về `returnUrl` (ACK của
+   * api: 2xx + `code: '00'`) hoặc 502 (phản hồi khác, lỗi mạng, timeout).
+   */
+  async function submitCheckout(res: ServerResponse, orderId: string | null, raw: string): Promise<void> {
+    const found = linkOf(orderId);
+    if (!found) return linkNotFound(res);
+    const { link, merchant } = found;
+    const form = new URLSearchParams(raw);
+    const typed = (form.get('ipnUrl') ?? '').trim();
+    const status = form.get('status');
+    const url = httpUrlOrNull(typed);
+    if (url === null || !isCheckoutIpnStatus(status)) {
+      const lines: string[] = [];
+      if (!typed) lines.push('Chưa nhập Đường dẫn IPN.');
+      else if (url === null) lines.push('Đường dẫn IPN phải là URL http:// hoặc https://.');
+      if (!isCheckoutIpnStatus(status)) lines.push('Nút lạ: chỉ có "Đã thanh toán (giả lập)", "Hết hạn" và "Hủy".');
+      options.log?.(`POST /checkout/${link.orderId} → 400 (đầu vào sai, không gửi IPN)`);
+      sendHtml(res, 400, checkoutHtml(link, typed, { title: 'Chưa gửi IPN', lines }));
       return;
     }
-    const back = link.returnUrl ? `<p><a href="${escapeHtml(link.returnUrl)}">Quay lại Tickee</a></p>` : '';
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    res.end(
-      `<!doctype html><html lang="vi"><meta charset="utf-8"><title>Tingee fake · Thanh toán</title>` +
-        `<h1>Tingee fake · Thanh toán</h1><p>${escapeHtml(link.description)}</p>` +
-        `<p>Mã Đơn ${escapeHtml(link.orderId)} · ${link.amount} đồng</p>` +
-        `<p>Đây là trang giả: không có tiền nào được chuyển.</p>${back}</html>`,
-    );
+
+    const payload =
+      status === 'success'
+        ? fakeIpnPayload(link.orderId, link.amount)
+        : fakeStatusIpnPayload(link.orderId, link.amount, status);
+    const ipn = signIpn(merchant.secretToken, payload);
+    const result = await deliverIpn(url, ipn);
+    ipnDeliveries.push({ orderId: link.orderId, clientId: merchant.clientId, url, status, ipn, result, sentAt: new Date() });
+    const network = result.kind === 'failed' && result.code ? ` (${result.code})` : '';
+    const outcome =
+      result.kind === 'replied' ? `HTTP ${result.httpStatus}` : result.reason === 'timeout' ? 'timeout' : `lỗi mạng${network}`;
+    options.log?.(`POST /checkout/${link.orderId} → IPN ${status} tới ${url} → ${outcome}`);
+
+    if (result.kind === 'replied' && isIpnAck(result)) {
+      // Như lưu "Đường dẫn IPN" trên portal Tingee: một URL cho mỗi merchant, link sau của merchant điền sẵn URL này.
+      merchant.ipnUrl = url;
+      if (link.returnUrl) {
+        res.writeHead(303, { location: link.returnUrl, 'cache-control': 'no-store' });
+        res.end();
+        return;
+      }
+      const notice = { title: `Đã gửi IPN ${status}`, lines: [`Bên nhận trả HTTP ${result.httpStatus}.`], reply: result.body };
+      sendHtml(res, 200, checkoutHtml(link, url, notice));
+      return;
+    }
+
+    let notice: CheckoutNotice;
+    if (result.kind === 'replied') {
+      const ok = result.httpStatus >= 200 && result.httpStatus < 300;
+      const hint = ok
+        ? 'Phản hồi không phải ACK của api Tickee ({"code":"00",…}): Đường dẫn IPN có trỏ nhầm dịch vụ khác (vd. chính Tingee fake)?'
+        : IPN_REPLY_HINTS[result.httpStatus];
+      notice = {
+        title: ok
+          ? `Bên nhận không trả ACK cho IPN ${status}: HTTP ${result.httpStatus}`
+          : `Bên nhận từ chối IPN ${status}: HTTP ${result.httpStatus}`,
+        lines: hint ? [hint] : [],
+        reply: result.body,
+      };
+    } else {
+      notice =
+        result.reason === 'timeout'
+          ? {
+              title: `Không có phản hồi cho IPN ${status} sau ${formatMs(ipnTimeoutMs)} (timeout)`,
+              lines: [
+                'IPN đã được gửi và có thể api đã xử lý: xem Trang Đơn trước khi bấm lại.',
+                'Kiểm tra api đang chạy và Đường dẫn IPN đúng.',
+              ],
+            }
+          : {
+              title: `Không gửi được IPN ${status}: lỗi mạng${network}`,
+              lines: ['Kiểm tra api đang chạy và Đường dẫn IPN đúng.'],
+            };
+    }
+    sendHtml(res, 502, checkoutHtml(link, url, notice));
   }
 
   const server = createServer((req, res) => {
@@ -280,8 +537,10 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
       const raw = await readBody(req);
       const path = new URL(req.url ?? '/', 'http://fake').pathname;
       const page = /^\/checkout\/([^/]+)$/.exec(path);
-      if (req.method === 'GET' && page) {
-        checkoutPage(res, decodeURIComponent(page[1]!));
+      if (page && (req.method === 'GET' || req.method === 'POST')) {
+        const orderId = decodeSegment(page[1]!);
+        if (req.method === 'GET') showCheckout(res, orderId);
+        else await submitCheckout(res, orderId, raw);
         return;
       }
       const header = (name: string) => {
@@ -357,6 +616,7 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
   return {
     url: baseUrl,
     requests,
+    ipnDeliveries,
     merchant(clientId) {
       const merchant = findMerchant(clientId);
       if (!merchant) throw new Error(`Tingee fake: không có merchant ${clientId}`);
@@ -382,6 +642,7 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
     },
     reset() {
       requests.length = 0;
+      ipnDeliveries.length = 0;
     },
     async close() {
       for (const res of hanging) res.destroy();

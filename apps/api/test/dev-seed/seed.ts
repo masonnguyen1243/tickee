@@ -5,13 +5,14 @@ import { users } from '../../src/modules/identity/schema.js';
 import { members, organizations, payoutAccounts, tingeeCredentials } from '../../src/modules/organizer/schema.js';
 import { ConfigError, loadConfig, type MigrateConfig } from '../../src/platform/config/index.js';
 import { CredentialKeysError, parseCredentialKeys, SecretBox } from '../../src/platform/crypto/index.js';
-import { Database } from '../../src/platform/db/index.js';
-import { SEED_MERCHANT, SEED_PAYOUT_ACCOUNT } from '../tingee-fake/demo-merchants.js';
+import { Database, type Tx } from '../../src/platform/db/index.js';
+import { SEED_IPN_KEY, SEED_MERCHANT, SEED_PAYOUT_ACCOUNT } from '../tingee-fake/demo-merchants.js';
 
 /*
  * Dữ liệu dev local (`pnpm db:seed`): một Tài khoản Tickee làm Owner của BTC demo đã duyệt Closed Beta, có key Tingee
  * của merchant demo (Tingee fake) và một tài khoản nhận tiền mặc định, nên BTC mở bán được Vé có phí ngay mà không phải
- * sửa DB bằng SQL. Code nằm ngoài `src/` nên không vào image.
+ * sửa DB bằng SQL. BTC demo nhận `ipnKey` cố định `SEED_IPN_KEY` (khi chưa BTC nào giữ) nên Tingee fake biết sẵn URL IPN
+ * của nó: bấm nút trên trang thanh toán giả là Đơn có phí thành `paid`. Code nằm ngoài `src/` nên không vào image.
  *
  * Chạy bằng `tickee_migrator` (như vai migrate), trong một transaction. Chỉ thêm phần còn thiếu, nên chạy lại không tạo
  * trùng. Không gọi Tingee, không ghi audit (không có người thao tác thật).
@@ -23,6 +24,21 @@ export const DEMO_ORGANIZATION_NAME = 'BTC Demo';
 /** `ipnKey`: 128 bit ngẫu nhiên, base64url (như `PayoutAccountService.connect`). */
 const IPN_KEY_BYTES = 16;
 const newIpnKey = () => randomBytes(IPN_KEY_BYTES).toString('base64url');
+
+/** `SEED_IPN_KEY` còn trống (chưa BTC nào giữ)? Advisory lock của seed tuần tự hóa kiểm-rồi-gán; api chỉ sinh khóa ngẫu nhiên. */
+async function seedIpnKeyFree(tx: Tx): Promise<boolean> {
+  const [holder] = await tx
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.tingeeIpnKey, SEED_IPN_KEY))
+    .limit(1);
+  return holder === undefined;
+}
+
+const SEED_IPN_KEY_CHANGE = `Khóa định tuyến IPN cố định của merchant demo (${SEED_IPN_KEY}): Tingee fake gửi IPN về BTC này`;
+const RANDOM_IPN_KEY_CHANGE =
+  `Khóa định tuyến IPN ngẫu nhiên (${SEED_IPN_KEY} thuộc BTC khác): Tingee fake gửi IPN của merchant demo về BTC kia; ` +
+  'dán URL IPN của BTC này (trang Tài khoản nhận tiền) vào ô "Đường dẫn IPN" trên trang thanh toán giả';
 
 export interface DevSeedOptions {
   /** Mã hóa Secret Token demo bằng đúng khóa api dùng (`TINGEE_CREDENTIAL_KEYS`), để api giải mã được. */
@@ -76,19 +92,23 @@ export async function seedDevData(db: Database, { secretBox, email }: DevSeedOpt
         .returning({ id: organizations.id });
       if (approved.length > 0) changes.push(`Duyệt Closed Beta cho BTC "${DEMO_ORGANIZATION_NAME}"`);
     } else {
+      // BTC khác đang giữ `SEED_IPN_KEY` (vd. BTC demo của email khác): khóa ngẫu nhiên, BTC này dán URL IPN của mình
+      // vào ô trên trang thanh toán giả.
+      const seedKey = await seedIpnKeyFree(tx);
       const [created] = await tx
         .insert(organizations)
         .values({
           name: DEMO_ORGANIZATION_NAME,
           closedBetaStatus: 'approved',
           closedBetaChangedAt: sql`now()`,
-          tingeeIpnKey: newIpnKey(),
+          tingeeIpnKey: seedKey ? SEED_IPN_KEY : newIpnKey(),
         })
         .returning({ id: organizations.id });
       if (!created) throw new Error('INSERT organizations không trả về dòng nào');
       organizationId = created.id;
       await tx.insert(members).values({ organizationId, userId, role: Role.OWNER });
       changes.push(`BTC "${DEMO_ORGANIZATION_NAME}", Owner ${email}, đã duyệt Closed Beta`);
+      changes.push(seedKey ? SEED_IPN_KEY_CHANGE : RANDOM_IPN_KEY_CHANGE);
     }
 
     let [credential] = await tx
@@ -108,13 +128,25 @@ export async function seedDevData(db: Database, { secretBox, email }: DevSeedOpt
       if (!credential) throw new Error('INSERT tingee_credentials không trả về dòng nào');
       changes.push(`Key Tingee của merchant demo ${SEED_MERCHANT.clientId}`);
     }
-    // Như lúc BTC lưu key lần đầu: BTC có key thì có `ipnKey`.
-    const ipnKey = await tx
-      .update(organizations)
-      .set({ tingeeIpnKey: newIpnKey() })
-      .where(and(eq(organizations.id, organizationId), isNull(organizations.tingeeIpnKey)))
-      .returning({ id: organizations.id });
-    if (ipnKey.length > 0) changes.push('Khóa định tuyến IPN của BTC');
+    // BTC demo seed trước đây (khóa ngẫu nhiên) nhận `SEED_IPN_KEY` nếu chưa BTC nào giữ; BTC khác đang giữ thì giữ
+    // nguyên khóa. Như lúc BTC lưu key lần đầu: BTC có key thì có `ipnKey`.
+    const [current] = await tx
+      .select({ ipnKey: organizations.tingeeIpnKey })
+      .from(organizations)
+      .where(eq(organizations.id, organizationId));
+    if (current?.ipnKey !== SEED_IPN_KEY) {
+      if (await seedIpnKeyFree(tx)) {
+        await tx.update(organizations).set({ tingeeIpnKey: SEED_IPN_KEY }).where(eq(organizations.id, organizationId));
+        changes.push(SEED_IPN_KEY_CHANGE);
+      } else if (!current?.ipnKey) {
+        const assigned = await tx
+          .update(organizations)
+          .set({ tingeeIpnKey: newIpnKey() })
+          .where(and(eq(organizations.id, organizationId), isNull(organizations.tingeeIpnKey)))
+          .returning({ id: organizations.id });
+        if (assigned.length > 0) changes.push('Khóa định tuyến IPN của BTC');
+      }
+    }
 
     const [linked] = await tx
       .select({ id: payoutAccounts.id })
