@@ -246,7 +246,8 @@ export function isBlockedBankBin(bin: string): boolean {
 
 /**
  * Đường dẫn nhận IPN của Tingee trên api (AD-7, Story 3.5). URL IPN của một BTC là
- * `{API_PUBLIC_URL}{TINGEE_IPN_PATH}/{ipnKey}`; `ipnKey` ngẫu nhiên 128 bit (base64url), không phải secret.
+ * `{API_PUBLIC_URL}{TINGEE_IPN_PATH}/{ipnKey}`; `ipnKey` ngẫu nhiên 128 bit (base64url), không phải secret. Parser JSON
+ * toàn cục của api bỏ qua mọi đường dẫn có tiền tố này: handler IPN tự đọc byte thô để kiểm chữ ký.
  */
 export const TINGEE_IPN_PATH = '/v1/payments/tingee/ipn';
 

@@ -43,6 +43,8 @@ export function buildRedactPaths(keys: readonly string[] = PII_KEYS): string[] {
     'req.headers.cookie',
     // Lần xác nhận lại trước thao tác nhạy cảm (Story 2.13): token dùng được 5 phút, không bao giờ vào log.
     `req.headers["${REAUTH_HEADER}"]`,
+    // Chữ ký IPN Tingee (Story 3.5): không bao giờ vào log.
+    'req.headers["x-signature"]',
     ...REQUEST_PII_PATHS,
     'res.headers["set-cookie"]',
   ];

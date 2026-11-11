@@ -1,7 +1,7 @@
-import { randomInt } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { parseTingeeTimestamp, verifySignature } from '../../src/modules/tingee/signing.js';
+import { parseTingeeTimestamp, sign, tingeeTimestamp, verifySignature } from '../../src/modules/tingee/signing.js';
 
 /*
  * Tingee fake: server HTTP thật trên cổng ngẫu nhiên (hoặc cổng chỉ định, cho dev local) với nhiều merchant, mỗi merchant
@@ -17,6 +17,10 @@ import { parseTingeeTimestamp, verifySignature } from '../../src/modules/tingee/
  * (không thì 2023), rồi trả `00` với checkout URL trỏ về chính
  * fake (`GET /checkout/:orderId` hiện một trang tối giản có link quay về `returnUrl`). `linkReplies` cài trước phản hồi
  * của từng lần gọi kế tiếp (mã lỗi, HTTP lạ, `data` sai dạng, treo); `linkDelayMs` giả Tingee chậm.
+ *
+ * IPN (Story 3.5): `signIpn` / `fake.signIpn(clientId, …)` ký body IPN bằng Secret Token của từng merchant như Tingee
+ * (`x-request-timestamp` `yyyyMMddHHmmssSSS` giờ Việt Nam, `x-signature` = HMAC-SHA512 của `timestamp:rawBody`) và trả
+ * đúng chuỗi byte đã ký; `fakeIpnPayload` dựng body đủ 14 trường như tài liệu Cổng thanh toán.
  */
 
 /** `create-link` của Cổng thanh toán (`developers.tingee.vn/docs/payment-gateway/create-payment-link`). */
@@ -69,11 +73,74 @@ export interface RecordedRequest {
   receivedAt: Date;
 }
 
+/** Body IPN của Cổng thanh toán (14 trường như tài liệu Tingee; trường lạ hay sai kiểu để test cài được). */
+export type FakeIpnPayload = Record<string, unknown>;
+
+let ipnSeq = 0;
+
+/**
+ * Body IPN `success` như Tingee gửi cho `orderId` (mã Đơn) với `amount` = `paidAmount` = `amount`; mỗi lần gọi một
+ * `providerTransactionCode` và `requestId` mới. `overrides` thay hoặc thêm trường.
+ */
+export function fakeIpnPayload(orderId: string, amount: number, overrides: FakeIpnPayload = {}): FakeIpnPayload {
+  ipnSeq += 1;
+  const n = String(ipnSeq).padStart(6, '0');
+  return {
+    requestId: randomUUID(),
+    orderId,
+    amount,
+    paidAmount: amount,
+    description: `Thanh toán Đơn ${orderId}`,
+    orderInfo: null,
+    status: 'success',
+    statusCode: '00',
+    billId: null,
+    customerEmail: 'nguoi-tra@vidu.vn',
+    paymentMethod: 'qr',
+    providerTransactionCode: `tg-txn-${randomInt(100_000, 999_999)}-${n}`,
+    paidAt: new Date().toISOString(),
+    merchantId: 29267,
+    ...overrides,
+  };
+}
+
+/** Một IPN đã ký: header như Tingee gửi và đúng chuỗi body đã ký (gửi nguyên văn, không serialize lại). */
+export interface SignedIpn {
+  headers: { 'content-type': string; 'x-request-timestamp': string; 'x-signature': string };
+  body: string;
+}
+
+export interface SignIpnOptions {
+  /** Thời điểm ký (mặc định bây giờ); bị `timestamp` ghi đè. */
+  at?: Date;
+  /** `x-request-timestamp` nguyên văn (vd. sai dạng). */
+  timestamp?: string;
+}
+
+/**
+ * Ký IPN bằng `secretToken` như Tingee: `body` dạng chuỗi được ký và gửi nguyên văn (giữ khoảng trắng, thứ tự khóa,
+ * `\uXXXX`); dạng object thì `JSON.stringify` một lần (như Tingee gửi JSON đã minify).
+ */
+export function signIpn(secretToken: string, body: string | FakeIpnPayload, options: SignIpnOptions = {}): SignedIpn {
+  const raw = typeof body === 'string' ? body : JSON.stringify(body);
+  const timestamp = options.timestamp ?? tingeeTimestamp(options.at ?? new Date());
+  return {
+    headers: {
+      'content-type': 'application/json',
+      'x-request-timestamp': timestamp,
+      'x-signature': sign(timestamp, raw, secretToken),
+    },
+    body: raw,
+  };
+}
+
 export interface TingeeFake {
   url: string;
   requests: RecordedRequest[];
   /** Merchant theo Client ID (cùng object đã truyền vào, sửa được). */
   merchant(clientId: string): FakeMerchant;
+  /** Ký IPN bằng Secret Token của merchant `clientId` (`signIpn`). */
+  signIpn(clientId: string, body: string | FakeIpnPayload, options?: SignIpnOptions): SignedIpn;
   /** Lời gọi theo đường dẫn, vd. `calls('/v1/get-va-paging')`. */
   calls(path: string): RecordedRequest[];
   /** Chờ tới khi có ít nhất `count` lời gọi tới `path`. */
@@ -294,6 +361,11 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
       const merchant = findMerchant(clientId);
       if (!merchant) throw new Error(`Tingee fake: không có merchant ${clientId}`);
       return merchant;
+    },
+    signIpn(clientId, body, options) {
+      const merchant = findMerchant(clientId);
+      if (!merchant) throw new Error(`Tingee fake: không có merchant ${clientId}`);
+      return signIpn(merchant.secretToken, body, options);
     },
     calls,
     waitFor(path, count = 1) {

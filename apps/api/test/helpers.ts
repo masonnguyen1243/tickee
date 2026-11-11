@@ -49,7 +49,10 @@ export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
 /** Bí mật revalidate trang Sự kiện công khai chỉ dùng trong test (≥ 32 ký tự). */
 export const TEST_REVALIDATE_SECRET = 'test-only-revalidate-secret-0123456789abcdef';
 
-/** Cấu hình vai `worker` cho test: cùng DB, cùng origin web và SMTP giả với `apiConfig`. */
+/**
+ * Cấu hình vai `worker` cho test: cùng DB, cùng origin web, SMTP giả, Tingee (cổng 1: lỡ gọi thì lỗi ngay) và khóa
+ * credential/QR với `apiConfig`.
+ */
 export const workerConfig = (overrides: Partial<WorkerConfig> = {}): WorkerConfig => {
   const api = apiConfig();
   return {
@@ -61,6 +64,9 @@ export const workerConfig = (overrides: Partial<WorkerConfig> = {}): WorkerConfi
     SMTP_URL: api.SMTP_URL,
     EMAIL_FROM: api.EMAIL_FROM,
     REVALIDATE_SECRET: TEST_REVALIDATE_SECRET,
+    TINGEE_BASE_URL: api.TINGEE_BASE_URL,
+    TINGEE_CREDENTIAL_KEYS: api.TINGEE_CREDENTIAL_KEYS,
+    TICKET_QR_KEYS: api.TICKET_QR_KEYS,
     ...overrides,
   };
 };

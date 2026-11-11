@@ -29,6 +29,9 @@ const workerEnv = {
   SMTP_URL: apiEnv.SMTP_URL,
   EMAIL_FROM: apiEnv.EMAIL_FROM,
   REVALIDATE_SECRET: `${SECRET}-${'r'.repeat(32)}`,
+  TINGEE_BASE_URL: apiEnv.TINGEE_BASE_URL,
+  TINGEE_CREDENTIAL_KEYS: apiEnv.TINGEE_CREDENTIAL_KEYS,
+  TICKET_QR_KEYS: apiEnv.TICKET_QR_KEYS,
 };
 
 function issuesOf(env: Record<string, string | undefined>): ConfigError {
@@ -164,9 +167,38 @@ describe('loadConfig', () => {
     // Key Tingee là của từng BTC (lưu mã hóa trong DB): env Tingee chỉ còn URL và khóa mã hóa.
     const tingeeKeys = Object.keys(loadConfig(apiEnv)).filter((k) => k.startsWith('TINGEE_'));
     expect(tingeeKeys.sort()).toEqual(['TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS']);
-    // Vai worker không cần Tingee.
-    const worker = loadConfig(workerEnv);
-    expect(worker.APP_ROLE).toBe('worker');
+    const workerTingeeKeys = Object.keys(loadConfig(workerEnv)).filter((k) => k.startsWith('TINGEE_'));
+    expect(workerTingeeKeys.sort()).toEqual(['TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS']);
+  });
+
+  it('vai worker (Story 3.5): cần TINGEE_BASE_URL, TINGEE_CREDENTIAL_KEYS, TICKET_QR_KEYS như vai api; lỗi không in giá trị', () => {
+    const config = loadConfig(workerEnv);
+    expect(config).toMatchObject({
+      APP_ROLE: 'worker',
+      TINGEE_BASE_URL: 'https://uat-open-api.tingee.vn',
+      TINGEE_CREDENTIAL_KEYS: apiEnv.TINGEE_CREDENTIAL_KEYS,
+      TICKET_QR_KEYS: apiEnv.TICKET_QR_KEYS,
+    });
+    const missing = issuesOf({
+      ...workerEnv,
+      TINGEE_BASE_URL: undefined,
+      TINGEE_CREDENTIAL_KEYS: '',
+      TICKET_QR_KEYS: undefined,
+    });
+    expect(missing.issues).toEqual([
+      { variable: 'TINGEE_BASE_URL', reason: 'thiếu' },
+      { variable: 'TINGEE_CREDENTIAL_KEYS', reason: 'thiếu' },
+      { variable: 'TICKET_QR_KEYS', reason: 'thiếu' },
+    ]);
+    const short = Buffer.alloc(16, 0x3c).toString('base64');
+    const invalid = issuesOf({
+      ...workerEnv,
+      TINGEE_BASE_URL: `https://uat-open-api.tingee.vn/${SECRET}`,
+      TINGEE_CREDENTIAL_KEYS: `v1:${short}`,
+      TICKET_QR_KEYS: QR_KEY_1,
+    });
+    expect(invalid.issues.map((i) => i.variable)).toEqual(['TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS', 'TICKET_QR_KEYS']);
+    for (const value of [SECRET, short, QR_KEY_1]) expect(invalid.message).not.toContain(value);
   });
 
   it('TINGEE_CREDENTIAL_KEYS: ít nhất 1 khóa, mỗi khóa đúng 32 byte, không trùng phiên bản; lỗi không in khóa', () => {
@@ -218,8 +250,6 @@ describe('loadConfig', () => {
       expect(err.message).not.toContain(QR_KEY_2);
       expect(err.message).not.toContain(short);
     }
-    // Vai worker chưa cần khóa này.
-    expect(loadConfig(workerEnv)).not.toHaveProperty('TICKET_QR_KEYS');
   });
 
   it('vai api: thiếu hoặc rỗng biến Google → dừng, chỉ nêu tên biến, không in giá trị', () => {

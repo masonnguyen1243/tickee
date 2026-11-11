@@ -252,7 +252,7 @@ describe('markPaid đúng một lần', () => {
     expect(audits.rows).toHaveLength(1);
   });
 
-  it('Đơn không còn pending (đã hết hạn) → lost_race, không Vé; nguồn có phí chưa hỗ trợ → lỗi', async () => {
+  it('Đơn không còn pending (đã hết hạn) → lost_race, không Vé; nguồn chưa làm (Đối soát bù, duyệt tay) → lỗi', async () => {
     const buyer = await signUp(h);
     const sale = await eventOnSale(org, [{ name: 'Vé', price: 0, capacity: 5 }]);
     const { orderId } = await pendingFreeOrder(buyer, sale.event.id, sale.tiers[0]!.id, 1);
@@ -261,6 +261,8 @@ describe('markPaid đúng một lần', () => {
     const payments = h.app.get(OrderPayments);
     expect(await db.transaction((tx) => payments.markPaid(tx, orderId, 'free', 0))).toBe('lost_race');
     expect(await ticketsOfEvent(sale.event.id)).toEqual([]);
-    await expect(db.transaction((tx) => payments.markPaid(tx, orderId, 'ipn', 100_000))).rejects.toThrow(/chưa hỗ trợ/);
+    for (const source of ['reconciliation', 'manual'] as const) {
+      await expect(db.transaction((tx) => payments.markPaid(tx, orderId, source, 0))).rejects.toThrow(/chưa hỗ trợ/);
+    }
   });
 });

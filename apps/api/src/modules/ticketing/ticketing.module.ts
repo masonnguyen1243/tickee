@@ -3,7 +3,7 @@ import type { ApiConfig } from '../../platform/config/index.js';
 import { TICKET_QR_KEYS, TicketQrKeys } from './qr.js';
 import { TicketsService } from './tickets.service.js';
 
-/** Cấu hình của `ticketing` (env vai api): khóa ký Mã QR vé. */
+/** Cấu hình của `ticketing` (env vai api và worker): khóa ký Mã QR vé. */
 export type TicketingConfig = Pick<ApiConfig, 'TICKET_QR_KEYS'>;
 
 /**

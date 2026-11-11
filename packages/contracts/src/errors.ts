@@ -179,6 +179,12 @@ export const ErrorCode = {
   FREE_TICKET_LIMIT_REACHED: 'FREE_TICKET_LIMIT_REACHED',
   /** Không tìm thấy Đơn: mã sai dạng, không tồn tại, hoặc Đơn của người khác (cùng lỗi để không lộ mã nào có thật). */
   ORDER_NOT_FOUND: 'ORDER_NOT_FOUND',
+  /**
+   * IPN Tingee (Story 3.5) bị từ chối: `x-request-timestamp` thiếu, sai dạng hoặc lệch đồng hồ server quá 10 phút;
+   * `x-signature` không khớp secret hiện hành lẫn các credential cũ của BTC sở hữu `ipnKey`; hoặc chỉ khớp secret của
+   * một credential cũ mà IPN không thuộc Đơn có link tạo bằng chính credential đó. Không lưu gì.
+   */
+  IPN_SIGNATURE_INVALID: 'IPN_SIGNATURE_INVALID',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

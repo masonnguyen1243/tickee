@@ -1,6 +1,8 @@
+import type { IncomingMessage } from 'node:http';
 import { Module, type DynamicModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { AuthModule } from '@thallesp/nestjs-better-auth';
+import { TINGEE_IPN_PATH } from '@tickee/contracts';
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { EMAIL_TRANSPORT, type EmailTransport } from '../../platform/email/index.js';
 import { authHttpGate } from './auth-http-gate.js';
@@ -20,6 +22,34 @@ import { TotpController } from './totp.controller.js';
 import { TotpGuard } from './totp.guard.js';
 import { TotpService } from './totp.service.js';
 import { TotpStore } from './totp-store.js';
+
+/**
+ * Đường dẫn của request (Express giữ `originalUrl` khi middleware mount theo path), bỏ query, chữ thường. Lấy `pathname`
+ * bằng `new URL` để nhận cả request dạng absolute-form (`POST http://host/v1/…`: `originalUrl` giữ nguyên URL tuyệt đối
+ * mà router Express vẫn khớp route).
+ */
+function requestPath(req: IncomingMessage): string {
+  const raw = (req as IncomingMessage & { originalUrl?: string }).originalUrl ?? req.url ?? '';
+  let path: string;
+  try {
+    path = new URL(raw, 'http://localhost').pathname;
+  } catch {
+    path = raw.split('?', 1)[0]!;
+  }
+  return path.toLowerCase();
+}
+
+/**
+ * Loại body mà parser JSON toàn cục đọc: `application/json` (như mặc định của `express.json`), trừ mọi đường dẫn có tiền
+ * tố `TINGEE_IPN_PATH` — handler IPN (Story 3.5) tự đọc byte thô để kiểm chữ ký, sau khi đã tra `ipnKey`. So chữ thường
+ * vì router Express không phân biệt hoa thường.
+ */
+export function parsesAsJson(req: IncomingMessage): boolean {
+  const path = requestPath(req);
+  if (path === TINGEE_IPN_PATH || path.startsWith(`${TINGEE_IPN_PATH}/`)) return false;
+  const type = req.headers['content-type'];
+  return typeof type === 'string' && type.split(';', 1)[0]!.trim().toLowerCase() === 'application/json';
+}
 
 /**
  * Tài khoản Tickee (AD-19): Better Auth mount ở `/v1/auth/*`, endpoint của web ở `/v1/identity/*`,
@@ -44,8 +74,8 @@ export class IdentityModule {
             // Handler HTTP của Better Auth chỉ mở các đường dẫn trong AUTH_HTTP_ALLOWLIST.
             middleware: authHttpGate,
             bodyParser: {
-              // AD-19: giữ `req.rawBody` cho IPN (Epic 3).
-              rawBody: true,
+              // AD-19: route IPN không qua parser JSON (handler tự đọc byte thô); không route nào cần `req.rawBody`.
+              json: { type: parsesAsJson },
               // API chỉ nhận JSON: form HTML cross-site (urlencoded) không gửi được body hợp lệ (chống CSRF đăng nhập).
               urlencoded: { enabled: false },
             },

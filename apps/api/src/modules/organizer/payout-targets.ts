@@ -1,13 +1,13 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { SecretBox } from '../../platform/crypto/index.js';
 import type { DbExecutor } from '../../platform/db/index.js';
 import type { TingeeCredential } from '../tingee/index.js';
 import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
 
 /*
- * Read model tài khoản nhận tiền cho `ordering` (Story 3.4, AD-6, AD-35). `organizer` chỉ đọc: không ghi gì, không giữ
- * secret. Khóa giải mã (`SecretBox`) do bên gọi truyền vào; credential đã giải mã chỉ sống trong lời gọi Tingee của bên
- * gọi, không bao giờ được lưu hay log.
+ * Read model tài khoản nhận tiền cho `ordering` (Story 3.4, AD-6, AD-35) và người nhận IPN cho `payment` (Story 3.5,
+ * AD-7). `organizer` chỉ đọc: không ghi gì, không giữ secret. Khóa giải mã (`SecretBox`) do bên gọi truyền vào;
+ * credential đã giải mã chỉ sống trong lời gọi Tingee hay lần kiểm chữ ký của bên gọi, không bao giờ được lưu hay log.
  */
 
 const pa = payoutAccounts;
@@ -62,6 +62,64 @@ export async function defaultPayoutTargetOf(
     accountName: row.accountName,
     bankName: row.bankName,
   };
+}
+
+/** Một credential Tingee của BTC với Secret Token đã giải mã, để kiểm chữ ký IPN. */
+export interface IpnCredential {
+  /** `tingee_credentials.id`: IPN chỉ khớp secret của credential đã thay thì phải ràng được Đơn của credential này. */
+  id: string;
+  secretToken: string;
+  /** Credential hiện hành (`retired_at IS NULL`). */
+  current: boolean;
+}
+
+/** BTC sở hữu một `ipnKey` và các credential để kiểm chữ ký IPN, theo thứ tự thử. */
+export interface IpnRecipient {
+  organizationId: string;
+  /**
+   * Credential hiện hành trước, rồi các credential đã thay (`retired_at`), mới thay nhất trước. Secret của credential
+   * đã thay chỉ có hiệu lực với IPN của Đơn có link tạo bằng chính credential đó (AD-35, Story 3.5). Rỗng khi BTC chưa
+   * từng lưu credential.
+   */
+  credentials: IpnCredential[];
+}
+
+/**
+ * BTC sở hữu `ipnKey` (`organizations.tingee_ipn_key`, AD-7) cùng mọi credential Tingee của BTC, Secret Token giải mã
+ * bằng `secretBox`. Không có BTC nào → `null`. Ciphertext hỏng hay thiếu khóa giải mã → ném `SecretBoxError` (cấu hình
+ * sai: IPN trả 500 để Tingee gửi lại).
+ */
+export async function ipnRecipientOf(db: DbExecutor, secretBox: SecretBox, ipnKey: string): Promise<IpnRecipient | null> {
+  const [org] = await db
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.tingeeIpnKey, ipnKey));
+  if (!org) return null;
+  const rows = await db
+    .select({ id: cred.id, secretTokenCiphertext: cred.secretTokenCiphertext, retiredAt: cred.retiredAt })
+    .from(cred)
+    .where(eq(cred.organizationId, org.id))
+    .orderBy(sql`${cred.retiredAt} DESC NULLS FIRST`, desc(cred.createdAt), desc(cred.id));
+  return {
+    organizationId: org.id,
+    credentials: rows.map((row) => ({
+      id: row.id,
+      secretToken: secretBox.open(row.secretTokenCiphertext),
+      current: row.retiredAt === null,
+    })),
+  };
+}
+
+/**
+ * Id credential Tingee mà tài khoản nhận tiền `payoutAccountId` được đọc bằng (`payout_accounts.tingee_credential_id`,
+ * kể cả khi tài khoản hay credential đã bị thay). Không có tài khoản → `null`. Không giải mã gì.
+ */
+export async function payoutAccountCredentialOf(db: DbExecutor, payoutAccountId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ credentialId: pa.tingeeCredentialId })
+    .from(pa)
+    .where(eq(pa.id, payoutAccountId));
+  return row?.credentialId ?? null;
 }
 
 /** Người nhận tiền hiện cho Người mua (`recipient-trust-block`). Không có credential hay VA. */

@@ -109,14 +109,40 @@ export async function expireOrder(db: Database, orderId: string, kind: ExpiryKin
         );
       return early ? 'not_yet' : 'skipped';
     }
-    const lines = await tx
-      .select({ ticketTypeId: orderItems.ticketTypeId, quantity: orderItems.quantity })
-      .from(orderItems)
-      .where(eq(orderItems.orderId, orderId))
-      .orderBy(asc(orderItems.ticketTypeId));
-    await releaseHeld(tx, lines);
+    await releaseOrderHeld(tx, orderId);
     return 'expired';
   });
+}
+
+/** Nhả toàn bộ chỗ đang giữ của Đơn vừa rời `pending` (`held -= n` từng dòng, theo `ticket_type_id` tăng dần). */
+async function releaseOrderHeld(tx: Tx, orderId: string): Promise<void> {
+  const lines = await tx
+    .select({ ticketTypeId: orderItems.ticketTypeId, quantity: orderItems.quantity })
+    .from(orderItems)
+    .where(eq(orderItems.orderId, orderId))
+    .orderBy(asc(orderItems.ticketTypeId));
+  await releaseHeld(tx, lines);
+}
+
+/** Kết quả `markExpired`: Đơn vừa chuyển `expired` và đã nhả chỗ; hoặc bỏ qua (không còn `pending`, không có). */
+export type MarkExpiredResult = 'expired' | 'skipped';
+
+/**
+ * Hết hạn (b) của AD-4 (Story 3.5): Tingee báo link `expired`/`canceled` (IPN, sau này cả tra trạng thái của Story 4.1).
+ * Trong `tx` của bên gọi: CAS `UPDATE orders SET status = 'expired' WHERE id = :id AND status = 'pending'`, không xét
+ * hạn (Tingee đã xác nhận link không còn trả được), rồi `held -= n` cho từng dòng. 0 dòng (Đơn không còn `pending` hoặc
+ * không có) → `skipped`, không đổi gì. Gọi song song với job (a)/(c) hay `markPaid` cho cùng Đơn thì chỉ một bên thắng
+ * CAS, nên chỗ chỉ được nhả (hoặc chốt bán) một lần.
+ */
+export async function markExpired(tx: Tx, orderId: string): Promise<MarkExpiredResult> {
+  const [expired] = await tx
+    .update(orders)
+    .set({ status: OrderStatus.EXPIRED })
+    .where(and(eq(orders.id, orderId), eq(orders.status, OrderStatus.PENDING)))
+    .returning({ id: orders.id });
+  if (!expired) return 'skipped';
+  await releaseOrderHeld(tx, orderId);
+  return 'expired';
 }
 
 /**

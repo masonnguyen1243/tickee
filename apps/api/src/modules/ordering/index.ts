@@ -7,9 +7,16 @@ export {
   lockInventoryForEvent,
   type InventoryRow,
 } from './inventory.service.js';
-export { OrderPayments, type MarkPaidResult } from './mark-paid.js';
+export {
+  OrderPayments,
+  OrderPaymentsModule,
+  orderForPayment,
+  type MarkPaidOptions,
+  type MarkPaidResult,
+  type OrderForPayment,
+} from './mark-paid.js';
 export { ORDER_CODE_GENERATOR, type OrderCodeGenerator } from './order-code.js';
-export { OrderingJobsModule } from './order-jobs.js';
+export { markExpired, OrderingJobsModule, type MarkExpiredResult } from './order-jobs.js';
 export { type OrderingConfig } from './order-rate-limit.js';
 export { OrderingModule } from './ordering.module.js';
 export { ORDER_HOLD } from './orders.service.js';

@@ -71,6 +71,12 @@ describe('tài khoản nhận tiền: BTC dùng key Tingee của mình (Story 2.
   it('URL IPN riêng của BTC', () => {
     expect(TINGEE_IPN_PATH).toBe('/v1/payments/tingee/ipn');
     expect(tingeeIpnUrl('https://api.tickee.vn', 'AbC_-123')).toBe('https://api.tickee.vn/v1/payments/tingee/ipn/AbC_-123');
+    // Cùng một hằng cho URL dán vào portal và tiền tố mà parser JSON toàn cục của api bỏ qua (Story 3.5).
+    expect(tingeeIpnUrl('https://api.tickee.vn', 'k').startsWith(`https://api.tickee.vn${TINGEE_IPN_PATH}/`)).toBe(true);
+  });
+
+  it('IPN sai chữ ký hoặc lệch giờ có mã lỗi riêng (Story 3.5)', () => {
+    expect(ErrorCode.IPN_SIGNATURE_INVALID).toBe('IPN_SIGNATURE_INVALID');
   });
 
   it('DTO không có Secret Token, Client ID đầy đủ hay số tài khoản đầy đủ', () => {

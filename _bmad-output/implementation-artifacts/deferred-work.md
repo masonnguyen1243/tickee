@@ -397,3 +397,15 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-5-refactor-api.md`
   summary: Chưa có test worker kiểm `PublicPageWorker` gộp theo slug (`dedupeBy`) và chạy song song (`parallel`): hai job cùng slug trong một lô phải chỉ gọi web một lần, và cả hai job đều `completed`.
   evidence: Review E2-5 API #19 (VG). Helper đã có unit test cho `parallel` và `dedupeBy` (`test/platform/jobs-queue.test.ts`), nhưng test của public-page chỉ gửi một job mỗi slug. Nếu bỏ hai option này khỏi `public-page-jobs.ts`, mọi test vẫn qua. Trước E2-5 cũng chưa có test này; hậu quả chỉ là gọi revalidate thừa hoặc chậm hơn.
+
+## Deferred from: planning spec-3-5-nhan-ipn-va-phat-ve-dung-mot-lan.md (2026-11-11)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-5-nhan-ipn-va-phat-ve-dung-mot-lan.md`
+  summary: Chặn hai BTC kết nối cùng một merchant Tingee (cùng Client ID hiện hành) ở bước kết nối (Story 2.6) và đổi key (Story 2.13-b), vd. unique một phần trên `tingee_credentials.client_id WHERE retired_at IS NULL` + lỗi 409. Làm trước khi mở bán Vé có phí.
+  evidence: Mason chốt 11/11 khi lập spec 3.5 (phương án A): giữ AD-7, Đơn phải thuộc BTC sở hữu `ipnKey`. Portal Tingee chỉ có một URL IPN cho mỗi merchant, nên nếu hai BTC dùng chung merchant thì IPN của BTC thứ hai rơi vào nhánh Tài khoản lệch và không tự phát Vé. Mục này đóng câu hỏi ở mục "Deferred from: code review of spec-2-6-lien-ket-tai-khoan-nhan-tien-2.md" (hai BTC chung merchant).
+
+## Deferred from: code review of spec-3-5-nhan-ipn-va-phat-ve-dung-mot-lan.md (2026-11-11)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-5-nhan-ipn-va-phat-ve-dung-mot-lan.md`
+  summary: IPN có `status` khác chữ thường hay đánh vần khác (`SUCCESS`, `Success`, `cancelled`) bị coi là trạng thái lạ: chỉ lưu, không phát Vé, không hết hạn Đơn; IPN trạng thái cho Đơn của BTC khác hay Đơn không còn `pending` chỉ log mức info (`stored`).
+  evidence: Review 3.5 vòng 1 #14 (BH, EC; maybe-false, nếu đúng là medium). Tài liệu Tingee chỉ ghi `success`/`expired`/`canceled` chữ thường. Cách chốt: lấy IPN thật từ Tingee UAT (test hợp đồng, Story 4.7, hoặc thử tay) và xem `status` đúng chữ nào; nếu khác thì chuẩn hóa `trim().toLowerCase()` và nhận cả `cancelled`.
