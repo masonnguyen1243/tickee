@@ -19,6 +19,7 @@ import { PublicEventLink } from '../public-event-link';
 import { PurchaseFormEditor } from '../purchase-form-editor';
 import { TicketTypesEditor } from '../ticket-types-editor';
 
+import { EventOverviewLive } from './event-overview';
 import { EventSettings } from './event-settings';
 import { DEFAULT_EVENT_TAB, EVENT_TABS, isEventTab, type EventTab } from './event-tab-list';
 
@@ -32,10 +33,21 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /**
- * Tab Tổng quan: tóm tắt thông tin. Nháp → "Tiếp tục thiết lập"; đã mở bán (kể cả Ẩn, Đã hủy: link vẫn mở được) → link
- * trang Sự kiện công khai kèm "Sao chép link".
+ * Tab Tổng quan: Sự kiện đã rời nháp → `stat-card` doanh thu và "Đơn gần đây" tự cập nhật (Story 3.11) nằm trên thẻ
+ * "Thông tin"; nháp → chỉ thẻ "Thông tin" (không gọi API Tổng quan). Thẻ "Thông tin": nháp → "Tiếp tục thiết lập"; đã mở
+ * bán (kể cả Ẩn, Đã hủy: link vẫn mở được) → link trang Sự kiện công khai kèm "Sao chép link".
  */
 function Overview({ orgId, event }: { orgId: string; event: EventDetail }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-section">
+      {event.status !== 'draft' ? <EventOverviewLive orgId={orgId} eventId={event.id} /> : null}
+      <EventInfo orgId={orgId} event={event} />
+    </div>
+  );
+}
+
+/** Thẻ "Thông tin" của tab Tổng quan. */
+function EventInfo({ orgId, event }: { orgId: string; event: EventDetail }) {
   const badge = eventBadge(event);
   return (
     <section

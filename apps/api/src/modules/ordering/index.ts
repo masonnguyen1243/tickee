@@ -2,6 +2,13 @@
 export { type OrderingJobsConfig } from './buyer-email-jobs.js';
 export { enqueueEventChangeEmail, EventChangeEmailQueues, paidBuyerCount } from './event-change-email-jobs.js';
 export {
+  eventRevenueOf,
+  recentOrdersOf,
+  type EventOrdersScope,
+  type EventRevenue,
+  type RecentOrderRow,
+} from './event-overview-read.js';
+export {
   changeCapacity,
   createInventory,
   deleteInventory,

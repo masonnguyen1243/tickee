@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-12-2026 11:35
+last_updated: 11-12-2026 14:46
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -69,8 +69,8 @@ development_status:
   3-7-trang-đơn-tự-chuyển-thành-công-theo-thời-gian-thực: done
   3-8-email-vé-và-link-chia-sẻ-vé: done
   3-9-vé-của-tôi-và-chi-tiết-vé: done
-  3-10-báo-người-mua-khi-sự-kiện-đổi-giờ-hoặc-địa-điểm: review
-  3-11-tổng-quan-sự-kiện-thấy-đơn-đầu-tiên-ngay-lập-tức: backlog
+  3-10-báo-người-mua-khi-sự-kiện-đổi-giờ-hoặc-địa-điểm: done
+  3-11-tổng-quan-sự-kiện-thấy-đơn-đầu-tiên-ngay-lập-tức: review
   epic-3-retrospective: optional
 
   epic-4: backlog
@@ -284,7 +284,9 @@ action_items:
       TingeeClient.createPaymentLink (timestamp yyyyMMddHHmmssSSS từ 10/11, timeout 5 giây). Phần 3.5 xong
       (spec-3-5-nhan-ipn-va-phat-ve-dung-mot-lan.md): tra BTC theo ipnKey (ipnRecipientOf)
       và cấu hình Tingee + khóa QR cho worker (TINGEE_BASE_URL, TINGEE_CREDENTIAL_KEYS,
-      TICKET_QR_KEYS). Còn lại: nhãn dashboard (3.11/4.2)"
+      TICKET_QR_KEYS). Còn lại: nhãn trạng thái bán trên dashboard theo sellability
+      (retro C5) → Story 4.2 (Mason quyết 12/11 khi lập spec 3.11; 3.11 không đổi
+      event-status.ts)"
   - id: "epic-2-retro-e2-7-moi-truong-dev"
     epic: 2
     action: "E2-7: môi trường dev — pnpm dev tự migrate và chạy worker, seed BTC đã

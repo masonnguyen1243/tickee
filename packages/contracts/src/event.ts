@@ -301,6 +301,25 @@ export function formatVnDate(value: Date | string): string {
   return `${pad(p.day)}/${pad(p.month)}/${pad(p.year, 4)}`;
 }
 
+/** Giờ theo giờ Việt Nam, dạng `HH:mm` (vd. "10:04"); như `formatVnDateTime`, không dùng `Intl`. */
+export function formatVnTime(value: Date | string | number): string {
+  const p = vnParts(new Date(value));
+  return `${pad(p.hour)}:${pad(p.minute)}`;
+}
+
+/** Ngày-giờ ngắn theo giờ Việt Nam, dạng `dd/MM · HH:mm` (vd. "08/11 · 10:04"); không dùng `Intl`. */
+export function formatVnDayTime(value: Date | string | number): string {
+  const p = vnParts(new Date(value));
+  return `${pad(p.day)}/${pad(p.month)} · ${pad(p.hour)}:${pad(p.minute)}`;
+}
+
+/** Hai mốc rơi vào cùng một ngày lịch theo giờ Việt Nam (vd. 23:59 và 00:00 hôm sau là hai ngày khác nhau). */
+export function isSameVnDay(a: Date | string | number, b: Date | string | number): boolean {
+  const x = vnParts(new Date(a));
+  const y = vnParts(new Date(b));
+  return x.year === y.year && x.month === y.month && x.day === y.day;
+}
+
 /** Tag cache Next.js của trang Sự kiện công khai `/e/{slug}` (SSR gắn tag; 2.11-c revalidate theo tag này). */
 export function publicEventTag(slug: string): string {
   return `event:${slug}`;

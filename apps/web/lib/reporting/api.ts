@@ -1,4 +1,4 @@
-import { StatusNotice } from '@tickee/contracts';
+import { EventOverview, eventOverviewApiPath, StatusNotice } from '@tickee/contracts';
 import { z } from 'zod';
 
 import { apiRequest } from '@/lib/api/client';
@@ -22,3 +22,11 @@ export const StatusNoticesResponse = z
 /** `GET /v1/orgs/:orgId/notices`: đã lọc theo vai người xem và sắp theo ưu tiên ở api. */
 export const fetchStatusNotices = (orgId: string, signal?: AbortSignal) =>
   apiRequest(`/orgs/${encodeURIComponent(orgId)}/notices`, { schema: StatusNoticesResponse, init: { signal } });
+
+/** Khóa TanStack Query: Tổng quan (doanh thu + Đơn gần đây) của một Sự kiện (Story 3.11). */
+export const eventOverviewQueryKey = (orgId: string, eventId: string) =>
+  ['reporting', 'event-overview', orgId, eventId] as const;
+
+/** `GET /v1/orgs/:orgId/events/:eventId/overview`: doanh thu (Đơn `paid`) và 5 Đơn mới nhất ở mọi trạng thái. */
+export const fetchEventOverview = (orgId: string, eventId: string, signal?: AbortSignal) =>
+  apiRequest(eventOverviewApiPath(orgId, eventId), { schema: EventOverview, init: { signal } });
