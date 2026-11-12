@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   ErrorCode,
-  EventStatus,
   SHARE_TOKEN_PATTERN,
   SharedTicketStatus,
   toEventIso,
@@ -13,7 +12,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { audit } from '../../platform/audit/index.js';
 import type { Database, DbExecutor, Tx } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
-import { ticketEventById, type TicketEventRef } from '../event/index.js';
+import { eventOpenForTickets, ticketEventById } from '../event/index.js';
 import { ownTicket, ticketNotFound, ticketsOfUser, type OwnTicket, type OwnTicketDetail } from './my-tickets.js';
 import { signTicketQr, TICKET_QR_KEYS, TicketQrKeys } from './qr.js';
 import { tickets } from './schema.js';
@@ -24,10 +23,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Một câu cho mọi lý do link chia sẻ không mở được (không lộ lý do nào). */
 const sharedTicketNotFound = () =>
   new AppError(ErrorCode.SHARED_TICKET_NOT_FOUND, 'Link không đúng hoặc không còn hiệu lực.');
-
-/** Sự kiện của Vé còn cho xem/chia sẻ Vé: có, chưa hủy, đồng hồ DB chưa quá `effective_end_at` (AD-14). */
-const eventOpenForTicket = (event: TicketEventRef | null): event is TicketEventRef =>
-  event !== null && event.status !== EventStatus.CANCELLED && !event.ended;
 
 /** Một dòng của Đơn cần phát Vé: Hạng vé, tên Hạng vé đã chụp lúc đặt, số Vé. */
 export interface TicketIssueLine {
@@ -112,7 +107,9 @@ export class TicketsService {
 
   /**
    * Vé của Đơn theo `seq`, kèm Mã QR vé và token link chia sẻ hiện hành, cả hai tính lại từ `qr_key_version` (và
-   * `share_version`). Chưa phát → `[]`. Chỉ dùng cho chủ Đơn (`buyerScope`) và worker email Vé.
+   * `share_version`). Chưa phát → `[]`. Chỉ dùng cho chủ Đơn (`buyerScope`) và worker email Vé. Không lọc theo Sự kiện:
+   * người gọi kiểm `eventOpenForTickets` (mô-đun `event`) trước khi gọi, để không ký gì cho Sự kiện đã hủy hay đã kết
+   * thúc.
    */
   async ticketsOfOrder(db: DbExecutor, orderId: string): Promise<BuyerTicket[]> {
     const rows = await db
@@ -174,7 +171,7 @@ export class TicketsService {
       .where(eq(tickets.shareTokenHash, hashShareToken(token)));
     if (!row || row.status !== 'valid') throw sharedTicketNotFound();
     const event = await ticketEventById(db, row.eventId);
-    if (!eventOpenForTicket(event)) throw sharedTicketNotFound();
+    if (!eventOpenForTickets(event)) throw sharedTicketNotFound();
     return {
       eventName: event.name,
       eventStartsAt: toEventIso(event.startsAt),
@@ -210,7 +207,7 @@ export class TicketsService {
         .where(and(eq(tickets.id, ticketId.toLowerCase()), eq(tickets.userId, userId)))
         .for('no key update');
       if (!row || row.status !== 'valid') throw ticketNotFound();
-      if (!eventOpenForTicket(await ticketEventById(tx, row.eventId))) throw ticketNotFound();
+      if (!eventOpenForTickets(await ticketEventById(tx, row.eventId))) throw ticketNotFound();
 
       const shareVersion = row.shareVersion + 1;
       const shareToken = shareTokenOf(this.keys, row.id, row.qrKeyVersion, shareVersion);

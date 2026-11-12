@@ -219,7 +219,7 @@ describe('BuyerOrderView và lỗi', () => {
   const order = {
     code: 'TK8F3Q2AXM',
     buyerStatus: 'awaiting_payment',
-    event: { slug: 'giai-chay-ab12', name: 'Giải chạy', startsAt: '2026-11-16T07:00:00+07:00' },
+    event: { slug: 'giai-chay-ab12', name: 'Giải chạy', startsAt: '2026-11-16T07:00:00+07:00', ended: false },
     items: [{ ticketTypeId: A, name: 'Đơn nam', unitPrice: 300_000, quantity: 2, amount: 600_000 }],
     totalAmount: 600_000,
     buyer: { name: 'An', phone: '+84912345678', email: 'an@vidu.vn' },
@@ -245,12 +245,17 @@ describe('BuyerOrderView và lỗi', () => {
     expect(BuyerOrderView.parse({ ...order, payment: null }).payment).toBeNull();
     const { payment: _payment, ...noPayment } = order;
     expect(BuyerOrderView.safeParse(noPayment).success).toBe(false);
-    // Thiếu `tickets` hay `event.startsAt` (API cũ) → không nhận.
+    // Thiếu `tickets`, `event.startsAt` hay `event.ended` (API cũ) → không nhận.
     const { tickets: _tickets, ...noTickets } = order;
     expect(BuyerOrderView.safeParse(noTickets).success).toBe(false);
-    expect(BuyerOrderView.safeParse({ ...order, event: { slug: 'giai-chay-ab12', name: 'Giải chạy' } }).success).toBe(
-      false,
-    );
+    expect(
+      BuyerOrderView.safeParse({ ...order, event: { slug: 'giai-chay-ab12', name: 'Giải chạy', ended: false } }).success,
+    ).toBe(false);
+    const { ended: _ended, ...notEnded } = order.event;
+    expect(BuyerOrderView.safeParse({ ...order, event: notEnded }).success).toBe(false);
+    // Đơn `paid` của Sự kiện đã kết thúc, không kèm Vé, vẫn nhận.
+    const ended = { ...order, buyerStatus: 'paid', event: { ...order.event, ended: true } };
+    expect(BuyerOrderView.parse(ended)).toEqual(ended);
     // BTC không nhập kênh liên hệ → `null`; thiếu `organizer` (API cũ) → không nhận.
     const noContact = { ...order, organizer: { name: 'CLB ABC', contactPhone: null, contactEmail: null } };
     expect(BuyerOrderView.parse(noContact)).toEqual(noContact);

@@ -367,14 +367,17 @@ export type BuyerOrderOrganizer = z.infer<typeof BuyerOrderOrganizer>;
  * - `serverNow`: giờ của máy chủ lúc trả lời, để web đếm ngược tới `expiresAt` không theo đồng hồ máy. Đơn 0đ có
  *   `expiresAt` = `createdAt` (không Giữ chỗ).
  * - `event.startsAt`: giờ bắt đầu hiện tại của Sự kiện (thẻ Vé).
+ * - `event.ended`: đồng hồ DB đã quá `effective_end_at` của Sự kiện lúc trả lời (AD-14, kể cả BTC bấm "Kết thúc"
+ *   sớm). Không có tín hiệu realtime tại mốc kết thúc: trang đang mở chỉ đổi ở lần tải sau.
  * - `payment`: `null` với Đơn tổng 0đ.
- * - `tickets`: các Vé theo `seq`, chỉ khi `buyerStatus = paid`; trạng thái khác thì rỗng.
+ * - `tickets`: các Vé theo `seq` (kèm Mã QR vé và token link chia sẻ), chỉ khi `buyerStatus = paid` và
+ *   `event.ended = false`; còn lại rỗng (máy chủ không ký Mã QR vé cho Sự kiện đã kết thúc, FR-24).
  * - `organizer`: tên và kênh liên hệ BTC hiện tại.
  */
 export const BuyerOrderView = z.object({
   code: z.string().regex(ORDER_CODE_PATTERN),
   buyerStatus: z.union([buyerOrderStatusSchema, z.string()]),
-  event: z.object({ slug: z.string(), name: z.string(), startsAt: EventDateTime }),
+  event: z.object({ slug: z.string(), name: z.string(), startsAt: EventDateTime, ended: z.boolean() }),
   items: z.array(BuyerOrderItem).min(1),
   totalAmount: z.number().int().min(0),
   buyer: z.object({ name: z.string(), phone: z.string(), email: z.string() }),

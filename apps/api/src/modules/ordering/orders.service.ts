@@ -34,6 +34,7 @@ import { AppError, parseRequest } from '../../platform/http/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
 import {
   buyerFormQuestions,
+  eventOpenForTickets,
   lockSaleEventBySlug,
   publicEventBySlug,
   saleEventById,
@@ -507,11 +508,15 @@ export class OrdersService {
   }
 
   /**
-   * Đơn + bản chụp + Sự kiện (tên, slug, giờ bắt đầu hiện tại, đã hủy chưa) + BTC → `BuyerOrderView`, kèm `serverNow`.
-   * `buyerStatus` theo bảng của `buyerStatusOf` tại `serverNow`; Vé (theo `seq`, kèm Mã QR vé) chỉ khi `buyerStatus =
-   * paid`; Đơn có phí kèm phần thanh toán (`paymentOf`); `organizer` là tên và kênh liên hệ BTC hiện tại.
+   * Đơn + bản chụp + Sự kiện (tên, slug, giờ bắt đầu hiện tại, đã hủy chưa, đã kết thúc chưa theo đồng hồ DB) + BTC →
+   * `BuyerOrderView`, kèm `serverNow`. `buyerStatus` theo bảng của `buyerStatusOf` tại `serverNow`; Vé (theo `seq`, kèm
+   * Mã QR vé và token link chia sẻ) chỉ khi `buyerStatus = paid` và Sự kiện chưa kết thúc: Vé chỉ đọc sau khi đọc xong
+   * Sự kiện (cùng đợt với các truy vấn khác), Sự kiện không còn dùng được cho Vé (`eventOpenForTickets`: đã hủy hay đã quá
+   * `effective_end_at`, FR-24, AD-14) thì không đọc Vé, không ký gì. Đơn có phí kèm phần thanh toán (`paymentOf`);
+   * `organizer` là tên và kênh liên hệ BTC hiện tại.
    */
   private async view(row: OrderRow, db: DbExecutor = this.db.orm): Promise<BuyerOrderView> {
+    const eventRead = saleEventById(db, row.eventId);
     const [items, answers, event, tickets, payment, organizer] = await Promise.all([
       db
         .select()
@@ -523,8 +528,12 @@ export class OrdersService {
         .from(orderAnswers)
         .where(eq(orderAnswers.orderId, row.id))
         .orderBy(asc(orderAnswers.position)),
-      saleEventById(db, row.eventId),
-      row.status === OrderStatus.PAID ? this.tickets.ticketsOfOrder(db, row.id) : Promise.resolve([]),
+      eventRead,
+      eventRead.then((saleEvent) => {
+        // Sự kiện đã hủy hay đã kết thúc (đồng hồ DB): không đọc Vé, không ký Mã QR vé, không tính token chia sẻ.
+        const withTickets = row.status === OrderStatus.PAID && eventOpenForTickets(saleEvent);
+        return withTickets ? this.tickets.ticketsOfOrder(db, row.id) : [];
+      }),
       this.paymentOf(row, db),
       organizerContactOf(db, { organizationId: row.organizationId }),
     ]);
@@ -537,7 +546,7 @@ export class OrdersService {
     return {
       code: row.code,
       buyerStatus,
-      event: { slug: event.slug, name: event.name, startsAt: toEventIso(event.startsAt) },
+      event: { slug: event.slug, name: event.name, startsAt: toEventIso(event.startsAt), ended: event.ended },
       items: items.map((i) => ({
         ticketTypeId: i.ticketTypeId,
         name: i.ticketTypeName,
@@ -553,7 +562,7 @@ export class OrdersService {
       expiresAt: row.expiresAt.toISOString(),
       serverNow: now.toISOString(),
       payment,
-      // Sự kiện đã hủy: không bao giờ hiện Mã QR vé.
+      // Chỉ trả Vé khi `buyerStatus = paid`.
       tickets: buyerStatus === BuyerOrderStatus.PAID ? tickets : [],
       organizer,
     };

@@ -13,6 +13,7 @@ export { buyerFormQuestions } from './form.service.js';
 export {
   assertPublicSlug,
   eventNotFound,
+  eventOpenForTickets,
   lockEventByIdForShare,
   lockSaleEventBySlug,
   publicEventBySlug,
@@ -20,6 +21,7 @@ export {
   ticketEventById,
   ticketEventsByIds,
   type PublicEventRef,
+  type SaleEventRef,
   type TicketEventRef,
 } from './public-event.js';
 export {

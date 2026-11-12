@@ -1,4 +1,4 @@
-import { EVENT_SLUG_PATTERN, toEventIso, type PublicEvent } from '@tickee/contracts';
+import { EVENT_SLUG_PATTERN, EventStatus, toEventIso, type PublicEvent } from '@tickee/contracts';
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { DbExecutor, Tx } from '../../platform/db/index.js';
 import { organizationNameOf } from '../organizer/index.js';
@@ -14,6 +14,24 @@ import { ticketTypesOf } from './ticket-type.service.js';
 
 const SLUG_MAX = 100;
 type EventRow = typeof events.$inferSelect;
+
+/**
+ * Đồng hồ DB đã quá `effective_end_at` (AD-14): so bằng `now()` của DB tại lúc đọc, không theo đồng hồ máy chủ ứng dụng
+ * (kể cả "Kết thúc" sớm: lệnh đó đặt `effective_end_at` = lúc bấm). Mọi `ended` mô-đun này trả về đều tính bằng biểu
+ * thức này; trong một transaction thì mọi dòng cùng một `now()`.
+ */
+const endedNow = sql<boolean>`now() > ${events.effectiveEndAt}`;
+
+/**
+ * Sự kiện còn dùng được cho Vé (FR-24, AD-14): có, chưa hủy, đồng hồ DB chưa quá `effective_end_at`. Nơi duy nhất quyết
+ * định có ký Mã QR vé, tính token link chia sẻ hay gửi email về Vé: Trang Đơn, Chi tiết Vé, link chia sẻ, email Vé và
+ * email đổi giờ/địa điểm. `ended` phải đọc từ mô-đun này (`ticketEventById`, `ticketEventsByIds`, `saleEventById`).
+ */
+export function eventOpenForTickets<T extends { status: EventRow['status']; ended: boolean }>(
+  event: T | null,
+): event is T {
+  return event !== null && event.status !== EventStatus.CANCELLED && !event.ended;
+}
 
 /** Slug sai dạng hoặc quá dài → `404 EVENT_NOT_FOUND` (không chạm DB). */
 export function assertPublicSlug(slug: string): void {
@@ -105,14 +123,18 @@ export async function lockEventByIdForShare(tx: Tx, eventId: string): Promise<Pu
   return row;
 }
 
+/** `PublicEventRef` kèm `ended`: đồng hồ DB đã quá `effective_end_at` lúc đọc (AD-14). */
+export type SaleEventRef = PublicEventRef & { ended: boolean };
+
 /**
- * Tra Sự kiện đã mở bán (không còn nháp) theo id, cho `ordering.sellability` khi người gọi chỉ có id (vd. trang Đơn,
- * Epic 3). Id sai dạng, không tồn tại hoặc còn nháp → `404 EVENT_NOT_FOUND`.
+ * Tra Sự kiện đã mở bán (không còn nháp) theo id, cho `ordering.sellability` khi người gọi chỉ có id và cho Trang Đơn
+ * (`ended` quyết định có trả Vé hay không, qua `eventOpenForTickets`). Id sai dạng, không tồn tại hoặc còn nháp → `404
+ * EVENT_NOT_FOUND`.
  */
-export async function saleEventById(db: DbExecutor, eventId: string): Promise<PublicEventRef> {
+export async function saleEventById(db: DbExecutor, eventId: string): Promise<SaleEventRef> {
   if (!UUID.test(eventId)) throw notFound();
   const [row] = await db
-    .select(refColumns)
+    .select({ ...refColumns, ended: endedNow })
     .from(events)
     .where(and(eq(events.id, eventId), ne(events.status, 'draft')));
   if (!row) throw notFound();
@@ -143,7 +165,7 @@ const ticketEventColumns = {
   venue: events.venue,
   status: events.status,
   effectiveEndAt: events.effectiveEndAt,
-  ended: sql<boolean>`now() > ${events.effectiveEndAt}`,
+  ended: endedNow,
 };
 
 /** Sự kiện của Vé theo id (không lọc trạng thái: Vé đã phát thì Sự kiện đã từng mở bán). Id sai dạng, không có → `null`. */

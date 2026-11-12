@@ -196,7 +196,7 @@ function paidOrder(version: Record<number, number> = {}) {
   return {
     code: CODE,
     buyerStatus: 'paid',
-    event: { slug: 'giai-chay-ho-guom', name: EVENT_NAME, startsAt: '2099-11-15T07:00:00+07:00' },
+    event: { slug: 'giai-chay-ho-guom', name: EVENT_NAME, startsAt: '2099-11-15T07:00:00+07:00', ended: false },
     items: [{ ticketTypeId: '019a3b2c-0800-7abc-8def-000000000001', name: TIER, unitPrice: 0, quantity: 2, amount: 0 }],
     totalAmount: 0,
     buyer: { name: HOLDER, phone: '+84912345678', email: EMAIL },

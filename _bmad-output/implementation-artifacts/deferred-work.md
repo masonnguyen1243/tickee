@@ -479,3 +479,26 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-11-tong-quan-su-kien-thay-don-dau-tien-ngay-lap-tuc.md`
   summary: `GET …/overview` đọc doanh thu và "Đơn gần đây" bằng hai câu độc lập (READ COMMITTED, chạy song song), nên một lần trả lời có thể lệch nhau đúng một Đơn vừa đổi giữa hai câu (vd. Đơn hiện "Đã thanh toán" mà "· n Đơn" chưa tăng). Tín hiệu của chính thay đổi đó làm web tải lại ngay sau, nên tự đúng. Nếu cần khớp tuyệt đối thì chạy cả ba câu trong một transaction `REPEATABLE READ READ ONLY`.
   evidence: `reporting/event-overview.service.ts` › `overview`. Chấp nhận ở 3.11 vì REST là sự thật và mỗi thay đổi đều kèm tín hiệu tải lại (AD-17).
+
+## Deferred from: build E3-7, tách phạm vi (2026-11-12)
+
+E3-7 (retro Epic 3) gom 4 việc ship riêng được. Mason chọn tách ngày 12/11/2026: làm D3 + gom điều kiện "Sự kiện còn dùng được" trước (`spec-epic-3-e3-7-trang-don-an-qr-sau-ket-thuc.md`); ba việc dưới đây vẫn thuộc E3-7, phải xong trước Epic 4. Gợi ý thứ tự: B6 + C7 chung một spec, rồi tới tách `orders.service.ts`.
+
+- source_spec: none
+  summary: E3-7 (B6). `PaymentLinks.expire` dùng `releaseOrderHeld` thay vì tự nhả chỗ, thêm test Đơn có 2 Hạng vé.
+  evidence: Retro Epic 3 B6 (`payment-link.ts:242-258`, `order-jobs.ts:122-133`, `test/ordering/payment-link.test.ts:131-149`). Tách khỏi D3 vì là sửa độc lập ở luồng link thanh toán, không chạm Trang Đơn.
+- source_spec: none
+  summary: E3-7 (C7). Test "TX1 không `NOTIFY`" bảo vệ lại cả `event_orders_changed`, không chỉ `order_changed`.
+  evidence: Retro Epic 3 C7: 3.11 thu hẹp `notificationsFor` về `order_changed` (`test/ordering/order-live.test.ts:126,189-202`). Chỉ sửa test, ship riêng được; nên gộp chung spec với B6.
+- source_spec: none
+  summary: E3-7 (E2, E3). Tách tối thiểu `ordering/orders.service.ts` (579 dòng, ≥ 6 trách nhiệm) trước Epic 4, và gom đồng hồ DB (`SELECT now()` 7 bản, `clock_timestamp()` ở `mark-paid.ts:74`) về một chỗ; cân nhắc helper `buyerScope` (AD-13, retro E4) khi tách.
+  evidence: Retro Epic 3 E2, E3, E4. Refactor thuần, diff lớn nhất trong E3-7; tách khỏi D3 để không trộn thay đổi hành vi với refactor. Làm sau D3 vì cùng chạm `orders.service.ts`.
+
+## Deferred from: code review of spec-epic-3-e3-7-trang-don-an-qr-sau-ket-thuc.md (2026-11-12)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-3-e3-7-trang-don-an-qr-sau-ket-thuc.md`
+  summary: E3-2. Đơn chưa trả (`awaiting_payment`/`confirming`) mà Sự kiện đã kết thúc (BTC bấm "Kết thúc") vẫn hiện màn thanh toán và checkout link; Người mua trả thì tiền vào `review` + `orphan` `event_ended`, BTC phải hoàn tay. `BuyerOrderView.event.ended` (đồng hồ DB) đã có sẵn cho web dùng khi E3-2 chốt luật.
+  evidence: Review E3-7 (BH, EC) triage #9. Đúng retro Epic 3 B1, có từ trước; `order-view.tsx` chỉ đọc `event.ended` ở nhánh `paid`. Chờ Mason chốt luật cho Đơn đang có link khi "Kết thúc"/Ẩn/khóa (E3-2).
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-3-e3-7-trang-don-an-qr-sau-ket-thuc.md`
+  summary: Không test nào chứng minh `ended` đi theo đồng hồ DB chứ không theo đồng hồ app: mọi test đẩy mốc bằng `effective_end_at = now() - 1s`, cả hai đồng hồ đều đã quá. Thêm một ca giả `Date` của app (vd. `vi.useFakeTimers({ toFake: ['Date'] })`) lùi về trước mốc rồi kiểm `ended: true`, `tickets: []` cho biểu thức chung `endedNow`.
+  evidence: Review E3-7 (VG) triage #2. Yếu điểm chung của `event/public-event.ts` › `endedNow` (Trang Đơn, Chi tiết Vé, link chia sẻ, email); repo chưa có mẫu giả `Date` trong harness Nest/HTTP. Nên làm cùng mục gom đồng hồ DB của E3-7.

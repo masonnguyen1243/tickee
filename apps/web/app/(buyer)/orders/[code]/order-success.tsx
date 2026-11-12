@@ -29,26 +29,90 @@ function useSuccessVibration(celebrate: boolean): void {
   }, [celebrate]);
 }
 
+/**
+ * Focus vào `h1` lúc gắn: vùng `aria-live` của stage gắn cùng lúc với nội dung nên không được đọc, và trình báo đổi trang
+ * của Next chỉ đọc tiêu đề trang; focus để trình đọc màn hình đọc tiêu đề của màn ngay.
+ */
+function useHeadingFocus() {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    heading.current?.focus();
+  }, []);
+  return heading;
+}
+
+/** Cuối màn Thành công và màn đã kết thúc: Mã Đơn và nút chính "Xem Vé của tôi" → `/tickets` (Story 3.9, UX-DR18). */
+function OrderFooter({ code }: { code: string }) {
+  return (
+    <>
+      <p className="mt-section text-meta text-muted-foreground">
+        Mã Đơn{' '}
+        <span data-slot="order-code" className="font-bold text-foreground tabular-nums">
+          {code}
+        </span>
+      </p>
+      <Button asChild variant="primary-on-light" className="mt-stack w-full">
+        <Link href={MY_TICKETS_PATH} data-slot="order-success-my-tickets">
+          Xem Vé của tôi
+        </Link>
+      </Button>
+    </>
+  );
+}
+
 type OrderSuccessProps = {
   order: BuyerOrderView;
   /**
    * "Khoảnh khắc" (Story 3.7): thẻ trượt lên từ sân khấu và máy rung nhẹ, chỉ khi trang đang mở thấy Đơn chuyển `paid`
-   * hoặc vừa từ Checkout / nút "Thanh toán" sang. Mở lại hay tải lại sau đó: hiện ngay, không trượt, không rung.
+   * hoặc vừa từ Checkout / nút "Thanh toán" sang. Mở lại hay tải lại sau đó: hiện ngay, không trượt, không rung. Không có
+   * tác dụng khi Sự kiện đã kết thúc.
    */
   celebrate: boolean;
 };
 
 /**
- * Màn "Thành công" của Trang Đơn khi `buyerStatus = paid` (Story 3.3; 3.7 dùng lại khi Đơn có phí tự chuyển): stage có
- * wordmark, tên Sự kiện, "Vé của bạn đã sẵn sàng!" (`aria-live="polite"`; vùng live gắn cùng lúc với nội dung nên không
- * được đọc, và trình báo đổi trang của Next chỉ đọc tiêu đề trang: lúc gắn chuyển focus vào `h1` để trình đọc màn hình
- * đọc câu này ngay) và "Đã gửi Vé tới {email}" (Story 3.8: email Vé đi qua hàng đợi, lỗi email không bao giờ hiện ở
- * đây); mỗi Vé một `ticket-card` kèm "Chia sẻ Vé" / "Tạo lại link" (Story 3.8), thẻ đầu chồng mép dưới stage ~30px;
- * `celebrate` thì các thẻ trượt lên từ sân khấu và máy rung nhẹ. Reduced motion: hiện ngay, không trượt (quy tắc toàn cục
- * trong globals.css tắt animation), không rung. Cuối màn: nút chính "Xem Vé của tôi" → `/tickets` (Story 3.9, UX-DR18);
- * biên nhận nằm ở Chi tiết Vé (3.9), không ở đây.
+ * Trang Đơn khi `buyerStatus = paid`: Sự kiện đã kết thúc (`event.ended`, theo đồng hồ DB lúc tải) → màn đã kết thúc;
+ * còn lại → màn Thành công. Hai màn là hai component riêng nên đổi màn (Đơn tải lại sau mốc kết thúc) không trộn hook.
  */
 export function OrderSuccess({ order, celebrate }: OrderSuccessProps) {
+  return order.event.ended ? <OrderEnded order={order} /> : <OrderReady order={order} celebrate={celebrate} />;
+}
+
+/**
+ * Đơn `paid` mà Sự kiện đã kết thúc (E3-7, Mason chốt 12/11/2026; như Chi tiết Vé sau kết thúc và FR-24): stage có
+ * wordmark, tên Sự kiện, "Sự kiện đã kết thúc" (`h1`, focus lúc gắn) và "Vé của Đơn này đã chuyển vào lịch sử ở Vé của
+ * tôi."; không thẻ Vé, không Mã QR vé, không "Đã gửi Vé tới…", không banner "đang được chuẩn bị"; không rung, không
+ * trượt. Máy chủ đã không trả Vé nào (`tickets = []`). Cuối màn vẫn có Mã Đơn và "Xem Vé của tôi".
+ */
+function OrderEnded({ order }: { order: BuyerOrderView }) {
+  const heading = useHeadingFocus();
+  return (
+    <div className="flex flex-col pt-2" data-slot="order-ended">
+      <StageBlock aria-live="polite" className="flex flex-col items-center gap-1 py-5 text-center">
+        <Wordmark tone="stage" />
+        <p className="mt-3 text-meta text-stage-muted wrap-break-word">{order.event.name}</p>
+        <h1 ref={heading} tabIndex={-1} className="text-headline">
+          Sự kiện đã kết thúc
+        </h1>
+        <p data-slot="order-ended-note" className="mt-1 max-w-full text-meta text-stage-muted wrap-break-word">
+          Vé của Đơn này đã chuyển vào lịch sử ở Vé của tôi.
+        </p>
+      </StageBlock>
+      <OrderFooter code={order.code} />
+    </div>
+  );
+}
+
+/**
+ * Màn "Thành công" của Trang Đơn khi `buyerStatus = paid` và Sự kiện chưa kết thúc (Story 3.3; 3.7 dùng lại khi Đơn có
+ * phí tự chuyển): stage có wordmark, tên Sự kiện, "Vé của bạn đã sẵn sàng!" (`aria-live="polite"`, focus `h1` lúc gắn)
+ * và "Đã gửi Vé tới {email}" (Story 3.8: email Vé đi qua hàng đợi, lỗi email không bao giờ hiện ở đây); mỗi Vé một
+ * `ticket-card` kèm "Chia sẻ Vé" / "Tạo lại link" (Story 3.8), thẻ đầu chồng mép dưới stage ~30px; `celebrate` thì các
+ * thẻ trượt lên từ sân khấu và máy rung nhẹ. Reduced motion: hiện ngay, không trượt (quy tắc toàn cục trong globals.css
+ * tắt animation), không rung. Cuối màn: Mã Đơn và nút chính "Xem Vé của tôi"; biên nhận nằm ở Chi tiết Vé (3.9), không
+ * ở đây.
+ */
+function OrderReady({ order, celebrate }: OrderSuccessProps) {
   useSuccessVibration(celebrate);
   const queryClient = useQueryClient();
   // Tạo lại link xong: ghi token mới vào Đơn và vào Chi tiết Vé đó (nếu đã có trong cache) rồi tải lại cả hai, để không
@@ -65,10 +129,7 @@ export function OrderSuccess({ order, celebrate }: OrderSuccessProps) {
     void queryClient.invalidateQueries({ queryKey });
     void queryClient.invalidateQueries({ queryKey: ticketKey });
   };
-  const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => {
-    heading.current?.focus();
-  }, []);
+  const heading = useHeadingFocus();
   return (
     <div className="flex flex-col pt-2" data-slot="order-success" data-celebrate={celebrate ? 'true' : 'false'}>
       <StageBlock
@@ -124,17 +185,7 @@ export function OrderSuccess({ order, celebrate }: OrderSuccessProps) {
           <StatusBanner tone="neutral" title="Vé của bạn đang được chuẩn bị. Tải lại trang sau ít phút." />
         </div>
       )}
-      <p className="mt-section text-meta text-muted-foreground">
-        Mã Đơn{' '}
-        <span data-slot="order-code" className="font-bold text-foreground tabular-nums">
-          {order.code}
-        </span>
-      </p>
-      <Button asChild variant="primary-on-light" className="mt-stack w-full">
-        <Link href={MY_TICKETS_PATH} data-slot="order-success-my-tickets">
-          Xem Vé của tôi
-        </Link>
-      </Button>
+      <OrderFooter code={order.code} />
     </div>
   );
 }
