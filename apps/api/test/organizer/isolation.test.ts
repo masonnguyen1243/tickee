@@ -91,6 +91,8 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/hide');
     expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/unhide');
     expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/end');
+    // Story 3.10: PATCH Sự kiện chuyển sang flows (cùng đường dẫn) và số Người mua.
+    expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/buyer-count');
     expect(guarded).toContain('GET /v1/orgs/:orgId/test-owner-only');
     expect(guarded).toContain('POST /v1/orgs/:orgId/test-owner-only/items/:itemId');
   });
@@ -148,7 +150,7 @@ describe('cách ly BTC', () => {
 
   it('route Sự kiện trên BTC A: body {} → 400, id ngẫu nhiên → 404 EVENT_NOT_FOUND', async () => {
     const eventRoutes = routes.filter((r) => r.permission && r.path.startsWith('/v1/orgs/:orgId/events'));
-    expect(eventRoutes).toHaveLength(19);
+    expect(eventRoutes).toHaveLength(20);
     for (const route of eventRoutes) {
       const res = await call(route, orgA, ownerA.cookie);
       // Body được kiểm trước khi chạm DB; danh sách Sự kiện của BTC trả 200; còn lại Sự kiện ngẫu nhiên → 404.

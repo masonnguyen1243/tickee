@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { ErrorCode } from '../src/errors.js';
 import {
   EVENT_SLUG_BASE_MAX,
+  EventBuyerCount,
   EventDraftInput,
+  eventBuyerCountApiPath,
   isEventYearInRange,
   effectiveEndAt,
   eventIsoToLocal,
@@ -12,10 +14,14 @@ import {
   formatEventTimeRange,
   formatVnDate,
   formatVnDateTime,
+  notifiesBuyers,
   publicEventTag,
   slugBase,
+  timeOrVenueChanged,
   toEventIso,
+  type EventBeforeEdit,
 } from '../src/event.js';
+import { JobQueue, SendEventChangeEmailPayload } from '../src/jobs.js';
 
 const at = (iso: string) => new Date(iso);
 const effective = (endsAt: string) => toEventIso(effectiveEndAt(at(endsAt)));
@@ -188,5 +194,78 @@ describe('đường dẫn và mã lỗi', () => {
 
   it('EVENT_NOT_FOUND', () => {
     expect(ErrorCode.EVENT_NOT_FOUND).toBe('EVENT_NOT_FOUND');
+  });
+});
+
+describe('báo Người mua khi đổi giờ hoặc địa điểm (Story 3.10)', () => {
+  const START = '2099-11-16T07:00:00+07:00';
+  const END = '2099-11-16T17:00:00+07:00';
+  const before = (overrides: Partial<EventBeforeEdit> = {}): EventBeforeEdit => ({
+    status: 'published',
+    startsAt: START,
+    endsAt: END,
+    venue: 'Hồ Gươm',
+    endedManuallyAt: null,
+    ...overrides,
+  });
+  const same = { startsAt: START, endsAt: END, venue: 'Hồ Gươm' };
+  const NOW = Date.parse('2099-11-10T00:00:00Z');
+
+  it('timeOrVenueChanged: giờ so theo mốc (khác offset vẫn là cùng mốc), venue so giá trị', () => {
+    expect(timeOrVenueChanged(before(), same)).toBe(false);
+    expect(timeOrVenueChanged(before(), { ...same, startsAt: '2099-11-16T00:00:00Z' })).toBe(false);
+    expect(timeOrVenueChanged(before(), { ...same, startsAt: new Date('2099-11-16T00:00:00Z') })).toBe(false);
+    expect(timeOrVenueChanged(before(), { ...same, startsAt: '2099-11-16T08:00:00+07:00' })).toBe(true);
+    expect(timeOrVenueChanged(before(), { ...same, endsAt: '2099-11-16T18:00:00+07:00' })).toBe(true);
+    expect(timeOrVenueChanged(before(), { ...same, venue: 'Sân Mỹ Đình' })).toBe(true);
+    expect(timeOrVenueChanged(before(), { ...same, venue: null })).toBe(true);
+    expect(timeOrVenueChanged(before({ venue: null }), { ...same, venue: null })).toBe(false);
+  });
+
+  it('published/hidden + đổi giờ hoặc địa điểm + chưa kết thúc sau khi sửa → báo', () => {
+    for (const status of ['published', 'hidden'] as const) {
+      expect(notifiesBuyers(before({ status }), { ...same, startsAt: '2099-11-16T08:00:00+07:00' }, NOW)).toBe(true);
+      expect(notifiesBuyers(before({ status }), { ...same, venue: 'Sân Mỹ Đình' }, new Date(NOW))).toBe(true);
+    }
+  });
+
+  it('nháp hoặc đã hủy → không báo', () => {
+    for (const status of ['draft', 'cancelled'] as const) {
+      expect(notifiesBuyers(before({ status }), { ...same, venue: 'Sân Mỹ Đình' }, NOW)).toBe(false);
+    }
+  });
+
+  it('không đổi giờ/địa điểm (chỉ tên, mô tả…) → không báo', () => {
+    expect(notifiesBuyers(before(), same, NOW)).toBe(false);
+    expect(notifiesBuyers(before(), { ...same, startsAt: '2099-11-16T00:00:00Z' }, NOW)).toBe(false);
+  });
+
+  it('sau khi sửa vẫn đã kết thúc (effectiveEndAt của endsAt mới ≤ now) → không báo; dời sang tương lai → báo', () => {
+    const past = before({ startsAt: '2020-11-16T07:00:00+07:00', endsAt: '2020-11-16T17:00:00+07:00' });
+    expect(
+      notifiesBuyers(past, { startsAt: '2020-11-16T07:00:00+07:00', endsAt: '2020-11-16T17:00:00+07:00', venue: 'X' }, NOW),
+    ).toBe(false);
+    expect(notifiesBuyers(past, same, NOW)).toBe(true);
+    // Biên: mốc kết thúc mới đúng bằng now → đã kết thúc.
+    const end = effectiveEndAt(new Date(END)).getTime();
+    expect(notifiesBuyers(before(), { ...same, venue: 'X' }, end)).toBe(false);
+    expect(notifiesBuyers(before(), { ...same, venue: 'X' }, end - 1)).toBe(true);
+  });
+
+  it('đã bấm "Kết thúc" → không bao giờ báo, kể cả dời endsAt sang tương lai hay đồng hồ máy chậm hơn mốc bấm', () => {
+    const ended = before({ endedManuallyAt: '2099-11-09T09:30:00+07:00' });
+    expect(notifiesBuyers(ended, { ...same, endsAt: '2099-11-20T17:00:00+07:00' }, NOW)).toBe(false);
+    expect(notifiesBuyers(ended, { ...same, venue: 'X' }, Date.parse('2099-11-09T02:00:00Z'))).toBe(false);
+  });
+
+  it('EventBuyerCount, đường API và payload job', () => {
+    expect(EventBuyerCount.parse({ buyers: 3 })).toEqual({ buyers: 3 });
+    expect(EventBuyerCount.safeParse({ buyers: -1 }).success).toBe(false);
+    expect(eventBuyerCountApiPath('o1', 'e1')).toBe('/orgs/o1/events/e1/buyer-count');
+    expect(JobQueue.ORDERING_SEND_EVENT_CHANGE_EMAIL).toBe('ordering.send-event-change-email');
+    const eventId = '019a3b2c-0712-7abc-8def-0123456789ab';
+    expect(SendEventChangeEmailPayload.parse({ eventId, version: 1 })).toEqual({ eventId, version: 1 });
+    expect(SendEventChangeEmailPayload.safeParse({ eventId, version: 0 }).success).toBe(false);
+    expect(SendEventChangeEmailPayload.safeParse({ eventId, version: 1, userId: 'x' }).success).toBe(false);
   });
 });

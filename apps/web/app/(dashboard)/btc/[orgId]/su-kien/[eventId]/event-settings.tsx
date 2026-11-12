@@ -1,7 +1,14 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { EventDraftInput, ErrorCode, eventPath, formatEventDateTime, type EventDetail } from '@tickee/contracts';
+import {
+  EventDraftInput,
+  ErrorCode,
+  eventPath,
+  formatEventDateTime,
+  notifiesBuyers,
+  type EventDetail,
+} from '@tickee/contracts';
 import Link from 'next/link';
 import { useId, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
@@ -13,7 +20,15 @@ import { handledElsewhere } from '@/lib/api/handled-elsewhere';
 import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
 import { useGoToLogin } from '@/lib/auth/use-go-to-login';
-import { endEvent, eventQueryKey, eventsQueryKey, hideEvent, unhideEvent, updateEvent } from '@/lib/event/api';
+import {
+  endEvent,
+  eventQueryKey,
+  eventsQueryKey,
+  fetchEventBuyerCount,
+  hideEvent,
+  unhideEvent,
+  updateEvent,
+} from '@/lib/event/api';
 
 import {
   EventInfoFields,
@@ -33,6 +48,10 @@ import { isEventEnded } from '../event-status';
  * đọc kèm lý do. Đã kết thúc: không còn nút nào (Ẩn, Hiện lại, Kết thúc — "Đã kết thúc" thắng "Ẩn" ở `sellability`),
  * hiện "Đã kết thúc lúc …". Chưa bắt đầu: nút "Kết thúc" tắt kèm lý do. Trạng thái đổi giữa chừng (người khác vừa bấm)
  * → toast và tải lại Sự kiện.
+ *
+ * Story 3.10: lưu lệnh đổi giờ hoặc địa điểm của Sự kiện đã mở bán, theo đồng hồ máy chưa kết thúc sau khi sửa
+ * (`notifiesBuyers`), thì đếm Người mua trước; có người → `Dialog` "Email sẽ được gửi tới {n} Người mua." rồi mới lưu,
+ * không có ai → lưu luôn. Đếm lỗi → banner "Chưa lưu được thông tin", không lưu.
  */
 
 const NOT_STARTED_REASON = 'Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.';
@@ -58,40 +77,70 @@ function useEventSaved(orgId: string) {
 // Thông tin Sự kiện
 // ---------------------------------------------------------------------------------------------------------------
 
+/** Lỗi lưu có chỗ báo riêng: lỗi tại từng ô (`VALIDATION_FAILED`), toast + tải lại (`EVENT_CANCELLED`), nơi khác. */
+const saveErrorShownElsewhere = (error: unknown) =>
+  hasErrorCode(error, ErrorCode.VALIDATION_FAILED) ||
+  hasErrorCode(error, ErrorCode.EVENT_CANCELLED) ||
+  handledElsewhere(error);
+
+/** Câu báo trong `Dialog` khi server từ chối dữ liệu: lỗi tại ô nằm sau `Dialog`. */
+const INVALID_IN_DIALOG = 'Thông tin chưa hợp lệ. Bấm "Hủy" để sửa các ô được đánh dấu.';
+
+/** Lệnh sửa chờ xác nhận gửi email: body sẽ lưu và số Người mua sẽ nhận email. */
+type PendingNotice = { input: EventDraftInput; buyers: number };
+
 function InfoForm({ orgId, event }: { orgId: string; event: EventDetail }) {
   const goToLogin = useGoToLogin();
   const cache = useEventSaved(orgId);
   const [values, setValues] = useState<EventInfoValues>(() => valuesOf(event));
   const [errors, setErrors] = useState<EventInfoErrors>({});
+  const [notice, setNotice] = useState<PendingNotice | null>(null);
   const cancelled = event.status === 'cancelled';
 
   const save = useMutation({
     mutationFn: (body: EventDraftInput) => updateEvent(orgId, event.id, body),
     onSuccess: (saved) => {
       cache.saved(saved);
+      setNotice(null);
       toast.success('Đã lưu thông tin Sự kiện.');
     },
     onError: (error) => {
       if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
       else if (hasErrorCode(error, ErrorCode.VALIDATION_FAILED)) setErrors(serverFieldErrors(error, values));
       else if (hasErrorCode(error, ErrorCode.EVENT_CANCELLED)) {
+        setNotice(null);
         toast.info('Sự kiện đã hủy, không sửa được. Đã tải lại Sự kiện.');
         cache.reload(event.id);
       }
     },
   });
 
+  // Đếm Người mua trước khi lưu lệnh đổi giờ/địa điểm (Story 3.10); biến của mutation là body sẽ lưu.
+  const count = useMutation({
+    mutationFn: (_body: EventDraftInput) => fetchEventBuyerCount(orgId, event.id),
+    onSuccess: ({ buyers }, body) => {
+      if (buyers > 0) setNotice({ input: body, buyers });
+      else save.mutate(body);
+    },
+    onError: (error) => {
+      if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
+    },
+  });
+  const busy = save.isPending || count.isPending;
+
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (save.isPending || cancelled) return;
+    if (busy || cancelled) return;
     const parsed = EventDraftInput.safeParse(inputOf(values));
+    save.reset();
+    count.reset();
     if (!parsed.success) {
       setErrors(fieldErrorsOf(parsed.error.issues.map((i) => i.path[0]), values));
-      save.reset();
       return;
     }
     setErrors({});
-    save.mutate(parsed.data);
+    if (notifiesBuyers(event, parsed.data, Date.now())) count.mutate(parsed.data);
+    else save.mutate(parsed.data);
   };
 
   const update = (field: EventInfoField, next: string) => {
@@ -99,56 +148,80 @@ function InfoForm({ orgId, event }: { orgId: string; event: EventDetail }) {
     if (errors[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
   };
 
-  const failure =
-    save.error &&
-    !hasErrorCode(save.error, ErrorCode.VALIDATION_FAILED) &&
-    !hasErrorCode(save.error, ErrorCode.EVENT_CANCELLED) &&
-    !handledElsewhere(save.error)
-      ? save.error
+  const saveFailure = save.error && !saveErrorShownElsewhere(save.error) ? save.error : null;
+  const countFailure = count.error && !handledElsewhere(count.error) ? count.error : null;
+  // Lỗi của lần lưu từ `Dialog` hiện trong `Dialog`; đóng `Dialog` thì xóa lỗi đó.
+  const failure = notice ? null : (saveFailure ?? countFailure);
+  const dialogFailure =
+    notice && save.error && !hasErrorCode(save.error, ErrorCode.EVENT_CANCELLED) && !handledElsewhere(save.error)
+      ? hasErrorCode(save.error, ErrorCode.VALIDATION_FAILED)
+        ? INVALID_IN_DIALOG
+        : messageOf(save.error)
       : null;
 
   return (
-    <form noValidate onSubmit={onSubmit} data-slot="event-settings-info">
-      <EventInfoFields
-        values={values}
-        errors={errors}
-        onChange={update}
-        readOnly={cancelled}
-        draft={event.status === 'draft'}
-        notice={
-          cancelled ? (
-            <StatusBanner
-              tone="neutral"
-              title="Sự kiện đã hủy"
-              description="Thông tin chỉ để xem, không sửa được nữa."
-            />
-          ) : null
-        }
-        footer={
-          cancelled ? null : (
-            <div className="flex flex-col gap-stack">
-              {failure ? (
-                <StatusBanner
-                  tone="danger"
-                  title="Chưa lưu được thông tin"
-                  description={messageOf(failure)}
-                  action={
-                    <Button type="submit" variant="link" size="sm">
-                      Thử lại
-                    </Button>
-                  }
-                />
-              ) : null}
-              <div className="flex justify-end">
-                <Button type="submit" loading={save.isPending}>
-                  Lưu thay đổi
-                </Button>
+    <>
+      <form noValidate onSubmit={onSubmit} data-slot="event-settings-info">
+        <EventInfoFields
+          values={values}
+          errors={errors}
+          onChange={update}
+          readOnly={cancelled}
+          draft={event.status === 'draft'}
+          notice={
+            cancelled ? (
+              <StatusBanner
+                tone="neutral"
+                title="Sự kiện đã hủy"
+                description="Thông tin chỉ để xem, không sửa được nữa."
+              />
+            ) : null
+          }
+          footer={
+            cancelled ? null : (
+              <div className="flex flex-col gap-stack">
+                {failure ? (
+                  <StatusBanner
+                    tone="danger"
+                    title="Chưa lưu được thông tin"
+                    description={messageOf(failure)}
+                    action={
+                      <Button type="submit" variant="link" size="sm">
+                        Thử lại
+                      </Button>
+                    }
+                  />
+                ) : null}
+                <div className="flex justify-end">
+                  <Button type="submit" loading={busy}>
+                    Lưu thay đổi
+                  </Button>
+                </div>
               </div>
-            </div>
-          )
-        }
+            )
+          }
+        />
+      </form>
+
+      <ConfirmDialog
+        open={notice !== null}
+        onOpenChange={(open) => {
+          if (open) return;
+          save.reset();
+          setNotice(null);
+        }}
+        title="Lưu thay đổi?"
+        description={`Email sẽ được gửi tới ${(notice?.buyers ?? 0).toLocaleString('vi-VN')} Người mua.`}
+        confirmLabel="Lưu và gửi email"
+        confirmVariant="primary-on-light"
+        onConfirm={() => {
+          if (notice) save.mutate(notice.input);
+        }}
+        pending={save.isPending}
+        failureTitle="Chưa lưu được thông tin"
+        failure={dialogFailure}
       />
-    </form>
+    </>
   );
 }
 

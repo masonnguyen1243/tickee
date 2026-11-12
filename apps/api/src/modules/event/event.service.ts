@@ -7,19 +7,20 @@ import {
   effectiveEndAt,
   ErrorCode,
   slugBase,
+  timeOrVenueChanged,
   toEventIso,
   type EventDetail,
   type EventDraftField,
   type EventList,
   type EventOrderLimitInput,
 } from '@tickee/contracts';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import pg from 'pg';
 import type { PgBoss } from 'pg-boss';
 import type { z } from 'zod';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import { audit } from '../../platform/audit/index.js';
-import { DATABASE, type Database } from '../../platform/db/index.js';
+import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
 import { enqueuePublicPageRevalidation, PublicPageQueues } from './public-page-jobs.js';
@@ -58,8 +59,10 @@ function isUniqueViolation(err: unknown, constraint: string): boolean {
   return false;
 }
 
-type EventRow = typeof events.$inferSelect;
-type DraftValues = z.output<typeof EventDraftInput>;
+/** Một dòng `events` đầy đủ (kể cả cột nội bộ như `time_venue_version`); trả ra api qua `detailOf`. */
+export type EventRow = typeof events.$inferSelect;
+/** Body `PATCH`/`POST` Sự kiện sau khi qua `EventDraftInput`. */
+export type EventDraftValues = z.output<typeof EventDraftInput>;
 
 export const detailOf = (row: EventRow): EventDetail => ({
   id: row.id,
@@ -83,7 +86,7 @@ export const detailOf = (row: EventRow): EventDetail => ({
  * Cột ghi từ input (giờ đã đổi sang `Date`). `effective_end_at` tính lại, trừ khi BTC đã bấm "Kết thúc"
  * (`current.endedManuallyAt`): khi đó giữ nguyên mốc bấm (AD-14, CHECK `events_ended_manually_check`).
  */
-function columnsOf(input: DraftValues, current?: Pick<EventRow, 'endedManuallyAt'>) {
+function columnsOf(input: EventDraftValues, current?: Pick<EventRow, 'endedManuallyAt'>) {
   const endsAt = new Date(input.endsAt);
   return {
     name: input.name,
@@ -106,6 +109,63 @@ function changedFieldsOf(row: EventRow, next: ReturnType<typeof columnsOf>): Eve
   });
 }
 
+/** Kết quả của `applyEventEdit`. */
+export interface EventEditResult {
+  /** Dòng trước lệnh sửa (đã khóa `FOR UPDATE`). */
+  before: EventRow;
+  /** Dòng sau lệnh sửa; không có trường đổi thì là chính `before`. */
+  after: EventRow;
+  /** Tên các trường đổi (rỗng: không ghi gì, không audit). */
+  changedFields: EventDraftField[];
+}
+
+/**
+ * Sửa Sự kiện trong `tx` của người gọi (Story 2.12; `flows/event-update.flow.ts` gọi, Story 3.10): thay toàn bộ các
+ * trường của `EventDraftInput` ở mọi trạng thái trừ `cancelled` (→ `409 EVENT_CANCELLED`). Khóa dòng `FOR UPDATE` theo
+ * `orgScope`; id lạ, sai dạng hoặc của BTC khác → `404 EVENT_NOT_FOUND`. Slug giữ nguyên; `effective_end_at` tính lại
+ * trừ khi đã bấm "Kết thúc". Không có trường đổi → trả luôn, không ghi. Có thì `UPDATE` (đổi giờ hoặc địa điểm thì tăng
+ * `time_venue_version` trong cùng lệnh), audit `event.updated` (`changedFields` là tên trường, không ghi giá trị) và, khi
+ * Sự kiện không còn nháp, enqueue revalidate trang `/e/{slug}` bằng `tx` (Story 2.11-c). Người gọi đã
+ * `PublicPageQueues.ready()` trước transaction.
+ */
+export async function applyEventEdit(
+  tx: Tx,
+  boss: PgBoss,
+  ctx: AccessContext,
+  eventId: string,
+  input: EventDraftValues,
+): Promise<EventEditResult> {
+  if (!UUID.test(eventId)) throw notFound();
+  const [current] = await tx
+    .select()
+    .from(events)
+    .where(and(orgScope(ctx)(events), eq(events.id, eventId)))
+    .for('update');
+  if (!current) throw notFound();
+  if (current.status === 'cancelled') throw cancelled();
+  const next = columnsOf(input, current);
+  const changedFields = changedFieldsOf(current, next);
+  if (changedFields.length === 0) return { before: current, after: current, changedFields };
+  const [updated] = await tx
+    .update(events)
+    .set({
+      ...next,
+      ...(timeOrVenueChanged(current, next) ? { timeVenueVersion: sql`${events.timeVenueVersion} + 1` } : {}),
+    })
+    .where(and(orgScope(ctx)(events), eq(events.id, eventId)))
+    .returning();
+  if (!updated) throw notFound();
+  await audit.record(tx, {
+    actorUserId: ctx.userId,
+    organizationId: ctx.organizationId,
+    action: 'event.updated',
+    target: { type: 'event', id: updated.id },
+    changedFields,
+  });
+  if (updated.status !== 'draft') await enqueuePublicPageRevalidation(boss, tx, updated.slug);
+  return { before: current, after: updated, changedFields };
+}
+
 @Injectable()
 export class EventService {
   constructor(
@@ -116,7 +176,7 @@ export class EventService {
   ) {}
 
   /** Tạo Sự kiện nháp kèm audit `event.created`. Slug trùng thì sinh hậu tố khác, tối đa `SLUG_ATTEMPTS` lần. */
-  async create(ctx: AccessContext, input: DraftValues): Promise<EventDetail> {
+  async create(ctx: AccessContext, input: EventDraftValues): Promise<EventDetail> {
     const base = slugBase(input.name);
     for (let attempt = 1; ; attempt++) {
       const slug = `${base}-${this.slugSuffix()}`;
@@ -174,46 +234,6 @@ export class EventService {
       .from(events)
       .where(and(orgScope(ctx)(events), eq(events.id, eventId)));
     if (!row) throw notFound();
-    return detailOf(row);
-  }
-
-  /**
-   * Sửa Sự kiện (thay toàn bộ các trường của `EventDraftInput`) ở mọi trạng thái trừ `cancelled` (→ `409
-   * EVENT_CANCELLED`, Story 2.12). Slug giữ nguyên; `effective_end_at` tính lại trừ khi đã bấm "Kết thúc". Audit
-   * `event.updated` chỉ khi có trường đổi, `changedFields` là tên trường (không ghi giá trị). Sự kiện đã mở bán mà có
-   * trường đổi thì enqueue revalidate trang `/e/{slug}` trong cùng transaction (Story 2.11-c).
-   */
-  async update(ctx: AccessContext, eventId: string, input: DraftValues): Promise<EventDetail> {
-    if (!UUID.test(eventId)) throw notFound();
-    // pg-boss đã start và queue đã có (ngoài transaction): `boss.send` cần cả hai.
-    await this.publicPageQueues.ready();
-    const row = await this.db.transaction(async (tx) => {
-      const [current] = await tx
-        .select()
-        .from(events)
-        .where(and(orgScope(ctx)(events), eq(events.id, eventId)))
-        .for('update');
-      if (!current) throw notFound();
-      if (current.status === 'cancelled') throw cancelled();
-      const next = columnsOf(input, current);
-      const changedFields = changedFieldsOf(current, next);
-      if (changedFields.length === 0) return current;
-      const [updated] = await tx
-        .update(events)
-        .set(next)
-        .where(and(orgScope(ctx)(events), eq(events.id, eventId)))
-        .returning();
-      if (!updated) throw notFound();
-      await audit.record(tx, {
-        actorUserId: ctx.userId,
-        organizationId: ctx.organizationId,
-        action: 'event.updated',
-        target: { type: 'event', id: updated.id },
-        changedFields,
-      });
-      if (updated.status !== 'draft') await enqueuePublicPageRevalidation(this.boss, tx, updated.slug);
-      return updated;
-    });
     return detailOf(row);
   }
 

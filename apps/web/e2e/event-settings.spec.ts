@@ -1,12 +1,14 @@
 import type { Page } from '@playwright/test';
 
 import { expect, test } from './fixtures';
-import { apiError, me, mockIdentityApi, type Call, type Handler } from './identity-mock';
+import { apiError, me, mockIdentityApi, unauthenticated, type Call, type Handler } from './identity-mock';
 import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
 
 /*
  * Tab "Cài đặt" của Sự kiện (Story 2.12): form thông tin (dùng chung với wizard bước 1), Ẩn / Hiện lại (không hỏi xác
- * nhận) và "Kết thúc" qua `Dialog`. API giả có trạng thái, luật trạng thái như server.
+ * nhận) và "Kết thúc" qua `Dialog`. API giả có trạng thái, luật trạng thái như server. Story 3.10: lưu lệnh đổi giờ hoặc
+ * địa điểm của Sự kiện đã mở bán, chưa kết thúc → đếm Người mua (`GET …/buyer-count`) rồi `Dialog` "Email sẽ được gửi tới
+ * {n} Người mua." trước khi `PATCH`.
  */
 
 test.use({ timezoneId: 'America/New_York' });
@@ -27,7 +29,22 @@ type State = {
   status: Status;
   name: string;
   startsAt: string;
+  endsAt: string;
+  /** Mốc tự kết thúc khi chưa bấm "Kết thúc" (API giả không tự tính lại khi đổi `endsAt`). */
+  effectiveEndAt: string;
+  venue: string | null;
+  description: string | null;
   endedManuallyAt: string | null;
+  /** `GET …/buyer-count` trả số này (Story 3.10). */
+  buyers: number;
+  /** `GET …/buyer-count` trả 500. */
+  failCount?: boolean;
+  /** Chặn phản hồi `GET …/buyer-count` tới khi promise xong. */
+  holdCount?: Promise<void>;
+  /** Session hết hạn: `GET …/buyer-count` và `GET /identity/me` trả 401. */
+  signedOut?: boolean;
+  /** Chặn phản hồi `PATCH` tới khi promise xong. */
+  holdPatch?: Promise<void>;
   /** Chặn phản hồi Ẩn/Hiện lại/Kết thúc tới khi promise xong. */
   hold?: Promise<void>;
   /** Ẩn trả 500 (lỗi không phải đổi trạng thái). */
@@ -49,11 +66,11 @@ const eventOf = (state: State) => ({
   name: state.name,
   status: state.status,
   startsAt: state.startsAt,
-  endsAt: '2099-11-16T17:00:00+07:00',
-  effectiveEndAt: state.endedManuallyAt ?? EFFECTIVE_END,
+  endsAt: state.endsAt,
+  effectiveEndAt: state.endedManuallyAt ?? state.effectiveEndAt,
   endedManuallyAt: state.endedManuallyAt,
-  venue: 'Hồ Gươm',
-  description: null,
+  venue: state.venue,
+  description: state.description,
   refundPolicy: 'Hoàn 100% trước 7 ngày.',
   maxTicketsPerOrder: 10,
   createdAt: '2026-11-03T03:00:00+07:00',
@@ -61,15 +78,20 @@ const eventOf = (state: State) => ({
 });
 
 async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ calls: Call[]; state: State }> {
-  await mockIdentityApi(page, { 'GET /identity/me': () => me(CONSENTED) });
   const state: State = {
     status: 'published',
     name: 'Giải chạy Hà Nội 2026',
     // Đã bắt đầu: "Kết thúc" bấm được.
     startsAt: '2020-11-16T07:00:00+07:00',
+    endsAt: '2099-11-16T17:00:00+07:00',
+    effectiveEndAt: EFFECTIVE_END,
+    venue: 'Hồ Gươm',
+    description: null,
     endedManuallyAt: null,
+    buyers: 0,
     ...initial,
   };
+  await mockIdentityApi(page, { 'GET /identity/me': () => (state.signedOut ? unauthenticated() : me(CONSENTED)) });
   const ended = () => state.endedManuallyAt !== null;
   const handlers: Record<string, Handler> = {
     [`GET /orgs/${ORG_ID}`]: () => organization({ role: 'admin' }),
@@ -79,14 +101,27 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
       return { status: 200, body: [{ id, slug, name, status, startsAt, endsAt, effectiveEndAt }] };
     },
     [`GET ${eventPath}`]: () => ({ status: 200, body: eventOf(state) }),
-    [`PATCH ${eventPath}`]: (request) => {
+    [`PATCH ${eventPath}`]: async (request) => {
+      if (state.holdPatch) await state.holdPatch;
       if (state.failPatch === 'validation') {
         return apiError(400, 'VALIDATION_FAILED', { issues: [{ path: 'endsAt', code: 'custom' }] });
       }
       if (state.failPatch === 'server') return apiError(500, 'INTERNAL');
       if (state.status === 'cancelled') return apiError(409, 'EVENT_CANCELLED');
-      state.name = (request.postDataJSON() as { name: string }).name;
+      const body = request.postDataJSON() as Pick<State, 'name' | 'startsAt' | 'endsAt' | 'venue' | 'description'>;
+      Object.assign(state, {
+        name: body.name,
+        startsAt: body.startsAt,
+        endsAt: body.endsAt,
+        venue: body.venue,
+        description: body.description,
+      });
       return { status: 200, body: eventOf(state) };
+    },
+    [`GET ${eventPath}/buyer-count`]: async () => {
+      if (state.holdCount) await state.holdCount;
+      if (state.signedOut) return unauthenticated();
+      return state.failCount ? apiError(500, 'INTERNAL') : { status: 200, body: { buyers: state.buyers } };
     },
     [`POST ${eventPath}/hide`]: async () => {
       if (state.hold) await state.hold;
@@ -124,6 +159,10 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
 const statusSection = (page: Page) => page.locator('[data-slot="event-status-actions"]');
 const callsTo = (calls: Call[], action: string) =>
   calls.filter((c) => c.method === 'POST' && c.path === `${eventPath}/${action}`);
+const patches = (calls: Call[]) => calls.filter((c) => c.method === 'PATCH' && c.path === eventPath);
+const buyerCounts = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === `${eventPath}/buyer-count`);
+const field = (page: Page, label: string) => page.getByLabel(label, { exact: true });
+const saveButton = (page: Page) => page.getByRole('button', { name: 'Lưu thay đổi' });
 
 test('sửa tên ở Cài đặt: PATCH đủ trường, toast, tiêu đề đổi theo', async ({ page }) => {
   const { calls } = await openApi(page);
@@ -232,6 +271,8 @@ test('Kết thúc qua Dialog nêu hậu quả: "Hủy" không gọi api; xác nh
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('heading', { name: 'Kết thúc Sự kiện?' })).toBeVisible();
   await expect(dialog).toContainText('Ngừng nhận Đơn ngay, không mở lại được.');
+  // `ConfirmDialog` mặc định vẫn là nút kiểu destructive (Story 3.10 thêm `confirmVariant`).
+  await expect(dialog.getByRole('button', { name: 'Kết thúc', exact: true })).toHaveClass(/bg-destructive/);
   await dialog.getByRole('button', { name: 'Hủy' }).click();
   await expect(dialog).toHaveCount(0);
   expect(callsTo(calls, 'end')).toEqual([]);
@@ -247,6 +288,8 @@ test('Kết thúc qua Dialog nêu hậu quả: "Hủy" không gọi api; xác nh
 
   await page.getByRole('tab', { name: 'Tổng quan' }).click();
   await expect(page.locator('[data-slot="event-overview"] [data-slot="status-badge"]')).toHaveText('Đã kết thúc');
+  // Đổi tab gọi `router.replace` (bỏ `?tab=`): chờ xong rồi mới `goto`, không thì hai lần điều hướng đè nhau.
+  await page.waitForURL((url) => url.pathname === base && url.search === '');
   await page.goto(`/btc/${ORG_ID}`);
   await expect(page.locator('[data-slot="event-card"] [data-slot="status-badge"]')).toHaveText('Đã kết thúc');
 });
@@ -390,6 +433,233 @@ test('đã hủy: form chỉ đọc kèm lý do, không có nút lưu hay nút t
   await expect(page.getByRole('button', { name: 'Lưu thay đổi' })).toHaveCount(0);
   await expect(statusSection(page).getByRole('button')).toHaveCount(0);
   await expect(statusSection(page)).toContainText('Sự kiện đã hủy, không đổi trạng thái được nữa.');
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Story 3.10: báo Người mua khi đổi giờ hoặc địa điểm
+// ---------------------------------------------------------------------------------------------------------------
+
+test('đổi giờ, có 3 Người mua: Dialog "Email sẽ được gửi tới 3 Người mua."; "Hủy" không PATCH; "Lưu và gửi email" thì PATCH', async ({
+  page,
+}) => {
+  const { calls, state } = await openApi(page, { buyers: 3 });
+  await page.goto(settings);
+  await field(page, 'Bắt đầu').fill('2020-11-16T08:00');
+  await saveButton(page).click();
+
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'Lưu thay đổi?' })).toBeVisible();
+  await expect(dialog).toContainText('Email sẽ được gửi tới 3 Người mua.');
+  const confirm = dialog.getByRole('button', { name: 'Lưu và gửi email' });
+  await expect(confirm).toBeVisible();
+  // Không phải nút kiểu destructive.
+  await expect(confirm).not.toHaveClass(/bg-destructive/);
+  expect(buyerCounts(calls)).toHaveLength(1);
+  expect(patches(calls)).toEqual([]);
+
+  await dialog.getByRole('button', { name: 'Hủy' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(patches(calls)).toEqual([]);
+  expect(state.startsAt).toBe('2020-11-16T07:00:00+07:00');
+
+  await saveButton(page).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Lưu và gửi email' }).click();
+  await expect(page.getByText('Đã lưu thông tin Sự kiện.')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(buyerCounts(calls)).toHaveLength(2);
+  expect(patches(calls)).toHaveLength(1);
+  expect(patches(calls)[0]?.body).toMatchObject({ startsAt: '2020-11-16T08:00:00+07:00', venue: 'Hồ Gươm' });
+});
+
+test('đổi địa điểm, đang lưu trong Dialog: spinner, Esc và "Hủy" không đóng, không gửi lặp; xong thì Dialog đóng', async ({
+  page,
+}) => {
+  let release = () => {};
+  const { calls } = await openApi(page, { buyers: 1, holdPatch: new Promise<void>((resolve) => (release = resolve)) });
+  await page.goto(settings);
+  await field(page, 'Địa điểm (không bắt buộc)').fill('Sân Mỹ Đình');
+  await saveButton(page).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Email sẽ được gửi tới 1 Người mua.');
+  const confirm = dialog.getByRole('button', { name: 'Lưu và gửi email' });
+  await confirm.click();
+  await expect(confirm).toHaveAttribute('aria-busy', 'true');
+  await confirm.click({ force: true });
+  await page.keyboard.press('Escape');
+  await dialog.getByRole('button', { name: 'Hủy' }).click();
+  await expect(dialog).toBeVisible();
+  expect(patches(calls)).toHaveLength(1);
+
+  release();
+  await expect(page.getByText('Đã lưu thông tin Sự kiện.')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(patches(calls)).toHaveLength(1);
+  expect(patches(calls)[0]?.body).toMatchObject({ venue: 'Sân Mỹ Đình' });
+});
+
+test('đổi địa điểm, 0 Người mua: đếm rồi lưu luôn, không Dialog', async ({ page }) => {
+  const { calls, state } = await openApi(page, { buyers: 0 });
+  await page.goto(settings);
+  await field(page, 'Địa điểm (không bắt buộc)').fill('');
+  await saveButton(page).click();
+  await expect(page.getByText('Đã lưu thông tin Sự kiện.')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(buyerCounts(calls)).toHaveLength(1);
+  expect(patches(calls)).toHaveLength(1);
+  expect(state.venue).toBeNull();
+});
+
+test('chỉ sửa mô tả, có Người mua: không đếm, không Dialog, lưu luôn', async ({ page }) => {
+  const { calls } = await openApi(page, { buyers: 5 });
+  await page.goto(settings);
+  await field(page, 'Mô tả (không bắt buộc)').fill('Mô tả mới');
+  await saveButton(page).click();
+  await expect(page.getByText('Đã lưu thông tin Sự kiện.')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(buyerCounts(calls)).toEqual([]);
+  expect(patches(calls)).toHaveLength(1);
+});
+
+test('nháp: đổi giờ và địa điểm → không đếm, không Dialog', async ({ page }) => {
+  const { calls } = await openApi(page, { status: 'draft', buyers: 5 });
+  await page.goto(settings);
+  await field(page, 'Bắt đầu').fill('2020-11-16T08:00');
+  await field(page, 'Địa điểm (không bắt buộc)').fill('Sân Mỹ Đình');
+  await saveButton(page).click();
+  await expect(page.getByText('Đã lưu thông tin Sự kiện.')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(buyerCounts(calls)).toEqual([]);
+  expect(patches(calls)).toHaveLength(1);
+});
+
+test('đã bấm "Kết thúc": dời giờ kết thúc sang tương lai và đổi địa điểm → không đếm, không Dialog', async ({ page }) => {
+  const { calls } = await openApi(page, { buyers: 5, endedManuallyAt: '2026-11-01T09:30:00+07:00' });
+  await page.goto(settings);
+  await field(page, 'Kết thúc').fill('2099-11-20T17:00');
+  await field(page, 'Địa điểm (không bắt buộc)').fill('Sân Mỹ Đình');
+  await saveButton(page).click();
+  await expect(page.getByText('Đã lưu thông tin Sự kiện.')).toBeVisible();
+  expect(buyerCounts(calls)).toEqual([]);
+  expect(patches(calls)).toHaveLength(1);
+});
+
+test('đã tự kết thúc, sửa địa điểm (giờ giữ trong quá khứ) → không đếm, không Dialog', async ({ page }) => {
+  const { calls } = await openApi(page, {
+    buyers: 5,
+    endsAt: '2020-11-16T17:00:00+07:00',
+    effectiveEndAt: '2020-11-16T23:59:59+07:00',
+  });
+  await page.goto(settings);
+  await field(page, 'Địa điểm (không bắt buộc)').fill('Sân Mỹ Đình');
+  await saveButton(page).click();
+  await expect(page.getByText('Đã lưu thông tin Sự kiện.')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(buyerCounts(calls)).toEqual([]);
+  expect(patches(calls)).toHaveLength(1);
+});
+
+test('đếm Người mua lỗi: banner "Chưa lưu được thông tin", không PATCH; "Thử lại" đếm lại rồi mở Dialog', async ({
+  page,
+}) => {
+  const { calls, state } = await openApi(page, { buyers: 2, failCount: true });
+  await page.goto(settings);
+  await field(page, 'Địa điểm (không bắt buộc)').fill('Sân Mỹ Đình');
+  await saveButton(page).click();
+  await expect(page.getByText('Chưa lưu được thông tin')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(buyerCounts(calls)).toHaveLength(1);
+  expect(patches(calls)).toEqual([]);
+
+  state.failCount = false;
+  await page.getByRole('button', { name: 'Thử lại' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Email sẽ được gửi tới 2 Người mua.');
+  await expect(page.locator('[data-slot="event-settings-info"]').getByText('Chưa lưu được thông tin')).toHaveCount(0);
+  expect(buyerCounts(calls)).toHaveLength(2);
+  expect(patches(calls)).toEqual([]);
+});
+
+test('PATCH lỗi khi lưu từ Dialog: lỗi hiện trong Dialog, Dialog vẫn mở; "Hủy" đóng và không còn banner', async ({
+  page,
+}) => {
+  const { calls } = await openApi(page, { buyers: 2, failPatch: 'server' });
+  await page.goto(settings);
+  await field(page, 'Địa điểm (không bắt buộc)').fill('Sân Mỹ Đình');
+  await saveButton(page).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Lưu và gửi email' }).click();
+  await expect(dialog.getByText('Chưa lưu được thông tin')).toBeVisible();
+  await expect(dialog.locator('[data-slot="status-banner"]')).toHaveCount(1);
+  await expect(page.locator('[data-slot="event-settings-info"]').getByText('Chưa lưu được thông tin')).toHaveCount(0);
+  expect(patches(calls)).toHaveLength(1);
+
+  await dialog.getByRole('button', { name: 'Hủy' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('Chưa lưu được thông tin')).toHaveCount(0);
+  await expect(field(page, 'Địa điểm (không bắt buộc)')).toHaveValue('Sân Mỹ Đình');
+});
+
+test('400 VALIDATION_FAILED khi lưu từ Dialog: báo trong Dialog; "Hủy" thì thấy lỗi tại ô "Kết thúc"', async ({ page }) => {
+  await openApi(page, { buyers: 2, failPatch: 'validation' });
+  await page.goto(settings);
+  await field(page, 'Địa điểm (không bắt buộc)').fill('Sân Mỹ Đình');
+  await saveButton(page).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Lưu và gửi email' }).click();
+  await expect(dialog.getByText('Chưa lưu được thông tin')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Hủy' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(field(page, 'Kết thúc')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByText('Giờ kết thúc phải sau giờ bắt đầu.')).toBeVisible();
+});
+
+test('đang đếm Người mua: "Lưu thay đổi" aria-busy, bấm lại hay Enter không đếm lần nữa; đếm xong thì mở Dialog', async ({
+  page,
+}) => {
+  let release = () => {};
+  const { calls } = await openApi(page, { buyers: 2, holdCount: new Promise<void>((resolve) => (release = resolve)) });
+  await page.goto(settings);
+  await field(page, 'Địa điểm (không bắt buộc)').fill('Sân Mỹ Đình');
+  const save = saveButton(page);
+  await save.click();
+  await expect(save).toHaveAttribute('aria-busy', 'true');
+  await save.click({ force: true });
+  await field(page, 'Tên Sự kiện').press('Enter');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(buyerCounts(calls)).toHaveLength(1);
+
+  release();
+  await expect(page.getByRole('dialog')).toContainText('Email sẽ được gửi tới 2 Người mua.');
+  expect(buyerCounts(calls)).toHaveLength(1);
+  expect(patches(calls)).toEqual([]);
+});
+
+test('lưu từ Dialog khi Sự kiện vừa bị hủy (409 EVENT_CANCELLED): Dialog đóng, toast, form chỉ đọc', async ({ page }) => {
+  const { calls, state } = await openApi(page, { buyers: 2 });
+  await page.goto(settings);
+  await field(page, 'Địa điểm (không bắt buộc)').fill('Sân Mỹ Đình');
+  await saveButton(page).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Email sẽ được gửi tới 2 Người mua.');
+  state.status = 'cancelled';
+  await dialog.getByRole('button', { name: 'Lưu và gửi email' }).click();
+  await expect(page.getByText('Sự kiện đã hủy, không sửa được. Đã tải lại Sự kiện.')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('Thông tin chỉ để xem, không sửa được nữa.')).toBeVisible();
+  await expect(field(page, 'Tên Sự kiện')).toHaveAttribute('readonly', '');
+  await expect(saveButton(page)).toHaveCount(0);
+  expect(patches(calls)).toHaveLength(1);
+});
+
+test('đếm Người mua trả 401 (session hết hạn): sang trang đăng nhập kèm returnTo, không PATCH', async ({ page }) => {
+  const { calls, state } = await openApi(page, { buyers: 2 });
+  await page.goto(settings);
+  await field(page, 'Địa điểm (không bắt buộc)').fill('Sân Mỹ Đình');
+  state.signedOut = true;
+  await saveButton(page).click();
+  await page.waitForURL(`**/dang-nhap?returnTo=${encodeURIComponent(base)}`);
+  expect(buyerCounts(calls)).toHaveLength(1);
+  expect(patches(calls)).toEqual([]);
 });
 
 test('320px: tab Cài đặt không cuộn ngang', async ({ page }) => {

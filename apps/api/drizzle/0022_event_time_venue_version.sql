@@ -1,0 +1,2 @@
+ALTER TABLE "events" ADD COLUMN "time_venue_version" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "events" ADD CONSTRAINT "events_time_venue_version_check" CHECK ("events"."time_venue_version" >= 0);

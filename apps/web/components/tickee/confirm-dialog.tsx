@@ -21,6 +21,11 @@ type ConfirmDialogProps = {
   /** Phần thân thêm, giữa phần đầu và lỗi (vd. ô gõ tên để xác nhận). */
   children?: ReactNode;
   confirmLabel: string;
+  /**
+   * Kiểu nút xác nhận: mặc định `destructive` (thao tác không hoàn tác được); `primary-on-light` cho xác nhận thường
+   * (vd. "Lưu và gửi email").
+   */
+  confirmVariant?: 'destructive' | 'primary-on-light';
   /** Nhãn nút hủy, mặc định "Hủy". */
   cancelLabel?: string;
   onConfirm: () => void;
@@ -42,7 +47,7 @@ type HeldContent = Pick<ConfirmDialogProps, 'title' | 'description' | 'children'
 
 /**
  * `Dialog` xác nhận thao tác (thường là không hoàn tác được): tiêu đề, hậu quả, lỗi của lần thử bằng
- * `StatusBanner tone="danger"`, nút xác nhận `destructive` và nút hủy. Nội dung của lần mở gần nhất (trừ lỗi) được giữ
+ * `StatusBanner tone="danger"`, nút xác nhận (`destructive`, trừ khi `confirmVariant` khác) và nút hủy. Nội dung của lần mở gần nhất (trừ lỗi) được giữ
  * trong lúc đóng (hiệu ứng thoát), nên nơi gọi chỉ cần `open={target !== null}` mà nội dung không trống. Logic thao tác
  * (gọi api, xác nhận lại, toast) ở nơi gọi.
  */
@@ -55,6 +60,7 @@ export function ConfirmDialog({
   onConfirm,
   pending,
   confirmDisabled,
+  confirmVariant = 'destructive',
   failureTitle,
   asForm = false,
   onCloseAutoFocus,
@@ -77,7 +83,7 @@ export function ConfirmDialog({
     <DialogFooter>
       <Button
         type={asForm ? 'submit' : 'button'}
-        variant="destructive"
+        variant={confirmVariant}
         className="w-full"
         loading={pending}
         disabled={confirmDisabled}

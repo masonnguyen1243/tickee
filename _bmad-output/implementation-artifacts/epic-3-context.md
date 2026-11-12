@@ -104,7 +104,8 @@ Người mua đi trọn đường từ trang Sự kiện tới Vé trong tay: ch
 - **Xem Vé qua link:** `GET /v1/shared-tickets/:token` không cần đăng nhập. Chỉ trả Mã QR vé, tên Sự kiện, Hạng vé, "Vé k/N" và trạng thái. Token sai, Vé hoặc Sự kiện đã hủy, hay đã quá mốc kết thúc → cùng một `404` chung.
 - **Link web:** `/xem-ve#<token>`. Token nằm sau `#`; trang gọi API không kèm cookie, đặt `noindex` và `no-referrer`. Log của api che đoạn token.
 - **Email** là job pg-boss enqueue bằng chính `tx` của thay đổi. Payload chỉ chứa id. Handler idempotent theo khóa = loại job + id; email đổi giờ/địa điểm thêm phiên bản Sự kiện vào khóa. Job tự retry, hết retry thì vào dead-letter; gửi qua `EmailTransport`. Email Vé có mỗi Vé một link chia sẻ và một dòng link tới "Vé của tôi" (3.9).
-- **Email Người mua đã dựng (Story 3.8):** queue `ordering.send-buyer-email` (+ dead-letter), payload `SendBuyerEmailPayload` `{ kind: 'tickets' | 'orphan_sold_out', orderId }` (contracts), id job cố định `derivedJobId(orderId, '<queue>:<kind>')` nên enqueue lặp không tạo job thứ hai. `markPaid` enqueue `tickets` cho mọi nguồn; nhánh `sold_out` của IPN enqueue `orphan_sold_out`. Worker gửi tới `orders.buyer_email`, bỏ qua khi Đơn không còn `paid` (hay `review` với `orphan_sold_out`) hoặc Sự kiện hủy. 3.10 thêm loại email của mình vào cùng queue.
+- **Email Người mua đã dựng (Story 3.8):** queue `ordering.send-buyer-email` (+ dead-letter), payload `SendBuyerEmailPayload` `{ kind: 'tickets' | 'orphan_sold_out', orderId }` (contracts), id job cố định `derivedJobId(orderId, '<queue>:<kind>')` nên enqueue lặp không tạo job thứ hai. `markPaid` enqueue `tickets` cho mọi nguồn; nhánh `sold_out` của IPN enqueue `orphan_sold_out`. Worker gửi tới `orders.buyer_email`, bỏ qua khi Đơn không còn `paid` (hay `review` với `orphan_sold_out`) hoặc Sự kiện hủy.
+- **Email đổi giờ/địa điểm (Story 3.10):** queue riêng `ordering.send-event-change-email` (+ dead-letter), payload `SendEventChangeEmailPayload` `{ eventId, version, userId? }`; `ordering.send-buyer-email` giữ nguyên. `PATCH /v1/orgs/:orgId/events/:eventId` chuyển sang `flows` (flow `updateEvent`, cùng đường dẫn): `event.applyEventEdit(tx, …)` tăng `events.time_venue_version` khi đổi `startsAt`/`endsAt`/`venue`, rồi enqueue job gốc id `derivedJobId(eventId, '<queue>:v<version>')` trong cùng `tx` khi `notifiesBuyers` (contracts: không `draft`/`cancelled`, có đổi giờ/địa điểm, sau khi sửa chưa quá `effective_end_at` theo đồng hồ DB) và có ít nhất một Người mua. "Người mua" = `user_id` có Đơn `paid` (kể cả 0đ); `GET …/buyer-count` → `{ buyers }` đếm cùng định nghĩa. Job gốc `fanOut` mỗi Người mua một job con; job con gửi một email (mẫu A: chỉ thông tin mới, có "Vé của tôi" và liên hệ BTC) tới `buyer_email` của Đơn `paid` mới nhất, bỏ qua khi Sự kiện hủy, đã kết thúc hoặc người đó hết Đơn `paid`.
 
 **Thời gian và trạng thái cho Người mua**
 
@@ -167,7 +168,7 @@ Người mua đi trọn đường từ trang Sự kiện tới Vé trong tay: ch
   - Sau mốc kết thúc chỉ còn hàng lịch sử ("Đã tham dự"/"Chưa check-in"), không có Mã QR vé, không chia sẻ.
   - Khối "Biên nhận": mã Đơn, "Hạng vé × SL · thành tiền", tổng đã trả (0đ → "Miễn phí"), thời điểm thanh toán, "Tiền đã chuyển thẳng cho {BTC}" (chỉ Đơn có phí). Hiện cả khi Vé đã sang lịch sử.
 - **Chia sẻ Vé:** dùng Web Share API, fallback sao chép link kèm toast "Đã sao chép". Tạo lại link qua `Dialog` ghi rõ: ai đã thấy hoặc chụp mã QR vẫn dùng được mã để vào cổng. Link sai, Vé hủy hoặc đã hết hiệu lực → `empty-state` chung, không lộ thông tin.
-- **Sửa giờ/địa điểm:** trước khi lưu, `Dialog` báo "Email sẽ được gửi tới {n} Người mua."
+- **Sửa giờ/địa điểm (tab Cài đặt):** Sự kiện không ở nháp, đổi giờ/địa điểm và theo đồng hồ máy chưa kết thúc sau khi sửa → gọi `buyer-count` trước (nút đang tải). `n > 0` → `ConfirmDialog` "Lưu thay đổi?" / "Email sẽ được gửi tới {n} Người mua." với "Lưu và gửi email" (không destructive) và "Hủy"; lỗi khi lưu hiện trong `Dialog`. `n = 0` → lưu luôn. Đếm lỗi → banner "Chưa lưu được thông tin" kèm "Thử lại". Wizard nháp không bao giờ hỏi.
 - **Tổng quan BTC:**
   - `stat-card` doanh thu: nền stage, số `tabular-nums`.
   - `recent-orders-block`: card sáng; bảng Mã Đơn · Người mua · Vé · Số tiền · Trạng thái · Thời gian. Đơn `review` kèm dòng loại, vd. "Lệch số tiền · nhận 250.000đ / Đơn 300.000đ". Dưới `md` hiển thị dạng thẻ.
@@ -191,7 +192,7 @@ Người mua đi trọn đường từ trang Sự kiện tới Vé trong tay: ch
   - 3.3 dựng `markPaid`, phát Vé, Mã QR và màn Thành công; 3.5 và 3.7 dùng lại.
   - 3.6 mở rộng xử lý IPN của 3.5.
   - 3.7 dựng `platform/realtime` và `useLiveResource`; 3.9 và 3.11 mở endpoint SSE riêng trên hub này.
-  - 3.8 cấp link chia sẻ và hàng đợi email; 3.9 (Chi tiết Vé, chia sẻ) và 3.10 (email đổi giờ) dùng lại.
+  - 3.8 cấp link chia sẻ và hàng đợi email; 3.9 (Chi tiết Vé, chia sẻ) dùng lại; 3.10 (email đổi giờ) dựng queue riêng theo cùng mẫu, dùng lại mẫu email và link "Vé của tôi".
 - **Epic sau:**
   - 4.1 Đối soát bù đi chung đường xử lý và thứ tự kiểm của 3.5/3.6.
   - 4.2 bật trạng thái dịch vụ thanh toán từ lỗi tạo link của 3.4.
