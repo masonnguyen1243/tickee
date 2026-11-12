@@ -3,6 +3,7 @@ import {
   BuyerEmailKind,
   EventStatus,
   JobQueue,
+  MY_TICKETS_PATH,
   orderPath,
   OrderStatus,
   SendBuyerEmailPayload,
@@ -125,6 +126,7 @@ async function messageOf(
             link: sharedTicketUrl(webOrigin, t.shareToken),
           })),
           orderLink: `${webOrigin.replace(/\/+$/, '')}${orderPath(order.code)}`,
+          myTicketsLink: `${webOrigin.replace(/\/+$/, '')}${MY_TICKETS_PATH}`,
         }),
       };
     }

@@ -10,6 +10,7 @@ export {
   publicEventBySlug,
   saleEventById,
   ticketEventById,
+  ticketEventsByIds,
   type PublicEventRef,
   type TicketEventRef,
 } from './public-event.js';

@@ -34,8 +34,8 @@ type OrderPaymentProps = {
   offline: boolean;
 };
 
-/** Copy tạm của dòng mất mạng (Story 3.7); 3.8/3.9 đổi thành "… vé vẫn được gửi qua email và Vé của tôi." */
-export const OFFLINE_TEXT = 'Mất kết nối — vé sẽ tự hiện khi có mạng lại.';
+/** Dòng mất mạng (Story 3.7, copy chốt ở 3.9 khi đã có email Vé và "Vé của tôi"). */
+export const OFFLINE_TEXT = 'Mất kết nối — vé vẫn được gửi qua email và Vé của tôi.';
 
 /** Chính sách hoàn vé của Đơn (bản chụp lúc đặt) trong `Sheet` từ dưới lên: đọc mà không rời Trang Đơn. */
 function RefundPolicySheet({ policy }: { policy: string }) {

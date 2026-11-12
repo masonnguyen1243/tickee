@@ -986,10 +986,12 @@ test.describe('Đăng ký Sự kiện miễn phí (Story 3.3)', () => {
     await expect(stage).toContainText(FREE_EVENT_NAME);
     // Focus chuyển vào tiêu đề để trình đọc màn hình đọc "Vé của bạn đã sẵn sàng!" ngay sau "Đăng ký".
     await expect(page.getByRole('heading', { level: 1, name: 'Vé của bạn đã sẵn sàng!' })).toBeFocused();
-    // Story 3.8: email Vé + "Chia sẻ Vé" trên từng thẻ (chi tiết ở `shared-ticket.spec.ts`); chưa có "Vé của tôi" (3.9).
+    // Story 3.8: email Vé + "Chia sẻ Vé" trên từng thẻ (chi tiết ở `shared-ticket.spec.ts`); Story 3.9: cuối màn một nút
+    // chính "Xem Vé của tôi" → /tickets (chi tiết ở `my-tickets.spec.ts`).
     await expect(stage.locator('[data-slot="order-success-email"]')).toHaveText(`Đã gửi Vé tới ${EMAIL}`);
     await expect(page.getByRole('button', { name: 'Chia sẻ Vé' })).toHaveCount(2);
-    await expect(page.getByText('Xem Vé của tôi')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Xem Vé của tôi' })).toHaveCount(1);
+    await expect(page.getByRole('link', { name: 'Xem Vé của tôi' })).toHaveAttribute('href', '/tickets');
 
     await expect(ticketCards(page)).toHaveCount(2);
     await expect(page.locator('[data-slot="ticket-card-position"]')).toHaveText(['· Vé 1/2', '· Vé 2/2']);
@@ -1308,6 +1310,8 @@ test.describe('Màn thanh toán (Story 3.4)', () => {
     await page.goto(`/orders/${ORDER_CODE}`);
     await expect(orderBanner(page)).toHaveText(HOLD_EXPIRED);
     await expect(page.getByRole('link', { name: 'Mua lại' })).toHaveAttribute('href', `/e/${SLUG_BUY}`);
+    // Story 3.9: "Vé của tôi" trong dòng phụ là link tới /tickets.
+    await expect(page.getByRole('link', { name: 'Vé của tôi' })).toHaveAttribute('href', '/tickets');
     await expect(page.getByText(SALES_PAUSED)).toHaveCount(0);
     await expect(paymentScreen(page)).toHaveCount(0);
   });
@@ -1383,6 +1387,8 @@ test.describe('Trang Đơn', () => {
     await page.goto(`/orders/${ORDER_CODE}`);
     await expect(orderBanner(page)).toHaveText(HOLD_EXPIRED);
     await expect(page.getByRole('link', { name: 'Mua lại' })).toHaveAttribute('href', `/e/${SLUG_BUY}`);
+    // Story 3.9: "Vé của tôi" trong dòng phụ là link tới /tickets.
+    await expect(page.getByRole('link', { name: 'Vé của tôi' })).toHaveAttribute('href', '/tickets');
     await expect(page.locator('[data-slot="order-code"]')).toHaveText(ORDER_CODE);
     await expect(page.locator('[data-slot="order-summary-line"]')).toHaveText([`${VIP}2 × 300.000đ600.000đ`]);
 

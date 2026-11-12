@@ -3,6 +3,7 @@ import type { Page, Route } from '@playwright/test';
 import { PORT_PUBLIC_EVENT } from '../playwright.config';
 import { expect, test } from './fixtures';
 import { apiError, corsHeaders, EMAIL, me, mockIdentityApi, type Reply } from './identity-mock';
+import { fakeEventSource, setVisibility } from './live-mock';
 import { SLUG_BUY, TIER_PAID_ID } from './public-event-api';
 
 /*
@@ -25,7 +26,7 @@ const CHECKOUT_URL = `https://pay.tingee.test/checkout/${CODE}?r=1`;
 const WAITING = 'Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền.';
 const CONFIRMING = 'Đang xác nhận thanh toán. Nếu bạn đã trả, vé sẽ tự hiện — đừng trả lại.';
 const REASSURANCE = 'Nếu bạn đã chuyển, vé sẽ về trong vài phút — đừng chuyển lại.';
-const OFFLINE = 'Mất kết nối — vé sẽ tự hiện khi có mạng lại.';
+const OFFLINE = 'Mất kết nối — vé vẫn được gửi qua email và Vé của tôi.';
 const SUCCESS = 'Vé của bạn đã sẵn sàng!';
 
 const ticketId = (n: number) => `019a3b2c-0b00-7abc-8def-${String(n).padStart(12, '0')}`;
@@ -135,68 +136,6 @@ async function recordVibrations(page: Page): Promise<() => Promise<unknown[]>> {
   });
   return () => page.evaluate(() => (window as unknown as { __vibrations: unknown[] }).__vibrations);
 }
-
-/**
- * `EventSource` giả điều khiển được (`page.route` không giữ được một stream mở rồi đẩy tin sau): mỗi lần trang mở stream
- * là một phần tử của `window.__sse`; test gọi `open()` (kết nối xong), `message(data)` (một tin `data:` trên chính kết
- * nối đó), `drop()` (mất kết nối tạm thời: trình duyệt sẽ tự nối lại, `readyState` CONNECTING).
- */
-async function fakeEventSource(page: Page) {
-  await page.addInitScript(() => {
-    class FakeEventSource extends EventTarget {
-      static readonly CONNECTING = 0;
-      static readonly OPEN = 1;
-      static readonly CLOSED = 2;
-      url: string;
-      withCredentials: boolean;
-      readyState = 0;
-      onopen: ((event: Event) => void) | null = null;
-      onmessage: ((event: MessageEvent) => void) | null = null;
-      onerror: ((event: Event) => void) | null = null;
-      constructor(url: string, init?: { withCredentials?: boolean }) {
-        super();
-        this.url = url;
-        this.withCredentials = Boolean(init?.withCredentials);
-        (window as unknown as { __sse: FakeEventSource[] }).__sse.push(this);
-      }
-      close() {
-        this.readyState = 2;
-      }
-      open() {
-        this.readyState = 1;
-        this.onopen?.(new Event('open'));
-      }
-      message(data: string) {
-        this.onmessage?.(new MessageEvent('message', { data }));
-      }
-      drop() {
-        this.readyState = 0;
-        this.onerror?.(new Event('error'));
-      }
-    }
-    (window as unknown as { __sse: unknown[] }).__sse = [];
-    Object.defineProperty(window, 'EventSource', { configurable: true, writable: true, value: FakeEventSource });
-  });
-  const last = 'window.__sse[window.__sse.length - 1]';
-  return {
-    count: () => page.evaluate<number>('window.__sse.length'),
-    info: () =>
-      page.evaluate<{ url: string; withCredentials: boolean; readyState: number }>(
-        `({ url: ${last}.url, withCredentials: ${last}.withCredentials, readyState: ${last}.readyState })`,
-      ),
-    open: () => page.evaluate(`${last}.open()`),
-    message: (type: string) => page.evaluate(`${last}.message(${JSON.stringify(JSON.stringify({ type }))})`),
-    drop: () => page.evaluate(`${last}.drop()`),
-  };
-}
-
-/** Giả lập tab ẩn / hiện lại (Safari cắt kết nối khi tab ở nền; polling của TanStack cũng dừng khi tab ẩn). */
-const setVisibility = (page: Page, state: 'hidden' | 'visible') =>
-  page.evaluate((next) => {
-    Object.defineProperty(document, 'visibilityState', { value: next, configurable: true });
-    Object.defineProperty(document, 'hidden', { value: next === 'hidden', configurable: true });
-    document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
-  }, state);
 
 const success = (page: Page) => page.locator('[data-slot="order-success"]');
 const heading = (page: Page) => page.getByRole('heading', { level: 1, name: SUCCESS });

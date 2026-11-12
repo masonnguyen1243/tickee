@@ -1,8 +1,13 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { ACCOUNT_SECURITY_PATH, CREATE_ORGANIZATION_PATH, organizationDashboardPath } from '@tickee/contracts';
-import { CircleUserRound, LayoutDashboard, LogOut, Plus, ShieldCheck } from 'lucide-react';
+import {
+  ACCOUNT_SECURITY_PATH,
+  CREATE_ORGANIZATION_PATH,
+  MY_TICKETS_PATH,
+  organizationDashboardPath,
+} from '@tickee/contracts';
+import { CircleUserRound, LayoutDashboard, LogOut, Plus, ShieldCheck, Ticket } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
@@ -22,7 +27,8 @@ import { fetchMemberships, MEMBERSHIPS_QUERY_KEY } from '@/lib/organizer/api';
 
 /**
  * Menu tài khoản ở header. Chưa đăng nhập: link "Đăng nhập" (kèm `returnTo` là trang hiện tại).
- * Đã đăng nhập: email, lối vào dashboard ("Dashboard BTC" mở BTC đầu tiên, chưa có BTC thì "Tạo BTC"),
+ * Đã đăng nhập: email, "Vé của tôi" (Story 3.9, mọi tài khoản), lối vào dashboard ("Dashboard BTC" mở BTC đầu tiên, chưa
+ * có BTC thì "Tạo BTC"),
  * "Bảo mật tài khoản" (bật/tắt xác thực hai lớp, mọi vai) và "Đăng xuất" (hủy session ở server, xóa cache, về trang chủ).
  * Đặt trong `<Suspense>` vì dùng `useSearchParams`.
  */
@@ -74,6 +80,12 @@ export function AccountMenu() {
       <DropdownMenuContent align="end">
         <DropdownMenuLabel className="break-all">{me.data.email}</DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link href={MY_TICKETS_PATH}>
+            <Ticket aria-hidden="true" />
+            Vé của tôi
+          </Link>
+        </DropdownMenuItem>
         {firstOrganization ? (
           <DropdownMenuItem asChild>
             <Link href={organizationDashboardPath(firstOrganization.organizationId)}>

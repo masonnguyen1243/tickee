@@ -5,6 +5,7 @@ import {
   buyerOrderLiveApiPath,
   ErrorCode,
   eventPagePath,
+  MY_TICKETS_PATH,
   PaymentLinkError,
   type BuyerOrderView,
 } from '@tickee/contracts';
@@ -30,18 +31,19 @@ import {
   nextMoment,
   orderPollInterval,
 } from '@/lib/order/live';
+import {
+  CANCELLED_BY_ORGANIZER,
+  EVENT_CANCELLED,
+  HOLD_EXPIRED,
+  SALES_PAUSED,
+  UNDER_REVIEW,
+  UNKNOWN_STATUS,
+} from '@/lib/order/status-copy';
 import { useLiveResource } from '@/lib/realtime/use-live-resource';
 
 import { BuyerSkeleton } from '../../buyer-gate';
 import { OrderPayment } from './order-payment';
 import { OrderSuccess } from './order-success';
-
-const SALES_PAUSED = 'Sự kiện tạm ngừng bán. Bạn thử lại sau nhé.';
-const HOLD_EXPIRED = 'Hết thời gian giữ chỗ. Chỗ đã được trả lại.';
-const UNDER_REVIEW = 'BTC đang kiểm tra thanh toán';
-const CANCELLED_BY_ORGANIZER = 'BTC đã hủy Đơn này. Liên hệ BTC để được hoàn tiền nếu bạn đã chuyển.';
-const EVENT_CANCELLED = 'Sự kiện đã hủy — BTC sẽ liên hệ hoàn tiền.';
-const UNKNOWN_STATUS = 'Chúng tôi đang cập nhật trạng thái Đơn.';
 
 /** Đơn đã hết hạn vì dịch vụ thanh toán của BTC tạm ngừng (Tingee từ chối tạo link). */
 const salesPaused = (order: BuyerOrderView) => order.payment?.linkError === PaymentLinkError.SALES_PAUSED;
@@ -76,7 +78,11 @@ function StatusBlock({ order }: { order: BuyerOrderView }) {
             <Link href={eventPagePath(order.event.slug)}>Mua lại</Link>
           </Button>
           <p className="text-meta text-muted-foreground">
-            Nếu bạn đã chuyển tiền, đừng chuyển lại — kiểm tra Vé của tôi hoặc email.
+            Nếu bạn đã chuyển tiền, đừng chuyển lại — kiểm tra{' '}
+            <Link href={MY_TICKETS_PATH} className="text-foreground underline underline-offset-4">
+              Vé của tôi
+            </Link>{' '}
+            hoặc email.
           </p>
         </div>
       );

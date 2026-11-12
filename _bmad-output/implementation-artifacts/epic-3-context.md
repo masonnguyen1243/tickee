@@ -4,7 +4,7 @@
 
 ## Goal
 
-Người mua chọn Vé trên trang Sự kiện, đăng nhập mà không mất lựa chọn, điền form một lần cho cả Đơn, thanh toán qua Tingee Payment Gateway (redirect toàn trang) rồi tự thấy "Thành công" cùng từng Mã QR vé, không cần tải lại. Vé đến email, nằm trong "Vé của tôi" và chia sẻ được từng Vé. Sự kiện miễn phí đi trọn luồng không thanh toán. IPN xử lý đủ mọi nhánh biên, mọi khoản tiền không khớp đều thành mục Cần xử lý, nên không có khoản tiền nào về mà im lặng. Epic dựng lõi tiền – tồn kho – Vé (`markPaid`, giữ chỗ có điều kiện, máy trạng thái Đơn, realtime) mà Epic 4–8 dựa vào, và kết thúc bằng khung Tổng quan tối thiểu để BTC thấy Đơn đầu tiên realtime.
+Người mua đi trọn đường từ trang Sự kiện tới Vé trong tay: chọn Vé theo Hạng vé, đăng nhập mà không mất lựa chọn, điền form một lần cho cả Đơn, thanh toán qua Tingee Payment Gateway (redirect toàn trang) rồi tự thấy "Thành công" cùng từng Mã QR vé mà không cần tải lại. Vé đến email, nằm trong "Vé của tôi" và chia sẻ được từng Vé. Sự kiện miễn phí đi trọn luồng mà không qua thanh toán. Mọi khoản tiền về đều có kết cục rõ ràng: hoặc phát Vé, hoặc thành mục Cần xử lý. Không có khoản tiền nào về mà không ai biết. Epic dựng lõi tiền – tồn kho – Vé – realtime mà Epic 4–8 dựa vào, và kết thúc bằng khung Tổng quan tối thiểu để BTC thấy Đơn đầu tiên theo thời gian thực.
 
 ## Stories
 
@@ -22,55 +22,181 @@ Người mua chọn Vé trên trang Sự kiện, đăng nhập mà không mất 
 
 ## Requirements & Constraints
 
-- **Mua:** xem trang không cần đăng nhập; bấm "Mua" thì bắt đăng nhập rồi quay về đúng Hạng vé + số lượng. Một Đơn gồm nhiều Vé, nhiều Hạng vé; giới hạn Vé/Đơn theo Sự kiện (mặc định 10), kiểm ở server bằng schema Zod. Tổng tiền tính ở server từ giá đã chốt.
-- **Không bao giờ bán quá số suất**, kể cả 5.000 người cùng mua 300 Vé. Đơn nhiều Hạng vé giữ chỗ kiểu được hết hoặc không được gì, báo rõ Hạng vé nào hết.
-- **Giữ chỗ 15 phút** có đếm ngược. Hết hạn → nhả chỗ, Đơn "Hết hạn". Tiền về muộn: còn chỗ thì phát Vé, hết chỗ thì vào Cần xử lý loại `orphan` + email báo Người mua.
-- **Miễn phí:** không thanh toán, không tiêu Token, vẫn bắt đăng nhập, phát Vé ngay; tổng Vé của một Người mua trên Sự kiện miễn phí (mọi Đơn `paid`) không vượt giới hạn Vé/Đơn.
-- **Thanh toán:** đúng số tiền Đơn; màn ghi "Tiền chuyển thẳng cho {BTC}" + chính sách hoàn vé; tạo link p95 < 2 giây. Chỉ phát Vé khi số tiền khớp đúng.
-- **IPN:** xác thực chữ ký, mỗi giao dịch xử lý đúng một lần (lặp không phát thêm Vé/email), sai chữ ký bị từ chối và ghi lại. Ghi thanh toán + phát Vé + enqueue email trọn gói hoặc không gì. Trả `00` dưới 5 giây.
-- **Realtime:** từ lúc nhận IPN đến lúc Vé hiện trên trình duyệt < 3 giây.
-- **Vé:** mỗi Vé một Mã QR ký số; Đơn N Vé có N mã độc lập. Không chuyển nhượng, Người mua không tra Vé theo SĐT. Email lỗi tự retry, Vé vẫn hợp lệ. Sau `effective_end_at` Vé rời "Vé của tôi", chỉ còn lịch sử (dữ liệu BTC vẫn còn).
-- **Đổi giờ/địa điểm** khi đã phát Vé → email cho Người mua, mỗi lần sửa đúng một lượt.
-- **Dashboard tối thiểu:** doanh thu chỉ tính Đơn `paid` + 5 Đơn gần đây realtime; chưa có tab Đơn, bộ lọc, CSV ("Xem tất cả Đơn" thuộc Epic 6).
-- **Dữ liệu cá nhân:** checkout ghi rõ thông tin form được chia sẻ cho BTC; không lưu dữ liệu ngân hàng của người trả; log che SĐT/email; `checkout_funnel_events` không PII (`buy_clicked`, `login_completed`, `order_created`, `paid`).
+- **Chọn và đăng nhập:** xem trang Sự kiện không cần đăng nhập. Bấm "Mua" mới bắt đăng nhập, rồi quay về đúng Hạng vé và số lượng đã chọn. Một Đơn gồm nhiều Vé thuộc nhiều Hạng vé. Giới hạn Vé/Đơn đặt theo Sự kiện (mặc định 10) và được kiểm ở server. Tổng tiền chỉ tính ở server, từ giá đã chốt.
+- **Không bao giờ bán quá số suất**, kể cả khi 5.000 người cùng mua một Sự kiện 300 Vé. Đơn nhiều Hạng vé được giữ chỗ trọn vẹn hoặc không giữ hạng nào, và báo rõ Hạng vé nào hết.
+- **Giữ chỗ 15 phút**, có đếm ngược. Hết hạn thì nhả chỗ và Đơn chuyển "Hết hạn". Tiền về muộn: còn chỗ thì phát Vé, hết chỗ thì vào Cần xử lý và báo Người mua.
+- **Miễn phí:** không thanh toán, không tiêu Token, vẫn bắt đăng nhập, phát Vé ngay khi gửi Đơn. Tổng Vé một Người mua nhận trên một Sự kiện miễn phí (cộng mọi Đơn) không vượt giới hạn Vé/Đơn.
+- **Thanh toán:** đúng số tiền của Đơn. Màn ghi "Tiền chuyển thẳng cho {BTC}" và hiện chính sách hoàn vé. Tạo link p95 dưới 2 giây. Chỉ phát Vé khi số tiền khớp đúng.
+- **IPN:** xác thực chữ ký. Mỗi giao dịch chỉ xử lý một lần: IPN lặp không phát thêm Vé, không gửi thêm email. IPN sai chữ ký bị từ chối và được ghi lại. Ghi thanh toán, phát Vé và lên lịch email diễn ra trọn gói hoặc không diễn ra gì.
+- **Realtime:** từ lúc nhận IPN đến lúc Vé hiện trên trình duyệt dưới 3 giây.
+- **Vé:** mỗi Vé có một Mã QR ký số; Đơn N Vé có N mã độc lập. Không chuyển nhượng Vé. Người mua không tra được Vé theo SĐT. Email lỗi thì tự thử lại, Vé vẫn hợp lệ, Người mua không thấy lỗi. Sau mốc Sự kiện kết thúc, Vé rời "Vé của tôi" và chỉ còn lịch sử (tên, ngày, đã check-in hay chưa). Dữ liệu phía BTC vẫn giữ nguyên.
+- **Đổi giờ hoặc địa điểm** sau khi đã phát Vé → gửi email cho Người mua, mỗi lần sửa đúng một lượt. Chưa phát Vé nào, hoặc chỉ sửa trường khác → không gửi.
+- **Dashboard tối thiểu:** doanh thu chỉ tính Đơn đã thanh toán, cộng 5 Đơn gần đây ở mọi trạng thái, cập nhật realtime. Tab Đơn đầy đủ, bộ lọc, CSV và link "Xem tất cả Đơn" thuộc Epic 6.
+- **Dữ liệu cá nhân và cách ly:** checkout ghi rõ thông tin trong form sẽ được chia sẻ cho BTC. Không lưu dữ liệu ngân hàng của người trả. Log che SĐT và email. Người mua chỉ thấy Đơn và Vé của chính mình. BTC không đọc được dữ liệu của BTC khác.
+- **Đo lường:** phễu mua không chứa PII (`buy_clicked`, `login_completed`, `order_created`, `paid`). Mục tiêu: ≥ 95% Đơn có phí được phát Vé mà không qua Cần xử lý; p95 từ lúc tiền vào đến lúc Vé hiện < 10 giây.
 
 ## Technical Decisions
 
-- **Sở hữu:** `ordering` (Đơn, `order_items`, câu trả lời form kèm nhãn, bản chụp người mua, mã Đơn, link Gateway, `ticket_type_inventory`, funnel); `payment` (`payment_events`, `review_items`); `ticketing` (Vé, bản chụp Vé, Mã QR, share token, check-in); `integration` (email); `tingee` adapter không sở hữu bảng; `reporting` chỉ đọc qua read model `<module>_read_*` hoặc hàm query trong `index.ts`. Hướng phụ thuộc: `payment → ordering → ticketing → event`, `ordering → organizer/tingee`.
-- **Phát Vé chỉ trong `ordering.markPaid(tx, orderId, source, paidAmount)`**, `source` ∈ `ipn`/`reconciliation`/`manual`/`free`. Đọc Sự kiện `FOR SHARE`, CAS Đơn, phép tồn kho, phát N Vé, enqueue email, audit, funnel — một transaction. Kết quả `{ outcome }`: `paid`/`event_cancelled`/`duplicate_payment`/`mismatch`/`orphan` (kèm lý do `event_ended`/`event_locked`/`sold_out`); `lost_race` chỉ nguồn `free`. `markPaid` tự chuyển Đơn `pending`/`expired` sang `review` khi cần; khác `paid` thì bên gọi tạo `review_item` trong cùng `tx`. Không bao giờ phát Vé từ `returnUrl` hay request trình duyệt.
-- **Tồn kho:** `CHECK (held >= 0 AND sold >= 0 AND sold + held <= capacity)`. Giữ/bán có điều kiện `UPDATE … WHERE sold + held + :n <= capacity`, nhiều Hạng vé theo `ticket_type_id` tăng dần, 0 dòng → rollback cả Đơn. Không dùng Redis. Bảng phép tồn kho: tạo Đơn có phí `held += n`; Đơn 0đ `sold += n`; `pending→paid` `held -= n, sold += n`; `pending→expired/review/cancelled` `held -= n`; `expired→paid` bán có điều kiện (thất bại → `review` loại `orphan`); `paid→cancelled` không trả chỗ.
-- **Máy trạng thái Đơn (CAS `WHERE status=:from`):** `pending`/`paid`/`expired`/`review`/`cancelled`(`cancel_reason` `rejected`|`event_cancelled`)/`refunded`. 0 dòng = thua đua → đọc lại. Ngoại lệ đã chốt: Đơn `cancelled` do hủy Sự kiện nhận tiền thì **giữ** `cancelled`, chỉ tạo `review_item`.
-- **Hết hạn (AD-4):** `expires_at` = now + 60s ở TX1; TX2 gắn link thì = hạn link (15 phút). `expired` khi: (a) chưa có link quá `expires_at` (job hoãn, CAS `AND payment_link IS NULL`); (b) IPN `canceled`/`expired` → `ordering.markExpired`; (c) quá `expires_at + 5 phút` (job hoãn). Web: đồng hồ về 0 → "Đang xác nhận thanh toán", chỉ hiện "Hết hạn" khi API trả `expired`.
-- **Tạo Đơn có phí:** TX1 (gọi lại `sellability`, giữ chỗ, Đơn `pending`, bản chụp bất biến, mã Đơn `TK` + 8 Crockford base32 sinh lại ≤ 3 lần) → commit → `tingee.createPaymentLink()` ngoài transaction, timeout 5 giây → TX2 CAS `WHERE status='pending' AND payment_link IS NULL`, chụp `orders.payout_account_id`. Checkout URL chỉ trả sau TX2. TX1 không gọi Tingee, không email, không `NOTIFY`. Lỗi Tingee rõ ràng → thử lại cùng Đơn qua `POST /v1/me/orders/:code/payment-link` trong 60 giây; timeout/mơ hồ → `expired`, không thử lại cùng `orderId`. `MERCHANT_SUSPENDED`/`TINGEE_CREDENTIAL_INVALID` → `expired` + "Sự kiện tạm ngừng bán" (bật `payment_service_status` để Epic 4).
-- **Gateway `create-link`:** ký bằng credential hiện hành (tài khoản mặc định luôn thuộc credential hiện hành), `vaAccountNumber` = VA tài khoản mặc định, không gửi `merchantId`, `orderId` = mã Đơn, `amount` = `total_amount`, `expireInMinute` = 15, `returnUrl` = `/orders/:code`, timestamp `yyyyMMddHHmmssSSS` UTC+7 như mọi API Tingee (Tingee production trả `90` cho UNIX ms, Story 3.4). Hết tài khoản nhận tiền → không tạo link. Chỉ `tingee` gọi HTTP Tingee; test dùng Tingee fake (`apps/api/test/tingee-fake`, nhiều cặp key, ký IPN theo từng BTC).
-- **IPN:** `POST /v1/payments/tingee/ipn/:ipnKey`, `@Public`, raw body parser riêng (không áp JSON parser toàn cục). Tìm BTC theo `ipnKey` trước khi đọc body (lạ → 404). `x-signature` = `HMAC_SHA512(timestamp + ':' + rawBody, secret)` so bằng `timingSafeEqual`, thử secret hiện hành rồi các credential cũ còn giữ; secret cũ chỉ có hiệu lực với IPN cho Đơn của chính BTC đó mà `orders.payout_account_id` thuộc đúng credential cũ ấy (không ràng được → từ chối như sai chữ ký, không lưu); lệch timestamp > 10 phút → từ chối. `payment_events` whitelist field, unique theo từng BTC: `(organization_id, providerTransactionCode)` (thanh toán) / `(organization_id, orderId, status)` (trạng thái); trùng → trả thành công, không làm gì. IPN không có VA nên tài khoản nhận tiền lấy từ `orders.payout_account_id`.
-- **Thứ tự kiểm cố định cho IPN `success`** (dùng lại ở Đối soát bù 4.1), dừng ở nhánh đầu khớp: (1) `orderId` sai định dạng → lưu, `00`, không `review_item`; đúng định dạng nhưng không tồn tại → `unmatched`; (2) Đơn không thuộc BTC của `ipnKey` → `unmatched` gắn BTC của `ipnKey` + cảnh báo; (3) Sự kiện đã hủy → `event_cancelled`; (4) Đơn `paid`/`cancelled`/`refunded`/`review` → `duplicate_payment`; (5) số tiền lệch → `amount_mismatch`; (6) Đơn `expired` hoặc quá `effective_end_at` → tiền về muộn (đã kết thúc hoặc Sự kiện bị khóa với Đơn `expired` → `orphan`); (7) `pending` → `markPaid`. Đơn `pending` của Sự kiện bị khóa vẫn `markPaid`.
-- **`review_items`:** `organization_id` luôn có, `status` `open`/`resolved`, loại `amount_mismatch`/`orphan`/`event_cancelled`/`duplicate_payment`/`unmatched`. `payment_event_id` unique (mỗi khoản tiền một mục); unique một phần `(order_id, type)` khi `open` chỉ cho `amount_mismatch`/`orphan`. `event_cancelled`/`duplicate_payment`/`unmatched` chỉ kết thúc bằng `refunded`/`dismissed`.
-- **Vé & QR:** bản chụp `seq` (1..N, `UNIQUE (order_id, seq)`), `order_ticket_count`, `holder_name`, `ticket_type_name`, `order_code`, `issued_at`. QR `t<k>.<ticketId>.<sig>`, `sig` = base64url(HMAC-SHA256(key_k, `t<k>.<ticketId>`)), khóa có phiên bản từ env, không PII. Tạo lại link chia sẻ không đổi Mã QR.
-- **Link chia sẻ:** `share_token` 128 bit, DB chỉ lưu hash; `GET /v1/shared-tickets/:token` (`shareScope`, không đăng nhập) trả QR, tên Sự kiện, Hạng vé, "Vé k/N", trạng thái — không SĐT/email/tên. Token sai, Vé hủy, Sự kiện hủy, quá `effective_end_at` → `404` chung.
-- **Link chia sẻ đã dựng (Story 3.8):** token suy bằng HMAC (16 byte đầu của HMAC-SHA256(khóa con của `TICKET_QR_KEYS` theo `qr_key_version`, `share:<ticketId>:<share_version>`), base64url 22 ký tự; `ticketing/share-token.ts`); `tickets.share_token_hash` (SHA-256, unique) + `share_version`. `BuyerTicket.shareToken` chỉ trong response của chủ Đơn. "Tạo lại link" `POST /v1/me/tickets/:ticketId/share-link` (chủ Vé, audit `ticket.share_link_regenerated`) tăng `share_version`; QR không đổi (không có `qr_version`, AD-16). Web: `{WEB_ORIGIN}/xem-ve#<token>` (`sharedTicketUrl`), trang client gọi API không cookie; log api che token. Đọc Sự kiện cho Vé: `event.ticketEventById` (tên, giờ, địa điểm, trạng thái, `ended` theo đồng hồ DB).
-- **Email:** job pg-boss enqueue bằng chính `tx`, payload chỉ id, handler idempotent (khóa loại job + order id; email đổi giờ thêm phiên bản Sự kiện), retry rồi dead-letter, gửi qua `EmailTransport`.
-- **Email Người mua đã dựng (Story 3.8):** queue `ordering.send-buyer-email` (+ dead-letter), payload `SendBuyerEmailPayload` `{ kind: 'tickets' | 'orphan_sold_out', orderId }` (contracts), id job cố định `derivedJobId(orderId, '<queue>:<kind>')` (`EnqueueOptions.id` của `platform/jobs`: enqueue lặp không tạo job thứ hai trong khi dòng job cũ còn trong bảng của pg-boss; job đã xong bị xóa sau `deleteAfterSeconds`, mặc định 7 ngày, rồi enqueue lại sẽ tạo job mới). `markPaid` (`pay`) enqueue `tickets` cho mọi nguồn; nhánh `sold_out` của IPN enqueue `orphan_sold_out`. Bên gọi `markPaid` gọi `OrderPayments.ready()` trước transaction. Worker ở `ordering` (`OrderingJobsModule.forRoot({ WEB_ORIGIN })`), gửi tới `orders.buyer_email`; Đơn không còn `paid` / Sự kiện hủy (hay Đơn không còn `review` với `orphan_sold_out`) → bỏ qua. Lỗi lưu vào job chỉ có tên lớp (`errorName` của `platform/jobs`). 3.10 thêm loại email vào cùng queue.
-- **Realtime:** `realtime.notify(tx, topic, ids)` trong cùng transaction, payload `{type, id, organizationId, eventId}`; mỗi instance một kết nối `LISTEN`, lọc theo phạm vi rồi đẩy SSE, heartbeat 25 giây; `/readyz` kiểm `LISTEN`. Topic `order_changed` (Người mua, `buyerScope`) và `event_orders_changed` (Owner/Admin; CTV không được đăng ký). Một hook `useLiveResource`: REST khi kết nối, khi có tín hiệu (gom 1 giây), khi `visibilitychange`; polling 2 giây ở màn chờ thanh toán, 10 giây ở dashboard.
-- **Realtime đã dựng (Story 3.7):** `platform/realtime` (`realtime.notify`, `RealtimeHub`, kênh `tickee_realtime`), SSE `GET /v1/me/orders/:code/live` (chỉ `{type}`, `resync` khi hub nối lại `LISTEN`), hook `useLiveResource` ở `apps/web/lib/realtime/`. 3.9 và 3.11 mở endpoint SSE riêng, kiểm quyền rồi `hub.open(req, res, filter)`; phát tín hiệu bằng `realtime.notify` trong `tx` của thay đổi.
-- **`BuyerOrderView.buyerStatus`:** `awaiting_payment`/`confirming`/`under_review`/`paid`/`expired`/`cancelled_by_organizer`/`event_cancelled`, tính ở máy chủ (`pending` quá `expires_at` → `confirming`; Sự kiện hủy che mọi trạng thái sau thanh toán); không lộ loại Cần xử lý hay số tiền lệch. Vé chỉ khi `paid`; kèm `organizer` (tên + kênh liên hệ BTC). Web nhận giá trị lạ → trạng thái an toàn. Response có hạn chót kèm `serverNow`.
-- **Chống trùng:** `Idempotency-Key` với `UNIQUE (user_id, idempotency_key)` (trùng → trả Đơn đã có + link); tối đa một Đơn `pending` mỗi Người mua mỗi Sự kiện (unique index một phần, vi phạm → `409 PENDING_ORDER_EXISTS` kèm mã Đơn); giới hạn tốc độ tạo Đơn theo user + IP đếm trong Postgres.
-- **Kiểm thử:** Vitest với Postgres thật cho đua chỗ cuối và Đơn nhiều hạng thiếu chỗ; test tích hợp Tingee fake phủ đủ nhánh IPN; Playwright cho tab ở nền khi IPN tới; route mới vào bộ test cách ly.
+**Sở hữu và ranh giới**
+
+- Phân chia sở hữu:
+  - `ordering`: Đơn, dòng Đơn, câu trả lời form kèm nhãn, bản chụp người mua, mã Đơn, link Gateway, tồn kho `ticket_type_inventory`, phễu mua.
+  - `payment`: `payment_events` và `review_items`.
+  - `ticketing`: Vé, bản chụp trên Vé, Mã QR vé, link chia sẻ.
+  - `integration`: gửi email qua `EmailTransport`.
+  - `tingee`: adapter duy nhất gọi Tingee, không sở hữu bảng.
+- Hướng phụ thuộc: `payment → ordering → ticketing → event → organizer`; `ordering` và `payment` gọi `tingee`. `reporting` chỉ đọc qua read model (view `<module>_read_*` hoặc hàm query xuất từ `index.ts`), không join thẳng bảng của mô-đun khác. `apps/web` chỉ gọi REST `/v1`.
+
+**Lõi tiền, tồn kho và Vé**
+
+- **Chỉ phát Vé trong `ordering.markPaid(tx, orderId, source, paidAmount)`**, với `source` ∈ `ipn`/`reconciliation`/`manual`/`free`. Không bao giờ phát Vé từ `returnUrl` hay từ request của trình duyệt. Mọi bước sau chạy trong một transaction:
+  - đọc Sự kiện `FOR SHARE`, compare-and-set Đơn, chạy phép tồn kho;
+  - phát N Vé kèm bản chụp: `seq` (1..N, unique theo Đơn), `order_ticket_count`, `holder_name`, `ticket_type_name`, `order_code`, `issued_at`;
+  - enqueue email, ghi audit, ghi phễu.
+- **Kết quả của `markPaid`:** `paid`, `orphan` (lý do `event_ended`/`event_locked`/`sold_out`), `mismatch`, `event_cancelled`, `duplicate_payment`, hoặc `lost_race` (chỉ nguồn `free`). Chỉ `paid` mới phát Vé. Với `mismatch`, `orphan` và `event_cancelled`, chính `markPaid` chuyển Đơn `pending`/`expired` sang `review`. Với mọi kết quả khác `paid`, bên gọi tạo `review_item` trong cùng `tx`.
+- **Tồn kho:** ràng buộc `CHECK (held >= 0 AND sold >= 0 AND sold + held <= capacity)`. Giữ chỗ và bán là UPDATE có điều kiện `… WHERE sold + held + :n <= capacity`. Đơn nhiều Hạng vé cập nhật theo `ticket_type_id` tăng dần; một dòng trả 0 thì rollback cả Đơn. Không dùng Redis. Phép tồn kho theo từng chuyển trạng thái:
+
+  | Chuyển trạng thái | Phép tồn kho |
+  | --- | --- |
+  | tạo Đơn có phí | `held += n` |
+  | Đơn 0đ | `sold += n` |
+  | `pending → paid` | `held -= n`, `sold += n` |
+  | `pending → expired`/`review`/`cancelled` | `held -= n` |
+  | `expired → paid` | bán có điều kiện; thiếu chỗ → `review` loại `orphan` `sold_out` |
+  | `paid → cancelled` | không trả chỗ |
+
+- **Đơn là máy trạng thái compare-and-set** (`WHERE status=:from`; 0 dòng nghĩa là thua đua, phải đọc lại). Các trạng thái: `pending`, `paid`, `expired`, `review` (mang loại), `cancelled` (`cancel_reason` `rejected` | `event_cancelled`), `refunded`. Tiền về cho Đơn đã `paid`/`cancelled`/`refunded`/`review` không đổi trạng thái Đơn, chỉ tạo `review_item`.
+- **Hết hạn:** lúc tạo, `expires_at` = now + 60 giây; gắn link xong thì bằng hạn link (15 phút). Đơn chuyển `expired` ở điều kiện đầu tiên xảy ra:
+  - chưa có link mà đã quá `expires_at`: job hoãn, compare-and-set kèm `payment_link IS NULL`;
+  - Tingee xác nhận chưa trả (IPN `canceled`/`expired`);
+  - quá `expires_at + 5 phút`.
+- **Tạo Đơn có phí** đi theo thứ tự:
+  1. TX1: gọi lại `sellability`, giữ chỗ, tạo Đơn `pending` với bản chụp bất biến (giá, tổng, người mua, câu trả lời), mã Đơn `TK` + 8 ký tự Crockford base32.
+  2. Commit, rồi tạo link Gateway ngoài transaction (timeout 5 giây).
+  3. TX2: gắn link bằng compare-and-set, chụp `orders.payout_account_id`. Checkout URL chỉ trả cho trình duyệt sau khi TX2 commit.
+
+  TX1 không gọi HTTP, không gửi email, không `NOTIFY`. Tingee trả lỗi rõ ràng → được thử lại cùng Đơn trong 60 giây qua `POST /v1/me/orders/:code/payment-link`. Timeout hoặc kết quả mơ hồ → Đơn `expired`, không thử lại với cùng `orderId`.
+- **Gateway `create-link`:** ký bằng credential hiện hành của BTC, `vaAccountNumber` = VA của tài khoản nhận tiền mặc định, không gửi `merchantId`, `orderId` = mã Đơn, `expireInMinute` = 15, `returnUrl` = `/orders/:code`. Timestamp ký theo dạng `yyyyMMddHHmmssSSS` UTC+7 (Tingee production từ chối UNIX ms). Gặp `MERCHANT_SUSPENDED`/`TINGEE_CREDENTIAL_INVALID` → Đơn `expired`, Người mua thấy "Sự kiện tạm ngừng bán". Mọi test tự động dùng Tingee fake.
+
+**IPN và Cần xử lý**
+
+- **Endpoint:** mỗi BTC một URL riêng `POST /v1/payments/tingee/ipn/:ipnKey`. Route công khai với guard người dùng và dùng parser raw body riêng.
+- **Xác thực:**
+  - tìm BTC theo `ipnKey` trước khi đọc body (`ipnKey` lạ → `404`);
+  - `x-signature` = HMAC-SHA512(`timestamp + ':' + rawBody`, secret), so bằng `timingSafeEqual`, thử secret hiện hành trước rồi tới các credential cũ. Secret cũ chỉ hợp lệ cho Đơn có `payout_account_id` thuộc đúng credential đó;
+  - timestamp lệch quá 10 phút → từ chối.
+- **Lưu và phản hồi:** `payment_events` chỉ giữ các field trong whitelist. Khóa unique theo từng BTC: mã giao dịch cho sự kiện thanh toán, `(orderId, status)` cho sự kiện trạng thái. Trùng khóa → trả thành công mà không làm gì. Luôn trả `00` trong dưới 5 giây.
+- **Thứ tự kiểm cố định cho tiền về** (Đối soát bù dùng lại), dừng ở nhánh đầu tiên khớp:
+  1. `orderId` sai định dạng → chỉ lưu event.
+  2. `orderId` không tồn tại, hoặc Đơn thuộc BTC khác → `unmatched`, gắn BTC sở hữu `ipnKey`.
+  3. Sự kiện đã hủy → `event_cancelled`.
+  4. Đơn đã `paid`/`cancelled`/`refunded`/`review` → `duplicate_payment`.
+  5. Lệch số tiền → `amount_mismatch`.
+  6. Đơn `expired`, hoặc đã quá mốc kết thúc → tiền về muộn (`orphan`, hoặc bán lại có điều kiện).
+  7. Đơn `pending` → `markPaid`. Đơn `pending` của Sự kiện bị khóa vẫn `markPaid`.
+- **`review_items`:** luôn có `organization_id`. `payment_event_id` unique, nên mỗi khoản tiền là đúng một mục. Mỗi Đơn tối đa một mục `open` cho `amount_mismatch` và `orphan`. `status` là `open` hoặc `resolved`, kèm `resolution`. `event_cancelled`/`duplicate_payment`/`unmatched` chỉ kết thúc bằng `refunded`/`dismissed`.
+
+**Vé, link chia sẻ, email**
+
+- **Mã QR vé:** dạng `t<k>.<ticketId>.<sig>`, với `sig` = base64url(HMAC-SHA256(key_k, `t<k>.<ticketId>`)). Khóa có phiên bản, mã không chứa PII. Mã không đổi suốt đời Vé (không có `qr_version`).
+- **Token link chia sẻ:** 128 bit, suy bằng HMAC từ khóa con của khóa QR theo `share_version` (`ticketing/share-token.ts`). DB chỉ lưu hash và `share_version`. Máy chủ tính lại token khi cần, nên chia sẻ nhiều lần vẫn ra cùng một link.
+- **Tạo lại link:** chỉ chủ Vé làm được, có audit. Thao tác tăng `share_version` nên link cũ mất hiệu lực ngay; Mã QR vé không đổi.
+- **Xem Vé qua link:** `GET /v1/shared-tickets/:token` không cần đăng nhập. Chỉ trả Mã QR vé, tên Sự kiện, Hạng vé, "Vé k/N" và trạng thái. Token sai, Vé hoặc Sự kiện đã hủy, hay đã quá mốc kết thúc → cùng một `404` chung.
+- **Link web:** `/xem-ve#<token>`. Token nằm sau `#`; trang gọi API không kèm cookie, đặt `noindex` và `no-referrer`. Log của api che đoạn token.
+- **Email** là job pg-boss enqueue bằng chính `tx` của thay đổi. Payload chỉ chứa id. Handler idempotent theo khóa = loại job + id; email đổi giờ/địa điểm thêm phiên bản Sự kiện vào khóa. Job tự retry, hết retry thì vào dead-letter; gửi qua `EmailTransport`. Email Vé có mỗi Vé một link chia sẻ và một dòng link tới "Vé của tôi" (3.9).
+- **Email Người mua đã dựng (Story 3.8):** queue `ordering.send-buyer-email` (+ dead-letter), payload `SendBuyerEmailPayload` `{ kind: 'tickets' | 'orphan_sold_out', orderId }` (contracts), id job cố định `derivedJobId(orderId, '<queue>:<kind>')` nên enqueue lặp không tạo job thứ hai. `markPaid` enqueue `tickets` cho mọi nguồn; nhánh `sold_out` của IPN enqueue `orphan_sold_out`. Worker gửi tới `orders.buyer_email`, bỏ qua khi Đơn không còn `paid` (hay `review` với `orphan_sold_out`) hoặc Sự kiện hủy. 3.10 thêm loại email của mình vào cùng queue.
+
+**Thời gian và trạng thái cho Người mua**
+
+- **`effective_end_at`** (tính theo `Asia/Ho_Chi_Minh`) luôn được so với `now()` ngay tại request, không chờ job. Giá trị này quyết định Vé còn trong "Vé của tôi" hay không, link chia sẻ còn sống hay không, và nhánh tiền về muộn.
+- **`BuyerOrderView.buyerStatus`** tính ở máy chủ:
+
+  | Trạng thái Đơn | `buyerStatus` |
+  | --- | --- |
+  | `pending`, trước `expires_at` | `awaiting_payment` |
+  | `pending`, từ `expires_at` | `confirming` |
+  | `expired` | `expired` |
+  | Sự kiện đã hủy (che mọi trạng thái sau thanh toán) | `event_cancelled` |
+  | `paid` | `paid` |
+  | `review` | `under_review` |
+  | `cancelled`/`refunded` | `cancelled_by_organizer` |
+
+  Vé chỉ có khi `paid`. Response kèm `organizer` (tên và kênh liên hệ BTC), không lộ loại Cần xử lý hay số tiền lệch. Response có hạn chót kèm `serverNow`.
+
+**Realtime**
+
+- **Server:** realtime chỉ là tín hiệu, REST mới là sự thật. `realtime.notify(tx, topic, ids)` (`platform/realtime`, kênh `tickee_realtime`; `RealtimeHub` chỉ ở vai api) phát `NOTIFY` trong cùng transaction, payload `{type, id, organizationId, eventId}`. Hub ở vai api giữ một kết nối `LISTEN`, lọc theo phạm vi rồi đẩy SSE: chỉ `{type}`, gửi `resync` khi nối lại, heartbeat 25 giây.
+- **Endpoint SSE:** mỗi tài nguyên mở endpoint riêng, kiểm phiên và quyền như endpoint REST tương ứng, rồi đăng ký với hub bằng bộ lọc trên payload (`hub.open(req, res, filter)`). Đã có: `GET /v1/me/orders/:code/live` (3.7), `GET /v1/me/tickets/live` (3.9); 3.11 mở endpoint của mình theo cùng mẫu.
+- **Topic của epic:** `order_changed` chỉ đến Người mua của Đơn. `event_orders_changed` đến Owner/Admin; CTV không được đăng ký.
+- **Stream "Vé của tôi" (3.9):** `GET /v1/me/tickets/live` tra id mọi Đơn của người gọi lúc mở rồi lọc `order_changed` theo tập đó (payload không có `userId` và giữ nguyên). Web đưa khóa suy từ tập mã Đơn của danh sách vào đường SSE, nên stream mở lại khi tập đổi.
+- **Web:** một hook duy nhất `useLiveResource` (`apps/web/lib/realtime/`) tải REST khi kết nối, khi có tín hiệu (gom trong 1 giây) và khi `visibilitychange`. Không có SSE thì polling: 2 giây ở màn chờ thanh toán, 10 giây ở dashboard.
+
+**Chống trùng, cách ly, quy ước**
+
+- **Chống trùng:** `POST` từ trình duyệt mang `Idempotency-Key`. Tạo Đơn có unique `(user_id, idempotency_key)`; request trùng khóa trả Đơn đã có. Mỗi Người mua tối đa một Đơn `pending` cho mỗi Sự kiện; vi phạm → `409 PENDING_ORDER_EXISTS` kèm mã Đơn. Giới hạn tốc độ tạo Đơn theo user và IP, đếm trong Postgres.
+- **Cách ly:** đọc chéo phạm vi chỉ qua `buyerScope` (Người mua), `shareScope` (link chia sẻ) và `orgScope` (BTC). Mọi route mới phải vào bộ test cách ly chạy trong CI.
+- **Quy ước:**
+  - tiền là `bigint` theo đồng, thời gian là `timestamptz`;
+  - schema Zod dùng chung trong `packages/contracts`;
+  - lỗi dạng `{error:{code,message,details}}`;
+  - mã Đơn là mã duy nhất hiển thị ở mọi nơi;
+  - cô lập READ COMMITTED, an toàn đồng thời dựa vào UPDATE có điều kiện và khóa dòng theo thứ tự.
+- **Kiểm thử:** Vitest với Postgres thật (đua chỗ cuối, Đơn nhiều hạng thiếu chỗ), test tích hợp với Tingee fake phủ mọi nhánh IPN, Playwright cho trường hợp tab ở nền khi IPN tới.
 
 ## UX & Interaction Patterns
 
-- **Trang Sự kiện:** `quantity-stepper` bắt đầu 0, "+" chặn ở min(số còn lại, giới hạn Vé/Đơn còn lại) kèm dòng giải thích, aria-label "Giảm/Tăng số vé {Hạng vé}". `purchase-bar` dính đáy (safe-area, `scroll-padding-bottom`), tổng tiền tức thì; chưa chọn → tắt + "Chọn vé để tiếp tục"; miễn phí → "Miễn phí"/"Đăng ký"; hết mọi hạng → "Hết vé".
-- **Checkout:** tóm tắt Đơn + form một lần; email tự điền, SĐT tự điền nếu có; lỗi tại trường khi rời trường và khi gửi, cuộn/focus trường lỗi đầu, `aria-describedby`. Hết chỗ → "Hạng vé {tên} vừa hết. Bạn chọn lại nhé.", về trang Sự kiện với hạng đó về 0. Lỗi mạng → thử lại cùng `Idempotency-Key`, giữ dữ liệu form.
-- **Màn thanh toán:** stage có số tiền, `countdown-chip` "Giữ chỗ còn mm:ss" theo `serverNow` (coral, không đổi đỏ, trình đọc màn hình chỉ báo ở 5 phút và 1 phút), mã Đơn; `recipient-trust-block`; chính sách hoàn vé trong `Sheet`; chân "Tickee không giữ tiền của bạn"; tất cả thấy không cần cuộn ở 375×667. "Thanh toán" redirect toàn trang, không popup. Lỗi tạo link → "Chưa tạo được link thanh toán" + "Thử lại".
-- **`/orders/:code`:** chờ "Đang chờ thanh toán — vé sẽ tự hiện khi BTC nhận được tiền."; sau ~2 phút `reassurance-line` "đừng chuyển lại"; mất mạng → dòng nhỏ trấn an; Hết hạn "Hết thời gian giữ chỗ. Chỗ đã được trả lại." + "Mua lại" + dòng phụ; `under_review` "BTC đang kiểm tra thanh toán" + liên hệ BTC; `buyerStatus` lạ → trạng thái an toàn, không bao giờ trống hay kẹt.
-- **Thành công:** stage có wordmark, tên Sự kiện, "Vé của bạn đã sẵn sàng!", "Đã gửi Vé tới {email}"; `ticket-card` dáng cuống vé (đường xé nét đứt + hai khuyết), nhãn "Mã QR vé · đưa cho CTV ở cổng", QR đen trên tấm trắng ≥ 200×200; thẻ đầu chồng mép stage ~30px, trượt lên + rung nhẹ (tắt khi reduced motion); "Xem Vé của tôi"; `aria-live="polite"`.
-- **Vé của tôi:** ba nhóm Vé còn hiệu lực · Đơn đang chờ · Lịch sử; `Skeleton`; trống không có nút khám phá. `order-card` không bao giờ có QR; "Tiếp tục thanh toán" mở lại đúng Đơn. Chi tiết Vé tăng độ sáng màn nếu được; đã check-in → QR mờ .25 + badge.
-- **Chia sẻ Vé:** Web Share API, fallback sao chép + toast "Đã sao chép"; tạo lại link qua `Dialog` ghi rõ ai đã chụp QR vẫn dùng được mã.
-- **Tổng quan BTC:** `stat-card` doanh thu + `recent-orders-block` (Mã Đơn · Người mua · Vé · Số tiền · Trạng thái, Đơn `review` kèm dòng loại · Thời gian), < md dạng thẻ; mất mạng → toast một lần + "Cập nhật lúc HH:MM".
-- **Chung:** tiền "300.000đ" `tabular-nums`; spinner trong nút, chặn bấm lặp; WCAG 2.2 AA, 320px không cuộn ngang, tôn trọng reduced motion.
+- **Mua (trang Sự kiện, Checkout):** `quantity-stepper` bắt đầu ở 0, "+" chặn ở min(số còn lại, giới hạn Vé/Đơn còn lại). `purchase-bar` dính đáy, tổng tiền cập nhật tức thì. Checkout là form một lần cho cả Đơn, lỗi hiện tại từng trường. Hết chỗ → "Hạng vé {tên} vừa hết. Bạn chọn lại nhé." Lỗi mạng → thử lại với cùng `Idempotency-Key`.
+- **Màn thanh toán:** stage có số tiền, `countdown-chip` theo `serverNow` (coral, không đổi đỏ) và mã Đơn; `recipient-trust-block`; chân trang "Tickee không giữ tiền của bạn". Thấy đủ mà không cuộn ở 375×667. "Thanh toán" redirect toàn trang, không popup.
+- **`/orders/:code`:** đang chờ thì sau khoảng 2 phút hiện `reassurance-line` ("đừng chuyển lại"). Đồng hồ về 0 → "Đang xác nhận thanh toán"; chỉ hiện "Hết hạn" khi API trả `expired`. `under_review` → "BTC đang kiểm tra thanh toán" + liên hệ BTC. `buyerStatus` lạ → trạng thái an toàn, không bao giờ trống hay kẹt.
+- **Thành công và `ticket-card`:** stage có "Vé của bạn đã sẵn sàng!" và "Đã gửi Vé tới {email}". `ticket-card` dáng cuống vé, nhãn "Mã QR vé · đưa cho CTV ở cổng", QR module đen trên tấm trắng ≥ 200×200. Thẻ đầu chồng mép stage, trượt lên (tắt khi reduced motion). Mỗi Vé có "Chia sẻ Vé".
+- **Vé của tôi (`/tickets`, `GET /v1/me/tickets`):**
+  - Ba nhóm: Vé còn hiệu lực (giờ Sự kiện tăng dần) · Đơn đang chờ (mới nhất trước) · Lịch sử (giờ Sự kiện giảm dần). Nhóm rỗng thì ẩn. Tải lần đầu dùng `Skeleton` 2 thẻ. Danh sách không có QR; dòng Vé mở Chi tiết Vé.
+  - Trống → "Bạn chưa có vé nào. Vé bạn mua sẽ hiện ở đây.", không có nút khám phá.
+  - `order-card` không bao giờ có QR. Các dạng:
+    - Chờ thanh toán: `countdown-chip` trên nền sáng (không đọc mốc) đếm theo `serverNow` + "Tiếp tục thanh toán" mở lại đúng Đơn đó. Về 0 thì hiện "Đang xác nhận thanh toán", ẩn nút, thẻ vẫn ở nhóm.
+    - "BTC đang kiểm tra thanh toán": badge warning, liên hệ BTC, không có nút chính.
+    - Đã hủy (BTC hủy Đơn, Sự kiện hủy): badge neutral, liên hệ BTC, thẻ mờ nhẹ.
+    - Hết hạn: API trả Đơn `expired` trong 30 phút sau `expires_at` (đồng hồ DB); badge neutral "Hết hạn", không nút. Web không tự suy ra "Hết hạn".
+
+    Thẻ tự cập nhật qua `order_changed` (stream `/v1/me/tickets/live`; không có SSE thì polling 2 giây khi có Đơn chờ tiền).
+  - Lối vào: menu tài khoản, nút "Xem Vé của tôi" cuối màn Thành công, link trong email Vé.
+- **Chi tiết Vé (`/tickets/:ticketId`, `GET /v1/me/tickets/:ticketId`):**
+  - Web không chỉnh được độ sáng: đang hiện QR thì giữ màn hình không tối bằng Screen Wake Lock (nhả khi rời trang hoặc tab ẩn, xin lại khi tab hiện lại; không hỗ trợ hay bị từ chối thì bỏ qua).
+  - Vé đã check-in → QR mờ (.25) + badge "Đã check-in".
+  - Vé đã hủy → badge "Đã hủy", không có QR (máy chủ không ký). Sự kiện hủy → "Sự kiện đã hủy. BTC sẽ liên hệ hoàn tiền."; còn lại kênh liên hệ BTC.
+  - Sau mốc kết thúc chỉ còn hàng lịch sử ("Đã tham dự"/"Chưa check-in"), không có Mã QR vé, không chia sẻ.
+  - Khối "Biên nhận": mã Đơn, "Hạng vé × SL · thành tiền", tổng đã trả (0đ → "Miễn phí"), thời điểm thanh toán, "Tiền đã chuyển thẳng cho {BTC}" (chỉ Đơn có phí). Hiện cả khi Vé đã sang lịch sử.
+- **Chia sẻ Vé:** dùng Web Share API, fallback sao chép link kèm toast "Đã sao chép". Tạo lại link qua `Dialog` ghi rõ: ai đã thấy hoặc chụp mã QR vẫn dùng được mã để vào cổng. Link sai, Vé hủy hoặc đã hết hiệu lực → `empty-state` chung, không lộ thông tin.
+- **Sửa giờ/địa điểm:** trước khi lưu, `Dialog` báo "Email sẽ được gửi tới {n} Người mua."
+- **Tổng quan BTC:**
+  - `stat-card` doanh thu: nền stage, số `tabular-nums`.
+  - `recent-orders-block`: card sáng; bảng Mã Đơn · Người mua · Vé · Số tiền · Trạng thái · Thời gian. Đơn `review` kèm dòng loại, vd. "Lệch số tiền · nhận 250.000đ / Đơn 300.000đ". Dưới `md` hiển thị dạng thẻ.
+  - Mất mạng → toast một lần "Mất kết nối. Đang thử lại…" và nhãn "Cập nhật lúc HH:MM".
+- **Tone của `status-badge`:**
+  - Đơn: Chờ thanh toán → warning · Đã thanh toán → success · Hết hạn, Đã hủy, Đã hoàn tay → neutral · Cần xử lý → danger.
+  - Vé: Hợp lệ → success · Đã check-in → neutral · Đã hủy → danger.
+
+  Badge luôn có chữ.
+- **Chung:**
+  - Tiền định dạng "300.000đ", dùng `tabular-nums`.
+  - Gọi mạng → spinner trong nút, chặn bấm lặp.
+  - Không dùng coral để báo lỗi.
+  - WCAG 2.2 AA; dùng được ở 320px mà không cuộn ngang; tôn trọng reduced motion.
 
 ## Cross-Story Dependencies
 
-- Dựa vào Epic 2: `sellability` (gọi lại trong TX1), tồn kho từ `flows.createTicketType`, giới hạn Vé/Đơn, form mua (câu hỏi id ổn định), tài khoản nhận tiền mặc định + credential cũ giữ lại (2.6, 2.13), `effective_end_at`, khung dashboard và bộ test cách ly; Story 3.10 gắn vào luồng sửa Sự kiện của 2.12. Đăng nhập + `returnTo` từ Epic 1.
-- Trong epic: 3.2 là nền cho 3.3 và 3.4; 3.3 dựng `markPaid`, phát Vé, QR và màn Thành công dùng lại ở 3.5/3.7; 3.6 mở rộng xử lý IPN của 3.5; 3.7 dựng `platform/realtime` + `useLiveResource` mà 3.9 và 3.11 dùng; 3.8 cần Vé từ 3.3/3.5.
-- Epic sau: 4.1 Đối soát bù đi chung đường xử lý và thứ tự kiểm của 3.5/3.6; 4.2 bật `payment_service_status` từ lỗi tạo link của 3.4; 4.4 xử lý `review_items` (tạo `cancelled_by_organizer`); 5.x check-in dựa trên Vé/QR; 6.x mở rộng Tổng quan và tab Đơn; 7.1 hủy Sự kiện tạo trạng thái `event_cancelled`; 7.4 khóa Sự kiện ảnh hưởng nhánh tiền về muộn.
+- **Từ Epic 1–2:** đăng nhập kèm `returnTo`; `sellability` (gọi lại trong TX1); tồn kho tạo cùng Hạng vé; giới hạn Vé/Đơn; form mua; tài khoản nhận tiền mặc định và credential cũ được giữ lại; `effective_end_at`; khung dashboard; bộ test cách ly. Story 3.10 gắn vào luồng sửa Sự kiện có sẵn của Story 2.12.
+- **Trong epic:**
+  - 3.2 là nền cho 3.3 và 3.4.
+  - 3.3 dựng `markPaid`, phát Vé, Mã QR và màn Thành công; 3.5 và 3.7 dùng lại.
+  - 3.6 mở rộng xử lý IPN của 3.5.
+  - 3.7 dựng `platform/realtime` và `useLiveResource`; 3.9 và 3.11 mở endpoint SSE riêng trên hub này.
+  - 3.8 cấp link chia sẻ và hàng đợi email; 3.9 (Chi tiết Vé, chia sẻ) và 3.10 (email đổi giờ) dùng lại.
+- **Epic sau:**
+  - 4.1 Đối soát bù đi chung đường xử lý và thứ tự kiểm của 3.5/3.6.
+  - 4.2 bật trạng thái dịch vụ thanh toán từ lỗi tạo link của 3.4.
+  - 4.4 xử lý `review_items` (tạo trạng thái `cancelled_by_organizer`).
+  - Epic 5 check-in dựa trên Vé và Mã QR vé.
+  - Epic 6 mở rộng Tổng quan và tab Đơn.
+  - 7.1 hủy Sự kiện sinh `event_cancelled`; 7.4 khóa Sự kiện ảnh hưởng nhánh tiền về muộn.
+- **Câu hỏi còn mở:** cách tính doanh thu trên dashboard sau khi hủy Sự kiện chưa chốt.

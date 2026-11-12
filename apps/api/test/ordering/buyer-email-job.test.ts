@@ -175,7 +175,7 @@ describe('enqueue trong markPaid', () => {
 });
 
 describe('mẫu email', () => {
-  it('email Vé: text + HTML (escape), giờ formatVnDateTime, địa điểm, mã Đơn, mỗi Vé một dòng "Vé k/N · Hạng" kèm link, link Trang Đơn', () => {
+  it('email Vé: text + HTML (escape), giờ formatVnDateTime, địa điểm, mã Đơn, mỗi Vé một dòng "Vé k/N · Hạng" kèm link, link Trang Đơn và Vé của tôi', () => {
     const startsAt = new Date('2099-11-16T00:00:00.000Z');
     const message = buildTicketsEmail({
       eventName: 'Giải <Mùa thu>',
@@ -187,6 +187,7 @@ describe('mẫu email', () => {
         { seq: 2, count: 2, ticketTypeName: 'Hạng <A>', link: `${TEST_WEB_ORIGIN}/xem-ve#tok2` },
       ],
       orderLink: `${TEST_WEB_ORIGIN}/orders/TK8F3Q2AXM`,
+      myTicketsLink: `${TEST_WEB_ORIGIN}/tickets`,
     });
     expect(message.subject).toBe('Vé của bạn · Giải <Mùa thu>');
     for (const part of [
@@ -197,9 +198,12 @@ describe('mẫu email', () => {
       `Vé 1/2 · Hạng <A>\n${TEST_WEB_ORIGIN}/xem-ve#tok1`,
       `Vé 2/2 · Hạng <A>\n${TEST_WEB_ORIGIN}/xem-ve#tok2`,
       `${TEST_WEB_ORIGIN}/orders/TK8F3Q2AXM`,
+      `Mọi Vé của bạn ở Vé của tôi: ${TEST_WEB_ORIGIN}/tickets`,
     ]) {
       expect(message.text).toContain(part);
     }
+    // Story 3.9: một dòng link tới /tickets (cả HTML).
+    expect(message.html).toContain(`href="${TEST_WEB_ORIGIN}/tickets"`);
     expect(message.text).toContain('07:00 16/11/2099 (giờ Việt Nam)');
     expect(message.html).toContain('Giải &lt;Mùa thu&gt;');
     expect(message.html).toContain('Sân A &amp; B');
@@ -216,6 +220,7 @@ describe('mẫu email', () => {
       orderCode: 'TK8F3Q2AXM',
       tickets: [],
       orderLink: `${TEST_WEB_ORIGIN}/orders/TK8F3Q2AXM`,
+      myTicketsLink: `${TEST_WEB_ORIGIN}/tickets`,
     });
     expect(noVenue.text).not.toContain('Địa điểm');
   });
@@ -358,6 +363,7 @@ describe('worker', () => {
     expect(message.text).toContain(order.code);
     expect(message.text).toContain('Địa điểm: Sân A & B');
     expect(message.text).toContain(`${TEST_WEB_ORIGIN}/orders/${order.code}`);
+    expect(message.text).toContain(`Mọi Vé của bạn ở Vé của tôi: ${TEST_WEB_ORIGIN}/tickets`);
     expect(message.text).toContain(`Vé 1/2 · Hạng <A>`);
     const tokens = [...message.text.matchAll(LINK)].map((m) => m[1]!);
     expect(tokens).toEqual(order.tickets.map((t) => t.shareToken));

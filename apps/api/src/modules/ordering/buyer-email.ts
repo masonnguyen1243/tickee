@@ -41,14 +41,16 @@ export interface TicketsEmailInput {
   tickets: readonly TicketEmailLine[];
   /** Trang Đơn của web (`{WEB_ORIGIN}/orders/:code`, cần đăng nhập). */
   orderLink: string;
+  /** Trang "Vé của tôi" của web (`{WEB_ORIGIN}/tickets`, cần đăng nhập, Story 3.9). */
+  myTicketsLink: string;
 }
 
 /**
  * Email Vé gửi tới email Người mua đã chụp trên Đơn: tên Sự kiện, giờ bắt đầu (giờ Việt Nam), địa điểm (nếu có), mã
- * Đơn, mỗi Vé một dòng "Vé k/N · {Hạng vé}" kèm link chia sẻ, và link về Trang Đơn.
+ * Đơn, mỗi Vé một dòng "Vé k/N · {Hạng vé}" kèm link chia sẻ, link về Trang Đơn và link "Vé của tôi" (Story 3.9).
  */
 export function buildTicketsEmail(input: TicketsEmailInput): Omit<EmailMessage, 'to'> {
-  const { eventName, startsAt, venue, orderCode, tickets, orderLink } = input;
+  const { eventName, startsAt, venue, orderCode, tickets, orderLink, myTicketsLink } = input;
   const time = `${formatVnDateTime(startsAt)} (giờ Việt Nam)`;
   const label = (t: TicketEmailLine) => `Vé ${t.seq}/${t.count} · ${t.ticketTypeName}`;
   const details = [`Thời gian: ${time}`, ...(venue ? [`Địa điểm: ${venue}`] : []), `Mã Đơn: ${orderCode}`];
@@ -73,6 +75,7 @@ export function buildTicketsEmail(input: TicketsEmailInput): Omit<EmailMessage, 
       ...tickets.flatMap((t) => [label(t), t.link]),
       '',
       `Xem Đơn của bạn: ${orderLink}`,
+      `Mọi Vé của bạn ở Vé của tôi: ${myTicketsLink}`,
     ].join('\n'),
     html: page(`      <p style="${P_STYLE}">Vé của bạn cho <strong>${escapeHtml(eventName)}</strong> đã sẵn sàng.</p>
       <p style="${P_STYLE}">${details.map(escapeHtml).join('<br>')}</p>
@@ -80,7 +83,8 @@ export function buildTicketsEmail(input: TicketsEmailInput): Omit<EmailMessage, 
       <ul style="margin:0 0 16px;padding:0;list-style:none">
 ${ticketItems}
       </ul>
-      <p style="${MUTED_STYLE}">Xem Đơn của bạn: <a href="${escapeHtml(orderLink)}" style="color:#1C1917">${escapeHtml(orderLink)}</a></p>`),
+      <p style="${MUTED_STYLE}">Xem Đơn của bạn: <a href="${escapeHtml(orderLink)}" style="color:#1C1917">${escapeHtml(orderLink)}</a></p>
+      <p style="${MUTED_STYLE}">Mọi Vé của bạn ở Vé của tôi: <a href="${escapeHtml(myTicketsLink)}" style="color:#1C1917">${escapeHtml(myTicketsLink)}</a></p>`),
   };
 }
 

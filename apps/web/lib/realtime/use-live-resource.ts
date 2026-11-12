@@ -10,7 +10,8 @@ import { createSignalCoalescer, effectivePollInterval, reopenDelay, type SignalC
 
 /*
  * Một hook dùng chung cho mọi tài nguyên tự cập nhật (AD-17, Story 3.7; 3.9 và 3.11 dùng lại): REST là sự thật, SSE chỉ
- * là tín hiệu nhắc tải lại.
+ * là tín hiệu nhắc tải lại. Đường SSE đổi (vd. "Vé của tôi" đưa khóa của tập mã Đơn vào đường) → đóng stream cũ, mở
+ * stream mới.
  */
 
 export type LiveResourceOptions<T> = {
@@ -18,8 +19,11 @@ export type LiveResourceOptions<T> = {
   queryKey: QueryKey;
   /** Hàm tải REST (parse bằng schema của contracts). */
   queryFn: (signal: AbortSignal) => Promise<T>;
-  /** Đường SSE tương đối gốc `/v1` (vd. `buyerOrderLiveApiPath(code)`); mở kèm cookie phiên (`withCredentials`). */
-  livePath: string;
+  /**
+   * Đường SSE tương đối gốc `/v1` (vd. `buyerOrderLiveApiPath(code)`); mở kèm cookie phiên (`withCredentials`). Dạng hàm:
+   * tính theo dữ liệu hiện có (vd. `myTicketsLivePath`), stream mở lại mỗi khi kết quả đổi.
+   */
+  livePath: string | ((data: T | undefined) => string);
   /** Chu kỳ polling (ms) khi SSE chưa kết nối, theo dữ liệu hiện có; `false` = không polling. */
   pollInterval: (data: T | undefined) => number | false;
 };
@@ -92,9 +96,10 @@ export function useLiveResource<T>({ queryKey, queryFn, livePath, pollInterval }
   }, []);
 
   const hasData = query.data !== undefined;
+  const path = typeof livePath === 'function' ? livePath(query.data) : livePath;
   useEffect(() => {
     if (!hasData || typeof EventSource === 'undefined') return;
-    const url = `${apiBaseUrl()}${livePath}`;
+    const url = `${apiBaseUrl()}${path}`;
     let source: EventSource | null = null;
     let attempt = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -135,7 +140,7 @@ export function useLiveResource<T>({ queryKey, queryFn, livePath, pollInterval }
       reopenNow.current = () => undefined;
       setConnected(false);
     };
-  }, [hasData, livePath]);
+  }, [hasData, path]);
 
   const offline = !browserOnline || isNetworkError(query.failureReason);
   return { query, connected, offline };
