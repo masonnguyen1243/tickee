@@ -453,3 +453,13 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-8-email-ve-va-link-chia-se-ve.md`
   summary: Người mua đã trả tiền mà không có Vé vì lý do khác `sold_out` (mục Cần xử lý `orphan` `event_ended`/`event_locked`, `amount_mismatch`, `event_cancelled`) không nhận email nào; cần quyết có gửi email báo (vd. "BTC sẽ liên hệ") qua hàng đợi `ordering.send-buyer-email` hay để BTC tự liên hệ (Story 4.4/7.1).
   evidence: Review 3.8 (BH) triage #7. Có từ trước 3.8: AC 3.6 trong epics chỉ đòi email cho `sold_out`, 3.8 làm đúng phần đó. Các nhánh khác chỉ tạo `review_item`; Trang Đơn hiện `under_review` + kênh liên hệ BTC nhưng Người mua phải tự mở lại trang mới biết.
+
+## Deferred from: build of spec-3-10-bao-nguoi-mua-khi-doi-gio-hoac-dia-diem.md (2026-11-12)
+
+- Đã xử lý (12/11/2026): phần spec 2.12 hoãn sang 3.10 (Boundaries › "email báo Người mua khi đổi giờ/địa điểm") được giải quyết bằng `_bmad-output/implementation-artifacts/spec-3-10-bao-nguoi-mua-khi-doi-gio-hoac-dia-diem.md`. `PATCH /v1/orgs/:orgId/events/:eventId` chuyển sang `flows/event-edit.controller.ts` (flow `updateEvent`), cột `events.time_venue_version` (migration 0022), queue `ordering.send-event-change-email` (job gốc theo `(eventId, version)`, job con theo Người mua), `GET …/buyer-count`, `Dialog` "Email sẽ được gửi tới {n} Người mua." ở tab Cài đặt.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-10-bao-nguoi-mua-khi-doi-gio-hoac-dia-diem.md`
+  summary: Không giới hạn số lượt email đổi giờ/địa điểm: mỗi lệnh sửa có đổi giờ/địa điểm là một lượt gửi cho mọi Người mua (spec cấm hợp nhất), nên BTC sửa địa điểm nhiều lần liên tiếp (hoặc phiên BTC bị lộ) gửi bấy nhiêu email cho mỗi người. Cần chốt có giới hạn theo Sự kiện/giờ hay gom trong một khoảng ngắn (vd. job gốc `startAfter` vài phút, chỉ gửi bản mới nhất) không.
+  evidence: `flows/event-update.flow.ts` enqueue mỗi phiên bản một job gốc; `Dialog` của web là chặn duy nhất. Spec 3.10 › Never: "Không hợp nhất các lượt gửi khi BTC sửa liên tiếp".
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-10-bao-nguoi-mua-khi-doi-gio-hoac-dia-diem.md`
+  summary: Lỗi lặp ở `e2e/event-settings.spec.ts` › "Kết thúc qua Dialog…" trên ios-webkit: bấm tab "Tổng quan" (`router.replace` bỏ `?tab=`) rồi `page.goto` ngay thì hai lần điều hướng đè nhau ("interrupted by another navigation"). Đã thêm `waitForURL` trước `goto` trong test này; các spec khác đổi tab rồi `goto` ngay có thể cùng kiểu.
+  evidence: Kiểm chứng 3.10 (12/11): bản baseline `1dd0d0e` chạy riêng ca này 10 lần trên ios-webkit fail 2; sau khi chờ URL, 10/10 pass. Nên gộp vào việc ghi các test chập chờn ở E2-8.

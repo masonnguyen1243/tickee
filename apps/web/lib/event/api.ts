@@ -1,4 +1,6 @@
 import {
+  EventBuyerCount,
+  eventBuyerCountApiPath,
   EventDetail,
   EventForm,
   EventList,
@@ -42,9 +44,19 @@ export const fetchEvent = (orgId: string, eventId: string, signal?: AbortSignal)
 export const createEvent = (orgId: string, body: EventDraftInput) =>
   apiRequest(eventsPath(orgId), { schema: EventDetail, init: json('POST', body) });
 
-/** Sửa Sự kiện (thay toàn bộ các trường thông tin); slug không đổi. */
+/**
+ * Sửa Sự kiện (thay toàn bộ các trường thông tin); slug không đổi. Đổi giờ/địa điểm của Sự kiện đã phát Vé thì server
+ * gửi email báo Người mua (Story 3.10).
+ */
 export const updateEvent = (orgId: string, eventId: string, body: EventDraftInput) =>
   apiRequest(`${eventsPath(orgId)}/${encodeURIComponent(eventId)}`, { schema: EventDetail, init: json('PATCH', body) });
+
+/**
+ * Số Người mua (user có Đơn `paid`) của Sự kiện (Story 3.10): hỏi trước khi lưu lệnh sửa đổi giờ hoặc địa điểm để báo
+ * "Email sẽ được gửi tới {n} Người mua.".
+ */
+export const fetchEventBuyerCount = (orgId: string, eventId: string) =>
+  apiRequest(eventBuyerCountApiPath(orgId, eventId), { schema: EventBuyerCount });
 
 const eventPath = (orgId: string, eventId: string) => `${eventsPath(orgId)}/${encodeURIComponent(eventId)}`;
 const ticketTypesPath = (orgId: string, eventId: string) => `${eventPath(orgId, eventId)}/ticket-types`;

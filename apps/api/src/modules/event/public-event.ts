@@ -120,14 +120,15 @@ export async function saleEventById(db: DbExecutor, eventId: string): Promise<Pu
 }
 
 /**
- * Phần Sự kiện in trên Vé (Story 3.8): trang chia sẻ Vé (`ticketing`) và email Vé (`ordering`). Tên, giờ bắt đầu và địa
- * điểm hiện tại, trạng thái, `effective_end_at`; `ended`: đồng hồ DB đã quá `effective_end_at` (AD-14, so tại lúc đọc,
- * không theo đồng hồ máy chủ ứng dụng).
+ * Phần Sự kiện in trên Vé (Story 3.8): trang chia sẻ Vé (`ticketing`), email Vé và email đổi giờ/địa điểm (`ordering`,
+ * Story 3.10). Tên, giờ bắt đầu, giờ kết thúc và địa điểm hiện tại, trạng thái, `effective_end_at`; `ended`: đồng hồ DB
+ * đã quá `effective_end_at` (AD-14, so tại lúc đọc, không theo đồng hồ máy chủ ứng dụng).
  */
 export interface TicketEventRef {
   id: string;
   name: string;
   startsAt: Date;
+  endsAt: Date;
   venue: string | null;
   status: EventRow['status'];
   effectiveEndAt: Date;
@@ -138,6 +139,7 @@ const ticketEventColumns = {
   id: events.id,
   name: events.name,
   startsAt: events.startsAt,
+  endsAt: events.endsAt,
   venue: events.venue,
   status: events.status,
   effectiveEndAt: events.effectiveEndAt,

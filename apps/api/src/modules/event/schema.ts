@@ -54,6 +54,12 @@ export const events = pgTable(
     lockReason: text('lock_reason'),
     /** Giới hạn Vé/Đơn (Story 2.8): mặc định 10, khoảng 1–50. */
     maxTicketsPerOrder: smallint('max_tickets_per_order').notNull().default(MAX_TICKETS_PER_ORDER_DEFAULT),
+    /**
+     * Phiên bản giờ/địa điểm (Story 3.10): tăng 1 trong chính `UPDATE` của lệnh sửa đổi `starts_at`, `ends_at` hoặc
+     * `venue` (`timeOrVenueChanged`), ở mọi trạng thái. Nằm trong id job email báo Người mua, nên mỗi lần sửa là một lượt.
+     * Không có trong `EventDetail`.
+     */
+    timeVenueVersion: integer('time_venue_version').notNull().default(0),
     createdAt: createdAt(),
     updatedAt: timestamptz('updated_at')
       .notNull()
@@ -66,6 +72,7 @@ export const events = pgTable(
     check('events_status_check', sql`${t.status} IN ('draft', 'published', 'hidden', 'cancelled')`),
     check('events_ends_after_starts_check', sql`${t.endsAt} > ${t.startsAt}`),
     check('events_max_tickets_per_order_check', sql`${t.maxTicketsPerOrder} BETWEEN 1 AND 50`),
+    check('events_time_venue_version_check', sql`${t.timeVenueVersion} >= 0`),
     check(
       'events_ended_manually_check',
       sql`${t.endedManuallyAt} IS NULL OR ${t.effectiveEndAt} = ${t.endedManuallyAt}`,

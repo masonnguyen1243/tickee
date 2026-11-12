@@ -52,6 +52,15 @@ export const JobQueue = {
   ORDERING_SEND_BUYER_EMAIL: 'ordering.send-buyer-email',
   /** Dead-letter của `ORDERING_SEND_BUYER_EMAIL`: job hết lượt retry được chép sang đây. */
   ORDERING_SEND_BUYER_EMAIL_DEAD_LETTER: 'ordering.send-buyer-email.dead-letter',
+  /**
+   * Email báo Người mua khi Sự kiện đổi giờ hoặc địa điểm (`ordering`, Story 3.10), payload `SendEventChangeEmailPayload`
+   * (`{ eventId, version, userId? }`, chỉ id). Lệnh sửa Sự kiện (`flows`) enqueue job gốc (không `userId`) bằng chính `tx`
+   * của thay đổi, id cố định theo (`eventId`, `version`). Worker chốt danh sách Người mua lúc chạy job gốc rồi tạo mỗi
+   * người một job con (`userId`, id suy từ id job gốc); job con gửi đúng một email với giờ và địa điểm lúc gửi.
+   */
+  ORDERING_SEND_EVENT_CHANGE_EMAIL: 'ordering.send-event-change-email',
+  /** Dead-letter của `ORDERING_SEND_EVENT_CHANGE_EMAIL`: job hết lượt retry được chép sang đây. */
+  ORDERING_SEND_EVENT_CHANGE_EMAIL_DEAD_LETTER: 'ordering.send-event-change-email.dead-letter',
 } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];
 
@@ -68,3 +77,13 @@ export const buyerEmailKindSchema = z.enum(BuyerEmailKind);
 /** Payload của job `ordering.send-buyer-email`: chỉ loại email và id Đơn (không PII, không token). */
 export const SendBuyerEmailPayload = z.object({ kind: buyerEmailKindSchema, orderId: z.uuid() });
 export type SendBuyerEmailPayload = z.infer<typeof SendBuyerEmailPayload>;
+
+/** Payload của job `ordering.send-event-change-email` (Story 3.10): chỉ id và phiên bản, không email hay tên. */
+export const SendEventChangeEmailPayload = z.object({
+  eventId: z.uuid(),
+  /** `events.time_venue_version` ngay sau lệnh sửa: mỗi lệnh đổi giờ/địa điểm là một phiên bản, một lượt email. */
+  version: z.number().int().positive(),
+  /** Có: job con, gửi đúng một email cho Người mua này. Thiếu: job gốc, tạo job con cho mọi Người mua. */
+  userId: z.uuid().optional(),
+});
+export type SendEventChangeEmailPayload = z.infer<typeof SendEventChangeEmailPayload>;

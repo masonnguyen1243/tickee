@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
 import { BOSS, defineQueue, JOB_COMPLETED, QueueProducer, registerQueueWorker } from '../../platform/jobs/index.js';
 import { BuyerEmailWorker, ORDERING_JOBS_CONFIG, type OrderingJobsConfig } from './buyer-email-jobs.js';
+import { EventChangeEmailWorker } from './event-change-email-jobs.js';
 import { releaseHeld } from './inventory.service.js';
 import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
 import { orderItems, orders } from './schema.js';
@@ -193,9 +194,10 @@ export class OrderExpiryWorker implements OnApplicationBootstrap {
 }
 
 /**
- * Job nền của `ordering` cho vai `worker`: hết hạn Giữ chỗ ((a) và (c)) và email Người mua (Story 3.8: email Vé, email
- * tiền về muộn hết chỗ). Cần `DbModule`, `JobsModule`, `EmailModule` và `TicketingModule` (toàn cục) ở gốc DI; `config`
- * cho origin web của link trong email. Không cần cấu hình Tingee.
+ * Job nền của `ordering` cho vai `worker`: hết hạn Giữ chỗ ((a) và (c)), email Người mua (Story 3.8: email Vé, email
+ * tiền về muộn hết chỗ) và email báo Sự kiện đổi giờ hoặc địa điểm (Story 3.10). Cần `DbModule`, `JobsModule`,
+ * `EmailModule` và `TicketingModule` (toàn cục) ở gốc DI; `config` cho origin web của link trong email. Không cần cấu
+ * hình Tingee.
  */
 @Module({})
 export class OrderingJobsModule {
@@ -206,6 +208,7 @@ export class OrderingJobsModule {
         { provide: ORDERING_JOBS_CONFIG, useValue: { WEB_ORIGIN: config.WEB_ORIGIN } satisfies OrderingJobsConfig },
         OrderExpiryWorker,
         BuyerEmailWorker,
+        EventChangeEmailWorker,
       ],
     };
   }

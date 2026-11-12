@@ -54,7 +54,8 @@ export class ApiModule {
         OrderingModule.forRoot(config),
         // IPN Tingee (Story 3.5): `POST /v1/payments/tingee/ipn/:ipnKey` → `ordering.markPaid` / `markExpired`.
         PaymentModule.forRoot(config),
-        // Hạng vé và tồn kho (Story 2.8): ghi cả `event` lẫn `ordering` nên controller ở flows.
+        // Hạng vé và tồn kho (Story 2.8), sửa thông tin Sự kiện kèm email báo Người mua và số Người mua (Story 3.10):
+        // ghi/đọc cả `event` lẫn `ordering` nên controller ở flows.
         FlowsModule,
         // Khu `/v1/admin/*`: guard Quản trị Tingee (cờ `platform_admin`, 2FA, step-up) do IdentityModule đăng ký.
         AdminModule,

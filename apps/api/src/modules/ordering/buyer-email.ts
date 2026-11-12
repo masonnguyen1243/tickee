@@ -1,10 +1,11 @@
-import { formatVnDateTime } from '@tickee/contracts';
+import { formatEventTimeRange, formatVnDateTime } from '@tickee/contracts';
 import { escapeHtml, type EmailMessage } from '../../platform/email/index.js';
 
 /*
- * Mẫu email cho Người mua (Story 3.8, tiếng Việt): email Vé (mỗi Vé một link chia sẻ) và email báo tiền về muộn mà
- * Hạng vé đã hết (`orphan` `sold_out`). Bản text và bản HTML; mọi chuỗi đưa vào HTML qua `escapeHtml`. Không đính Mã QR
- * vé: QR nằm sau link chia sẻ. Link chứa token nên chỉ nằm trong nội dung email, không bao giờ vào log.
+ * Mẫu email cho Người mua (tiếng Việt): email Vé (mỗi Vé một link chia sẻ) và email báo tiền về muộn mà Hạng vé đã hết
+ * (`orphan` `sold_out`) của Story 3.8; email báo Sự kiện đổi giờ hoặc địa điểm của Story 3.10. Bản text và bản HTML; mọi
+ * chuỗi đưa vào HTML qua `escapeHtml`. Không đính Mã QR vé: QR nằm sau link chia sẻ. Link chứa token nên chỉ nằm trong
+ * nội dung email, không bao giờ vào log.
  */
 
 const BODY_STYLE =
@@ -95,6 +96,15 @@ export interface OrganizerContactLine {
   contactEmail: string | null;
 }
 
+/** Các dòng kênh liên hệ BTC: tên, rồi SĐT và email nếu BTC đã nhập. */
+function organizerContactLines(organizer: OrganizerContactLine): string[] {
+  return [
+    `Liên hệ BTC: ${organizer.name}`,
+    ...(organizer.contactPhone ? [`SĐT: ${organizer.contactPhone}`] : []),
+    ...(organizer.contactEmail ? [`Email: ${organizer.contactEmail}`] : []),
+  ];
+}
+
 export interface OrphanSoldOutEmailInput {
   eventName: string;
   orderCode: string;
@@ -112,11 +122,7 @@ export function buildOrphanSoldOutEmail({ eventName, orderCode, organizer }: Orp
   EmailMessage,
   'to'
 > {
-  const contact = [
-    `Liên hệ BTC: ${organizer.name}`,
-    ...(organizer.contactPhone ? [`SĐT: ${organizer.contactPhone}`] : []),
-    ...(organizer.contactEmail ? [`Email: ${organizer.contactEmail}`] : []),
-  ];
+  const contact = organizerContactLines(organizer);
   const details = [`Sự kiện: ${eventName}`, `Mã Đơn: ${orderCode}`];
   return {
     subject: `Đơn ${orderCode}: BTC sẽ liên hệ hoàn tiền`,
@@ -124,5 +130,46 @@ export function buildOrphanSoldOutEmail({ eventName, orderCode, organizer }: Orp
     html: page(`      <p style="${P_STYLE}">${escapeHtml(ORPHAN_SOLD_OUT_MESSAGE)}</p>
       <p style="${P_STYLE}">${details.map(escapeHtml).join('<br>')}</p>
       <p style="${P_STYLE}">${contact.map(escapeHtml).join('<br>')}</p>`),
+  };
+}
+
+export interface EventChangeEmailInput {
+  eventName: string;
+  /** Giờ và địa điểm hiện tại của Sự kiện lúc gửi (không phải giá trị cũ). */
+  startsAt: Date;
+  endsAt: Date;
+  venue: string | null;
+  /** Trang "Vé của tôi" của web (`{WEB_ORIGIN}/tickets`, cần đăng nhập, Story 3.9). */
+  myTicketsLink: string;
+  organizer: OrganizerContactLine;
+}
+
+/** Dòng báo Vé không đổi của email đổi giờ/địa điểm. */
+export const EVENT_CHANGE_TICKETS_VALID = 'Vé của bạn vẫn dùng được, không cần làm gì thêm.';
+/** Sự kiện chưa có địa điểm (`venue` trống). */
+export const VENUE_NOT_ANNOUNCED = 'BTC chưa công bố địa điểm';
+
+/**
+ * Email báo Người mua khi Sự kiện đổi giờ hoặc địa điểm (Story 3.10, mẫu A của Mason: chỉ thông tin mới, không "trước →
+ * sau"), theo thứ tự: BTC vừa cập nhật; thời gian hiện tại (khoảng giờ, giờ Việt Nam); địa điểm hiện tại (trống → "BTC
+ * chưa công bố địa điểm"); Vé vẫn dùng được; link "Vé của tôi"; kênh liên hệ BTC.
+ */
+export function buildEventChangeEmail(input: EventChangeEmailInput): Omit<EmailMessage, 'to'> {
+  const { eventName, startsAt, endsAt, venue, myTicketsLink, organizer } = input;
+  const intro = `BTC ${organizer.name} vừa cập nhật thời gian hoặc địa điểm của ${eventName}.`;
+  const details = [
+    `Thời gian: ${formatEventTimeRange(startsAt.toISOString(), endsAt.toISOString())} (giờ Việt Nam)`,
+    `Địa điểm: ${venue ?? VENUE_NOT_ANNOUNCED}`,
+  ];
+  const myTickets = `Vé của tôi: ${myTicketsLink}`;
+  const contact = organizerContactLines(organizer);
+  return {
+    subject: `Sự kiện đổi giờ hoặc địa điểm · ${eventName}`,
+    text: [intro, '', ...details, '', EVENT_CHANGE_TICKETS_VALID, '', myTickets, '', ...contact].join('\n'),
+    html: page(`      <p style="${P_STYLE}">BTC ${escapeHtml(organizer.name)} vừa cập nhật thời gian hoặc địa điểm của <strong>${escapeHtml(eventName)}</strong>.</p>
+      <p style="${P_STYLE}">${details.map(escapeHtml).join('<br>')}</p>
+      <p style="${P_STYLE}">${escapeHtml(EVENT_CHANGE_TICKETS_VALID)}</p>
+      <p style="${P_STYLE}">Vé của tôi: <a href="${escapeHtml(myTicketsLink)}" style="color:#1C1917">${escapeHtml(myTicketsLink)}</a></p>
+      <p style="${MUTED_STYLE}">${contact.map(escapeHtml).join('<br>')}</p>`),
   };
 }

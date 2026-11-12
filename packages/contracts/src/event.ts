@@ -137,6 +137,17 @@ export type EventDetail = z.infer<typeof EventDetail>;
 export const EventStatusConflictDetails = z.object({ status: eventStatusSchema });
 export type EventStatusConflictDetails = z.infer<typeof EventStatusConflictDetails>;
 
+/**
+ * `GET /v1/orgs/:orgId/events/:eventId/buyer-count` (Story 3.10): số Người mua của Sự kiện, tức số `user_id` khác nhau
+ * có Đơn `paid` (tính cả Đơn 0đ). Web hỏi trước khi lưu lệnh sửa đổi giờ hoặc địa điểm.
+ */
+export const EventBuyerCount = z.object({ buyers: z.number().int().nonnegative() });
+export type EventBuyerCount = z.infer<typeof EventBuyerCount>;
+
+/** Đường API (sau `/v1`) của `EventBuyerCount`. */
+export const eventBuyerCountApiPath = (organizationId: string, eventId: string): string =>
+  `/orgs/${encodeURIComponent(organizationId)}/events/${encodeURIComponent(eventId)}/buyer-count`;
+
 // `PublicEvent` (`GET /v1/events/:slug`) nằm ở `sellability.ts`: nó dùng schema Hạng vé, mà `ticket-type.ts` lại import
 // file này.
 
@@ -168,6 +179,50 @@ export function effectiveEndAt(endsAt: Date): Date {
   const { year, month, day } = vnParts(endsAt);
   const endOfDay = Date.UTC(year, month - 1, day, 23, 59, 59) - OFFSET_MS;
   return new Date(Math.max(endOfDay, endsAt.getTime() + 6 * 60 * 60 * 1000));
+}
+
+/** Mốc thời gian: `Date` (dòng DB ở api) hoặc chuỗi ISO (web). */
+type Instant = Date | string;
+
+const msOf = (value: Instant): number => (value instanceof Date ? value.getTime() : Date.parse(value));
+
+/** Giờ và địa điểm của Sự kiện, trước hoặc sau một lệnh sửa (Story 3.10). */
+export interface EventTimeVenue {
+  startsAt: Instant;
+  endsAt: Instant;
+  venue: string | null;
+}
+
+/** Sự kiện trước lệnh sửa: giờ, địa điểm, trạng thái và mốc bấm "Kết thúc" (Story 2.12). */
+export interface EventBeforeEdit extends EventTimeVenue {
+  status: EventStatus;
+  endedManuallyAt: Instant | null;
+}
+
+/**
+ * Lệnh sửa có đổi giờ hoặc địa điểm (Story 3.10): `startsAt` hoặc `endsAt` khác mốc thời gian (không so chuỗi), hoặc
+ * `venue` khác. Tên, mô tả, chính sách hoàn vé hay giới hạn Vé/Đơn không tính. Api tăng `events.time_venue_version`
+ * theo đúng luật này.
+ */
+export function timeOrVenueChanged(before: EventTimeVenue, after: EventTimeVenue): boolean {
+  return (
+    msOf(before.startsAt) !== msOf(after.startsAt) ||
+    msOf(before.endsAt) !== msOf(after.endsAt) ||
+    (before.venue ?? null) !== (after.venue ?? null)
+  );
+}
+
+/**
+ * Lệnh sửa có báo Người mua không (Story 3.10), trừ điều kiện "có ít nhất một Người mua" (server đếm): Sự kiện không ở
+ * `draft` hay `cancelled`, chưa bấm "Kết thúc" (đã bấm là đã kết thúc, như `isEventEnded` của web; không so đồng hồ), có
+ * đổi giờ hoặc địa điểm, và sau khi sửa chưa kết thúc: `effectiveEndAt(endsAt mới)` sau `now`. Api truyền đồng hồ DB,
+ * web truyền đồng hồ máy.
+ */
+export function notifiesBuyers(before: EventBeforeEdit, after: EventTimeVenue, now: Date | number): boolean {
+  if (before.status === EventStatus.DRAFT || before.status === EventStatus.CANCELLED) return false;
+  if (before.endedManuallyAt !== null) return false;
+  if (!timeOrVenueChanged(before, after)) return false;
+  return effectiveEndAt(new Date(msOf(after.endsAt))).getTime() > (now instanceof Date ? now.getTime() : now);
 }
 
 /**

@@ -14,8 +14,9 @@ import { EventService } from './event.service.js';
 import { PublishService } from './publish.service.js';
 
 /**
- * Sự kiện của một BTC: tạo, sửa, đọc Sự kiện nháp (Story 2.7), giới hạn Vé/Đơn (Story 2.8), điều kiện mở bán và mở bán
- * (Story 2.10), Ẩn / Hiện lại / Kết thúc sớm (Story 2.12). Owner và Admin (`events.manage`).
+ * Sự kiện của một BTC: tạo, đọc Sự kiện (Story 2.7), giới hạn Vé/Đơn (Story 2.8), điều kiện mở bán và mở bán
+ * (Story 2.10), Ẩn / Hiện lại / Kết thúc sớm (Story 2.12). Owner và Admin (`events.manage`). Sửa thông tin
+ * (`PATCH :eventId`) nằm ở `flows/event-edit.controller.ts` (Story 3.10: cùng `tx` enqueue email báo Người mua của `ordering`).
  * Mọi route mang `@RequirePermission` nên tự rơi vào bộ test cách ly. `:eventId` sai dạng → 404 `EVENT_NOT_FOUND`.
  */
 @Controller('orgs/:orgId/events')
@@ -44,13 +45,6 @@ export class EventsController {
   @RequirePermission(Permission.EVENTS_MANAGE)
   get(@Access() ctx: AccessContext, @Param('eventId') eventId: string): Promise<EventDetail> {
     return this.events.get(ctx, eventId);
-  }
-
-  /** Sửa Sự kiện (thay toàn bộ các trường của `EventDraftInput`); slug không đổi. */
-  @Patch(':eventId')
-  @RequirePermission(Permission.EVENTS_MANAGE)
-  update(@Access() ctx: AccessContext, @Param('eventId') eventId: string, @Body() body: unknown): Promise<EventDetail> {
-    return this.events.update(ctx, eventId, parseRequest(EventDraftInput, body));
   }
 
   /** Đổi giới hạn Vé/Đơn của Sự kiện (Story 2.8): 1–50, mặc định 10. */
