@@ -502,3 +502,9 @@ E3-7 (retro Epic 3) gom 4 việc ship riêng được. Mason chọn tách ngày 
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-3-e3-7-trang-don-an-qr-sau-ket-thuc.md`
   summary: Không test nào chứng minh `ended` đi theo đồng hồ DB chứ không theo đồng hồ app: mọi test đẩy mốc bằng `effective_end_at = now() - 1s`, cả hai đồng hồ đều đã quá. Thêm một ca giả `Date` của app (vd. `vi.useFakeTimers({ toFake: ['Date'] })`) lùi về trước mốc rồi kiểm `ended: true`, `tickets: []` cho biểu thức chung `endedNow`.
   evidence: Review E3-7 (VG) triage #2. Yếu điểm chung của `event/public-event.ts` › `endedNow` (Trang Đơn, Chi tiết Vé, link chia sẻ, email); repo chưa có mẫu giả `Date` trong harness Nest/HTTP. Nên làm cùng mục gom đồng hồ DB của E3-7.
+
+## Deferred from: code review of spec-epic-3-e3-7-b6-c7-nha-cho-link-va-test-notify.md (2026-11-12)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-3-e3-7-b6-c7-nha-cho-link-va-test-notify.md`
+  summary: Chuyển `releaseOrderHeld` từ `ordering/order-jobs.ts` sang `ordering/inventory.service.ts` và thôi export `releaseHeld`. Khi đó "chỉ một chỗ nhả chỗ theo Đơn" được cấu trúc bảo đảm, không chỉ nằm trong comment. `payment-link.ts` và `mark-paid.ts` cũng thôi lấy một hàm tồn kho từ mô-đun job pg-boss.
+  evidence: Review B6 (BH) triage #6. Hiện `releaseHeld` chỉ còn một người gọi (`releaseOrderHeld`), nhưng vẫn export nên đường mới có thể tự nhả chỗ lại như `PaymentLinks.expire` trước B6. Refactor chạm ba file ngoài phạm vi B6, nên làm cùng mục tách `orders.service.ts` của E3-7.

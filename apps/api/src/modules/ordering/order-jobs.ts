@@ -120,8 +120,9 @@ export async function expireOrder(db: Database, orderId: string, kind: ExpiryKin
 }
 
 /**
- * Nhả toàn bộ chỗ đang giữ của Đơn vừa rời `pending` (`held -= n` từng dòng, theo `ticket_type_id` tăng dần): hết hạn
- * (job, IPN `expired`/`canceled`) và `pending → review` của `markPaid` (Story 3.6).
+ * Nhả toàn bộ chỗ đang giữ của một Đơn vừa rời `pending` mà không bán (`held -= n` từng dòng; `releaseHeld` khóa theo
+ * `ticket_type_id` tăng dần). Mọi đường hết hạn (job, IPN, `PaymentLinks`) và `pending → review` của `markPaid` (Story
+ * 3.6) đều nhả chỗ qua hàm này.
  */
 export async function releaseOrderHeld(tx: Tx, orderId: string): Promise<void> {
   const lines = await tx
