@@ -2,6 +2,8 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { ORDER_HOLD_SECONDS } from '@tickee/contracts';
 import { FunnelController } from './funnel.controller.js';
 import { FunnelService } from './funnel.service.js';
+import { MyTicketsController } from './my-tickets.controller.js';
+import { MyTicketsService } from './my-tickets.service.js';
 import { OrderPaymentsModule } from './mark-paid.js';
 import { ORDER_CODE_GENERATOR, randomOrderCode } from './order-code.js';
 import { OrderQueues } from './order-jobs.js';
@@ -22,8 +24,9 @@ import {
 
 /**
  * Trạng thái bán công khai (Story 2.11-a), phễu mua (Story 3.1), Checkout và tạo Đơn (Story 3.2), Đơn 0đ (Story 3.3),
- * link thanh toán Gateway (Story 3.4). Cần `DbModule`, `JobsModule` (enqueue job hết hạn Đơn trong TX1 và TX2),
- * `TicketingModule` (toàn cục: phát Vé, Mã QR vé) và `TingeeModule` (toàn cục: `create-link`) ở gốc DI; `config` cho
+ * link thanh toán Gateway (Story 3.4), "Vé của tôi" và Chi tiết Vé (Story 3.9). Cần `DbModule`, `JobsModule` (enqueue
+ * job hết hạn Đơn trong TX1 và TX2), `RealtimeModule` (toàn cục: SSE), `TicketingModule` (toàn cục: phát Vé, Mã QR vé,
+ * Vé của Người mua) và `TingeeModule` (toàn cục: `create-link`) ở gốc DI; `config` cho
  * khóa HMAC IP của bộ đếm tạo Đơn, `WEB_ORIGIN` (`returnUrl`) và khóa giải mã credential Tingee. `markPaid` nằm ở
  * `OrderPaymentsModule` (không cần cấu hình) để `payment` dùng được ở cả vai api lẫn worker (Story 3.5).
  */
@@ -33,11 +36,12 @@ export class OrderingModule {
     return {
       module: OrderingModule,
       imports: [OrderPaymentsModule],
-      controllers: [PublicAvailabilityController, FunnelController, OrdersController],
+      controllers: [PublicAvailabilityController, FunnelController, OrdersController, MyTicketsController],
       providers: [
         AvailabilityMemo,
         FunnelService,
         OrdersService,
+        MyTicketsService,
         PaymentLinks,
         OrderRateLimiter,
         OrderQueues,

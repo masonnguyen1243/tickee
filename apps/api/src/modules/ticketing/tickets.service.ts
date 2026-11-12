@@ -14,6 +14,7 @@ import { audit } from '../../platform/audit/index.js';
 import type { Database, DbExecutor, Tx } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { ticketEventById, type TicketEventRef } from '../event/index.js';
+import { ownTicket, ticketNotFound, ticketsOfUser, type OwnTicket, type OwnTicketDetail } from './my-tickets.js';
 import { signTicketQr, TICKET_QR_KEYS, TicketQrKeys } from './qr.js';
 import { tickets } from './schema.js';
 import { hashShareToken, shareTokenOf } from './share-token.js';
@@ -23,8 +24,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Một câu cho mọi lý do link chia sẻ không mở được (không lộ lý do nào). */
 const sharedTicketNotFound = () =>
   new AppError(ErrorCode.SHARED_TICKET_NOT_FOUND, 'Link không đúng hoặc không còn hiệu lực.');
-
-const ticketNotFound = () => new AppError(ErrorCode.TICKET_NOT_FOUND, 'Không tìm thấy Vé này.');
 
 /** Sự kiện của Vé còn cho xem/chia sẻ Vé: có, chưa hủy, đồng hồ DB chưa quá `effective_end_at` (AD-14). */
 const eventOpenForTicket = (event: TicketEventRef | null): event is TicketEventRef =>
@@ -134,6 +133,22 @@ export class TicketsService {
       qr: signTicketQr(this.keys, ticket.id, qrKeyVersion),
       shareToken: shareTokenOf(this.keys, ticket.id, qrKeyVersion, shareVersion),
     }));
+  }
+
+  /**
+   * Mọi Vé của chính Người mua (`buyerScope`, Story 3.9 "Vé của tôi"): không ký Mã QR vé, không tính token chia sẻ; trạng
+   * thái phía Người mua và `event.ended` theo đồng hồ DB (`my-tickets.ts`). Không theo thứ tự nào.
+   */
+  ticketsOfUser(db: DbExecutor, userId: string): Promise<OwnTicket[]> {
+    return ticketsOfUser(db, userId);
+  }
+
+  /**
+   * Một Vé của chính Người mua (`buyerScope`, Story 3.9 Chi tiết Vé): Mã QR vé và token chia sẻ chỉ khi Vé chưa hủy, Sự
+   * kiện chưa hủy và chưa quá `effective_end_at`. Id sai dạng, không có, của người khác → `404 TICKET_NOT_FOUND`.
+   */
+  ownTicket(db: DbExecutor, userId: string, ticketId: string): Promise<OwnTicketDetail> {
+    return ownTicket(db, this.keys, userId, ticketId);
   }
 
   /**

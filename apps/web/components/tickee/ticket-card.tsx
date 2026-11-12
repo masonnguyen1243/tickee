@@ -1,4 +1,4 @@
-import { formatEventDateTime, SharedTicketStatus } from '@tickee/contracts';
+import { formatEventDateTime, MyTicketStatus } from '@tickee/contracts';
 import type * as React from 'react';
 
 import { cn } from '@/lib/utils';
@@ -18,19 +18,27 @@ type TicketCardProps = {
   startsAt: string;
   /** Địa điểm Sự kiện; vắng hoặc `null` → không có dòng. */
   venue?: string | null;
-  /** Trạng thái Vé (trang Vé được chia sẻ): badge "Hợp lệ" / "Đã check-in"; đã check-in thì QR mờ .25. */
-  status?: SharedTicketStatus;
-  /** Mã QR vé (`t<k>.<ticketId>.<sig>`). */
-  qr: string;
+  /**
+   * Trạng thái Vé (trang Vé được chia sẻ, Chi tiết Vé): badge "Hợp lệ" / "Đã check-in" / "Đã hủy"; đã check-in thì QR mờ
+   * .25. `SharedTicketStatus` là tập con của `MyTicketStatus`.
+   */
+  status?: MyTicketStatus;
+  /**
+   * Mã QR vé (`t<k>.<ticketId>.<sig>`). Vắng hoặc `null` (Vé đã hủy: máy chủ không ký) → thẻ không có phần QR, không có
+   * đường xé.
+   */
+  qr?: string | null;
   /** Nút dưới QR (vd. "Chia sẻ Vé", "Tạo lại link" của chủ Vé). */
   actions?: React.ReactNode;
   className?: string;
   style?: React.CSSProperties;
 };
 
-const STATUS_LABEL: Record<SharedTicketStatus, { tone: 'success' | 'neutral'; label: string }> = {
-  [SharedTicketStatus.VALID]: { tone: 'success', label: 'Hợp lệ' },
-  [SharedTicketStatus.CHECKED_IN]: { tone: 'neutral', label: 'Đã check-in' },
+/** Tone badge của Vé (DESIGN.md › status-badge): Hợp lệ → success · Đã check-in → neutral · Đã hủy → danger. */
+export const TICKET_STATUS_BADGE: Record<MyTicketStatus, { tone: 'success' | 'neutral' | 'danger'; label: string }> = {
+  [MyTicketStatus.VALID]: { tone: 'success', label: 'Hợp lệ' },
+  [MyTicketStatus.CHECKED_IN]: { tone: 'neutral', label: 'Đã check-in' },
+  [MyTicketStatus.CANCELLED]: { tone: 'danger', label: 'Đã hủy' },
 };
 
 function Row({ label, slot, children }: { label: string; slot?: string; children: React.ReactNode }) {
@@ -48,8 +56,8 @@ function Row({ label, slot, children }: { label: string; slot?: string; children
  * `ticket-card` (DESIGN.md › Thanh toán & Vé): thẻ sáng `card` dáng cuống vé — phần thông tin (tên Sự kiện, Hạng vé,
  * "Vé k/N", trạng thái nếu có, Người mua nếu là chủ Vé, ngày-giờ, địa điểm nếu có) và phần Mã QR vé ngăn bởi đường xé
  * nét đứt với hai khuyết bán nguyệt (màu nền trang: thẻ phải nằm thẳng trên `page`). QR đen trên tấm trắng 200×200 ở
- * mọi theme; Vé đã check-in thì QR mờ .25 kèm badge "Đã check-in". Khác hẳn `payment-summary` (stage tối, không QR) để
- * không ai nhầm.
+ * mọi theme; Vé đã check-in thì QR mờ .25 kèm badge "Đã check-in". Không có QR (Vé đã hủy) → chỉ phần thông tin (và
+ * nút nếu có). Khác hẳn `payment-summary` (stage tối, không QR) để không ai nhầm.
  */
 export function TicketCard({
   eventName,
@@ -66,8 +74,8 @@ export function TicketCard({
   style,
 }: TicketCardProps) {
   const position = `Vé ${seq}/${count}`;
-  const badge = status ? STATUS_LABEL[status] : null;
-  const checkedIn = status === SharedTicketStatus.CHECKED_IN;
+  const badge = status ? TICKET_STATUS_BADGE[status] : null;
+  const checkedIn = status === MyTicketStatus.CHECKED_IN;
   return (
     <article
       data-slot="ticket-card"
@@ -107,27 +115,35 @@ export function TicketCard({
           ) : null}
         </dl>
       </div>
-      {/* Đường xé + hai khuyết: trang trí, không mang thông tin. */}
-      <div aria-hidden="true" data-slot="ticket-card-tear" className="relative mx-card-padding border-t-2 border-dashed">
-        <span className="absolute -top-[11px] -left-[25px] size-5 rounded-full bg-background" />
-        <span className="absolute -top-[11px] -right-[25px] size-5 rounded-full bg-background" />
-      </div>
-      <div className="flex flex-col items-center gap-stack p-card-padding">
-        <p data-slot="ticket-card-qr-label" className="text-label text-muted-foreground">
-          Mã QR vé · đưa cho CTV ở cổng
-        </p>
-        <QrPlate
-          value={qr}
-          label={`Mã QR vé ${seq} trên ${count}, ${ticketTypeName}${checkedIn ? ', đã check-in' : ''}`}
-          size={200}
-          className={checkedIn ? 'opacity-25' : undefined}
-        />
-        {actions ? (
-          <div data-slot="ticket-card-actions" className="flex w-full flex-col items-center gap-2">
-            {actions}
+      {qr ? (
+        <>
+          {/* Đường xé + hai khuyết: trang trí, không mang thông tin. */}
+          <div aria-hidden="true" data-slot="ticket-card-tear" className="relative mx-card-padding border-t-2 border-dashed">
+            <span className="absolute -top-[11px] -left-[25px] size-5 rounded-full bg-background" />
+            <span className="absolute -top-[11px] -right-[25px] size-5 rounded-full bg-background" />
           </div>
-        ) : null}
-      </div>
+          <div className="flex flex-col items-center gap-stack p-card-padding">
+            <p data-slot="ticket-card-qr-label" className="text-label text-muted-foreground">
+              Mã QR vé · đưa cho CTV ở cổng
+            </p>
+            <QrPlate
+              value={qr}
+              label={`Mã QR vé ${seq} trên ${count}, ${ticketTypeName}${checkedIn ? ', đã check-in' : ''}`}
+              size={200}
+              className={checkedIn ? 'opacity-25' : undefined}
+            />
+            {actions ? (
+              <div data-slot="ticket-card-actions" className="flex w-full flex-col items-center gap-2">
+                {actions}
+              </div>
+            ) : null}
+          </div>
+        </>
+      ) : actions ? (
+        <div data-slot="ticket-card-actions" className="flex flex-col items-center gap-2 px-card-padding pb-card-padding">
+          {actions}
+        </div>
+      ) : null}
     </article>
   );
 }

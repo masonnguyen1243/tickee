@@ -12,7 +12,8 @@ import { z } from 'zod';
 
 /**
  * Danh mục topic (AD-17). Ai được đăng ký và REST cần tải lại:
- * - `order_changed`: Người mua của Đơn (`buyerScope`) → `GET /v1/me/orders/:code` (Story 3.7).
+ * - `order_changed`: Người mua của Đơn (`buyerScope`) → `GET /v1/me/orders/:code` (Story 3.7) và `GET /v1/me/tickets`
+ *   (Story 3.9).
  * - `event_orders_changed`: Owner, Admin → Đơn gần đây, số liệu Sự kiện (Story 3.11).
  * - `event_checkins_changed`: Owner, Admin, CTV được giao → số liệu check-in.
  * - `org_review_items_changed`: Owner, Admin → số mục Cần xử lý.

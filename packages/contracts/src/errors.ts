@@ -192,8 +192,10 @@ export const ErrorCode = {
    */
   SHARED_TICKET_NOT_FOUND: 'SHARED_TICKET_NOT_FOUND',
   /**
-   * Không tìm thấy Vé của chính Người mua (Story 3.8): id sai dạng, không tồn tại, Vé của người khác, Vé đã hủy, Sự kiện
-   * đã hủy, hoặc đã quá `effective_end_at` (cùng lỗi để không lộ Vé nào có thật).
+   * Không tìm thấy Vé của chính Người mua (cùng lỗi để không lộ Vé nào có thật). Tạo lại link chia sẻ (Story 3.8): id sai
+   * dạng, không tồn tại, Vé của người khác, Vé đã hủy, Sự kiện đã hủy, hoặc đã quá `effective_end_at`. Chi tiết Vé
+   * (`GET /v1/me/tickets/:ticketId`, Story 3.9): chỉ id sai dạng, không tồn tại hoặc Vé của người khác (Vé đã hủy hay đã
+   * sang lịch sử vẫn trả `200`, không có QR).
    */
   TICKET_NOT_FOUND: 'TICKET_NOT_FOUND',
 } as const;

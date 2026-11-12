@@ -6,6 +6,13 @@ import { cn } from '@/lib/utils';
 
 type OrganizerContactProps = {
   organizer: BuyerOrderOrganizer;
+  /** Cấp tiêu đề "Liên hệ BTC" theo chỗ đặt: `h2` ở Trang Đơn và Chi tiết Vé, `h4` trong `order-card` (dưới `h3`). */
+  headingLevel?: 2 | 3 | 4;
+  /**
+   * `card` (mặc định): khối riêng nền `card` + bóng. `inline`: không nền, không đệm, để đặt trong một thẻ khác
+   * (`order-card`).
+   */
+  variant?: 'card' | 'inline';
   className?: string;
 };
 
@@ -13,18 +20,23 @@ type OrganizerContactProps = {
  * Khối liên hệ BTC của Trang Đơn (Story 3.7; DESIGN.md › order-card "khối liên hệ BTC"): tên BTC + SĐT, email liên hệ
  * BTC đã nhập khi tạo BTC (mở ứng dụng gọi điện / email). BTC không nhập kênh nào → chỉ còn tên. Không có nút chính.
  */
-export function OrganizerContact({ organizer, className }: OrganizerContactProps) {
+export function OrganizerContact({ organizer, headingLevel = 2, variant = 'card', className }: OrganizerContactProps) {
   const headingId = useId();
+  const Heading = `h${headingLevel}` as const;
   const link = 'inline-flex min-h-6 items-center gap-2 self-start text-label text-foreground underline underline-offset-4';
   return (
     <section
       aria-labelledby={headingId}
       data-slot="organizer-contact"
-      className={cn('flex flex-col gap-1 rounded-lg bg-card p-card-padding text-card-foreground shadow-card', className)}
+      className={cn(
+        'flex flex-col gap-1',
+        variant === 'card' && 'rounded-lg bg-card p-card-padding text-card-foreground shadow-card',
+        className,
+      )}
     >
-      <h2 id={headingId} className="text-meta text-muted-foreground">
+      <Heading id={headingId} className="text-meta text-muted-foreground">
         Liên hệ BTC
-      </h2>
+      </Heading>
       <p data-slot="organizer-contact-name" className="text-label font-bold wrap-break-word">
         {organizer.name}
       </p>

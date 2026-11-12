@@ -7,6 +7,7 @@ import { useEffect, type ReactNode } from 'react';
 
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError } from '@/lib/api/errors';
 import { fetchMe, hasErrorCode, ME_QUERY_KEY } from '@/lib/auth/api';
 import { CONSENT_PATH, LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
@@ -17,8 +18,8 @@ export function BuyerSkeleton() {
   return (
     <div role="status" aria-busy="true" className="flex flex-col gap-section pt-2">
       <span className="sr-only">Đang tải</span>
-      <div aria-hidden="true" data-slot="skeleton" className="h-16 animate-pulse rounded-lg bg-muted" />
-      <div aria-hidden="true" data-slot="skeleton" className="h-48 animate-pulse rounded-lg bg-muted" />
+      <Skeleton className="h-16" />
+      <Skeleton className="h-48" />
     </div>
   );
 }

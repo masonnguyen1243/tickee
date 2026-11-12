@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-11-2026 17:29
+last_updated: 11-12-2026 09:53
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -66,9 +66,9 @@ development_status:
   3-4-tạo-link-thanh-toán-gateway-và-màn-thanh-toán: done
   3-5-nhận-ipn-và-phát-vé-đúng-một-lần: done
   3-6-ipn-cho-các-trường-hợp-biên: done
-  3-7-trang-đơn-tự-chuyển-thành-công-theo-thời-gian-thực: review
-  3-8-email-vé-và-link-chia-sẻ-vé: review
-  3-9-vé-của-tôi-và-chi-tiết-vé: backlog
+  3-7-trang-đơn-tự-chuyển-thành-công-theo-thời-gian-thực: done
+  3-8-email-vé-và-link-chia-sẻ-vé: done
+  3-9-vé-của-tôi-và-chi-tiết-vé: review
   3-10-báo-người-mua-khi-sự-kiện-đổi-giờ-hoặc-địa-điểm: backlog
   3-11-tổng-quan-sự-kiện-thấy-đơn-đầu-tiên-ngay-lập-tức: backlog
   epic-3-retrospective: optional

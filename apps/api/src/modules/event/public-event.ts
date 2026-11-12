@@ -1,5 +1,5 @@
 import { EVENT_SLUG_PATTERN, toEventIso, type PublicEvent } from '@tickee/contracts';
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { DbExecutor, Tx } from '../../platform/db/index.js';
 import { organizationNameOf } from '../organizer/index.js';
 import { notFound, UUID } from './event.service.js';
@@ -134,22 +134,36 @@ export interface TicketEventRef {
   ended: boolean;
 }
 
+const ticketEventColumns = {
+  id: events.id,
+  name: events.name,
+  startsAt: events.startsAt,
+  venue: events.venue,
+  status: events.status,
+  effectiveEndAt: events.effectiveEndAt,
+  ended: sql<boolean>`now() > ${events.effectiveEndAt}`,
+};
+
 /** Sự kiện của Vé theo id (không lọc trạng thái: Vé đã phát thì Sự kiện đã từng mở bán). Id sai dạng, không có → `null`. */
 export async function ticketEventById(db: DbExecutor, eventId: string): Promise<TicketEventRef | null> {
   if (!UUID.test(eventId)) return null;
-  const [row] = await db
-    .select({
-      id: events.id,
-      name: events.name,
-      startsAt: events.startsAt,
-      venue: events.venue,
-      status: events.status,
-      effectiveEndAt: events.effectiveEndAt,
-      ended: sql<boolean>`now() > ${events.effectiveEndAt}`,
-    })
-    .from(events)
-    .where(eq(events.id, eventId));
+  const [row] = await db.select(ticketEventColumns).from(events).where(eq(events.id, eventId));
   return row ?? null;
+}
+
+/**
+ * Bản batch của `ticketEventById` (Story 3.9, "Vé của tôi"): một truy vấn cho mọi Sự kiện theo danh sách id, `ended` theo
+ * đồng hồ DB như bản lẻ (AD-14; trong một transaction thì mọi dòng cùng một `now()`). Id sai dạng, trùng hay không có
+ * thì không có trong kết quả. Danh sách rỗng → không chạm DB.
+ */
+export async function ticketEventsByIds(
+  db: DbExecutor,
+  eventIds: readonly string[],
+): Promise<Map<string, TicketEventRef>> {
+  const ids = [...new Set(eventIds.filter((id) => UUID.test(id)).map((id) => id.toLowerCase()))];
+  if (ids.length === 0) return new Map();
+  const rows = await db.select(ticketEventColumns).from(events).where(inArray(events.id, ids));
+  return new Map(rows.map((row) => [row.id, row]));
 }
 
 /**
