@@ -10,7 +10,7 @@ import { checkoutFunnelEvents } from './schema.js';
  * nhập. Không PII, không `user_id`; các sự kiện nối bằng `funnel_id`. "Mua" luôn đưa `f` sang Checkout (Story 3.2), nên
  * `login_completed` chỉ ghi khi đã có `buy_clicked` cùng `funnel_id` của cùng Sự kiện với `login_required = true` (người
  * đã đăng nhập sẵn không tính vào SM-C2); muốn bơm rác cũng phải gửi theo cặp. `order_created` do tạo Đơn ghi trong TX1
- * (`orders.service.ts`) và `paid` do `markPaid` ghi khi Đơn chuyển `paid` (`mark-paid.ts`, Story 3.3), không qua đây.
+ * (`place-order.ts`) và `paid` do `markPaid` ghi khi Đơn chuyển `paid` (`mark-paid.ts`, Story 3.3), không qua đây.
  * Trùng `(funnel_id, type)` → không thêm dòng. Chưa giới hạn tốc độ theo IP (deferred, Story 4.6).
  */
 @Injectable()

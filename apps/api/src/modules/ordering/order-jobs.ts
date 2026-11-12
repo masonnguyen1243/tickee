@@ -1,15 +1,15 @@
 import { Inject, Injectable, Logger, Module, type DynamicModule, type OnApplicationBootstrap } from '@nestjs/common';
 import { JobQueue, OrderStatus, PAYMENT_LINK_GRACE_SECONDS } from '@tickee/contracts';
-import { and, asc, eq, gte, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm';
+import { and, eq, gte, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
 import { BOSS, defineQueue, JOB_COMPLETED, QueueProducer, registerQueueWorker } from '../../platform/jobs/index.js';
 import { BuyerEmailWorker, ORDERING_JOBS_CONFIG, type OrderingJobsConfig } from './buyer-email-jobs.js';
 import { EventChangeEmailWorker } from './event-change-email-jobs.js';
-import { releaseHeld } from './inventory.service.js';
+import { releaseOrderHeld } from './inventory.service.js';
 import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
-import { orderItems, orders } from './schema.js';
+import { orders } from './schema.js';
 
 /*
  * Hết hạn Giữ chỗ (AD-4), một queue cho hai loại job, phân biệt bằng cờ `linked` của payload:
@@ -117,20 +117,6 @@ export async function expireOrder(db: Database, orderId: string, kind: ExpiryKin
     await notifyOrderChanged(tx, expired);
     return 'expired';
   });
-}
-
-/**
- * Nhả toàn bộ chỗ đang giữ của một Đơn vừa rời `pending` mà không bán (`held -= n` từng dòng; `releaseHeld` khóa theo
- * `ticket_type_id` tăng dần). Mọi đường hết hạn (job, IPN, `PaymentLinks`) và `pending → review` của `markPaid` (Story
- * 3.6) đều nhả chỗ qua hàm này.
- */
-export async function releaseOrderHeld(tx: Tx, orderId: string): Promise<void> {
-  const lines = await tx
-    .select({ ticketTypeId: orderItems.ticketTypeId, quantity: orderItems.quantity })
-    .from(orderItems)
-    .where(eq(orderItems.orderId, orderId))
-    .orderBy(asc(orderItems.ticketTypeId));
-  await releaseHeld(tx, lines);
 }
 
 /** Kết quả `markExpired`: Đơn vừa chuyển `expired` và đã nhả chỗ; hoặc bỏ qua (không còn `pending`, không có). */

@@ -3,14 +3,13 @@ import { BuyerEmailKind, EventStatus, FunnelEventType, OrderStatus, ReviewItemRe
 import { and, asc, eq, sql, type SQL } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { audit } from '../../platform/audit/index.js';
-import type { DbExecutor, Tx } from '../../platform/db/index.js';
+import { dbClock, type DbExecutor, type Tx } from '../../platform/db/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
 import { lockEventByIdForShare, organizationLocked, type PublicEventRef } from '../event/index.js';
 import { TicketsService } from '../ticketing/index.js';
 import { BuyerEmailQueues, enqueueBuyerEmail } from './buyer-email-jobs.js';
-import { sellInventory, settleHeld } from './inventory.service.js';
+import { releaseOrderHeld, sellInventory, settleHeld } from './inventory.service.js';
 import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
-import { releaseOrderHeld } from './order-jobs.js';
 import { checkoutFunnelEvents, orderItems, orders, type PaidSource } from './schema.js';
 
 /**
@@ -68,12 +67,6 @@ export async function orderForPayment(db: DbExecutor, code: string): Promise<Ord
     .from(orders)
     .where(eq(orders.code, code));
   return row ?? null;
-}
-
-/** Đồng hồ DB (`clock_timestamp()`): `issued_at` của Vé, `paid_at` khi Tingee không báo, mốc so `effective_end_at`. */
-async function dbClock(tx: Tx): Promise<Date> {
-  const { rows } = await tx.execute<{ now: string | Date }>(sql`SELECT clock_timestamp() AS now`);
-  return new Date(rows[0]!.now);
 }
 
 /** Một dòng của Đơn để chốt tồn kho và phát Vé. */
@@ -258,7 +251,8 @@ export class OrderPayments {
       await moveToReview(tx, orderId, status);
       return { outcome: 'mismatch' };
     }
-    // 6. Tiền về muộn.
+    // 6. Tiền về muộn. Đồng hồ DB lúc gọi (`clock_timestamp()`): mốc so `effective_end_at`, `issued_at` của Vé, `paid_at`
+    // khi Tingee không báo.
     const now = await dbClock(tx);
     if (now.getTime() > event.effectiveEndAt.getTime()) {
       await moveToReview(tx, orderId, status);

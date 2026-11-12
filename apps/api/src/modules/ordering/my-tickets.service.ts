@@ -13,7 +13,7 @@ import {
   type MyTicketsView,
 } from '@tickee/contracts';
 import { and, asc, desc, eq, gt, inArray, or, sql } from 'drizzle-orm';
-import { DATABASE, type Database, type DbExecutor } from '../../platform/db/index.js';
+import { DATABASE, dbNow, type Database, type DbExecutor } from '../../platform/db/index.js';
 import { ticketEventsByIds, type TicketEventRef } from '../event/index.js';
 import { organizerContactOf } from '../organizer/index.js';
 import { TicketsService, type OwnTicket } from '../ticketing/index.js';
@@ -68,8 +68,7 @@ export class MyTicketsService {
    */
   list(userId: string): Promise<MyTicketsView> {
     return this.db.orm.transaction(async (tx) => {
-      const { rows } = await tx.execute<{ now: string | Date }>(sql`SELECT now() AS now`);
-      const now = new Date(rows[0]!.now);
+      const now = await dbNow(tx);
       const owned = await this.tickets.ticketsOfUser(tx, userId);
       const pending = await this.pendingOrders(tx, userId, now);
       return {

@@ -156,15 +156,29 @@ export async function sellInventory(tx: Tx, lines: readonly InventoryLine[]): Pr
 
 /**
  * Nhả chỗ đang giữ của một Đơn (`held -= n`), theo `ticket_type_id` tăng dần. CHECK `held >= 0` chặn nhả quá số đang
- * giữ (lỗi lập trình → transaction lỗi, không âm thầm sai số).
+ * giữ (lỗi lập trình → transaction lỗi, không âm thầm sai số). Nội bộ: mọi đường nhả chỗ đi qua `releaseOrderHeld`.
  */
-export async function releaseHeld(tx: Tx, lines: readonly InventoryLine[]): Promise<void> {
+async function releaseHeld(tx: Tx, lines: readonly InventoryLine[]): Promise<void> {
   for (const { ticketTypeId, quantity } of byTicketTypeId(lines)) {
     await tx
       .update(ticketTypeInventory)
       .set({ held: sql`${ticketTypeInventory.held} - ${quantity}` })
       .where(eq(ticketTypeInventory.ticketTypeId, ticketTypeId));
   }
+}
+
+/**
+ * Nhả toàn bộ chỗ đang giữ của một Đơn vừa rời `pending` mà không bán (`held -= n` từng dòng; `releaseHeld` khóa theo
+ * `ticket_type_id` tăng dần). Mọi đường hết hạn (job, IPN, `PaymentLinks`) và `pending → review` của `markPaid` (Story
+ * 3.6) đều nhả chỗ qua hàm này.
+ */
+export async function releaseOrderHeld(tx: Tx, orderId: string): Promise<void> {
+  const lines = await tx
+    .select({ ticketTypeId: orderItems.ticketTypeId, quantity: orderItems.quantity })
+    .from(orderItems)
+    .where(eq(orderItems.orderId, orderId))
+    .orderBy(asc(orderItems.ticketTypeId));
+  await releaseHeld(tx, lines);
 }
 
 /**

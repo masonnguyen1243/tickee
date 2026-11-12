@@ -2,7 +2,7 @@ import { createHmac, hkdfSync } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { ErrorCode, ORDER_RATE_LIMITS, type OrderRateLimitedDetails } from '@tickee/contracts';
 import { and, desc, eq, gt, sql, type SQL } from 'drizzle-orm';
-import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
+import { DATABASE, dbNow, type Database } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { orderCreateAttempts } from './schema.js';
 
@@ -20,12 +20,6 @@ export interface OrderingConfig {
 
 /** Giá trị của `ORDERING_CONFIG`: chỉ khóa HMAC IP (khóa credential Tingee đi riêng vào `PAYMENT_LINK_SETTINGS`). */
 export type OrderRateLimitConfig = Pick<OrderingConfig, 'BETTER_AUTH_SECRET'>;
-
-/** `now()` của Postgres (đầu transaction), cùng mốc với `created_at` mặc định. */
-async function dbNow(tx: Tx): Promise<number> {
-  const rows = await tx.execute<{ now: string | Date }>(sql`SELECT now() AS now`);
-  return new Date(rows.rows[0]!.now).getTime();
-}
 
 /**
  * Giới hạn tốc độ tạo Đơn (Story 3.2, AD-31) đếm trong Postgres: tối đa `perUser` lần mỗi tài khoản và `perIp` lần mỗi
@@ -85,7 +79,7 @@ export class OrderRateLimiter {
       const oldestIp = await nth(eq(t.ipHmac, ipHmac), perIp);
       if (oldestIp !== undefined) allowedAt.push(oldestIp + windowSeconds * 1000);
       if (allowedAt.length > 0) {
-        const now = await dbNow(tx);
+        const now = (await dbNow(tx)).getTime();
         const details: OrderRateLimitedDetails = {
           retryAfterSeconds: Math.max(1, Math.ceil((Math.max(...allowedAt) - now) / 1000)),
         };

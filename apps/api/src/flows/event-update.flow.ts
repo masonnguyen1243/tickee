@@ -1,5 +1,4 @@
 import { notifiesBuyers, timeOrVenueChanged, type EventBuyerCount, type EventDetail } from '@tickee/contracts';
-import { sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import {
   applyEventEdit,
@@ -9,7 +8,7 @@ import {
 } from '../modules/event/index.js';
 import { enqueueEventChangeEmail, paidBuyerCount } from '../modules/ordering/index.js';
 import type { AccessContext } from '../platform/access/index.js';
-import type { Database, Tx } from '../platform/db/index.js';
+import { dbNow, type Database } from '../platform/db/index.js';
 
 /*
  * Sửa thông tin Sự kiện (Story 2.12) kèm báo Người mua khi đổi giờ hoặc địa điểm (Story 3.10, FR-7, AD-12, AD-25): một
@@ -17,12 +16,6 @@ import type { Database, Tx } from '../platform/db/index.js';
  * flows (`event` không được gọi `ordering`). Rollback (lỗi ghi, lỗi enqueue…) thì không có job và `time_venue_version`
  * giữ nguyên. Người gọi đã `PublicPageQueues.ready()` và `EventChangeEmailQueues.ready()` trước transaction.
  */
-
-/** Đồng hồ DB của transaction (`now()`): mốc so `effective_end_at` mới. */
-async function dbNow(tx: Tx): Promise<Date> {
-  const { rows } = await tx.execute<{ now: string | Date }>(sql`SELECT now() AS now`);
-  return new Date(rows[0]!.now);
-}
 
 /**
  * `PATCH /v1/orgs/:orgId/events/:eventId`: sửa như Story 2.12 (`applyEventEdit`), rồi enqueue đúng một job gốc email
