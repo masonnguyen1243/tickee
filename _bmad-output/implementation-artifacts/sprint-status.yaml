@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-12-2026 14:46
+last_updated: 11-12-2026 15:33
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -59,7 +59,7 @@ development_status:
   2-14-chuyển-quyền-owner: done
   epic-2-retrospective: done
 
-  epic-3: in-progress
+  epic-3: done
   3-1-chọn-vé-và-đăng-nhập-khi-bấm-mua: done
   3-2-checkout-và-giữ-chỗ-không-bao-giờ-bán-quá-số-suất: done
   3-3-đăng-ký-sự-kiện-miễn-phí-và-nhận-vé-ngay: done
@@ -70,8 +70,8 @@ development_status:
   3-8-email-vé-và-link-chia-sẻ-vé: done
   3-9-vé-của-tôi-và-chi-tiết-vé: done
   3-10-báo-người-mua-khi-sự-kiện-đổi-giờ-hoặc-địa-điểm: done
-  3-11-tổng-quan-sự-kiện-thấy-đơn-đầu-tiên-ngay-lập-tức: review
-  epic-3-retrospective: optional
+  3-11-tổng-quan-sự-kiện-thấy-đơn-đầu-tiên-ngay-lập-tức: done
+  epic-3-retrospective: done
 
   epic-4: backlog
   4-1-đối-soát-bù-khi-ipn-trễ-hoặc-mất: backlog
@@ -130,7 +130,8 @@ action_items:
     note: "Phần 3.4 có câu trả lời từ tài liệu công khai của Tingee (developers.tingee.vn
       › error-list): mã 2023 \"Tài khoản không nằm trong danh sách cấu hình của Payment
       Gateway\". 3.4 cho 2023 và nhóm VA lỗi đi nhánh tạm ngừng bán (Mason chốt 10/11).
-      Tài liệu cũng cho thấy create-link không trả hạn link. Các câu cho 4.1/4.2/4.5 vẫn mở"
+      Tài liệu cũng cho thấy create-link không trả hạn link. Các câu cho 4.1/4.2/4.5
+      vẫn mở"
   - epic: 2
     action: "Hỏi Tingee: key merchant có gọi được Chi hộ/rút tiền không, có tạo key
       giới hạn quyền không; nếu không thì ghi rủi ro chấp nhận vào PRD (R lộ Secret
@@ -148,9 +149,9 @@ action_items:
       làm Story 3.8"
     owner: "Mason"
     status: done
-    note: "Mason chốt 11/11/2026 khi lập spec 3.8: không thêm qr_version. Tạo lại link
-      chia sẻ chỉ thu hồi đường xem, Mã QR vé không đổi; đổi mã khi gửi nhầm chưa có
-      ở MVP. Ghi vào AD-16 và AD-29 của ARCHITECTURE-SPINE.md"
+    note: "Mason chốt 11/11/2026 khi lập spec 3.8: không thêm qr_version. Tạo lại
+      link chia sẻ chỉ thu hồi đường xem, Mã QR vé không đổi; đổi mã khi gửi nhầm
+      chưa có ở MVP. Ghi vào AD-16 và AD-29 của ARCHITECTURE-SPINE.md"
     ref: "_bmad-output/implementation-artifacts/spec-3-8-email-ve-va-link-chia-se-ve.md"
   - id: "epic-1-retro-item-4-ai-1-story-nhỏ-bịt-rò-pii-trong-log-che"
     epic: 1
@@ -207,14 +208,14 @@ action_items:
     owner: "Mason"
     status: in-progress
     ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
-    note: "E2E lỗi lẻ khi từ chối đồng ý đã sửa ở 3cfbe52 (PR #20); bước đăng xuất đã gom
-      vào lib/auth/use-sign-out.ts qua spec-epic-2-e2-5-refactor-web.md. Chỉ còn e2e
-      smoke full-stack (web + API thật + Mailpit) trong CI"
+    note: "E2E lỗi lẻ khi từ chối đồng ý đã sửa ở 3cfbe52 (PR #20); bước đăng xuất
+      đã gom vào lib/auth/use-sign-out.ts qua spec-epic-2-e2-5-refactor-web.md. Chỉ
+      còn e2e smoke full-stack (web + API thật + Mailpit) trong CI"
   - id: "epic-2-retro-e2-1-va-lo-hong-xac-nhan-lai"
     epic: 2
     action: "E2-1 (gate Epic 3): vá lỗ hổng xác nhận lại liên quan tới bật 2FA, kèm
-      email bảo mật và test API; admin:grant đòi 2FA; bổ sung AD-26. Chi tiết kỹ
-      thuật nằm ngoài repo (retro A1, A3)"
+      email bảo mật và test API; admin:grant đòi 2FA; bổ sung AD-26. Chi tiết kỹ thuật
+      nằm ngoài repo (retro A1, A3)"
     owner: "Mason"
     status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
@@ -235,7 +236,8 @@ action_items:
     owner: "Mason"
     status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
-    note: "Xong qua spec-epic-2-e2-3-guard-hang-ve-sau-mo-ban.md; trần 200 suất 0đ áp cho mọi Sự kiện (quyết định 09/11)"
+    note: "Xong qua spec-epic-2-e2-3-guard-hang-ve-sau-mo-ban.md; trần 200 suất 0đ
+      áp cho mọi Sự kiện (quyết định 09/11)"
   - id: "epic-2-retro-e2-4-doi-chieu-spec-truoc-epic-3"
     epic: 2
     action: "E2-4 (trước Epic 3): đối chiếu spec — PRD QR → Gateway (spine:558-561),
@@ -246,11 +248,11 @@ action_items:
     owner: "Mason"
     status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
-    note: "Xong qua sprint-change-proposal-2026-11-09-doi-chieu-spec.md: PRD và UX theo
-      Gateway; epics khớp code (sellability ở 2.11, 2.13 a/b, 2.14); AD-32, 3.4, 4.1,
-      4.2 theo credential hiện hành; AC Epic 2 chưa làm chuyển sang 4.7, 4.8 (mới), 5.8,
-      7.7 (mới), trường dựng sẵn FR-9 ra ngoài MVP; spine admin, spec 2.11-a, spec 2.2
-      cũ superseded"
+    note: "Xong qua sprint-change-proposal-2026-11-09-doi-chieu-spec.md: PRD và UX
+      theo Gateway; epics khớp code (sellability ở 2.11, 2.13 a/b, 2.14); AD-32, 3.4,
+      4.1, 4.2 theo credential hiện hành; AC Epic 2 chưa làm chuyển sang 4.7, 4.8
+      (mới), 5.8, 7.7 (mới), trường dựng sẵn FR-9 ra ngoài MVP; spine admin, spec
+      2.11-a, spec 2.2 cũ superseded"
   - id: "epic-2-retro-e2-5-refactor-truoc-epic-3"
     epic: 2
     action: "E2-5 (trước story Epic 3 đầu tiên có UI/queue mới): gom helper web (messageOf,
@@ -260,12 +262,12 @@ action_items:
     owner: "Mason"
     status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
-    note: "Phần Web xong qua spec-epic-2-e2-5-refactor-web.md (PR #48). Phần API xong qua
-      spec-epic-2-e2-5-refactor-api.md: helper pg-boss chung ở platform/jobs/queue.ts
-      (defineQueue, QueueProducer, registerQueueWorker, fanOut); hai job email gửi nhiều
-      người tách thành job gốc + job con theo người nhận, retry chỉ gửi lại người lỗi;
-      escapeHtml ở platform/email; formatVnDateTime/formatVnDate trong contracts; MESSAGES
-      còn 5 mã"
+    note: "Phần Web xong qua spec-epic-2-e2-5-refactor-web.md (PR #48). Phần API xong
+      qua spec-epic-2-e2-5-refactor-api.md: helper pg-boss chung ở platform/jobs/queue.ts
+      (defineQueue, QueueProducer, registerQueueWorker, fanOut); hai job email gửi
+      nhiều người tách thành job gốc + job con theo người nhận, retry chỉ gửi lại
+      người lỗi; escapeHtml ở platform/email; formatVnDateTime/formatVnDate trong
+      contracts; MESSAGES còn 5 mã"
   - id: "epic-2-retro-e2-6-checklist-san-sang-epic-3"
     epic: 2
     action: "E2-6: ghi checklist sẵn sàng vào spec 3.1/3.2/3.4/3.5 — sellability lúc
@@ -274,19 +276,18 @@ action_items:
       create-link, serverNow, câu chữ Kết thúc, nhãn dashboard theo sellability (retro
       B2, B3, C2-C7, D4)"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
     note: "Phần 3.1 và 3.2 xong (spec-3-2-checkout-va-giu-cho-khong-ban-qua-so-suat.md):
-      sellability lúc đặt Đơn khóa Sự kiện FOR SHARE và kiểm lại giới hạn Vé/Đơn, bản
-      chụp chính sách hoàn vé vào orders, xóa Hạng vé có order_items → 409, câu hỏi form
-      cho Người mua, serverNow. Phần 3.4 xong (spec-3-4-tao-link-thanh-toan-gateway-va-man-thanh-toan.md):
-      read model payout (defaultPayoutTargetOf, payoutRecipientOf) và
-      TingeeClient.createPaymentLink (timestamp yyyyMMddHHmmssSSS từ 10/11, timeout 5 giây). Phần 3.5 xong
-      (spec-3-5-nhan-ipn-va-phat-ve-dung-mot-lan.md): tra BTC theo ipnKey (ipnRecipientOf)
-      và cấu hình Tingee + khóa QR cho worker (TINGEE_BASE_URL, TINGEE_CREDENTIAL_KEYS,
-      TICKET_QR_KEYS). Còn lại: nhãn trạng thái bán trên dashboard theo sellability
-      (retro C5) → Story 4.2 (Mason quyết 12/11 khi lập spec 3.11; 3.11 không đổi
-      event-status.ts)"
+      sellability lúc đặt Đơn khóa Sự kiện FOR SHARE và kiểm lại giới hạn Vé/Đơn,
+      bản chụp chính sách hoàn vé vào orders, xóa Hạng vé có order_items → 409, câu
+      hỏi form cho Người mua, serverNow. Phần 3.4 xong (spec-3-4-tao-link-thanh-toan-gateway-va-man-thanh-toan.md):
+      read model payout (defaultPayoutTargetOf, payoutRecipientOf) và TingeeClient.createPaymentLink
+      (timestamp yyyyMMddHHmmssSSS từ 10/11, timeout 5 giây). Phần 3.5 xong (spec-3-5-nhan-ipn-va-phat-ve-dung-mot-lan.md):
+      tra BTC theo ipnKey (ipnRecipientOf) và cấu hình Tingee + khóa QR cho worker
+      (TINGEE_BASE_URL, TINGEE_CREDENTIAL_KEYS, TICKET_QR_KEYS). Còn lại: nhãn trạng
+      thái bán trên dashboard theo sellability (retro C5) → Story 4.2 (Mason quyết
+      12/11 khi lập spec 3.11; 3.11 không đổi event-status.ts)"
   - id: "epic-2-retro-e2-7-moi-truong-dev"
     epic: 2
     action: "E2-7: môi trường dev — pnpm dev tự migrate và chạy worker, seed BTC đã
@@ -295,12 +296,92 @@ action_items:
     owner: "Mason"
     status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
-    note: "Xong qua spec-epic-2-e2-7-moi-truong-dev.md; pnpm dev migrate trước rồi chạy api + worker + Tingee fake, pnpm db:seed (BTC demo btc.demo@tickee.local), next build thiếu NEXT_PUBLIC_API_BASE_URL thì dừng, cache turbo trần 2GB/7 ngày"
+    note: "Xong qua spec-epic-2-e2-7-moi-truong-dev.md; pnpm dev migrate trước rồi
+      chạy api + worker + Tingee fake, pnpm db:seed (BTC demo btc.demo@tickee.local),
+      next build thiếu NEXT_PUBLIC_API_BASE_URL thì dừng, cache turbo trần 2GB/7 ngày"
   - id: "epic-2-retro-e2-8-ve-sinh-quy-trinh"
     epic: 2
     action: "E2-8: vệ sinh quy trình — deferred-work.md thêm status, đóng mục đã ship,
       bổ sung 5 reject có điều kiện và test webkit chập chờn; quyết giữ hay bỏ luật
       Spec Change Log; chuyển stash 2.12 thành branch/tag (retro F4, F7, F8)"
     owner: "Mason"
-    status: open
+    status: in-progress
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
+  - id: "epic-3-retro-e3-1-siet-ipn-secret-tingee-cu"
+    epic: 3
+    action: "E3-1 (bảo mật, trước khi bán Vé có phí thật): siết điều kiện nhận IPN
+      ký bằng secret Tingee đã thay cho đúng AD-35, kèm test. Chi tiết ở ghi chú bảo
+      mật local của retro Epic 3 (A1)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
+  - id: "epic-3-retro-e3-2-ket-thuc-va-link-dang-song"
+    epic: 3
+    action: "E3-2 (trước hoặc cùng Story 4.2): chốt luật cho Đơn đang có link khi
+      BTC Kết thúc/Ẩn/bị khóa; kiểm sellability trong PaymentLinks.ensure trước claim;
+      Dialog Kết thúc báo số Đơn đang chờ thanh toán, gồm câu chữ C2 của E2-6 (B1)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
+  - id: "epic-3-retro-e3-3-uat-tingee-that"
+    epic: 3
+    action: "E3-3 (trước khi bán Vé có phí thật): UAT Tingee thật, create-link từ
+      2.000đ và một IPN thật; lưu body thật làm fixture; Tingee fake trả đúng như
+      vậy; IPN ký đúng mà không đọc được thì log marker alert (B3, deferred #14)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
+  - id: "epic-3-retro-e3-4-realtime-ben-hon"
+    epic: 3
+    action: "E3-4 (trước Closed Beta): heartbeat SSE dạng sự kiện có tên, connected
+      chỉ sau tin đầu tiên, watchdog phía client; đóng stream khi mất LISTEN quá lâu
+      (C1, C3)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
+  - id: "epic-3-retro-e3-5-doi-chieu-spec"
+    epic: 3
+    action: "E3-5 (trước Epic 4): AD-28 và AC 7.2 tính mục Cần xử lý mở trước khi
+      hủy; mở rộng mục hoãn xoay khóa QR (link chia sẻ, route công khai, email), sharedTicket
+      thiếu khóa trả 404, test Vé khóa cũ; sửa epics.md theo spine/spec hoặc ghi spine
+      là nguồn sự thật; sơ đồ spine payment→organizer; bảng sở hữu email (B2, D1,
+      E1, E5)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
+  - id: "epic-3-retro-e3-6-ban-giao-deferred"
+    epic: 3
+    action: "E3-6 (trước Epic 4): ghi bàn giao có story nhận vào deferred-work.md:
+      4.1 (IPN expired bỏ ân hạn, nguồn reconciliation), 4.4/7.2/7.5 (phát tín hiệu,
+      doanh thu bỏ Vé voided), 5.8 (khóa NOTIFY, fan-out email, NFR-1 p95 create-link,
+      trần Vé đang giữ), 4.7 (HTTP/2), 7.4 (test BTC bị khóa), polling Đơn expired,
+      Wake Lock /xem-ve"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
+  - id: "epic-3-retro-e3-7-no-ky-thuat-truoc-epic-4"
+    epic: 3
+    action: "E3-7 (trước Epic 4): Trang Đơn ẩn QR và shareToken sau khi Sự kiện kết
+      thúc, kèm test; PaymentLinks.expire dùng releaseOrderHeld, thêm ca 2 Hạng vé;
+      test TX1 không NOTIFY cho event_orders_changed; tách tối thiểu orders.service.ts,
+      gom điều kiện Sự kiện còn dùng được và đồng hồ DB (D3, B6, C7, E2, E3)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
+  - id: "epic-3-retro-e3-8-email-doi-gio-nguoi-di-cung"
+    epic: 3
+    action: "E3-8 (trước Closed Beta): chốt câu chữ email đổi giờ/địa điểm cho Đơn
+      nhiều Vé, nhắc báo người đi cùng đã nhận link chia sẻ (D2)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
+  - id: "epic-3-retro-e3-9-quy-trinh-va-moi-truong-dev"
+    epic: 3
+    action: "E3-9 (trước Story 4.1): đồng bộ sprint-status ngay trong PR của story,
+      không sửa tay trên main; không merge khi CI đỏ nếu không ghi lý do vào PR; đưa
+      commit 08520a6 (Tingee fake gửi IPN + README) lên main; db:seed kiểm Secret
+      Token giải mã được; README dev nhắc TINGEE_BASE_URL trỏ fake và không đổi giá
+      trị khóa khi giữ số phiên bản (F1, F3, F4, F5)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
