@@ -206,8 +206,9 @@ function useLongWait(waiting: boolean): boolean {
  * Trang Đơn (Story 3.2–3.4, 3.7): Đơn lấy từ máy chủ (`GET /v1/me/orders/:code`) và tự cập nhật qua `useLiveResource`
  * (SSE `…/live` + tải lại khi visible, có mạng lại; polling 2 giây khi chưa có SSE mà Đơn đang chờ tiền). Hiển thị theo
  * `buyerStatus`, không bao giờ theo tham số trên URL: chờ tiền → màn thanh toán (Story 3.4) rồi tóm tắt Đơn; `paid` →
- * Thành công với từng Vé; trạng thái khác → khối trạng thái (kèm liên hệ BTC khi cần) rồi tóm tắt. Mã sai, Đơn của
- * người khác hay không có → thông báo riêng (`404 ORDER_NOT_FOUND`).
+ * Thành công với từng Vé (Sự kiện đã kết thúc: màn "Sự kiện đã kết thúc", không Vé); trạng thái khác → khối trạng
+ * thái (kèm liên hệ BTC khi cần) rồi tóm tắt. Mã sai, Đơn của người khác hay không có → thông báo riêng (`404
+ * ORDER_NOT_FOUND`).
  */
 export function OrderView({ code }: { code: string }) {
   const { query: order, offline } = useLiveResource({

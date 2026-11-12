@@ -17,6 +17,7 @@ import { TEST_TICKET_QR_KEYS } from '../helpers.js';
 import { createHarness, signUp, type Harness } from '../identity/harness.js';
 import {
   eventOnSale,
+  eventsPath,
   inventory,
   orderBody,
   orderRow,
@@ -426,6 +427,103 @@ describe('GET /v1/me/orders/:code — Đơn đã trả', () => {
 
     const miss = await h.http.get(`/v1/me/orders/${created.code}`).set('cookie', stranger.cookie).expect(404);
     expect(errorOf(miss.body).code).toBe('ORDER_NOT_FOUND');
+  });
+});
+
+/*
+ * E3-7 (retro Epic 3 D3): sau mốc `effective_end_at` (đồng hồ DB, AD-14; "Kết thúc" sớm cũng chỉ đẩy mốc này) Trang Đơn
+ * không ký Mã QR vé, không tính token link chia sẻ, như Chi tiết Vé, link chia sẻ và email Vé (FR-24).
+ */
+describe('GET /v1/me/orders/:code — Sự kiện đã kết thúc', () => {
+  const endEvent = (eventId: string, extra = '') =>
+    h.db.pool.query(`UPDATE events SET effective_end_at = now() - interval '1 second'${extra} WHERE id = $1`, [eventId]);
+  const getOrder = (buyer: User, code: string) =>
+    h.http.get(`/v1/me/orders/${code}`).set('cookie', buyer.cookie).expect(200);
+
+  it('Đơn paid: trước mốc có Vé (QR, shareToken), ended = false; sau mốc ended = true, tickets = [], body không còn QR hay shareToken, không đọc Vé', async () => {
+    const buyer = await signUp(h);
+    const sale = await freeEvent([5]);
+    const created = parseOrder(
+      (await register(buyer, sale.event.slug, [{ ticketTypeId: sale.tiers[0]!.id, quantity: 2 }]).expect(201)).body,
+    );
+    expect(created.event.ended).toBe(false);
+    const readTickets = vi.spyOn(tickets, 'ticketsOfOrder');
+
+    const before = parseOrder((await getOrder(buyer, created.code)).body);
+    expect(before).toMatchObject({ buyerStatus: 'paid', event: { slug: sale.event.slug, ended: false } });
+    expect(before.tickets).toHaveLength(2);
+    for (const t of before.tickets) {
+      expect(verifyTicketQr(qrKeys, t.qr)?.ticketId).toBe(t.id);
+      expect(t.shareToken).not.toBe('');
+    }
+    expect(readTickets).toHaveBeenCalledTimes(1);
+
+    readTickets.mockClear();
+    await endEvent(sale.event.id);
+    const res = await getOrder(buyer, created.code);
+    const after = parseOrder(res.body);
+    expect(after).toMatchObject({
+      buyerStatus: 'paid',
+      event: { slug: sale.event.slug, name: sale.event.name, startsAt: before.event.startsAt, ended: true },
+      tickets: [],
+    });
+    expect(readTickets).not.toHaveBeenCalled();
+    const body = JSON.stringify(res.body);
+    for (const t of before.tickets) {
+      expect(body).not.toContain(t.qr);
+      expect(body).not.toContain(t.shareToken);
+    }
+  });
+
+  it('BTC bấm "Kết thúc" sớm (POST …/end thật) → ended = true, tickets = [], không đọc Vé', async () => {
+    const buyer = await signUp(h);
+    const sale = await freeEvent([5]);
+    const created = parseOrder(
+      (await register(buyer, sale.event.slug, [{ ticketTypeId: sale.tiers[0]!.id, quantity: 1 }]).expect(201)).body,
+    );
+    // "Kết thúc" chỉ nhận Sự kiện đã bắt đầu (`starts_at <= now`): dời giờ bắt đầu về trước, mốc kết thúc giữ nguyên.
+    await h.db.pool.query("UPDATE events SET starts_at = now() - interval '1 hour' WHERE id = $1", [sale.event.id]);
+    expect(parseOrder((await getOrder(buyer, created.code)).body)).toMatchObject({ event: { ended: false } });
+
+    await h.http.post(`${eventsPath(org, sale.event.id)}/end`).set('cookie', org.owner.cookie).expect(200);
+    const readTickets = vi.spyOn(tickets, 'ticketsOfOrder');
+    const res = await getOrder(buyer, created.code);
+    expect(parseOrder(res.body)).toMatchObject({ buyerStatus: 'paid', event: { ended: true }, tickets: [] });
+    expect(readTickets).not.toHaveBeenCalled();
+    const body = JSON.stringify(res.body);
+    expect(body).not.toContain(created.tickets[0]!.qr);
+    expect(body).not.toContain(created.tickets[0]!.shareToken);
+  });
+
+  it('Sự kiện hủy và đã quá mốc → event_cancelled, tickets = [] như cũ, ended = true', async () => {
+    const buyer = await signUp(h);
+    const sale = await freeEvent([5]);
+    const created = parseOrder(
+      (await register(buyer, sale.event.slug, [{ ticketTypeId: sale.tiers[0]!.id, quantity: 1 }]).expect(201)).body,
+    );
+    await endEvent(sale.event.id, ", status = 'cancelled'");
+    const readTickets = vi.spyOn(tickets, 'ticketsOfOrder');
+    const res = await getOrder(buyer, created.code);
+    expect(parseOrder(res.body)).toMatchObject({ buyerStatus: 'event_cancelled', event: { ended: true }, tickets: [] });
+    expect(readTickets).not.toHaveBeenCalled();
+    expect(JSON.stringify(res.body)).not.toContain(created.tickets[0]!.qr);
+  });
+
+  it('Đơn chưa trả → tickets = [] như cũ, ended theo đồng hồ DB (trước mốc false, sau mốc true)', async () => {
+    const buyer = await signUp(h);
+    const sale = await eventOnSale(org, [{ name: 'Có phí', price: 100_000, capacity: 5 }]);
+    const created = parseOrder(
+      (await register(buyer, sale.event.slug, [{ ticketTypeId: sale.tiers[0]!.id, quantity: 1 }]).expect(201)).body,
+    );
+    expect(created).toMatchObject({ buyerStatus: 'awaiting_payment', event: { ended: false }, tickets: [] });
+    expect(parseOrder((await getOrder(buyer, created.code)).body).event.ended).toBe(false);
+
+    await endEvent(sale.event.id);
+    expect(parseOrder((await getOrder(buyer, created.code)).body)).toMatchObject({
+      buyerStatus: 'awaiting_payment',
+      event: { ended: true },
+      tickets: [],
+    });
   });
 });
 

@@ -695,7 +695,7 @@ test.describe('lối vào Vé của tôi', () => {
         body: {
           code: CODE,
           buyerStatus: 'paid',
-          event: { slug: 'giai-chay-ho-guom', name: EVENT.name, startsAt: EVENT.startsAt },
+          event: { slug: 'giai-chay-ho-guom', name: EVENT.name, startsAt: EVENT.startsAt, ended: false },
           items: [{ ticketTypeId: '019a3b2c-0800-7abc-8def-000000000001', name: 'Vé VIP', unitPrice: 0, quantity: 2, amount: 0 }],
           totalAmount: 0,
           buyer: { name: HOLDER, phone: '+84912345678', email: EMAIL },

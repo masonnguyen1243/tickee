@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
-import { EventStatus, JobQueue, MY_TICKETS_PATH, OrderStatus, SendEventChangeEmailPayload } from '@tickee/contracts';
+import { JobQueue, MY_TICKETS_PATH, OrderStatus, SendEventChangeEmailPayload } from '@tickee/contracts';
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { DATABASE, type Database, type DbExecutor, type Tx } from '../../platform/db/index.js';
@@ -14,7 +14,7 @@ import {
   QueueProducer,
   registerQueueWorker,
 } from '../../platform/jobs/index.js';
-import { ticketEventById, type TicketEventRef } from '../event/index.js';
+import { eventOpenForTickets, ticketEventById } from '../event/index.js';
 import { organizerContactOf } from '../organizer/index.js';
 import { ORDERING_JOBS_CONFIG, type OrderingJobsConfig } from './buyer-email-jobs.js';
 import { buildEventChangeEmail } from './buyer-email.js';
@@ -79,16 +79,13 @@ export async function enqueueEventChangeEmail(
   await EVENT_CHANGE_EMAIL_QUEUE.enqueue(boss, tx, { eventId, version }, { id: eventChangeEmailJobId(eventId, version) });
 }
 
-/** Sự kiện còn cần báo lúc xử lý: còn tồn tại, chưa hủy, chưa quá `effective_end_at` theo đồng hồ DB. */
-const stillNotifiable = (event: TicketEventRef | null): event is TicketEventRef =>
-  event !== null && event.status !== EventStatus.CANCELLED && !event.ended;
-
 /**
  * Job gốc: Người mua của Sự kiện lúc xử lý (id tăng dần). Sự kiện không còn, đã hủy hoặc đã kết thúc → `skipped` (không
  * tạo job con nào).
  */
 export async function eventChangeRecipients(db: Database, eventId: string): Promise<string[] | 'skipped'> {
-  if (!stillNotifiable(await ticketEventById(db.orm, eventId))) return 'skipped';
+  // Sự kiện còn cần báo lúc xử lý = còn dùng được cho Vé (còn tồn tại, chưa hủy, chưa quá `effective_end_at`).
+  if (!eventOpenForTickets(await ticketEventById(db.orm, eventId))) return 'skipped';
   const rows = await db.orm
     .selectDistinct({ userId: orders.userId })
     .from(orders)
@@ -140,7 +137,7 @@ export async function sendEventChangeEmail(
 ): Promise<'sent' | 'skipped'> {
   const { db } = sender;
   const event = await ticketEventById(db.orm, eventId);
-  if (!stillNotifiable(event)) return 'skipped';
+  if (!eventOpenForTickets(event)) return 'skipped';
   const [order] = await db.orm
     .select({ buyerEmail: orders.buyerEmail, organizationId: orders.organizationId })
     .from(orders)

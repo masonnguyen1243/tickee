@@ -144,7 +144,7 @@ const payment = (patch: Record<string, unknown> = {}) => ({
 const buyerOrder = (patch: Record<string, unknown> = {}) => ({
   code: ORDER_CODE,
   buyerStatus: 'awaiting_payment',
-  event: { slug: SLUG_BUY, name: 'Giải chạy Hồ Gươm mùa thu 2026', startsAt: '2099-11-15T07:00:00+07:00' },
+  event: { slug: SLUG_BUY, name: 'Giải chạy Hồ Gươm mùa thu 2026', startsAt: '2099-11-15T07:00:00+07:00', ended: false },
   items: [{ ticketTypeId: TIER_PAID_ID, name: VIP, unitPrice: 300_000, quantity: 2, amount: 600_000 }],
   totalAmount: 600_000,
   buyer: { name: 'Nguyễn Văn An', phone: '+84912345678', email: EMAIL },
@@ -173,7 +173,7 @@ const freeOrder = (count = 2) =>
   buyerOrder({
     code: FREE_CODE,
     buyerStatus: 'paid',
-    event: { slug: SLUG_FREE, name: FREE_EVENT_NAME, startsAt: '2099-11-15T07:00:00+07:00' },
+    event: { slug: SLUG_FREE, name: FREE_EVENT_NAME, startsAt: '2099-11-15T07:00:00+07:00', ended: false },
     items: [{ ticketTypeId: TIER_FREE_ONLY_ID, name: FREE_TIER, unitPrice: 0, quantity: count, amount: 0 }],
     totalAmount: 0,
     payment: null,
@@ -1365,7 +1365,7 @@ test.describe('Màn thanh toán (Story 3.4)', () => {
     await page.emulateMedia({ colorScheme: 'dark' });
     await page.setViewportSize({ width: 320, height: 640 });
     const noAccount = buyerOrder({
-      event: { slug: SLUG_BUY, name: 'Giải chạy Hồ Gươm mùa thu 2026 — cự ly 42km dành cho vận động viên phong trào', startsAt: '2099-11-15T07:00:00+07:00' },
+      event: { slug: SLUG_BUY, name: 'Giải chạy Hồ Gươm mùa thu 2026 — cự ly 42km dành cho vận động viên phong trào', startsAt: '2099-11-15T07:00:00+07:00', ended: false },
       payment: payment({ recipient: { organizationName: 'Câu lạc bộ Chạy Bộ Phố Cổ Hà Nội Mở Rộng', accountName: null, bankName: null } }),
     });
     await mockOrders(page, { orders: { [ORDER_CODE]: { status: 200, body: noAccount } } });

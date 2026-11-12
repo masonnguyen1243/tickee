@@ -2,7 +2,7 @@ import { ErrorCode, EventStatus, MyTicketStatus } from '@tickee/contracts';
 import { and, eq } from 'drizzle-orm';
 import type { DbExecutor } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
-import { ticketEventById, ticketEventsByIds, type TicketEventRef } from '../event/index.js';
+import { eventOpenForTickets, ticketEventById, ticketEventsByIds, type TicketEventRef } from '../event/index.js';
 import { signTicketQr, type TicketQrKeys } from './qr.js';
 import { tickets, type TicketStatus } from './schema.js';
 import { shareTokenOf } from './share-token.js';
@@ -121,7 +121,8 @@ export async function ownTicket(
   // FK `tickets.event_id → events.id`: không thể thiếu.
   if (!event) throw new Error('Không đọc được Sự kiện của Vé');
   const own = ownTicketOf(row, event);
-  const open = own.status !== MyTicketStatus.CANCELLED && !event.ended;
+  // Vé chưa hủy và Sự kiện còn dùng được cho Vé (chưa hủy, chưa quá `effective_end_at`).
+  const open = row.status !== 'cancelled' && eventOpenForTickets(event);
   return {
     ...own,
     qr: open ? signTicketQr(keys, row.id, row.qrKeyVersion) : null,

@@ -46,7 +46,7 @@ function order(patch: Record<string, unknown> = {}) {
   return {
     code: CODE,
     buyerStatus: 'awaiting_payment',
-    event: { slug: SLUG_BUY, name: 'Giải chạy Hồ Gươm mùa thu 2026', startsAt: '2099-11-15T07:00:00+07:00' },
+    event: { slug: SLUG_BUY, name: 'Giải chạy Hồ Gươm mùa thu 2026', startsAt: '2099-11-15T07:00:00+07:00', ended: false },
     items: [{ ticketTypeId: TIER_PAID_ID, name: 'Vé VIP', unitPrice: 300_000, quantity: 2, amount: 600_000 }],
     totalAmount: 600_000,
     buyer: { name: 'Nguyễn Văn An', phone: '+84912345678', email: EMAIL },
@@ -362,6 +362,60 @@ test.describe('Màn theo buyerStatus', () => {
     await expectContact(page);
     await expect(qrImages(page)).toHaveCount(0);
     await expect(heading(page)).toHaveCount(0);
+  });
+
+  test('paid mà Sự kiện đã kết thúc → "Sự kiện đã kết thúc" (focus), không QR, không "Chia sẻ Vé", không "Đã gửi Vé tới"; có Mã Đơn, "Xem Vé của tôi"', async ({
+    page,
+  }) => {
+    const sse = await fakeEventSource(page);
+    const vibrations = await recordVibrations(page);
+    const api = await mockOrderApi(page);
+    api.state.order = paidOrder();
+    await page.goto(ORDER_PATH);
+    // Trước mốc kết thúc: màn Thành công với Vé.
+    await expect(heading(page)).toBeVisible();
+    await expect(qrImages(page)).toHaveCount(2);
+    await expect.poll(sse.count).toBe(1);
+    const beforeOpen = api.gets.length;
+    await sse.open();
+    await expect.poll(() => api.gets.length).toBe(beforeOpen + 1);
+    // Qua cửa sổ gom 1 giây của lần mở.
+    await page.waitForTimeout(1_200);
+
+    // Sau mốc: máy chủ trả `ended: true`, không Vé; lần tải sau (ở đây do một tín hiệu SSE) đổi màn.
+    api.state.order = order({
+      buyerStatus: 'paid',
+      event: { ...order().event, ended: true },
+      payment: { ...order().payment, checkoutUrl: null },
+      tickets: [],
+    });
+    await sse.message('order_changed');
+    const endedHeading = page.getByRole('heading', { level: 1, name: 'Sự kiện đã kết thúc' });
+    await expect(endedHeading).toBeVisible({ timeout: 3_000 });
+    await expect(endedHeading).toBeFocused();
+
+    for (const reloaded of [false, true]) {
+      if (reloaded) {
+        await page.reload();
+        await expect(endedHeading).toBeVisible();
+        await expect(endedHeading).toBeFocused();
+      }
+      const ended = page.locator('[data-slot="order-ended"]');
+      await expect(ended.locator('[data-slot="stage-block"]')).toContainText('Giải chạy Hồ Gươm mùa thu 2026');
+      await expect(ended.locator('[data-slot="order-ended-note"]')).toHaveText(
+        'Vé của Đơn này đã chuyển vào lịch sử ở Vé của tôi.',
+      );
+      await expect(qrImages(page)).toHaveCount(0);
+      await expect(page.locator('[data-slot="ticket-card"]')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /Chia sẻ Vé/ })).toHaveCount(0);
+      await expect(page.getByText(/Đã gửi Vé tới/)).toHaveCount(0);
+      await expect(page.getByText(/Vé của bạn đang được chuẩn bị/)).toHaveCount(0);
+      await expect(heading(page)).toHaveCount(0);
+      await expect(success(page)).toHaveCount(0);
+      await expect(ended.locator('[data-slot="order-code"]')).toHaveText(CODE);
+      await expect(ended.getByRole('link', { name: 'Xem Vé của tôi' })).toHaveAttribute('href', '/tickets');
+      expect(await vibrations()).toEqual([]);
+    }
   });
 
   test('buyerStatus lạ (kể cả kèm Vé) → "Chúng tôi đang cập nhật trạng thái Đơn." + liên hệ BTC, không QR, không lỗi', async ({

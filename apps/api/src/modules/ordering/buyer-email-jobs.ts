@@ -1,7 +1,6 @@
 import { Inject, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import {
   BuyerEmailKind,
-  EventStatus,
   JobQueue,
   MY_TICKETS_PATH,
   orderPath,
@@ -22,7 +21,7 @@ import {
   QueueProducer,
   registerQueueWorker,
 } from '../../platform/jobs/index.js';
-import { ticketEventById } from '../event/index.js';
+import { eventOpenForTickets, ticketEventById } from '../event/index.js';
 import { organizerContactOf } from '../organizer/index.js';
 import { TicketsService } from '../ticketing/index.js';
 import { buildOrphanSoldOutEmail, buildTicketsEmail } from './buyer-email.js';
@@ -109,7 +108,7 @@ async function messageOf(
 
   switch (kind) {
     case BuyerEmailKind.TICKETS: {
-      if (order.status !== OrderStatus.PAID || event.status === EventStatus.CANCELLED || event.ended) return null;
+      if (order.status !== OrderStatus.PAID || !eventOpenForTickets(event)) return null;
       const tickets = await sender.tickets.ticketsOfOrder(db.orm, order.id);
       if (tickets.length === 0) return null;
       return {
