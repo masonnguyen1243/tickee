@@ -1,4 +1,5 @@
 // Mô-đun `ordering`: API công khai cho mô-đun khác chỉ xuất từ file này (AD-10).
+export { type OrderingJobsConfig } from './buyer-email-jobs.js';
 export {
   changeCapacity,
   createInventory,

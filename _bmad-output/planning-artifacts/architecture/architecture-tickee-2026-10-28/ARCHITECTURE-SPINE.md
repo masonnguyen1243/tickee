@@ -227,6 +227,7 @@ IPN của Cổng thanh toán không có trường số tài khoản/VA, nên kh�
 - **Binds:** FR-22, FR-25, FR-27, NFR-6; `ticketing`
 - **Prevents:** Mã QR vé giả hoặc đoán được; mã lộ thông tin cá nhân.
 - **Rule:** Nội dung `t<k>.<ticketId>.<sig>`, với `sig` = base64url(HMAC-SHA256(key_k, `t<k>.<ticketId>`)). Khóa đánh số phiên bản `k` (env), giữ khóa cũ để verify khi xoay vòng. Không chứa thông tin cá nhân. Khi quét: kiểm chữ ký trước, rồi tra DB (AD-15). Ảnh Social Ticket Card không chứa mã.
+- **Quyết định (Mason, 11/11/2026, Story 3.8):** không thêm `qr_version` vào phần được ký. Mã QR vé của một Vé không đổi suốt đời Vé; "Tạo lại link" chia sẻ (AD-29) chỉ thu hồi đường xem, không thu hồi mã đã bị thấy hay chụp. Đổi mã khi gửi nhầm chưa có ở MVP.
 
 ### AD-17 — Realtime chỉ là tín hiệu, REST là sự thật
 
@@ -331,7 +332,9 @@ Hiện thực (Story 3.7):
 
 - **Binds:** FR-22, FR-23, UJ-1; `ticketing`
 - **Prevents:** Mỗi người build tự mở một đường công khai `/tickets/:id` đoán được và không hết hạn.
-- **Rule:** Mỗi Vé có `share_token` ngẫu nhiên 128 bit, DB chỉ lưu hash; chủ Vé tạo lại được, tạo lại thì link cũ mất hiệu lực. `GET /v1/shared-tickets/:token` không cần đăng nhập (`shareScope`), trả Mã QR vé, tên Sự kiện, Hạng vé, số thứ tự Vé và trạng thái; không trả SĐT, email hay tên người mua. Token sai, Vé đã hủy hoặc quá `effective_end_at` → `404` chung. Email gửi Vé (FR-23) dùng link này. Người nhận link không thấy Vé trong "Vé của tôi" của mình.
+- **Rule:** Mỗi Vé có `share_token` 128 bit khó đoán, suy ra bằng khóa bí mật, DB chỉ lưu hash; chủ Vé tạo lại được, tạo lại thì link cũ mất hiệu lực. `GET /v1/shared-tickets/:token` không cần đăng nhập (`shareScope`), trả Mã QR vé, tên Sự kiện, Hạng vé, số thứ tự Vé và trạng thái; không trả SĐT, email hay tên người mua. Token sai, Vé đã hủy, Sự kiện đã hủy hoặc quá `effective_end_at` → `404` chung. Email gửi Vé (FR-23) dùng link này. Người nhận link không thấy Vé trong "Vé của tôi" của mình.
+- **Token (Mason, 11/11/2026, Story 3.8):** token = 16 byte đầu của HMAC-SHA256(khóa con, `share:<ticketId>:<share_version>`), base64url (22 ký tự). Khóa con = HMAC-SHA256(khóa `TICKET_QR_KEYS` phiên bản `tickets.qr_key_version` của Vé, nhãn riêng), tách miền với chữ ký Mã QR vé (AD-16); không thêm biến env. DB lưu `share_token_hash` (SHA-256, unique) và `share_version` (bắt đầu 1); máy chủ tính lại token khi cần (Trang Đơn của chủ Vé, worker email), nên chia sẻ lặp ra cùng một link. "Tạo lại link" (`POST /v1/me/tickets/:ticketId/share-link`, chỉ chủ Vé, audit `ticket.share_link_regenerated`) tăng `share_version` và ghi hash mới trong cùng một `UPDATE`; Mã QR vé không đổi. Lộ DB không lộ link.
+- **Link web:** `{WEB_ORIGIN}/xem-ve#<token>` (dựng bằng `sharedTicketUrl` của contracts). Token nằm sau `#` nên không tới server web, không vào log web, `Referer` hay ảnh xem trước của ứng dụng chat; trang chạy ở trình duyệt, gọi API không kèm cookie, `noindex`, `referrer: no-referrer`. API vẫn nhận token trong đường dẫn: log request của api che đoạn token.
 
 ### AD-30 — Lời mời CTV
 

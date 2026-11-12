@@ -57,6 +57,8 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   ORDER_NOT_FOUND: 404,
   FREE_TICKET_LIMIT_REACHED: 409,
   IPN_SIGNATURE_INVALID: 401,
+  SHARED_TICKET_NOT_FOUND: 404,
+  TICKET_NOT_FOUND: 404,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

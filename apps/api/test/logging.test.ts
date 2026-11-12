@@ -8,7 +8,9 @@ import {
   buildRedactPaths,
   dbErrorSummary,
   GENERIC_PII_KEYS,
+  httpSerializers,
   isDatabaseError,
+  redactSharedTicketPath,
   REDACTED,
 } from '../src/platform/logging/index.js';
 import { LogCapture } from './helpers.js';
@@ -208,5 +210,43 @@ describe('nhận diện lỗi DB', () => {
     expect(dbErrorSummary(wrapped)).toEqual({ type: 'Error', code: '40001' });
     const freeText = new DrizzleQueryError('select 1', [], Object.assign(new Error('x'), { code: 'a@vidu.vn tok' }));
     expect(dbErrorSummary(freeText)).toEqual({ type: 'DrizzleQueryError' });
+  });
+});
+
+describe('che token link chia sẻ Vé (Story 3.8)', () => {
+  const token = 'Zx9_aB3-kLm0Qr7Tu1Vw2y';
+
+  it('redactSharedTicketPath: che đoạn token của /v1/shared-tickets/<token>, giữ đường khác', () => {
+    expect(redactSharedTicketPath(`/v1/shared-tickets/${token}`)).toBe(`/v1/shared-tickets/${REDACTED}`);
+    expect(redactSharedTicketPath(`/v1/shared-tickets/${token}?x=${REDACTED}`)).toBe(
+      `/v1/shared-tickets/${REDACTED}?x=${REDACTED}`,
+    );
+    expect(redactSharedTicketPath('/v1/me/tickets/abc/share-link')).toBe('/v1/me/tickets/abc/share-link');
+    expect(redactSharedTicketPath('/v1/events/x/shared-tickets/abc')).toBe('/v1/events/x/shared-tickets/abc');
+  });
+
+  it('router Express không phân biệt hoa thường và nhận URL dạng tuyệt đối: các dạng đó cũng bị che', () => {
+    expect(redactSharedTicketPath(`/V1/Shared-Tickets/${token}`)).toBe(`/V1/Shared-Tickets/${REDACTED}`);
+    expect(redactSharedTicketPath(`/v1/SHARED-TICKETS/${token}/`)).toBe(`/v1/SHARED-TICKETS/${REDACTED}/`);
+    expect(redactSharedTicketPath(`http://api.tickee.test/v1/shared-tickets/${token}`)).toBe(
+      `/v1/shared-tickets/${REDACTED}`,
+    );
+    expect(redactSharedTicketPath(`http://api.tickee.test/V1/Shared-Tickets/${token}?a=${REDACTED}`)).toBe(
+      `/V1/Shared-Tickets/${REDACTED}?a=${REDACTED}`,
+    );
+    for (const url of [
+      `/V1/Shared-Tickets/${token}`,
+      `http://api.tickee.test/v1/shared-tickets/${token}`,
+      `http://API.tickee.test/V1/SHARED-TICKETS/${token}?x=1`,
+    ]) {
+      const req = httpSerializers.req({ url, params: { token } });
+      expect(JSON.stringify(req), url).not.toContain(token);
+    }
+  });
+
+  it('serializer req: url đã che token, bỏ params và query', () => {
+    const req = httpSerializers.req({ url: `/v1/shared-tickets/${token}?a=1`, params: { token }, query: { a: '1' } });
+    expect(req).toEqual({ url: `/v1/shared-tickets/${REDACTED}?a=${REDACTED}`, params: undefined, query: undefined });
+    expect(JSON.stringify(req)).not.toContain(token);
   });
 });

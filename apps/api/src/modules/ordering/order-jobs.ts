@@ -1,10 +1,11 @@
-import { Inject, Injectable, Logger, Module, type OnApplicationBootstrap } from '@nestjs/common';
+import { Inject, Injectable, Logger, Module, type DynamicModule, type OnApplicationBootstrap } from '@nestjs/common';
 import { JobQueue, OrderStatus, PAYMENT_LINK_GRACE_SECONDS } from '@tickee/contracts';
 import { and, asc, eq, gte, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
 import { BOSS, defineQueue, JOB_COMPLETED, QueueProducer, registerQueueWorker } from '../../platform/jobs/index.js';
+import { BuyerEmailWorker, ORDERING_JOBS_CONFIG, type OrderingJobsConfig } from './buyer-email-jobs.js';
 import { releaseHeld } from './inventory.service.js';
 import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
 import { orderItems, orders } from './schema.js';
@@ -192,8 +193,20 @@ export class OrderExpiryWorker implements OnApplicationBootstrap {
 }
 
 /**
- * Job nền của `ordering` cho vai `worker` (hết hạn Giữ chỗ, (a) và (c)). Cần `DbModule` và `JobsModule` (toàn cục) ở gốc
- * DI. Không cần cấu hình Tingee.
+ * Job nền của `ordering` cho vai `worker`: hết hạn Giữ chỗ ((a) và (c)) và email Người mua (Story 3.8: email Vé, email
+ * tiền về muộn hết chỗ). Cần `DbModule`, `JobsModule`, `EmailModule` và `TicketingModule` (toàn cục) ở gốc DI; `config`
+ * cho origin web của link trong email. Không cần cấu hình Tingee.
  */
-@Module({ providers: [OrderExpiryWorker] })
-export class OrderingJobsModule {}
+@Module({})
+export class OrderingJobsModule {
+  static forRoot(config: OrderingJobsConfig): DynamicModule {
+    return {
+      module: OrderingJobsModule,
+      providers: [
+        { provide: ORDERING_JOBS_CONFIG, useValue: { WEB_ORIGIN: config.WEB_ORIGIN } satisfies OrderingJobsConfig },
+        OrderExpiryWorker,
+        BuyerEmailWorker,
+      ],
+    };
+  }
+}

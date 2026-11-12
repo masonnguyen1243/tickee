@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { BuyerOrderView } from '@tickee/contracts';
+import { BuyerOrderView, JobQueue } from '@tickee/contracts';
 import type pg from 'pg';
+import type { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { TingeeCredential } from '../../src/modules/tingee/index.js';
+import { BOSS } from '../../src/platform/jobs/index.js';
 import { createHarness, signUp, type Harness } from '../identity/harness.js';
 import {
   eventOnSale,
@@ -306,6 +308,11 @@ describe('Matrix: tiền về muộn', () => {
 
     await expectReviewItem(paid(placed), { branch: 'orphan', type: 'orphan', reason: 'sold_out', orderId: placed.orderId });
     expect(await orderState(h, placed.code)).toMatchObject({ status: 'review', paid_at: null, tickets: 0 });
+    // Story 3.8: cùng `tx` của IPN, đúng một job email báo Người mua (BTC sẽ liên hệ hoàn tiền).
+    const emails = await h.app
+      .get<PgBoss>(BOSS)
+      .findJobs(JobQueue.ORDERING_SEND_BUYER_EMAIL, { data: { orderId: placed.orderId } });
+    expect(emails.map((job) => job.data)).toEqual([{ kind: 'orphan_sold_out', orderId: placed.orderId }]);
     // Hạng đứng trước đã bán trong savepoint rồi rollback cùng savepoint.
     expect(await inventory(h, first)).toEqual(before.first);
     expect(await inventory(h, last)).toEqual(before.last);

@@ -10,6 +10,8 @@ import type { Tx } from '../../src/platform/db/index.js';
 import {
   childJobId,
   defineQueue,
+  derivedJobId,
+  errorName,
   fanOut,
   JOB_COMPLETED,
   jobErrorMessage,
@@ -135,6 +137,34 @@ describe('defineQueue', () => {
     expect(send.mock.calls[1]?.[1]).toEqual({ itemId });
     expect(send.mock.calls[1]?.[2]).toMatchObject({ startAfter });
     expect(send.mock.calls[1]?.[2]).toHaveProperty('db');
+    expect(send.mock.calls[1]?.[2]).not.toHaveProperty('id');
+  });
+
+  it('enqueue với id cố định: gửi kèm id; pg-boss trả null (job cùng id đã có) → không ném', async () => {
+    const send = vi.fn().mockResolvedValue(null);
+    const boss = { send } as unknown as PgBoss;
+    const itemId = randomUUID();
+    const id = derivedJobId(itemId, 'test.queue:a');
+    await testQueue().enqueue(boss, {} as Tx, { itemId }, { id });
+    expect(send.mock.calls[0]?.[2]).toMatchObject({ id });
+  });
+});
+
+describe('errorName / derivedJobId', () => {
+  it('errorName: chỉ tên lớp, không message (message SMTP có thể chứa email)', () => {
+    class SmtpRejected extends Error {}
+    expect(errorName(new SmtpRejected('550 a@vidu.vn'))).toBe('SmtpRejected');
+    expect(errorName(new TypeError('x'))).toBe('TypeError');
+    expect(errorName(null)).toBe('Unknown');
+    expect(errorName(undefined)).toBe('Unknown');
+  });
+
+  it('derivedJobId: cố định theo (uuid gốc, khóa), dạng UUID v5; childJobId là cùng phép suy', () => {
+    const base = randomUUID();
+    expect(derivedJobId(base, 'k')).toMatch(UUID_V5);
+    expect(derivedJobId(base, 'k')).toBe(derivedJobId(base, 'k'));
+    expect(derivedJobId(base, 'k')).not.toBe(derivedJobId(base, 'k2'));
+    expect(childJobId(base, 'k')).toBe(derivedJobId(base, 'k'));
   });
 });
 

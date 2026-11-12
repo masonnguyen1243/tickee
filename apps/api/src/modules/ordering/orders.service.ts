@@ -217,9 +217,10 @@ export class OrdersService {
       if (pending.idempotencyKey === key) return { order: await this.withPaymentLink(pending, buyer, ip), created: false };
       throw pendingExists(pending.code);
     }
-    // pg-boss đã start và queue đã có (ngoài transaction): `boss.send` trong TX1 cần cả hai. Trước giới hạn tốc độ:
-    // pg-boss lỗi thì không tới TX1, không tính lần thử.
+    // pg-boss đã start và queue đã có (ngoài transaction): `boss.send` trong TX1 cần cả hai (hết hạn Đơn; email Vé của
+    // Đơn 0đ). Trước giới hạn tốc độ: pg-boss lỗi thì không tới TX1, không tính lần thử.
     await this.queues.ready();
+    await this.payments.ready();
     await this.limiter.consume(buyer.id, ip);
 
     let orderId: string;

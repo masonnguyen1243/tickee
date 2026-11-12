@@ -93,7 +93,12 @@ export type AuditAction =
    * Đơn chuyển `pending` → `paid` và Vé được phát (`ordering.markPaid`, Story 3.3; actor: hệ thống; đối tượng: Đơn). Một
    * dòng cho mỗi lần chuyển thành công, cùng transaction với phát Vé.
    */
-  | 'order.paid';
+  | 'order.paid'
+  /**
+   * Chủ Vé bấm "Tạo lại link" chia sẻ Vé (Story 3.8, AD-29; actor: chủ Vé; đối tượng: Vé): link cũ chết ngay, Mã QR vé
+   * không đổi. Không ghi token hay hash.
+   */
+  | 'ticket.share_link_regenerated';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

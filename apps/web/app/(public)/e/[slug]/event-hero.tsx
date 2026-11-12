@@ -5,7 +5,7 @@ import { CalendarDays, MapPin, Share2 } from 'lucide-react';
 
 import { StageBlock } from '@/components/tickee/stage-block';
 import { Button } from '@/components/ui/button';
-import { copyWithToast } from '@/lib/clipboard';
+import { shareLink } from '@/lib/share';
 
 type EventHeroProps = {
   name: string;
@@ -16,19 +16,9 @@ type EventHeroProps = {
 
 const mapsUrl = (venue: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venue)}`;
 
-/** Chia sẻ link trang: Web Share API nếu có (người dùng hủy thì thôi), không có hoặc lỗi thì sao chép kèm toast. */
-async function shareEvent(name: string): Promise<void> {
-  const url = `${window.location.origin}${window.location.pathname}`;
-  if (typeof navigator.share === 'function') {
-    try {
-      await navigator.share({ title: name, url });
-      return;
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return;
-    }
-  }
-  await copyWithToast(url);
-}
+/** Chia sẻ link trang (không query, không `#`): Web Share API, không có thì sao chép kèm toast (`shareLink`). */
+const shareEvent = (name: string): Promise<void> =>
+  shareLink({ title: name, url: `${window.location.origin}${window.location.pathname}` });
 
 /**
  * `event-hero` dạng stage: ảnh Sự kiện (chưa có, Story 2.7-b) thay bằng gradient coral trên `stage-fallback`, eyebrow,

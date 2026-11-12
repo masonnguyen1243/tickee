@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-11-2026 15:32
+last_updated: 11-11-2026 17:29
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -67,7 +67,7 @@ development_status:
   3-5-nhận-ipn-và-phát-vé-đúng-một-lần: done
   3-6-ipn-cho-các-trường-hợp-biên: done
   3-7-trang-đơn-tự-chuyển-thành-công-theo-thời-gian-thực: review
-  3-8-email-vé-và-link-chia-sẻ-vé: backlog
+  3-8-email-vé-và-link-chia-sẻ-vé: review
   3-9-vé-của-tôi-và-chi-tiết-vé: backlog
   3-10-báo-người-mua-khi-sự-kiện-đổi-giờ-hoặc-địa-điểm: backlog
   3-11-tổng-quan-sự-kiện-thấy-đơn-đầu-tiên-ngay-lập-tức: backlog
@@ -147,7 +147,11 @@ action_items:
     action: "Quyết định có thêm qr_version vào phần ký của AD-16 hay không trước khi
       làm Story 3.8"
     owner: "Mason"
-    status: open
+    status: done
+    note: "Mason chốt 11/11/2026 khi lập spec 3.8: không thêm qr_version. Tạo lại link
+      chia sẻ chỉ thu hồi đường xem, Mã QR vé không đổi; đổi mã khi gửi nhầm chưa có
+      ở MVP. Ghi vào AD-16 và AD-29 của ARCHITECTURE-SPINE.md"
+    ref: "_bmad-output/implementation-artifacts/spec-3-8-email-ve-va-link-chia-se-ve.md"
   - id: "epic-1-retro-item-4-ai-1-story-nhỏ-bịt-rò-pii-trong-log-che"
     epic: 1
     action: "AI-1: Story nhỏ bịt rò PII trong log: che IP/UA của pino-http, redact

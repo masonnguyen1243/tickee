@@ -43,6 +43,7 @@ const FUNNEL = '5f0c6b8e-2a4d-4c1e-9b7a-3d2f1e0a9c8b';
 const TICKET = '019a3b2c-0b00-7abc-8def-000000000001';
 const SIG = 'q2dA3x_9-Lr4ZfKXJ0b1c2d3e4f5g6h7i8j9k0l1m2n';
 const QR = `t1.${TICKET}.${SIG}`;
+const SHARE_TOKEN = 'Zx9_aB3-kLm0Qr7Tu1Vw2y';
 const ticket = (seq: number, count: number) => ({
   id: TICKET,
   seq,
@@ -50,6 +51,7 @@ const ticket = (seq: number, count: number) => ({
   ticketTypeName: 'Đơn nam',
   holderName: 'Nguyễn Văn An',
   qr: QR,
+  shareToken: SHARE_TOKEN,
 });
 
 const questions: FormQuestion[] = [
@@ -359,9 +361,12 @@ describe('Mã QR vé và BuyerTicket', () => {
     }
   });
 
-  it('BuyerTicket: seq/count ≥ 1, qr đúng mẫu', () => {
+  it('BuyerTicket: seq/count ≥ 1, qr đúng mẫu, shareToken 22 ký tự base64url', () => {
     expect(BuyerTicket.parse(ticket(1, 1))).toEqual(ticket(1, 1));
     expect(BuyerTicket.safeParse({ ...ticket(1, 1), seq: 0 }).success).toBe(false);
     expect(BuyerTicket.safeParse({ ...ticket(1, 1), qr: 'abc' }).success).toBe(false);
+    for (const shareToken of [undefined, '', SHARE_TOKEN.slice(1), `${SHARE_TOKEN}A`, `${SHARE_TOKEN.slice(1)}=`, `${SHARE_TOKEN.slice(1)}+`]) {
+      expect(BuyerTicket.safeParse({ ...ticket(1, 1), shareToken }).success, String(shareToken)).toBe(false);
+    }
   });
 });

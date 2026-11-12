@@ -384,6 +384,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md`
   summary: Story 3.8/4.1. `TicketingModule` và `TICKET_QR_KEYS` mới chỉ nối ở vai api. Email Vé (3.8, có QR) và Đối soát bù (4.1, gọi `markPaid` nguồn `reconciliation`) chạy trong worker, nên phải thêm khóa vào `workerConfigSchema` và nối DI cho worker.
   evidence: Review 3.3 (BH) triage #18. `config.test.ts` đang ghim "Vai worker chưa cần khóa này", đúng phạm vi 3.3.
+- Đã xử lý (11/11/2026): `TICKET_QR_KEYS` và `TicketingModule.forRoot` đã nối ở vai worker từ Story 3.5 (`worker.module.ts`, `worker.test.ts` kiểm thiếu khóa → `ConfigError`). `_bmad-output/implementation-artifacts/spec-3-8-email-ve-va-link-chia-se-ve.md` dùng nó cho worker email Vé (tính lại token link chia sẻ). Phần Đối soát bù (4.1) không cần nối thêm.
 
 ## Deferred from: build of spec-3-4-tao-link-thanh-toan-gateway-va-man-thanh-toan.md (2026-11-10)
 
@@ -396,6 +397,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-5-refactor-api.md`
   summary: `errorName` (lấy tên lớp lỗi để lỗi lưu vào job không chứa PII) vẫn bị chép y hệt ở `organizer/ownership-transfer-jobs.ts` và `organizer/payout-default-jobs.ts`, có thêm bản inline trong `invitation-jobs.ts`. Phần tra tên BTC cũng lặp (`organizationName()` và truy vấn trong `loadChange()`). Nên gom `errorName` vào `platform/jobs` cạnh `jobErrorMessage`.
   evidence: Review E2-5 API #11 (BH). Phần lặp này có từ trước baseline `4cb9ff3`, không do E2-5 gây ra. Gom khi story kế tiếp thêm job email (3.8 email Vé) để nơi chặn PII chỉ còn một chỗ.
+- Đã xử lý (11/11/2026): phần `errorName` của mục trên được giải quyết bằng `_bmad-output/implementation-artifacts/spec-3-8-email-ve-va-link-chia-se-ve.md`. `errorName` nằm ở `platform/jobs/queue.ts` cạnh `jobErrorMessage`; ba chỗ chép ở `organizer` (`invitation-jobs.ts`, `ownership-transfer-jobs.ts`, `payout-default-jobs.ts`) và job email Người mua mới của `ordering` đều dùng bản chung. Phần tra tên BTC lặp trong `organizer` chưa gom.
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-2-e2-5-refactor-api.md`
   summary: Chưa có test worker kiểm `PublicPageWorker` gộp theo slug (`dedupeBy`) và chạy song song (`parallel`): hai job cùng slug trong một lô phải chỉ gọi web một lần, và cả hai job đều `completed`.
   evidence: Review E2-5 API #19 (VG). Helper đã có unit test cho `parallel` và `dedupeBy` (`test/platform/jobs-queue.test.ts`), nhưng test của public-page chỉ gửi một job mỗi slug. Nếu bỏ hai option này khỏi `public-page-jobs.ts`, mọi test vẫn qua. Trước E2-5 cũng chưa có test này; hậu quả chỉ là gọi revalidate thừa hoặc chậm hơn.
@@ -420,6 +422,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-6-ipn-cho-cac-truong-hop-bien.md`
   summary: Story 3.8. Email báo Người mua khi tiền về muộn cho Đơn đã hết hạn mà không phát được Vé (mục `orphan`, lý do `sold_out`): "BTC đã nhận tiền nhưng Hạng vé đã hết, BTC sẽ liên hệ hoàn tiền". Enqueue bằng chính `tx` của IPN, cùng hàng đợi email Người mua mà 3.8 dựng.
   evidence: Mason chốt 11/11 khi lập spec 3.6: 3.6 chỉ tạo mục `orphan`, không thêm hàng đợi hay mẫu email; lệch có chủ đích so với câu "enqueue email báo Người mua" trong AC 3.6 của epics. Chỗ gắn: `ordering/mark-paid.ts` (`settleIpn`, nhánh `sold_out`) hoặc `payment/ipn-processor.ts` (sau `openReviewItem` loại `orphan`).
+- Đã xử lý (11/11/2026): mục trên được giải quyết bằng `_bmad-output/implementation-artifacts/spec-3-8-email-ve-va-link-chia-se-ve.md`. `settleIpn` (nhánh `sold_out`) enqueue job `orphan_sold_out` của hàng đợi `ordering.send-buyer-email` trong chính `tx` của IPN; worker gửi "BTC đã nhận tiền nhưng Hạng vé đã hết, BTC sẽ liên hệ hoàn tiền." kèm mã Đơn, tên Sự kiện và kênh liên hệ BTC tới `orders.buyer_email` (bỏ qua nếu Đơn không còn `review`). Các lý do `orphan` khác (`event_ended`, `event_locked`) vẫn không có email.
 
 ## Deferred from: build of spec-3-7-trang-don-tu-chuyen-thanh-cong-theo-thoi-gian-thuc.md (2026-11-11)
 
@@ -429,6 +432,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-7-trang-don-tu-chuyen-thanh-cong-theo-thoi-gian-thuc.md`
   summary: Story 3.8. Thêm "Đã gửi Vé tới {email}" vào stage của màn Thành công khi đã có email Vé (EXPERIENCE › Thanh toán & Trang Đơn › Thành công).
   evidence: Mason chốt 11/11 khi lập spec 3.7: không hứa trước khi có tính năng (cùng tiền lệ 3.3 hoãn nút "Xem Vé của tôi"). `order-success.tsx` chưa có dòng này; e2e `purchase.spec.ts` đang ghim `not.toContainText('Đã gửi Vé tới')`, 3.8 đổi lại.
+- Đã xử lý (11/11/2026): mục trên được giải quyết bằng `_bmad-output/implementation-artifacts/spec-3-8-email-ve-va-link-chia-se-ve.md`. Stage của màn Thành công có "Đã gửi Vé tới {email}" (`order.buyer.email`); e2e `purchase.spec.ts` và `shared-ticket.spec.ts` kiểm dòng này. Dòng mất mạng (mục kế tiếp) chưa đổi, chờ 3.9.
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-7-trang-don-tu-chuyen-thanh-cong-theo-thoi-gian-thuc.md`
   summary: Story 3.8/3.9. Đổi dòng mất mạng của Trang Đơn về đúng copy AC: "Mất kết nối — vé vẫn được gửi qua email và Vé của tôi." khi đã có email Vé (3.8) và Vé của tôi (3.9).
   evidence: 3.7 dùng copy tạm "Mất kết nối — vé sẽ tự hiện khi có mạng lại." (`order-payment.tsx` › `OFFLINE_TEXT`, e2e `order-live.spec.ts` › `OFFLINE`) vì email Vé và Vé của tôi chưa có. Story nào làm xong phần sau cùng trong hai tính năng đó thì đổi copy và test.
@@ -442,3 +446,6 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
   summary: Story 7.1. Khi hủy Sự kiện, phát `order_changed` (`realtime.notify` trong chính `tx` hủy) cho mọi Đơn bị ảnh hưởng của Sự kiện, kể cả Đơn mà `status` không đổi; hoặc thêm một tín hiệu cấp Sự kiện mà bộ lọc của `GET /v1/me/orders/:code/live` cũng nhận.
   evidence: `buyerStatus` của Đơn `paid`/`review`/`cancelled`/`refunded` thành `event_cancelled` chỉ vì `events.status = 'cancelled'` (`ordering/buyer-status.ts`), không có CAS nào trên `orders` nên không có `order_changed`. Trang Đơn đang mở (đã `paid` hay `under_review`: không polling) sẽ đứng ở trạng thái cũ, vẫn hiện Mã QR vé, tới khi tải lại hoặc tab visible lại. Bộ lọc hiện tại ở `orders.controller.ts` › `live` chỉ nhận `order_changed` có `id` trùng Đơn.
 
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-8-email-ve-va-link-chia-se-ve.md`
+  summary: Người mua đã trả tiền mà không có Vé vì lý do khác `sold_out` (mục Cần xử lý `orphan` `event_ended`/`event_locked`, `amount_mismatch`, `event_cancelled`) không nhận email nào; cần quyết có gửi email báo (vd. "BTC sẽ liên hệ") qua hàng đợi `ordering.send-buyer-email` hay để BTC tự liên hệ (Story 4.4/7.1).
+  evidence: Review 3.8 (BH) triage #7. Có từ trước 3.8: AC 3.6 trong epics chỉ đòi email cho `sold_out`, 3.8 làm đúng phần đó. Các nhánh khác chỉ tạo `review_item`; Trang Đơn hiện `under_review` + kênh liên hệ BTC nhưng Người mua phải tự mở lại trang mới biết.

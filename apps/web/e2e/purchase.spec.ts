@@ -166,6 +166,8 @@ const FREE_TIER = 'Vé tham dự';
 const ticketId = (n: number) => `019a3b2c-0b00-7abc-8def-${String(n).padStart(12, '0')}`;
 /** Mã QR vé giả đúng mẫu `t<k>.<ticketId>.<sig>` (Story 3.3): chữ ký đúng 43 ký tự base64url. */
 const ticketQr = (n: number) => `t1.${ticketId(n)}.${String(n).padStart(43, 'q')}`;
+/** Token link chia sẻ giả (Story 3.8): 22 ký tự base64url. */
+const shareToken = (n: number) => `share${String(n).padStart(17, 'S')}`;
 /** Đơn 0đ đã `paid` với `count` Vé (Story 3.3). */
 const freeOrder = (count = 2) =>
   buyerOrder({
@@ -182,6 +184,7 @@ const freeOrder = (count = 2) =>
       ticketTypeName: FREE_TIER,
       holderName: 'Nguyễn Văn An',
       qr: ticketQr(i + 1),
+      shareToken: shareToken(i + 1),
     })),
   });
 
@@ -983,9 +986,9 @@ test.describe('Đăng ký Sự kiện miễn phí (Story 3.3)', () => {
     await expect(stage).toContainText(FREE_EVENT_NAME);
     // Focus chuyển vào tiêu đề để trình đọc màn hình đọc "Vé của bạn đã sẵn sàng!" ngay sau "Đăng ký".
     await expect(page.getByRole('heading', { level: 1, name: 'Vé của bạn đã sẵn sàng!' })).toBeFocused();
-    // Chưa có email Vé (3.8) và "Vé của tôi" (3.9).
-    await expect(success).not.toContainText('Đã gửi Vé tới');
-    await expect(page.getByRole('button', { name: 'Chia sẻ Vé' })).toHaveCount(0);
+    // Story 3.8: email Vé + "Chia sẻ Vé" trên từng thẻ (chi tiết ở `shared-ticket.spec.ts`); chưa có "Vé của tôi" (3.9).
+    await expect(stage.locator('[data-slot="order-success-email"]')).toHaveText(`Đã gửi Vé tới ${EMAIL}`);
+    await expect(page.getByRole('button', { name: 'Chia sẻ Vé' })).toHaveCount(2);
     await expect(page.getByText('Xem Vé của tôi')).toHaveCount(0);
 
     await expect(ticketCards(page)).toHaveCount(2);

@@ -15,3 +15,4 @@ export * from './realtime.js';
 export * from './reporting.js';
 export * from './sellability.js';
 export * from './ticket-type.js';
+export * from './tickets.js';

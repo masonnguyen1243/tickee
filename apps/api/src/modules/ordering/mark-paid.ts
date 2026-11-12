@@ -1,10 +1,13 @@
 import { Inject, Injectable, Module } from '@nestjs/common';
-import { EventStatus, FunnelEventType, OrderStatus, ReviewItemReason } from '@tickee/contracts';
+import { BuyerEmailKind, EventStatus, FunnelEventType, OrderStatus, ReviewItemReason } from '@tickee/contracts';
 import { and, asc, eq, sql, type SQL } from 'drizzle-orm';
+import type { PgBoss } from 'pg-boss';
 import { audit } from '../../platform/audit/index.js';
 import type { DbExecutor, Tx } from '../../platform/db/index.js';
+import { BOSS } from '../../platform/jobs/index.js';
 import { lockEventByIdForShare, organizationLocked, type PublicEventRef } from '../event/index.js';
 import { TicketsService } from '../ticketing/index.js';
+import { BuyerEmailQueues, enqueueBuyerEmail } from './buyer-email-jobs.js';
 import { sellInventory, settleHeld } from './inventory.service.js';
 import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
 import { releaseOrderHeld } from './order-jobs.js';
@@ -143,14 +146,26 @@ const orphan = (reason: ReviewItemReason): MarkPaidResult => ({ outcome: 'orphan
 /*
  * Đường duy nhất phát Vé (AD-1, Story 3.3): mọi nguồn ghi nhận thanh toán (`PAID_SOURCES`) đi qua `markPaid` trong `tx`
  * của bên gọi. Một transaction: khóa Sự kiện `FOR SHARE` → (nguồn có phí: khóa Đơn, thứ tự kiểm 3–7 của AD-7) → CAS Đơn
- * → `paid` (kèm `paid_at`, `paid_amount`, `paid_source`) → phép tồn kho theo nguồn → phát N Vé (`ticketing`) → audit
- * `order.paid` → phễu `paid` → tín hiệu `order_changed` (trừ nguồn `free`). Mọi lần Đơn chuyển `review` cũng phát
- * `order_changed`. Không bao giờ phát Vé từ request của trình duyệt hay `returnUrl`. Email Vé (Story 3.8) sẽ enqueue ở
- * đây cho mọi nguồn.
+ * → `paid` (kèm `paid_at`, `paid_amount`, `paid_source`) → phép tồn kho theo nguồn → phát N Vé (`ticketing`, kèm link
+ * chia sẻ) → enqueue email Vé (Story 3.8, mọi nguồn) → audit `order.paid` → phễu `paid` → tín hiệu `order_changed` (trừ
+ * nguồn `free`). Mọi lần Đơn chuyển `review` cũng phát `order_changed`; tiền về muộn hết chỗ (`orphan` `sold_out`) còn
+ * enqueue email báo Người mua. Không bao giờ phát Vé từ request của trình duyệt hay `returnUrl`.
  */
 @Injectable()
 export class OrderPayments {
-  constructor(@Inject(TicketsService) private readonly tickets: TicketsService) {}
+  constructor(
+    @Inject(TicketsService) private readonly tickets: TicketsService,
+    @Inject(BOSS) private readonly boss: PgBoss,
+    @Inject(BuyerEmailQueues) private readonly emailQueues: BuyerEmailQueues,
+  ) {}
+
+  /**
+   * pg-boss đã start và queue email Người mua đã có: `markPaid` enqueue trong `tx` của bên gọi, nên bên gọi chờ việc này
+   * trước transaction (lần trước lỗi thì làm lại).
+   */
+  ready(): Promise<void> {
+    return this.emailQueues.ready();
+  }
 
   /**
    * Ghi nhận khoản tiền `paidAmount` cho Đơn `orderId` trong `tx`.
@@ -170,9 +185,11 @@ export class OrderPayments {
    *   7. Đơn `pending` → CAS `pending → paid`, `held -= n, sold += n`, Vé. Sự kiện bị khóa không chặn (Đơn đã trả tiền
    *      khi còn bán).
    *   `paid_at` = `options.paidAt` (thiếu → đồng hồ DB); Vé `issued_at` = đồng hồ DB. `pending → review` nhả `held`.
+   *   `orphan` `sold_out` enqueue email báo Người mua (`orphan_sold_out`) trong `tx`.
    * - `reconciliation`, `manual`: chưa làm (Story 4.1, 4.4) → ném lỗi.
    *
-   * Lỗi bất kỳ (phát Vé, audit…) → ném, cả `tx` rollback.
+   * `paid` luôn kèm đúng một job email Vé (`tickets`) trong `tx`. Bên gọi đã `ready()` trước transaction. Lỗi bất kỳ
+   * (phát Vé, enqueue, audit…) → ném, cả `tx` rollback (không Vé, không job).
    */
   async markPaid(
     tx: Tx,
@@ -253,9 +270,15 @@ export class OrderPayments {
       // mua đã trả tiền khi còn bán (FR-14, AC 3.6).
       const eventLocked =
         event.lockedAt !== null || (await organizationLocked(tx, { organizationId: event.organizationId }));
-      if (eventLocked || !(await sellAllOrNothing(tx, lines))) {
+      if (eventLocked) {
         await moveToReview(tx, orderId, status);
-        return orphan(eventLocked ? ReviewItemReason.EVENT_LOCKED : ReviewItemReason.SOLD_OUT);
+        return orphan(ReviewItemReason.EVENT_LOCKED);
+      }
+      if (!(await sellAllOrNothing(tx, lines))) {
+        await moveToReview(tx, orderId, status);
+        // Người mua đã trả tiền mà không có Vé: báo BTC sẽ liên hệ hoàn tiền (email cùng `tx`).
+        await enqueueBuyerEmail(this.boss, tx, BuyerEmailKind.ORPHAN_SOLD_OUT, orderId);
+        return orphan(ReviewItemReason.SOLD_OUT);
       }
     } else {
       // 7. Đơn `pending`: chốt bán phần đang giữ từ TX1.
@@ -271,9 +294,9 @@ export class OrderPayments {
 
   /**
    * CAS `from → paid` (kèm `paid_at`, `paid_amount`, `paid_source`) → phát N Vé (`issued_at` = `issuedAt`, thiếu →
-   * `paid_at`) → audit `order.paid` → phễu `paid` → `order_changed` (trừ nguồn `free`: Đơn 0đ thành `paid` ngay trong
-   * TX1, không `NOTIFY` trong TX1, response tạo Đơn đã mang kết quả). Phép tồn kho do bên gọi làm. 0 dòng (Đơn không còn
-   * ở `from`) → `false`, không làm gì.
+   * `paid_at`) → enqueue email Vé (`tickets`, id job cố định theo Đơn) → audit `order.paid` → phễu `paid` →
+   * `order_changed` (trừ nguồn `free`: Đơn 0đ thành `paid` ngay trong TX1, không `NOTIFY` trong TX1, response tạo Đơn đã
+   * mang kết quả). Phép tồn kho do bên gọi làm. 0 dòng (Đơn không còn ở `from`) → `false`, không làm gì.
    */
   private async pay(tx: Tx, orderId: string, input: PayInput): Promise<boolean> {
     const [order] = await tx
@@ -302,6 +325,7 @@ export class OrderPayments {
       issuedAt: input.issuedAt ?? order.paidAt!,
       lines: input.lines,
     });
+    await enqueueBuyerEmail(this.boss, tx, BuyerEmailKind.TICKETS, order.id);
     await audit.record(tx, {
       actorUserId: null,
       organizationId: order.organizationId,
@@ -333,7 +357,8 @@ interface PayInput {
 
 /**
  * `OrderPayments` (`markPaid`) cho mọi vai: `OrderingModule` (api, Đơn 0đ), `payment` (IPN ở api, Đối soát bù ở worker).
- * Không controller, không cấu hình; cần `TicketingModule` (toàn cục: `TicketsService`) và `DbModule` ở gốc DI.
+ * Kèm `BuyerEmailQueues` (tạo queue email Người mua mà `markPaid` enqueue vào). Không controller, không cấu hình; cần
+ * `TicketingModule` (toàn cục: `TicketsService`), `JobsModule` và `DbModule` ở gốc DI.
  */
-@Module({ providers: [OrderPayments], exports: [OrderPayments] })
+@Module({ providers: [OrderPayments, BuyerEmailQueues], exports: [OrderPayments] })
 export class OrderPaymentsModule {}
