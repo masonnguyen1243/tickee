@@ -463,3 +463,19 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-10-bao-nguoi-mua-khi-doi-gio-hoac-dia-diem.md`
   summary: Lỗi lặp ở `e2e/event-settings.spec.ts` › "Kết thúc qua Dialog…" trên ios-webkit: bấm tab "Tổng quan" (`router.replace` bỏ `?tab=`) rồi `page.goto` ngay thì hai lần điều hướng đè nhau ("interrupted by another navigation"). Đã thêm `waitForURL` trước `goto` trong test này; các spec khác đổi tab rồi `goto` ngay có thể cùng kiểu.
   evidence: Kiểm chứng 3.10 (12/11): bản baseline `1dd0d0e` chạy riêng ca này 10 lần trên ios-webkit fail 2; sau khi chờ URL, 10/10 pass. Nên gộp vào việc ghi các test chập chờn ở E2-8.
+
+## Deferred from: build of spec-3-11-tong-quan-su-kien-thay-don-dau-tien-ngay-lap-tuc.md (2026-11-12)
+
+- Quyết định (12/11/2026): phần còn lại của E2-6 không làm ở 3.11. Mason quyết khi lập spec 3.11: nhãn trạng thái bán trên dashboard (đang tự tính ở `apps/web/app/(dashboard)/btc/[orgId]/su-kien/event-status.ts`, lệch `sellability`, retro Epic 2 C5) chuyển hẳn sang Story 4.2; 3.11 không đổi `event-status.ts`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-11-tong-quan-su-kien-thay-don-dau-tien-ngay-lap-tuc.md`
+  summary: Story 4.2. Nhãn trạng thái bán của Sự kiện trên dashboard (danh sách Sự kiện, badge thẻ "Thông tin" của tab Tổng quan) đọc theo `sellability` thay vì tự tính từ `status`/`effectiveEndAt` ở web.
+  evidence: Retro Epic 2 C5, E2-6 (`sprint-status.yaml`). Spec 3.11 › Boundaries › Quyết định của Mason (12/11).
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-11-tong-quan-su-kien-thay-don-dau-tien-ngay-lap-tuc.md`
+  summary: Story 4.4. Thao tác trên `review_items` mà không đổi trạng thái Đơn (vd. "Đã hoàn tay"/"Bỏ qua" mục `amount_mismatch` của Đơn vẫn ở `review`) phải phát `event_orders_changed` trong cùng `tx`, để dòng loại Cần xử lý của "Đơn gần đây" đổi theo mà không cần tải lại.
+  evidence: 3.11 chỉ phát `event_orders_changed` ở các điểm phát `order_changed` (đổi trạng thái hoặc link của Đơn) và sau commit TX1. `review` của `RecentOrder` lấy từ mục `open` cũ nhất (`payment.openReviewsOf`), nên đóng mục mà Đơn không đổi trạng thái thì Tổng quan đang mở chỉ đúng lại ở lần tải sau (tín hiệu khác, tab hiện lại).
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-11-tong-quan-su-kien-thay-don-dau-tien-ngay-lap-tuc.md`
+  summary: Story 7.1. Chốt cách tính doanh thu trên Tổng quan sau khi hủy Sự kiện, và phát `event_orders_changed` khi hủy (cùng chỗ với `order_changed` của mục 7.1 ở phần 3.7 phía trên) để Tổng quan đang mở đổi theo.
+  evidence: Spec 3.11 › Never: "Không đặt luật doanh thu riêng cho Sự kiện đã hủy (7.1 quyết)". Hiện `ordering.eventRevenueOf` cộng mọi Đơn `paid` bất kể Sự kiện đã hủy.
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-11-tong-quan-su-kien-thay-don-dau-tien-ngay-lap-tuc.md`
+  summary: `GET …/overview` đọc doanh thu và "Đơn gần đây" bằng hai câu độc lập (READ COMMITTED, chạy song song), nên một lần trả lời có thể lệch nhau đúng một Đơn vừa đổi giữa hai câu (vd. Đơn hiện "Đã thanh toán" mà "· n Đơn" chưa tăng). Tín hiệu của chính thay đổi đó làm web tải lại ngay sau, nên tự đúng. Nếu cần khớp tuyệt đối thì chạy cả ba câu trong một transaction `REPEATABLE READ READ ONLY`.
+  evidence: `reporting/event-overview.service.ts` › `overview`. Chấp nhận ở 3.11 vì REST là sự thật và mỗi thay đổi đều kèm tín hiệu tải lại (AD-17).

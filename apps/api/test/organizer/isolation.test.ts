@@ -93,6 +93,12 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/end');
     // Story 3.10: PATCH Sự kiện chuyển sang flows (cùng đường dẫn) và số Người mua.
     expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/buyer-count');
+    // Story 3.11: Tổng quan Sự kiện của `reporting` (REST và SSE, `orders.view`).
+    expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/overview');
+    expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/overview/live');
+    const permissionOf = (path: string) => routes.find((r) => r.method === 'GET' && r.path === path)?.permission;
+    expect(permissionOf('/v1/orgs/:orgId/events/:eventId/overview')).toBe(Permission.ORDERS_VIEW);
+    expect(permissionOf('/v1/orgs/:orgId/events/:eventId/overview/live')).toBe(Permission.ORDERS_VIEW);
     expect(guarded).toContain('GET /v1/orgs/:orgId/test-owner-only');
     expect(guarded).toContain('POST /v1/orgs/:orgId/test-owner-only/items/:itemId');
   });
@@ -150,7 +156,7 @@ describe('cách ly BTC', () => {
 
   it('route Sự kiện trên BTC A: body {} → 400, id ngẫu nhiên → 404 EVENT_NOT_FOUND', async () => {
     const eventRoutes = routes.filter((r) => r.permission && r.path.startsWith('/v1/orgs/:orgId/events'));
-    expect(eventRoutes).toHaveLength(20);
+    expect(eventRoutes).toHaveLength(22);
     for (const route of eventRoutes) {
       const res = await call(route, orgA, ownerA.cookie);
       // Body được kiểm trước khi chạm DB; danh sách Sự kiện của BTC trả 200; còn lại Sự kiện ngẫu nhiên → 404.

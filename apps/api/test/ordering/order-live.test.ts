@@ -1,4 +1,4 @@
-import { BuyerOrderStatus, ErrorResponse, OrderStatus, type BuyerOrderView } from '@tickee/contracts';
+import { BuyerOrderStatus, ErrorResponse, OrderStatus, RealtimeTopic, type BuyerOrderView } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -119,7 +119,12 @@ async function live(code: string, cookie?: string): Promise<SseClient> {
 const view = async (placed: Pick<Placed, 'buyer' | 'code'>) =>
   parseOrder((await h.http.get(`/v1/me/orders/${placed.code}`).set('cookie', placed.buyer.cookie).expect(200)).body);
 
-const notificationsFor = (orderId: string) => notified.filter((n) => n.id === orderId);
+/**
+ * Tín hiệu `type` (mặc định `order_changed`) của Đơn: từ Story 3.11 mỗi điểm đổi Đơn phát thêm `event_orders_changed`, và
+ * Đơn mới phát `event_orders_changed` sau khi TX1 commit.
+ */
+const notificationsFor = (orderId: string, type: string = RealtimeTopic.ORDER_CHANGED) =>
+  notified.filter((n) => n.id === orderId && n.type === type);
 
 const sendIpn = (placed: Pick<Placed, 'code' | 'total'>, overrides: Record<string, unknown> = {}) =>
   postIpn(h, ipnKey, signIpn(MAIN.secretToken, fakeIpnPayload(placed.code, placed.total, overrides)));

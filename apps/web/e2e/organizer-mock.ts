@@ -7,7 +7,9 @@ import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
  * (xem `identity-mock.ts`). Mặc định `GET /me/memberships`, `GET /orgs/:id/notices` (dashboard luôn tải dải banner) và
  * `GET /orgs/:id/events` (trang đích luôn tải danh sách Sự kiện), `GET /orgs/:id/events/:eventId/ticket-types` → `[]`,
  * `GET /orgs/:id/events/:eventId/form` → `{ questions: [] }`, `GET /orgs/:id/events/:eventId/publish-readiness` → bốn
- * điều kiện luôn có, đều đạt (`readyConditions`); lời gọi không có handler → 500.
+ * điều kiện luôn có, đều đạt (`readyConditions`), `GET /orgs/:id/events/:eventId/overview` → chưa có Đơn
+ * (`emptyOverview`), SSE `GET /orgs/:id/events/:eventId/overview/live` → 503 (không realtime: polling 10 giây); lời gọi
+ * không có handler → 500.
  */
 
 export const ORG_ID = '019a3b2c-5678-7abc-8def-0123456789ab';
@@ -19,6 +21,11 @@ const EVENTS_KEY = /^GET \/orgs\/[^/]+\/events$/;
 const TICKET_TYPES_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/ticket-types$/;
 const EVENT_FORM_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/form$/;
 const READINESS_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/publish-readiness$/;
+const OVERVIEW_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/overview$/;
+const OVERVIEW_LIVE_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/overview\/live$/;
+
+/** `EventOverview` của Sự kiện chưa có Đơn nào (Story 3.11). */
+export const emptyOverview = () => ({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: [] });
 
 /** Bốn điều kiện mở bán luôn có (Story 2.10). */
 export const ALWAYS_CONDITIONS = ['REFUND_POLICY', 'HAS_TICKET_TYPE', 'EVENT_NOT_ENDED', 'ORGANIZATION_NOT_LOCKED'];
@@ -40,6 +47,9 @@ function defaultHandler(key: string): Handler | undefined {
   if (EVENT_FORM_KEY.test(key)) return () => ({ status: 200, body: { questions: [] } });
   // Wizard bước 4 luôn tải điều kiện mở bán (Story 2.10): mặc định Sự kiện miễn phí đủ điều kiện.
   if (READINESS_KEY.test(key)) return () => ({ status: 200, body: readiness() });
+  // Tab Tổng quan của Sự kiện đã rời nháp luôn tải số liệu và mở SSE (Story 3.11): mặc định chưa có Đơn, không realtime.
+  if (OVERVIEW_KEY.test(key)) return () => ({ status: 200, body: emptyOverview() });
+  if (OVERVIEW_LIVE_KEY.test(key)) return () => apiError(503, 'SERVICE_UNAVAILABLE');
   return undefined;
 }
 

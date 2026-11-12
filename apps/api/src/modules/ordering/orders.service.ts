@@ -44,6 +44,7 @@ import { TicketsService } from '../ticketing/index.js';
 import { buyerStatusOf } from './buyer-status.js';
 import { holdInventory, sellInventory, type InventoryLine } from './inventory.service.js';
 import { OrderPayments } from './mark-paid.js';
+import { announceOrderCreated } from './order-changed.js';
 import { ORDER_CODE_ATTEMPTS, ORDER_CODE_GENERATOR, type OrderCodeGenerator } from './order-code.js';
 import { enqueueOrderExpiry, expireOrder, OrderQueues } from './order-jobs.js';
 import { OrderRateLimiter } from './order-rate-limit.js';
@@ -63,7 +64,8 @@ import { saleFactsOf, saleStatusOf } from './sellability.js';
  * transaction): khóa Sự kiện `FOR SHARE` → kiểm lại form, giới hạn Vé/Đơn và luật bán (`saleStatusOf`) trên dữ liệu đã
  * khóa → giữ chỗ (Đơn 0đ: bán) có điều kiện theo `ticket_type_id` tăng dần → Đơn `pending` + bản chụp (Đơn có phí: kèm
  * lượt tạo link) → `order_created` → enqueue job hết hạn bằng chính `tx` (Đơn 0đ: trần Vé miễn phí → `markPaid`, không
- * job). TX1 không gọi Tingee, không gửi email, không `NOTIFY`. Lỗi unique sau rollback (hai request cùng khóa, hay hai
+ * job). TX1 không gọi Tingee, không gửi email, không `NOTIFY`; commit xong mới phát `event_orders_changed` cho Tổng quan
+ * Sự kiện bằng lệnh riêng (Story 3.11, `announceOrderCreated`). Lỗi unique sau rollback (hai request cùng khóa, hay hai
  * Đơn chờ đua nhau) → đọc lại: trả Đơn của bên thắng hoặc 409. Mọi lần trả Đơn đã có (cùng khóa) cũng đi qua hàm bảo
  * đảm link: Đơn chưa có link mà còn lượt thì thử tạo link.
  */
@@ -79,6 +81,9 @@ export interface Buyer {
 }
 
 type OrderRow = typeof orders.$inferSelect;
+
+/** Đơn vừa tạo trong TX1: id, BTC và Sự kiện (payload tín hiệu `event_orders_changed` sau commit). */
+type PlacedOrder = { id: string; organizationId: string; eventId: string };
 
 const CODE_KEY = 'orders_code_key';
 const IDEMPOTENCY_KEY = 'orders_user_id_idempotency_key_key';
@@ -223,9 +228,9 @@ export class OrdersService {
     await this.payments.ready();
     await this.limiter.consume(buyer.id, ip);
 
-    let orderId: string;
+    let placed: PlacedOrder;
     try {
-      orderId = await this.db.transaction((tx) => this.placeOrder(tx, buyer, slug, key, body));
+      placed = await this.db.transaction((tx) => this.placeOrder(tx, buyer, slug, key, body));
     } catch (err) {
       const constraint = uniqueViolation(err);
       if (constraint === IDEMPOTENCY_KEY || constraint === ONE_PENDING_KEY) {
@@ -237,6 +242,9 @@ export class OrdersService {
       }
       throw err;
     }
+    // TX1 đã commit: báo Tổng quan Sự kiện có Đơn mới bằng lệnh riêng (lỗi chỉ log). Đường trả Đơn cũ ở trên không phát.
+    await announceOrderCreated(this.db, placed);
+    const orderId = placed.id;
     const row = await this.reload(orderId);
     // TX1 đã đặt sẵn lượt tạo link cho Đơn có phí: chính request này gọi Tingee (sau commit, ngoài transaction).
     if (row.status === OrderStatus.PENDING && row.paymentLinkAttemptAt !== null && row.paymentLink === null) {
@@ -301,13 +309,13 @@ export class OrdersService {
   }
 
   /**
-   * TX1. Trả id Đơn mới. Lỗi nghiệp vụ hoặc unique → ném, cả transaction rollback (không giữ chỗ, không bán, không Vé).
-   * Đơn tổng > 0: giữ chỗ (`held += n`), Đơn `pending` hạn `holdSeconds` kèm lượt tạo link (`payment_link_attempt_at`,
-   * cho lần gọi Tingee ngay sau commit), job hết hạn (a). Đơn tổng 0đ: bán (`sold += n`),
-   * Đơn `pending` hạn = lúc tạo, kiểm trần Vé miễn phí của Người mua, rồi `markPaid` nguồn `free` (Đơn `paid` + Vé);
-   * không job hết hạn.
+   * TX1. Trả id Đơn mới kèm BTC và Sự kiện (cho tín hiệu sau commit). Lỗi nghiệp vụ hoặc unique → ném, cả transaction
+   * rollback (không giữ chỗ, không bán, không Vé). Đơn tổng > 0: giữ chỗ (`held += n`), Đơn `pending` hạn
+   * `holdSeconds` kèm lượt tạo link (`payment_link_attempt_at`, cho lần gọi Tingee ngay sau commit), job hết hạn (a).
+   * Đơn tổng 0đ: bán (`sold += n`), Đơn `pending` hạn = lúc tạo, kiểm trần Vé miễn phí của Người mua, rồi `markPaid`
+   * nguồn `free` (Đơn `paid` + Vé); không job hết hạn.
    */
-  private async placeOrder(tx: Tx, buyer: Buyer, slug: string, key: string, body: unknown): Promise<string> {
+  private async placeOrder(tx: Tx, buyer: Buyer, slug: string, key: string, body: unknown): Promise<PlacedOrder> {
     const event = await lockSaleEventBySlug(tx, slug);
     const questions = await buyerFormQuestions(tx, event.id);
     const input = parseRequest(orderRequestFor(event, questions), body);
@@ -377,16 +385,17 @@ export class OrdersService {
         .values({ eventId: event.id, type: FunnelEventType.ORDER_CREATED, funnelId: input.funnelId.toLowerCase() })
         .onConflictDoNothing({ target: [checkoutFunnelEvents.funnelId, checkoutFunnelEvents.type] });
     }
+    const placed: PlacedOrder = { id: order.id, organizationId: event.organizationId, eventId: event.id };
     if (!free) {
       await enqueueOrderExpiry(this.boss, tx, order.id, order.expiresAt);
-      return order.id;
+      return placed;
     }
 
     await this.assertFreeTicketLimit(tx, buyer.id, event.id, ticketCount(lines), event.maxTicketsPerOrder);
     const result = await this.payments.markPaid(tx, order.id, 'free', 0);
     // Đơn vừa chèn `pending` trong chính `tx` này: không bên nào khác chuyển được trước.
     if (result.outcome !== 'paid') throw new Error(`markPaid trả ${result.outcome} cho Đơn 0đ vừa tạo`);
-    return order.id;
+    return placed;
   }
 
   /**

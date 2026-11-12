@@ -14,6 +14,9 @@ import {
   formatEventTimeRange,
   formatVnDate,
   formatVnDateTime,
+  formatVnDayTime,
+  formatVnTime,
+  isSameVnDay,
   notifiesBuyers,
   publicEventTag,
   slugBase,
@@ -179,6 +182,32 @@ describe('formatVnDateTime / formatVnDate (offset +07:00 cố định, không In
     expect(formatVnDate('2026-12-31T17:30:00Z')).toBe('01/01/2027');
     expect(formatVnDateTime('2026-12-31T16:59:00Z')).toBe('23:59 31/12/2026');
     expect(formatVnDate('2026-12-31T16:59:00Z')).toBe('31/12/2026');
+  });
+});
+
+describe('formatVnTime / formatVnDayTime / isSameVnDay (Story 3.11, offset +07:00 cố định)', () => {
+  it('HH:mm và dd/MM · HH:mm; nhận Date, chuỗi ISO hoặc mili giây', () => {
+    expect(formatVnTime(new Date('2026-11-08T03:04:00.000Z'))).toBe('10:04');
+    expect(formatVnTime('2026-11-08T10:04:00+07:00')).toBe('10:04');
+    expect(formatVnTime(Date.parse('2026-11-08T03:04:59.999Z'))).toBe('10:04');
+    expect(formatVnDayTime('2026-11-08T10:04:00+07:00')).toBe('08/11 · 10:04');
+    expect(formatVnDayTime(new Date('2026-01-02T00:05:00.000Z'))).toBe('02/01 · 07:05');
+  });
+
+  it('qua nửa đêm giờ Việt Nam: 17:00 UTC là 00:00 hôm sau', () => {
+    expect(formatVnTime('2026-11-16T17:00:00Z')).toBe('00:00');
+    expect(formatVnDayTime('2026-11-16T17:00:00Z')).toBe('17/11 · 00:00');
+    expect(formatVnDayTime('2026-11-16T16:59:00Z')).toBe('16/11 · 23:59');
+  });
+
+  it('cùng ngày lịch giờ Việt Nam, không theo UTC', () => {
+    // 16/11 23:30 UTC và 17/11 01:00 UTC: đều là ngày 17/11 giờ Việt Nam.
+    expect(isSameVnDay('2026-11-16T23:30:00Z', '2026-11-17T01:00:00Z')).toBe(true);
+    // 16/11 16:59 UTC (23:59 giờ VN) và 16/11 17:00 UTC (00:00 hôm sau giờ VN): khác ngày dù cùng ngày UTC.
+    expect(isSameVnDay('2026-11-16T16:59:00Z', '2026-11-16T17:00:00Z')).toBe(false);
+    expect(isSameVnDay(new Date('2026-11-08T10:04:00+07:00'), Date.parse('2026-11-08T00:00:00+07:00'))).toBe(true);
+    // Cùng ngày và tháng nhưng khác năm.
+    expect(isSameVnDay('2026-11-08T10:04:00+07:00', '2027-11-08T10:04:00+07:00')).toBe(false);
   });
 });
 

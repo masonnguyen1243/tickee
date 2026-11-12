@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
+import { ORDER_CODE_PATTERN, orderStatusSchema } from './order.js';
 import { roleSchema } from './organizer.js';
+import { reviewItemTypeSchema } from './payment.js';
 
 // ---------------------------------------------------------------------------------------------------------------
 // Thông báo trạng thái cho `status-banner` (AD-34, UX-DR8): `reporting.notices(scope)` là nguồn duy nhất
@@ -85,3 +87,59 @@ export function sortStatusNotices<T extends { code: StatusNoticeCode }>(notices:
 
 /** Dashboard hiện tối đa chừng này banner; phần còn lại gộp thành "+N thông báo" mở `Sheet` (UX-DR8). */
 export const STATUS_BANNER_LIMIT = 2;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Tổng quan Sự kiện (Story 3.11, FR-31, UX-DR35): doanh thu + Đơn gần đây, đọc qua read model của `ordering`, `payment`
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Số Đơn mới nhất của khối "Đơn gần đây". */
+export const RECENT_ORDERS_LIMIT = 5;
+
+/**
+ * Loại Cần xử lý của một Đơn `review`: `type` và số tiền đã nhận (`payment_events.paid_amount`) của mục `review_items`
+ * `open` cũ nhất của Đơn. `receivedAmount` `null` khi khoản tiền không ghi số tiền (không xảy ra với IPN `success`).
+ */
+export const RecentOrderReview = z.object({
+  type: reviewItemTypeSchema,
+  receivedAmount: z.number().int().nonnegative().nullable(),
+});
+export type RecentOrderReview = z.infer<typeof RecentOrderReview>;
+
+/**
+ * Một Đơn của khối "Đơn gần đây" (mọi trạng thái): mã Đơn, tên Người mua (bản chụp lúc đặt), tổng số Vé, tổng tiền,
+ * trạng thái, lúc tạo, loại Cần xử lý (`review` khác `null` chỉ khi `status = 'review'` và Đơn còn mục `open`). Không có
+ * id nội bộ, email hay SĐT.
+ */
+export const RecentOrder = z.object({
+  code: z.string().regex(ORDER_CODE_PATTERN),
+  buyerName: z.string(),
+  ticketCount: z.number().int().nonnegative(),
+  totalAmount: z.number().int().nonnegative(),
+  status: orderStatusSchema,
+  createdAt: z.iso.datetime({ offset: true }),
+  review: RecentOrderReview.nullable(),
+});
+export type RecentOrder = z.infer<typeof RecentOrder>;
+
+/**
+ * `GET /v1/orgs/:orgId/events/:eventId/overview` (Owner, Admin: `orders.view`): doanh thu = tổng `total_amount` của các
+ * Đơn `paid` của Sự kiện, `paidOrders` = số Đơn `paid` (tính cả Đơn 0đ); `recentOrders` = tối đa `RECENT_ORDERS_LIMIT`
+ * Đơn mới nhất ở mọi trạng thái, xếp theo lúc tạo rồi id, giảm dần. Web tải lại khi stream
+ * `GET …/overview/live` báo `event_orders_changed`.
+ */
+export const EventOverview = z.object({
+  revenue: z.object({
+    amount: z.number().int().nonnegative(),
+    paidOrders: z.number().int().nonnegative(),
+  }),
+  recentOrders: z.array(RecentOrder).max(RECENT_ORDERS_LIMIT),
+});
+export type EventOverview = z.infer<typeof EventOverview>;
+
+/** Đường API (sau `/v1`) của `EventOverview`. */
+export const eventOverviewApiPath = (organizationId: string, eventId: string): string =>
+  `/orgs/${encodeURIComponent(organizationId)}/events/${encodeURIComponent(eventId)}/overview`;
+
+/** Đường SSE (sau `/v1`) của Tổng quan Sự kiện: chỉ đẩy `event_orders_changed` của Sự kiện này và `resync`. */
+export const eventOverviewLiveApiPath = (organizationId: string, eventId: string): string =>
+  `${eventOverviewApiPath(organizationId, eventId)}/live`;
