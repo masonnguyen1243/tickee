@@ -23,7 +23,7 @@ import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import { audit } from '../../platform/audit/index.js';
 import type { ApiConfig } from '../../platform/config/index.js';
 import { parseCredentialKeys, SecretBox } from '../../platform/crypto/index.js';
-import { DATABASE, type Database, type DbExecutor, type Tx } from '../../platform/db/index.js';
+import { DATABASE, dbNow, type Database, type DbExecutor, type Tx } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
 import { assertReauth, consumeReauth, type ReauthProof } from '../identity/index.js';
@@ -556,13 +556,13 @@ export class PayoutAccountService {
     reason: DefaultPayoutChangeReason = 'default_changed',
   ): Promise<void> {
     // `now()` của transaction: cùng mốc với `retired_at` của lần hủy liên kết.
-    const { rows } = await tx.execute<{ now: string | Date }>(sql`SELECT now() AS now`);
+    const changedAt = await dbNow(tx);
     await enqueueDefaultPayoutChanged(this.boss, tx, {
       organizationId: ctx.organizationId,
       previousAccountId,
       nextAccountId,
       actorUserId: ctx.userId,
-      changedAt: new Date(rows[0]!.now).toISOString(),
+      changedAt: changedAt.toISOString(),
       reason,
     });
   }

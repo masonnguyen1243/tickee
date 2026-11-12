@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { Database, seedChecks } from '../src/platform/db/index.js';
+import { Database, dbClock, dbNow, seedChecks } from '../src/platform/db/index.js';
 import { runMigrations } from '../src/roles/migrate.js';
 import { databaseUrl, migrationDatabaseUrl } from './helpers.js';
 
@@ -42,6 +42,21 @@ describe('platform/db trên Postgres thật (role tickee_app)', () => {
     ).rejects.toThrow('hủy');
     const rows = await db.orm.select().from(seedChecks).where(eq(seedChecks.note, note));
     expect(rows).toHaveLength(0);
+  });
+
+  it('đồng hồ DB: dbNow cố định trong transaction, dbClock là giờ lúc gọi', async () => {
+    const result = await db.transaction(async (tx) => {
+      const now1 = await dbNow(tx);
+      const clock1 = await dbClock(tx);
+      await tx.execute(sql`SELECT pg_sleep(0.01)`);
+      const clock2 = await dbClock(tx);
+      const now2 = await dbNow(tx);
+      return { now1, now2, clock1, clock2 };
+    });
+    expect(result.now1).toBeInstanceOf(Date);
+    expect(result.now2.getTime()).toBe(result.now1.getTime());
+    expect(result.clock1.getTime()).toBeGreaterThanOrEqual(result.now1.getTime());
+    expect(result.clock2.getTime()).toBeGreaterThan(result.clock1.getTime());
   });
 
   it('tickee_app không có quyền DDL', async () => {

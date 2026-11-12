@@ -14,8 +14,9 @@ import { DATABASE, type Database } from '../../platform/db/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
 import { defaultPayoutTargetOf, type PayoutTarget } from '../organizer/index.js';
 import { CreateLinkError, TINGEE_CLIENT, type TingeeClient } from '../tingee/index.js';
+import { releaseOrderHeld } from './inventory.service.js';
 import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
-import { enqueueOrderExpiry, OrderQueues, releaseOrderHeld } from './order-jobs.js';
+import { enqueueOrderExpiry, OrderQueues } from './order-jobs.js';
 import { orders } from './schema.js';
 
 /*

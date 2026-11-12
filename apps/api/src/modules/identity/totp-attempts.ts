@@ -8,7 +8,7 @@ import {
 } from '@tickee/contracts';
 import { eq, sql } from 'drizzle-orm';
 import { audit } from '../../platform/audit/index.js';
-import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
+import { DATABASE, dbNow, type Database, type Tx } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { totpVerifyFailures } from './schema.js';
 
@@ -30,11 +30,6 @@ function totpInvalid(remainingAttempts: number): AppError {
 const lockUser = (tx: Tx, userId: string) =>
   tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`totp-verify:${userId}`}, 0))`);
 
-const dbNow = async (tx: Tx): Promise<number> => {
-  const rows = await tx.execute<{ now: string | Date }>(sql`SELECT now() AS now`);
-  return new Date(rows.rows[0]!.now).getTime();
-};
-
 /**
  * Bộ đếm xác minh TOTP sai liên tiếp theo user (NFR-6, AD-26), trong Postgres: TOTP và mã khôi phục, ở cả xác nhận
  * đăng ký lẫn step-up, dùng chung một bộ đếm. Sai `TOTP_MAX_FAILURES` lần liên tiếp → khóa `TOTP_LOCK_MS`; đang khóa
@@ -51,7 +46,7 @@ export class TotpAttemptLimiter {
   async begin(userId: string): Promise<void> {
     const locked = await this.db.transaction(async (tx) => {
       await lockUser(tx, userId);
-      const now = await dbNow(tx);
+      const now = (await dbNow(tx)).getTime();
       const [row] = await tx.select().from(totpVerifyFailures).where(eq(totpVerifyFailures.userId, userId));
       const lockedUntil = row?.lockedUntil?.getTime();
       if (lockedUntil !== undefined && lockedUntil > now) return totpLocked(lockedUntil - now);
@@ -85,7 +80,7 @@ export class TotpAttemptLimiter {
   async fail(userId: string): Promise<AppError> {
     return this.db.transaction(async (tx) => {
       await lockUser(tx, userId);
-      const now = await dbNow(tx);
+      const now = (await dbNow(tx)).getTime();
       const [row] = await tx.select().from(totpVerifyFailures).where(eq(totpVerifyFailures.userId, userId));
       const lockedUntil = row?.lockedUntil?.getTime();
       if (lockedUntil !== undefined && lockedUntil > now) return totpLocked(lockedUntil - now);

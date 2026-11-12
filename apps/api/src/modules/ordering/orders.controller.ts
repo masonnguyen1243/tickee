@@ -2,7 +2,8 @@ import { Body, Controller, Get, Header, Headers, HttpCode, Inject, Param, Post, 
 import { IDEMPOTENCY_KEY_HEADER, RealtimeTopic, type BuyerOrderView, type CheckoutForm } from '@tickee/contracts';
 import type { Request, Response } from 'express';
 import { RealtimeHub } from '../../platform/realtime/index.js';
-import { OrdersService, type Buyer } from './orders.service.js';
+import { OrdersService } from './orders.service.js';
+import type { Buyer } from './place-order.js';
 
 /**
  * Request đã qua guard session (route không `@Public`): `req.user` là user của session. Đọc trực tiếp, không import

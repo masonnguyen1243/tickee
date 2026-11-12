@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-12-2026 18:30
+last_updated: 11-12-2026 19:29
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -366,13 +366,15 @@ action_items:
       test TX1 không NOTIFY cho event_orders_changed; tách tối thiểu orders.service.ts,
       gom điều kiện Sự kiện còn dùng được và đồng hồ DB (D3, B6, C7, E2, E3)"
     owner: "Mason"
-    status: in-progress
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
     note: "Mason tách E3-7 ngày 12/11. D3 + gom điều kiện \"Sự kiện còn dùng được\"
       làm qua spec-epic-3-e3-7-trang-don-an-qr-sau-ket-thuc.md. B6 + C7 xong qua spec-epic-3-e3-7-b6-c7-nha-cho-link-va-test-notify.md.
-      Còn lại (ghi trong deferred-work.md, mục \"build E3-7, tách phạm vi\"): tách
-      orders.service.ts và gom đồng hồ DB, kèm chuyển releaseOrderHeld sang inventory.service.ts
-      (mục hoãn từ review B6)"
+      E2 + E3 xong qua spec-epic-3-e3-7-e2-e3-tach-orders-service-va-dong-ho-db.md:
+      TX1 sang place-order.ts, BuyerOrderView sang order-view.ts (orders.service.ts
+      còn 273 dòng), đồng hồ DB về platform/db/clock.ts (dbNow/dbClock) kèm test
+      chặn chép tay, releaseOrderHeld sang inventory.service.ts và thôi export releaseHeld.
+      buyerScope (E4) hoãn theo quyết định của Mason, ghi ở deferred-work.md"
   - id: "epic-3-retro-e3-8-email-doi-gio-nguoi-di-cung"
     epic: 3
     action: "E3-8 (trước Closed Beta): chốt câu chữ email đổi giờ/địa điểm cho Đơn

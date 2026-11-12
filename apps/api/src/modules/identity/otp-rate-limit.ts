@@ -10,16 +10,10 @@ import {
   type OtpRateLimitedDetails,
 } from '@tickee/contracts';
 import { and, desc, eq, gt, sql } from 'drizzle-orm';
-import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
+import { DATABASE, dbNow, type Database, type Tx } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { IDENTITY_CONFIG, type IdentityConfig } from './identity.config.js';
 import { googleStartEvents, otpSendEvents, otpVerifyFailures } from './schema.js';
-
-/** `now()` của Postgres (đầu transaction), cùng mốc với `created_at` mặc định. */
-async function dbNow(tx: Tx): Promise<number> {
-  const rows = await tx.execute<{ now: string | Date }>(sql`SELECT now() AS now`);
-  return new Date(rows.rows[0]!.now).getTime();
-}
 
 /** Giới hạn gửi OTP (NFR-6). */
 export const OTP_SEND_LIMITS = {
@@ -76,7 +70,7 @@ export class OtpRateLimiter {
     return this.db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`otp-send:${emailHmac}`}, 0))`);
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`otp-send-ip:${ipHmac}`}, 0))`);
-      const now = await dbNow(tx);
+      const now = (await dbNow(tx)).getTime();
       const lockedMs = await this.lockedForMs(tx, emailHmac, now);
       if (lockedMs !== null) throw otpLocked(lockedMs);
       const since = sql`now() - interval '1 hour'`;
@@ -148,7 +142,9 @@ export class OtpRateLimiter {
   /** Email đang bị khóa vì nhập sai quá nhiều lần trong 24 giờ → `OTP_LOCKED`. Gọi trước khi xác minh mã. */
   async assertVerifyAllowed(email: string): Promise<void> {
     const emailHmac = this.emailHmac(email);
-    const lockedMs = await this.db.transaction(async (tx) => this.lockedForMs(tx, emailHmac, await dbNow(tx)));
+    const lockedMs = await this.db.transaction(async (tx) =>
+      this.lockedForMs(tx, emailHmac, (await dbNow(tx)).getTime()),
+    );
     if (lockedMs !== null) throw otpLocked(lockedMs);
   }
 
@@ -160,7 +156,7 @@ export class OtpRateLimiter {
     const emailHmac = this.emailHmac(email);
     const lockedMs = await this.db.transaction(async (tx) => {
       await tx.insert(otpVerifyFailures).values({ emailHmac });
-      return this.lockedForMs(tx, emailHmac, await dbNow(tx));
+      return this.lockedForMs(tx, emailHmac, (await dbNow(tx)).getTime());
     });
     return lockedMs === null ? null : otpLocked(lockedMs);
   }
