@@ -7,17 +7,16 @@ import {
   PAYMENT_LINK_MINUTES,
   PaymentLinkError,
 } from '@tickee/contracts';
-import { and, asc, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { parseCredentialKeys, SecretBox } from '../../platform/crypto/index.js';
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
 import { defaultPayoutTargetOf, type PayoutTarget } from '../organizer/index.js';
 import { CreateLinkError, TINGEE_CLIENT, type TingeeClient } from '../tingee/index.js';
-import { releaseHeld } from './inventory.service.js';
 import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
-import { enqueueOrderExpiry, OrderQueues } from './order-jobs.js';
-import { orders, orderItems } from './schema.js';
+import { enqueueOrderExpiry, OrderQueues, releaseOrderHeld } from './order-jobs.js';
+import { orders } from './schema.js';
 
 /*
  * Bảo đảm link thanh toán Gateway cho một Đơn có phí (Story 3.4, AD-4, AD-5, AD-6). Một hàm cho hai điểm vào: tạo Đơn
@@ -236,8 +235,8 @@ export class PaymentLinks {
   }
 
   /**
-   * Một transaction: CAS `pending → expired` (chưa có link) kèm lý do, rồi nhả chỗ (`held -= n`, theo `ticket_type_id`
-   * tăng dần) và phát `order_changed`. Lượt không được trả. 0 dòng (job (a) đã hết hạn Đơn) → không làm gì.
+   * Một transaction: CAS `pending → expired` (chưa có link) kèm lý do, rồi nhả chỗ như mọi đường hết hạn khác
+   * (`releaseOrderHeld`) và phát `order_changed`. Lượt không được trả. 0 dòng (job (a) đã hết hạn Đơn) → không làm gì.
    */
   private async expire(orderId: string, reason: PaymentLinkError): Promise<void> {
     await this.db.transaction(async (tx) => {
@@ -247,12 +246,7 @@ export class PaymentLinks {
         .where(and(eq(orders.id, orderId), eq(orders.status, OrderStatus.PENDING), isNull(orders.paymentLink)))
         .returning(orderSignalColumns);
       if (!expired) return;
-      const lines = await tx
-        .select({ ticketTypeId: orderItems.ticketTypeId, quantity: orderItems.quantity })
-        .from(orderItems)
-        .where(eq(orderItems.orderId, orderId))
-        .orderBy(asc(orderItems.ticketTypeId));
-      await releaseHeld(tx, lines);
+      await releaseOrderHeld(tx, orderId);
       await notifyOrderChanged(tx, expired);
     });
   }

@@ -364,6 +364,32 @@ describe('tạo link khi gửi Đơn', () => {
     expect(linkCalls()).toHaveLength(1);
   });
 
+  it('Đơn 2 Hạng vé, Tingee trả 1007 → expired, sales_paused, nhả chỗ đủ ở cả hai Hạng vé', async () => {
+    fake.merchant(MAIN.clientId).linkReplies = [{ code: '1007' }];
+    const buyer = await signUp(h);
+    const sale = await eventOnSale(org, [
+      { name: 'Đơn nam', price: 300_000, capacity: 5 },
+      { name: 'Đôi nam nữ', price: 500_000, capacity: 5 },
+    ]);
+    const [single, mixed] = sale.tiers;
+    const res = await postOrder(
+      h,
+      buyer,
+      sale.event.slug,
+      orderBody([
+        { ticketTypeId: single!.id, quantity: 2 },
+        { ticketTypeId: mixed!.id, quantity: 1 },
+      ]),
+    );
+    expect(res.status).toBe(201);
+    const order = parseOrder(res.body);
+    expect(order).toMatchObject({ buyerStatus: 'expired', totalAmount: 1_100_000 });
+    expect(order.payment).toMatchObject({ checkoutUrl: null, linkError: 'sales_paused' });
+    expect(await inventory(h, single!.id)).toEqual({ capacity: 5, sold: 0, held: 0 });
+    expect(await inventory(h, mixed!.id)).toEqual({ capacity: 5, sold: 0, held: 0 });
+    await expectInventoryConsistent(sale.event.id);
+  });
+
   it('BTC vừa hủy liên kết hết tài khoản trước lần thử lại → expired, sales_paused, không gọi Tingee', async () => {
     const own = await paidReadyOrg(h, { name: 'CLB Cầu lông', credential: MAIN, payout: MAIN_PAYOUT });
     fake.merchant(MAIN.clientId).linkReplies = [{ code: '1006' }];

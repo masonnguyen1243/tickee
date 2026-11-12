@@ -1,12 +1,12 @@
 import { BuyerOrderStatus, ErrorResponse, OrderStatus, RealtimeTopic, type BuyerOrderView } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import pg from 'pg';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderPayments } from '../../src/modules/ordering/index.js';
 import { buyerStatusOf } from '../../src/modules/ordering/buyer-status.js';
 import { expireOrder } from '../../src/modules/ordering/order-jobs.js';
 import type { TingeeCredential } from '../../src/modules/tingee/index.js';
-import { REALTIME_CHANNEL } from '../../src/platform/realtime/index.js';
+import { realtime, REALTIME_CHANNEL } from '../../src/platform/realtime/index.js';
 import { databaseUrl, TEST_WEB_ORIGIN } from '../helpers.js';
 import { createHarness, signUp, type Harness } from '../identity/harness.js';
 import { orderState, postIpn } from '../payment/ipn-fixtures.js';
@@ -28,7 +28,8 @@ import {
 /*
  * Story 3.7: `GET /v1/me/orders/:code/live` và `BuyerOrderView` trên Postgres thật, Tingee fake, server HTTP thật nghe
  * cổng và client SSE thật. Đo từ lúc gửi IPN tới khi stream của Người mua nhận tín hiệu (< 1 giây); stream của người
- * khác không nhận gì; TX1 không bao giờ `NOTIFY`; mọi điểm đổi Đơn sau TX1 phát `order_changed`; bảng `buyerStatus`.
+ * khác không nhận gì; TX1 không bao giờ `NOTIFY` (mọi topic qua `realtime.notify`: lúc phát, Đơn đã commit); mọi điểm
+ * đổi Đơn sau TX1 phát `order_changed`; bảng `buyerStatus`.
  */
 
 const MAIN: TingeeCredential = { clientId: 'tg-live-main-7c3a', secretToken: 'tg-live-main-secret-Hj6Kl5Zx4' };
@@ -71,6 +72,9 @@ beforeAll(async () => {
 beforeEach(async () => {
   await resetOrderRateLimit(h);
   fake.merchant(MAIN.clientId).linkReplies = [];
+});
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 afterAll(async () => {
   for (const s of streams) s.close();
@@ -121,10 +125,45 @@ const view = async (placed: Pick<Placed, 'buyer' | 'code'>) =>
 
 /**
  * Tín hiệu `type` (mặc định `order_changed`) của Đơn: từ Story 3.11 mỗi điểm đổi Đơn phát thêm `event_orders_changed`, và
- * Đơn mới phát `event_orders_changed` sau khi TX1 commit.
+ * Đơn mới phát `event_orders_changed` sau khi TX1 commit. Đếm tín hiệu không phân biệt được tín hiệu phát sau commit với
+ * tín hiệu phát trong TX1; luật "TX1 không `NOTIFY`" kiểm bằng `recordNotifies`.
  */
 const notificationsFor = (orderId: string, type: string = RealtimeTopic.ORDER_CHANGED) =>
   notified.filter((n) => n.id === orderId && n.type === type);
+
+/** Một lần gọi `realtime.notify`: topic, id Đơn, và lúc phát Đơn đã commit chưa. */
+interface NotifyCall {
+  topic: string;
+  id: string;
+  committed: boolean;
+}
+
+/**
+ * Bọc `realtime.notify` (mọi topic) cho tới hết test: trước khi phát, đọc Đơn bằng một kết nối khác của pool. Trong TX1
+ * tạo Đơn, Đơn chưa commit nên kết nối khác không thấy (`committed: false`). Mọi điểm phát đúng luật (sau commit TX1,
+ * TX2 gắn link, hết hạn, IPN) đều thấy Đơn.
+ */
+function recordNotifies(): NotifyCall[] {
+  const calls: NotifyCall[] = [];
+  const original = realtime.notify.bind(realtime);
+  vi.spyOn(realtime, 'notify').mockImplementation(async (tx, topic, ids) => {
+    const { rowCount } = await h.db.pool.query('SELECT 1 FROM orders WHERE id = $1', [ids.id]);
+    calls.push({ topic, id: ids.id, committed: rowCount === 1 });
+    return original(tx, topic, ids);
+  });
+  return calls;
+}
+
+/**
+ * `calls` chỉ gồm tín hiệu về các Đơn `orderIds`: tín hiệu khóa theo id khác phát trong TX1 cũng lộ ra. Mọi lần phát đều
+ * khi Đơn đã commit. Mỗi Đơn có `event_orders_changed`, tức bộ kiểm thật sự chạy qua tín hiệu Tổng quan.
+ */
+function expectNotifiesAfterCommit(calls: NotifyCall[], orderIds: string[]): void {
+  expect(calls.filter((c) => !orderIds.includes(c.id))).toEqual([]);
+  expect(calls.filter((c) => !c.committed)).toEqual([]);
+  const overview = calls.filter((c) => c.topic === RealtimeTopic.EVENT_ORDERS_CHANGED).map((c) => c.id);
+  expect(new Set(overview)).toEqual(new Set(orderIds));
+}
 
 const sendIpn = (placed: Pick<Placed, 'code' | 'total'>, overrides: Record<string, unknown> = {}) =>
   postIpn(h, ipnKey, signIpn(MAIN.secretToken, fakeIpnPayload(placed.code, placed.total, overrides)));
@@ -187,7 +226,8 @@ describe('GET /v1/me/orders/:code/live: phạm vi Người mua', () => {
 });
 
 describe('order_changed ở mọi điểm đổi Đơn sau TX1, không bao giờ trong TX1', () => {
-  it('TX1 Đơn 0đ: không NOTIFY; TX1 Đơn có phí: không NOTIFY, chỉ TX2 gắn link phát đúng một lần; Tingee từ chối → không NOTIFY', async () => {
+  it('TX1 không NOTIFY (mọi topic, Đơn đã commit lúc phát); order_changed: Đơn 0đ và Tingee từ chối không có, Đơn có link đúng một lần từ TX2', async () => {
+    const calls = recordNotifies();
     const free = await place(2, { price: 0 });
     expect(free.order.buyerStatus).toBe('paid');
     const rejected = await place(1, { link: false });
@@ -200,14 +240,21 @@ describe('order_changed ở mọi điểm đổi Đơn sau TX1, không bao giờ
     expect(notificationsFor(free.orderId)).toEqual([]);
     expect(notificationsFor(rejected.orderId)).toEqual([]);
     expect(notificationsFor(linked.orderId)).toEqual([expect.objectContaining({ type: 'order_changed' })]);
+
+    // Mọi topic, kể cả `event_orders_changed` của Tổng quan (Story 3.11): không lần phát nào nằm trong TX1. Tín hiệu
+    // "Đơn mới" phát sau commit TX1; dời nó vào TX1 thì số tín hiệu không đổi, nhưng `committed` thành `false`.
+    expectNotifiesAfterCommit(calls, [free.orderId, rejected.orderId, linked.orderId]);
   });
 
   it('tạo link bị Tingee từ chối nhóm tạm ngừng bán (1007) → Đơn hết hạn trong một transaction và phát đúng một order_changed', async () => {
+    const calls = recordNotifies();
     const paused = await place(1, { link: false, linkCode: '1007' });
     expect(paused.order).toMatchObject({ buyerStatus: 'expired', payment: { checkoutUrl: null, linkError: 'sales_paused' } });
     await expect.poll(() => notificationsFor(paused.orderId).length).toBe(1);
     await sleep(300);
     expect(notificationsFor(paused.orderId)).toEqual([expect.objectContaining({ type: 'order_changed' })]);
+    // `PaymentLinks.expire` phát cả `event_orders_changed` (Story 3.11), cũng sau commit như tín hiệu "Đơn mới".
+    expectNotifiesAfterCommit(calls, [paused.orderId]);
   });
 
   it('lỗi sau khi Đơn đổi trong tx của IPN (rollback) → không tín hiệu nào, Đơn vẫn chờ', async () => {
