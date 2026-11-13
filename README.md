@@ -42,9 +42,33 @@ pnpm db:seed
   (cần `REVALIDATE_SECRET`, có sẵn trong `.env.example`). Gửi email từ job (lời mời Admin…) và revalidate trang Sự kiện
   công khai.
 - Tingee fake (`dev:tingee`): Tingee giả ở cổng 4010 (`.env.example` đã trỏ `TINGEE_BASE_URL` vào đây), có hai merchant
-  demo (`apps/api/test/tingee-fake/demo-merchants.ts`). Không bao giờ gọi Tingee thật.
+  demo (`apps/api/test/tingee-fake/demo-merchants.ts`) và trang thanh toán giả gửi IPN tới api (xem "Thanh toán Đơn có
+  phí ở local"). Không bao giờ gọi Tingee thật.
 - web: `next dev`, đọc `apps/web/.env.development` (`NEXT_PUBLIC_API_BASE_URL`, `TICKEE_UI_KIT=1`).
 - contracts: `tsc --watch`.
+
+### Hai bẫy của `.env` local
+
+- **`TINGEE_BASE_URL` phải là `http://localhost:4010`** (Tingee fake, như `.env.example`). Trỏ Tingee thật (UAT hay
+  production) thì `pnpm dev` vẫn chạy fake nhưng api không gọi nó: Tingee thật không biết key demo, Đơn có phí báo
+  "Chưa tạo được link thanh toán". Hay gặp khi chép `.env` từ máy khác hoặc từ môi trường khác.
+- **Không bao giờ đổi giá trị của một phiên bản khóa đã dùng** trong `TINGEE_CREDENTIAL_KEYS` và `TICKET_QR_KEYS` (vd.
+  `v1:<giá trị A>` thành `v1:<giá trị B>`), cũng không gỡ phiên bản còn dữ liệu dùng. Muốn đổi khóa thì thêm
+  `v<k+1>:<khóa mới>` (`openssl rand -base64 32`) và giữ khóa cũ: dữ liệu mới dùng khóa mới, dữ liệu cũ vẫn đọc bằng khóa
+  cũ. Đổi giá trị mà giữ số phiên bản thì:
+  - `TINGEE_CREDENTIAL_KEYS`: api không giải mã được Secret Token Tingee đã lưu (`SecretBoxError`). Đơn có phí báo "Chưa
+    tạo được link thanh toán", IPN của BTC đó trả 500, trang Tài khoản nhận tiền không đọc được danh sách tài khoản.
+  - `TICKET_QR_KEYS`: Mã QR của Vé đã phát (trong email, ảnh chụp) không còn khớp chữ ký; link chia sẻ đang hiện trên
+    Trang Đơn và Chi tiết Vé trả 404 tới khi chủ Vé bấm "Tạo lại link".
+
+  Sửa ở local (api và worker chỉ đọc khóa lúc khởi động: sửa `.env` xong thì khởi động lại `pnpm dev`):
+  - Cách đầy đủ: khôi phục giá trị cũ của phiên bản đó.
+  - Không còn giá trị cũ, với `TINGEE_CREDENTIAL_KEYS`: `pnpm db:seed` mã hóa lại key merchant demo hiện hành của BTC
+    demo (xem mục dưới); BTC đã nhập key riêng thì liên kết lại key ở trang Tài khoản nhận tiền. Cả hai chỉ sửa key
+    hiện hành, tức việc tạo link thanh toán mới. api kiểm chữ ký IPN bằng mọi credential của BTC, kể cả credential đã
+    thay (vẫn giữ ciphertext cũ): còn dòng nào của BTC không giải mã được thì IPN của BTC đó vẫn trả 500. Khi đó dựng
+    lại DB local: `docker compose down -v`, rồi `pnpm dev` và `pnpm db:seed`.
+  - Với `TICKET_QR_KEYS` thì seed không sửa gì: Vé local đã phát dùng "Tạo lại link", hoặc mua Vé mới.
 
 ### Dữ liệu dev (`pnpm db:seed`)
 
@@ -58,14 +82,58 @@ Trong một transaction, seed tạo phần còn thiếu:
 - Tài khoản Tickee (đã đồng ý NĐ 13; tài khoản có sẵn thì giữ nguyên);
 - BTC "BTC Demo" do tài khoản đó làm Owner, đã duyệt Closed Beta;
 - key Tingee của merchant demo `demo-btc-co-tai-khoan` (Secret Token mã hóa bằng `TINGEE_CREDENTIAL_KEYS` như api) và tài
-  khoản nhận tiền mặc định MB Bank ••••4567, khớp VA mà Tingee fake trả về.
+  khoản nhận tiền mặc định MB Bank ••••4567, khớp VA mà Tingee fake trả về;
+- khóa định tuyến IPN cố định `SEED_IPN_KEY` (`demo-merchants.ts`), nếu chưa BTC nào giữ: Tingee fake biết sẵn URL IPN
+  của BTC này. BTC demo seed trước đây (khóa ngẫu nhiên) cũng nhận khóa này khi chạy lại seed. Đã có BTC khác giữ (vd.
+  BTC demo của `--email` trước) thì BTC demo mới nhận khóa ngẫu nhiên (seed báo: phải dán URL IPN của BTC này vào ô
+  "Đường dẫn IPN" trên trang thanh toán giả) và BTC cũ giữ nguyên khóa.
+
+Seed cũng kiểm key Tingee hiện hành của BTC demo còn giải mã được bằng `TINGEE_CREDENTIAL_KEYS` không (hỏng khi đổi giá
+trị khóa mà giữ số phiên bản, hoặc gỡ phiên bản cũ; xem "Hai bẫy của `.env` local"):
+- key merchant demo của seed (`demo-btc-co-tai-khoan`): seed mã hóa lại Secret Token demo bằng khóa hiện hành ngay trên
+  dòng credential đó và báo một dòng "Mã hóa lại Secret Token…". Tài khoản nhận tiền và Đơn cũ vẫn trỏ cùng dòng, Secret
+  Token không đổi, nên tạo link chạy lại; IPN của BTC chỉ chạy lại khi BTC không còn credential đã thay nào mã hóa bằng
+  khóa cũ (xem "Hai bẫy của `.env` local");
+- key khác (BTC đã nhập key riêng ở trang Tài khoản nhận tiền, kể cả merchant demo `demo-btc-chua-lien-ket`): seed không
+  biết Secret Token gốc nên thoát mã 1, không đổi gì, và in cách sửa như "Hai bẫy của `.env` local".
+
+Seed chỉ kiểm BTC demo của `--email` đang chạy (mặc định `btc.demo@tickee.local`). BTC khác: là BTC demo của tài khoản
+khác thì chạy `pnpm db:seed --email <email Owner>`, còn lại sửa như "Hai bẫy của `.env` local". Seed không kiểm hay sửa
+credential đã thay (`retired_at`). Thông báo của seed không in ciphertext, Secret Token hay chuỗi kết nối.
 
 Xong thì in email đăng nhập: đăng nhập OTP ở `http://localhost:3000/dang-nhap` (mã ở Mailpit), tạo Sự kiện có Hạng vé có
-phí rồi bấm "Mở bán" được ngay. Chạy lại không tạo trùng (báo "Không đổi"); tài khoản nhận tiền đã hủy liên kết hay
-Closed Beta đã thu hồi thì seed thêm lại. Seed chạy bằng `tickee_migrator` (`MIGRATION_DATABASE_URL` trong `.env`), không gọi
-Tingee, không ghi audit, và từ chối chạy khi `NODE_ENV=production`. Key demo là key giả, chỉ có nghĩa với Tingee fake.
+phí rồi bấm "Mở bán" được ngay. Chạy lại không tạo trùng (báo "Không đổi" khi mọi thứ đã đủ và key còn giải mã được);
+tài khoản nhận tiền đã hủy liên kết hay Closed Beta đã thu hồi thì seed thêm lại. Seed chạy bằng `tickee_migrator`
+(`MIGRATION_DATABASE_URL` trong `.env`), không gọi Tingee, không ghi audit, và từ chối chạy khi `NODE_ENV=production`. Key
+demo là key giả, chỉ có nghĩa với Tingee fake.
 
 Mailpit: SMTP `localhost:1025`, giao diện `http://localhost:8025`.
+
+### Thanh toán Đơn có phí ở local
+
+Đơn có phí nhận link thanh toán trỏ về trang thanh toán giả của Tingee fake (`http://localhost:4010/checkout/{mã Đơn}`);
+không có tiền nào được chuyển. Trang có ô "Đường dẫn IPN" (như ô cùng tên trên portal Tingee) và ba nút:
+
+- "Đã thanh toán (giả lập)": fake ký IPN `success` (số tiền đúng bằng số tiền của link) bằng Secret Token của merchant
+  tạo link, gửi tới Đường dẫn IPN, rồi đưa trình duyệt về Trang Đơn. Trang Đơn hiện Vé.
+- "Hết hạn" / "Hủy": IPN `expired` / `canceled`. Đơn hết hạn, chỗ được nhả.
+
+Trang giả chỉ chuyển trang khi api trả ACK (HTTP 2xx kèm JSON `"code":"00"`). api từ chối, URL trỏ nhầm dịch vụ khác
+(trả 2xx nhưng không phải ACK), không tới được hoặc quá 10 giây không trả lời thì trang giả báo lỗi (kèm HTTP status và
+body nhận được) và không chuyển trang. Quá 10 giây thì IPN đã được gửi và có thể api đã xử lý: xem Trang Đơn trước khi
+bấm lại. Mỗi lần bấm gửi một IPN mới (`requestId` mới); riêng IPN `success` mang mã giao dịch mới, IPN `expired` /
+`canceled` không có mã giao dịch.
+
+Với BTC demo của `pnpm db:seed` thì không cần cấu hình gì thêm: đăng nhập bằng email BTC demo, tạo Sự kiện có Hạng vé có
+phí, bấm "Mở bán", mua Vé rồi bấm "Đã thanh toán (giả lập)". Seed gán cho BTC demo khóa cố định `SEED_IPN_KEY`, nên fake
+điền sẵn `{API_PUBLIC_URL}/v1/payments/tingee/ipn/{SEED_IPN_KEY}` (`API_PUBLIC_URL` đọc từ `.env`, in ra khi fake khởi
+động).
+
+BTC khác (nhập key merchant demo ở trang Tài khoản nhận tiền, hoặc BTC demo thứ hai của `--email` dùng chung merchant
+demo): chép "URL IPN" ở trang Tài khoản nhận tiền của BTC đó, dán vào ô "Đường dẫn IPN" trên trang giả rồi bấm nút. Như
+Tingee, mỗi merchant có một Đường dẫn IPN: api trả ACK thì fake nhớ URL đó cho merchant (Đơn sau điền sẵn) tới khi fake
+khởi động lại. IPN của Đơn thuộc BTC khác gửi vào URL này thì api chỉ lưu và vẫn trả 200: trang giả vẫn về Trang Đơn
+nhưng Đơn còn chờ thanh toán. Khi đó dán URL IPN của đúng BTC rồi bấm lại.
 
 ### Chạy từ bản build
 
@@ -188,16 +256,33 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `PORT`                   | api         | mặc định `3001`                |
 | `TRUST_PROXY_HOPS`       | api         | mặc định `0`; số proxy tin cậy trước api (vd. `1` sau load balancer) để `req.ip` là IP thật — bắt buộc đặt khi có LB, nếu không mọi người dùng chung giới hạn 20 OTP/giờ theo IP của LB |
 | `BETTER_AUTH_SECRET`     | api         | ≥ 32 ký tự; ký session/cookie và khóa gốc HMAC bộ đếm OTP |
-| `API_PUBLIC_URL`         | api         | origin công khai của api; Better Auth ở `/v1/auth` |
+| `API_PUBLIC_URL`         | api         | origin công khai của api; Better Auth ở `/v1/auth`, URL IPN của BTC ở `/v1/payments/tingee/ipn/{ipnKey}`. Tingee fake (local) cũng đọc để biết URL IPN của BTC demo |
 | `WEB_ORIGIN`             | api, worker | api: origin duy nhất được CORS kèm cookie; worker: gốc link trong email (lời mời Admin `<WEB_ORIGIN>/loi-moi-btc#…`) và nơi gọi `<WEB_ORIGIN>/api/revalidate` |
 | `REVALIDATE_SECRET`      | worker, web | worker: bắt buộc, ≥ 32 ký tự; gửi `Authorization: Bearer …` tới `<WEB_ORIGIN>/api/revalidate`. web: server-only, cùng giá trị; thiếu thì route trả 503 (trang chỉ tự làm mới sau 30 giây). Sinh bằng `openssl rand -base64 32` |
 | `AUTH_COOKIE_DOMAIN`     | api         | tùy chọn; tên miền cha cho cookie session (vd. `tickee.vn`) |
 | `SMTP_URL`, `EMAIL_FROM` | api, worker | api gửi email OTP/2FA; worker gửi email từ job (lời mời Admin); local là Mailpit `smtp://localhost:1025` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | api | bắt buộc; OAuth client Google, redirect URI `<API_PUBLIC_URL>/v1/auth/callback/google` |
-| `TINGEE_BASE_URL`        | api, worker | bắt buộc; origin Tingee Open API (UAT `https://uat-open-api.tingee.vn`). Env không có credential Tingee: mỗi BTC nhập API key của mình ở trang Tài khoản nhận tiền. Local trỏ vào Tingee fake (cổng 4010) mà `pnpm dev` chạy sẵn: BTC demo của `pnpm db:seed` đã liên kết sẵn, hoặc nhập key merchant demo (`demo-btc-co-tai-khoan` / `demo-secret-co-tai-khoan`: có tài khoản; `demo-btc-chua-lien-ket` / `demo-secret-chua-lien-ket`: chưa liên kết ngân hàng). Worker đọc cùng ba biến Tingee/Vé với api (cùng giá trị): Đối soát bù (Story 4.1) đi cùng đường xử lý IPN và phát Vé |
-| `TINGEE_CREDENTIAL_KEYS` | api, worker | bắt buộc; khóa AES-256-GCM mã hóa Secret Token Tingee của BTC: `v<k>:<base64 của 32 byte>`, nhiều khóa cách nhau bằng dấu phẩy, không trùng `k`. Mã hóa bằng khóa có `k` lớn nhất, giải mã theo tiền tố `v<k>:` của ciphertext; xoay khóa thì thêm khóa mới và giữ khóa cũ. Sinh khóa: `openssl rand -base64 32`. `pnpm db:seed` cũng đọc biến này để mã hóa key demo |
-| `TICKET_QR_KEYS`         | api, worker | bắt buộc; khóa HMAC-SHA256 ký Mã QR vé (`t<k>.<ticketId>.<sig>`), cùng dạng `TINGEE_CREDENTIAL_KEYS` nhưng là khóa khác. Ký Vé mới bằng khóa có `k` lớn nhất; Vé lưu `k` (không lưu chuỗi QR) nên xoay khóa thì thêm khóa mới và giữ khóa cũ tới khi không còn Vé nào dùng. Sinh khóa: `openssl rand -base64 32` |
+| `TINGEE_BASE_URL`        | api, worker | bắt buộc; origin Tingee Open API (UAT `https://uat-open-api.tingee.vn`). Env không có credential Tingee: mỗi BTC nhập API key của mình ở trang Tài khoản nhận tiền. `.env` local phải là `http://localhost:4010` (Tingee fake mà `pnpm dev` chạy sẵn): trỏ Tingee thật thì key demo lỗi và Đơn có phí báo "Chưa tạo được link thanh toán" (xem "Hai bẫy của `.env` local"). Với Tingee fake: BTC demo của `pnpm db:seed` đã liên kết sẵn, hoặc nhập key merchant demo (`demo-btc-co-tai-khoan` / `demo-secret-co-tai-khoan`: có tài khoản; `demo-btc-chua-lien-ket` / `demo-secret-chua-lien-ket`: chưa liên kết ngân hàng). Worker đọc cùng ba biến Tingee/Vé với api (cùng giá trị): Đối soát bù (Story 4.1) đi cùng đường xử lý IPN và phát Vé |
+| `TINGEE_CREDENTIAL_KEYS` | api, worker | bắt buộc; khóa AES-256-GCM mã hóa Secret Token Tingee của BTC: `v<k>:<base64 của 32 byte>`, nhiều khóa cách nhau bằng dấu phẩy, không trùng `k`. Mã hóa bằng khóa có `k` lớn nhất, giải mã theo tiền tố `v<k>:` của ciphertext; xoay khóa thì thêm khóa mới và giữ khóa cũ. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì api không giải mã được Secret Token đã lưu (local: `pnpm db:seed` mã hóa lại key demo, xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32`. `pnpm db:seed` cũng đọc biến này để mã hóa key demo |
+| `TICKET_QR_KEYS`         | api, worker | bắt buộc; khóa HMAC-SHA256 ký Mã QR vé (`t<k>.<ticketId>.<sig>`), cùng dạng `TINGEE_CREDENTIAL_KEYS` nhưng là khóa khác. Ký Vé mới bằng khóa có `k` lớn nhất; Vé lưu `k` (không lưu chuỗi QR) nên xoay khóa thì thêm khóa mới và giữ khóa cũ tới khi không còn Vé nào dùng. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì Mã QR đã gửi không còn khớp và link chia sẻ trả 404 (xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32` |
 | `NEXT_PUBLIC_API_BASE_URL` | web       | gốc REST của api; client thêm `/v1`; nhúng lúc build. `next build` thiếu biến thì dừng; lệnh dev ở gốc tự đặt `http://localhost:3001` (xem "Biến build của web") |
 | `TICKEE_UI_KIT`          | web         | `1` bật `/ui-kit`; production không đặt (404) |
 
 Nếu volume Postgres đã tồn tại từ trước khi có `docker/postgres/init.sql`, chạy `docker compose down -v` để khởi tạo lại.
+
+## Quy trình PR
+
+- Mọi thay đổi vào `main` đi qua PR; không push thẳng `main`. Bảo vệ nhánh `main`:
+  - bắt buộc qua PR (không bắt buộc số người duyệt) và bắt buộc check `ci` xanh;
+  - `strict` tắt: `ci` xanh trên base cũ vẫn đủ điều kiện merge, nên nhánh đã tụt xa `main` thì tự merge `main` vào rồi
+    chờ `ci` chạy lại;
+  - `enforce_admins` tắt: Owner/admin không bị chặn. `git push` thẳng lên `main` vẫn thành công, chỉ kèm thông báo
+    "bypassed rule violations"; merge PR khi `ci` đỏ thì phải tick ô bypass.
+- Mô tả PR theo `.github/pull_request_template.md`: Tóm tắt, Spec, Kiểm tra.
+- `sprint-status.yaml` cập nhật ngay trong PR của story: Build (`bmad-build`, override ở
+  `_bmad/custom/bmad-build.toml`) đặt story `done`, hoặc action item `done` kèm `note` trỏ spec, bằng một commit riêng
+  trên nhánh của story. Không sửa tay sprint-status trên `main`.
+- Trạng thái epic và retrospective trong sprint-status cũng chỉ đổi trong một PR (vd. PR của retro), không bao giờ sửa
+  tay trên `main`.
+- Không merge khi `ci` đỏ. Ngoại lệ (vd. test chập chờn đã ghi ở `deferred-work.md`) thì ghi lý do và link run CI đỏ vào
+  PR trước khi merge.

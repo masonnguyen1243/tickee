@@ -1,19 +1,33 @@
-import { randomUUID } from 'node:crypto';
-import { isBlockedBankBin } from '@tickee/contracts';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { isBlockedBankBin, tingeeIpnUrl } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { paidSalesAllowed } from '../../src/modules/event/index.js';
 import { HttpTingeeClient } from '../../src/modules/tingee/index.js';
-import { parseCredentialKeys, SecretBox } from '../../src/platform/crypto/index.js';
+import { parseCredentialKeys, SecretBox, SecretBoxError } from '../../src/platform/crypto/index.js';
 import { Database } from '../../src/platform/db/index.js';
-import { migrationDatabaseUrl, TEST_CREDENTIAL_KEYS } from '../helpers.js';
-import { DEMO_MERCHANTS, SEED_MERCHANT, SEED_PAYOUT_ACCOUNT } from '../tingee-fake/demo-merchants.js';
+import { migrationDatabaseUrl, TEST_CREDENTIAL_KEYS, testCredentialKey } from '../helpers.js';
+import {
+  DEFAULT_API_PUBLIC_URL,
+  DEMO_MERCHANTS,
+  fakeDemoMerchants,
+  SEED_IPN_KEY,
+  SEED_MERCHANT,
+  SEED_PAYOUT_ACCOUNT,
+} from '../tingee-fake/demo-merchants.js';
 import { startTingeeFake } from '../tingee-fake/server.js';
-import { DEFAULT_SEED_EMAIL, DEMO_ORGANIZATION_NAME, runDevSeed, seedDevData, type DevSeedIo } from './seed.js';
+import {
+  DEFAULT_SEED_EMAIL,
+  DEMO_ORGANIZATION_NAME,
+  runDevSeed,
+  seedDevData,
+  UnreadableCredentialError,
+  type DevSeedIo,
+} from './seed.js';
 
 /*
  * E2-7: seed dev (`pnpm db:seed`) trên Postgres thật (DB `tickee_test`, role `tickee_migrator` như CLI). DB test không
- * bị xóa giữa các lần chạy, nên mỗi test dùng email mới.
+ * bị xóa giữa các lần chạy, nên mỗi test dùng email mới; test cần `SEED_IPN_KEY` còn trống thì tự giải phóng khóa trước.
  */
 
 let db: Database;
@@ -162,7 +176,334 @@ describe('seedDevData', () => {
   });
 });
 
+/** `ipnKey` hiện tại của BTC. */
+async function ipnKeyOf(organizationId: string): Promise<string | null> {
+  const result = await db.orm.execute<{ tingee_ipn_key: string | null }>(
+    sql`SELECT tingee_ipn_key FROM organizations WHERE id = ${organizationId}`,
+  );
+  return result.rows[0]!.tingee_ipn_key;
+}
+
+/** Giải phóng `SEED_IPN_KEY`: BTC đang giữ (của lần chạy hay test trước) nhận khóa ngẫu nhiên. */
+async function releaseSeedIpnKey(): Promise<void> {
+  await db.orm.execute(sql`
+    UPDATE organizations SET tingee_ipn_key = ${randomBytes(16).toString('base64url')}
+     WHERE tingee_ipn_key = ${SEED_IPN_KEY}`);
+}
+
+describe('seedDevData: khóa IPN cố định của merchant demo (SEED_IPN_KEY)', () => {
+  it('chưa BTC nào giữ: BTC demo mới nhận SEED_IPN_KEY, báo thay đổi; chạy lại không đổi', async () => {
+    await releaseSeedIpnKey();
+    const email = newEmail();
+
+    const result = await seedDevData(db, { secretBox, email });
+
+    expect(await ipnKeyOf(result.organizationId)).toBe(SEED_IPN_KEY);
+    expect(result.changes.filter((c) => c.includes(SEED_IPN_KEY))).toHaveLength(1);
+    expect((await seedDevData(db, { secretBox, email })).changes).toEqual([]);
+    expect(await ipnKeyOf(result.organizationId)).toBe(SEED_IPN_KEY);
+  });
+
+  it('chưa BTC nào giữ: BTC demo seed trước đây (khóa ngẫu nhiên) nhận SEED_IPN_KEY, báo đúng một thay đổi', async () => {
+    const email = newEmail();
+    const first = await seedDevData(db, { secretBox, email });
+    // BTC này đang giữ khóa (nếu vừa nhận) thì giải phóng: nó còn khóa ngẫu nhiên như BTC demo seed trước spec này.
+    await releaseSeedIpnKey();
+    const before = await ipnKeyOf(first.organizationId);
+    expect(before).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(before).not.toBe(SEED_IPN_KEY);
+    const rows = await rowCounts();
+
+    const second = await seedDevData(db, { secretBox, email });
+
+    expect(second.organizationId).toBe(first.organizationId);
+    expect(second.changes).toHaveLength(1);
+    expect(second.changes[0]).toContain(SEED_IPN_KEY);
+    expect(await ipnKeyOf(first.organizationId)).toBe(SEED_IPN_KEY);
+    expect(await rowCounts()).toEqual(rows);
+    expect((await seedDevData(db, { secretBox, email })).changes).toEqual([]);
+  });
+
+  it('BTC khác đang giữ: BTC demo mới nhận khóa ngẫu nhiên, BTC demo cũ giữ nguyên khóa, BTC đang giữ không đổi', async () => {
+    await releaseSeedIpnKey();
+    const holder = await seedDevData(db, { secretBox, email: newEmail() });
+    expect(await ipnKeyOf(holder.organizationId)).toBe(SEED_IPN_KEY);
+
+    const email = newEmail();
+    const fresh = await seedDevData(db, { secretBox, email });
+    const freshKey = await ipnKeyOf(fresh.organizationId);
+    expect(freshKey).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(freshKey).not.toBe(SEED_IPN_KEY);
+    // Báo khóa ngẫu nhiên: IPN của merchant demo về BTC kia, BTC này phải dán URL IPN vào trang thanh toán giả.
+    const randomLines = fresh.changes.filter((c) => c.includes('ngẫu nhiên'));
+    expect(randomLines).toHaveLength(1);
+    expect(randomLines[0]).toContain(`${SEED_IPN_KEY} thuộc BTC khác`);
+    expect(randomLines[0]).toContain('Đường dẫn IPN');
+    expect(randomLines[0]).toContain('trang thanh toán giả');
+    expect(await paidSalesAllowed(db.orm, { organizationId: fresh.organizationId })).toEqual({
+      closedBetaApproved: true,
+      payoutLinked: true,
+    });
+
+    const again = await seedDevData(db, { secretBox, email });
+
+    expect(again.changes).toEqual([]);
+    expect(await ipnKeyOf(fresh.organizationId)).toBe(freshKey);
+    expect(await ipnKeyOf(holder.organizationId)).toBe(SEED_IPN_KEY);
+  });
+});
+
+describe('seedDevData: BTC demo cũ có ipnKey NULL', () => {
+  /** BTC demo đã seed, rồi `tingee_ipn_key` bị xóa về NULL. */
+  async function seededWithNullKey(email: string): Promise<string> {
+    const { organizationId } = await seedDevData(db, { secretBox, email });
+    await db.orm.execute(sql`UPDATE organizations SET tingee_ipn_key = NULL WHERE id = ${organizationId}`);
+    return organizationId;
+  }
+
+  it('BTC khác đang giữ SEED_IPN_KEY → khóa ngẫu nhiên 22 ký tự, đúng một thay đổi "Khóa định tuyến IPN của BTC"', async () => {
+    const email = newEmail();
+    const orgId = await seededWithNullKey(email);
+    await releaseSeedIpnKey();
+    const holder = await seedDevData(db, { secretBox, email: newEmail() });
+    expect(await ipnKeyOf(holder.organizationId)).toBe(SEED_IPN_KEY);
+
+    const again = await seedDevData(db, { secretBox, email });
+
+    expect(again.changes).toEqual(['Khóa định tuyến IPN của BTC']);
+    const key = await ipnKeyOf(orgId);
+    expect(key).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(key).not.toBe(SEED_IPN_KEY);
+    expect(await ipnKeyOf(holder.organizationId)).toBe(SEED_IPN_KEY);
+  });
+
+  it('SEED_IPN_KEY còn trống → nhận SEED_IPN_KEY', async () => {
+    const email = newEmail();
+    const orgId = await seededWithNullKey(email);
+    await releaseSeedIpnKey();
+
+    const again = await seedDevData(db, { secretBox, email });
+
+    expect(again.changes).toHaveLength(1);
+    expect(again.changes[0]).toContain(SEED_IPN_KEY);
+    expect(await ipnKeyOf(orgId)).toBe(SEED_IPN_KEY);
+  });
+});
+
+/** Credential hiện hành (`retired_at IS NULL`) của BTC. */
+async function currentCredentialOf(organizationId: string) {
+  const result = await db.orm.execute<{ id: string; client_id: string; secret_token_ciphertext: string }>(sql`
+    SELECT id, client_id, secret_token_ciphertext FROM tingee_credentials
+    WHERE organization_id = ${organizationId} AND retired_at IS NULL`);
+  expect(result.rows).toHaveLength(1);
+  return result.rows[0]!;
+}
+
+/** `tingee_credential_id` của mọi tài khoản nhận tiền của BTC (kể cả đã hủy). */
+async function payoutCredentialIdsOf(organizationId: string): Promise<string[]> {
+  const result = await db.orm.execute<{ tingee_credential_id: string }>(
+    sql`SELECT tingee_credential_id FROM payout_accounts WHERE organization_id = ${organizationId}`,
+  );
+  return result.rows.map((row) => row.tingee_credential_id);
+}
+
+/** Đầu ra CLI không lộ bí mật nào trong `secrets` (ciphertext, Secret Token, chuỗi kết nối, giá trị khóa). */
+function expectNoSecrets(io: { lines: string[]; errors: string[] }, secrets: string[]): void {
+  const output = [...io.lines, ...io.errors].join('\n');
+  for (const secret of secrets) expect(output).not.toContain(secret);
+}
+
+describe('seedDevData: Secret Token của key hiện hành không giải mã được bằng TINGEE_CREDENTIAL_KEYS', () => {
+  // DB mã hóa bằng khóa cũ, rồi `.env` đổi khóa: cùng `v1` khác giá trị, hoặc chỉ còn khóa phiên bản khác.
+  const OTHER_VALUE_V1 = testCredentialKey(1, 13);
+  const ONLY_V2 = testCredentialKey(2, 13);
+  /** Giá trị base64 của các khóa (phần sau `v<k>:`), không được xuất hiện trong đầu ra. */
+  const keyMaterial = [TEST_CREDENTIAL_KEYS, OTHER_VALUE_V1, ONLY_V2].map((k) => k.slice(k.indexOf(':') + 1));
+
+  it.each([
+    ['ciphertext mã hóa bằng giá trị khóa khác (cùng v1)', OTHER_VALUE_V1, 'không giải mã được ciphertext'],
+    ['ciphertext có phiên bản khóa không có trong env (v2)', ONLY_V2, 'không có khóa phiên bản v2'],
+  ])(
+    'merchant demo, %s → mã hóa lại tại chỗ bằng khóa hiện hành, đúng một thay đổi, thoát 0; lần hai "Không đổi"',
+    async (_name, oldKeys, reason) => {
+      const email = newEmail();
+      const oldBox = new SecretBox(parseCredentialKeys(oldKeys));
+      const { organizationId } = await seedDevData(db, { secretBox: oldBox, email });
+      const before = await currentCredentialOf(organizationId);
+      expect(() => secretBox.open(before.secret_token_ciphertext)).toThrow(SecretBoxError);
+      expect(await payoutCredentialIdsOf(organizationId)).toEqual([before.id]);
+      const rows = await rowCounts();
+
+      const io = captureIo();
+      expect(await runDevSeed(['--email', email], cliEnv(), io), io.errors.join('\n')).toBe(0);
+
+      // Cùng dòng credential (tài khoản nhận tiền vẫn trỏ vào), cùng Client ID, Secret Token mở được bằng khóa hiện hành.
+      const after = await currentCredentialOf(organizationId);
+      expect(after.id).toBe(before.id);
+      expect(after.client_id).toBe(SEED_MERCHANT.clientId);
+      expect(after.secret_token_ciphertext).toMatch(new RegExp(`^v${secretBox.currentVersion}:`));
+      expect(secretBox.open(after.secret_token_ciphertext)).toBe(SEED_MERCHANT.secretToken);
+      expect(await payoutCredentialIdsOf(organizationId)).toEqual([before.id]);
+      expect(await rowCounts()).toEqual(rows);
+      expect(await paidSalesAllowed(db.orm, { organizationId })).toEqual({ closedBetaApproved: true, payoutLinked: true });
+
+      const changeLines = io.lines.filter((line) => line.startsWith('  + '));
+      expect(changeLines).toHaveLength(1);
+      expect(changeLines[0]).toContain(`Mã hóa lại Secret Token của merchant demo ${SEED_MERCHANT.clientId}`);
+      expect(changeLines[0]).toContain(reason);
+      expect(io.errors).toEqual([]);
+      expectNoSecrets(io, [
+        before.secret_token_ciphertext,
+        after.secret_token_ciphertext,
+        SEED_MERCHANT.secretToken,
+        migrationDatabaseUrl(),
+        ...keyMaterial,
+      ]);
+
+      const again = captureIo();
+      expect(await runDevSeed(['--email', email], cliEnv(), again)).toBe(0);
+      expect(again.lines[0]).toMatch(/^Không đổi/);
+      expect(await currentCredentialOf(organizationId)).toEqual(after);
+      expect(await rowCounts()).toEqual(rows);
+    },
+  );
+
+  it('còn mở được bằng khóa cũ vẫn có trong env (đang xoay khóa v1 → v2): không mã hóa lại, báo "Không đổi"', async () => {
+    const email = newEmail();
+    const { organizationId } = await seedDevData(db, { secretBox, email });
+    const before = await currentCredentialOf(organizationId);
+    const rotating = `${TEST_CREDENTIAL_KEYS},${ONLY_V2}`;
+
+    const io = captureIo();
+    expect(await runDevSeed(['--email', email], cliEnv({ TINGEE_CREDENTIAL_KEYS: rotating }), io)).toBe(0);
+
+    expect(io.lines[0]).toMatch(/^Không đổi/);
+    expect(await currentCredentialOf(organizationId)).toEqual(before);
+  });
+
+  it('credential đã thay (retired_at) không giải mã được, key hiện hành mở được → không đụng tới, báo "Không đổi"', async () => {
+    const email = newEmail();
+    const { organizationId, userId } = await seedDevData(db, { secretBox, email });
+    const current = await currentCredentialOf(organizationId);
+    const oldBox = new SecretBox(parseCredentialKeys(OTHER_VALUE_V1));
+    const retired = (
+      await db.orm.execute<{ id: string }>(sql`
+        INSERT INTO tingee_credentials (organization_id, client_id, secret_token_ciphertext, created_by, retired_at)
+        VALUES (${organizationId}, ${SEED_MERCHANT.clientId}, ${oldBox.seal(SEED_MERCHANT.secretToken)}, ${userId}, now())
+        RETURNING id`)
+    ).rows[0]!;
+    const retiredRow = async () =>
+      (
+        await db.orm.execute<{ secret_token_ciphertext: string; retired_at: Date | null }>(
+          sql`SELECT secret_token_ciphertext, retired_at FROM tingee_credentials WHERE id = ${retired.id}`,
+        )
+      ).rows[0]!;
+    const before = await retiredRow();
+    expect(() => secretBox.open(before.secret_token_ciphertext)).toThrow(SecretBoxError);
+    const rows = await rowCounts();
+
+    try {
+      const io = captureIo();
+      expect(await runDevSeed(['--email', email], cliEnv(), io), io.errors.join('\n')).toBe(0);
+
+      expect(io.lines[0]).toMatch(/^Không đổi/);
+      expect(await retiredRow()).toEqual(before);
+      expect(before.retired_at).not.toBeNull();
+      expect(await currentCredentialOf(organizationId)).toEqual(current);
+      expect(await rowCounts()).toEqual(rows);
+    } finally {
+      // DB test dùng chung giữa các lần chạy: không để lại credential không giải mã được.
+      await db.orm.execute(sql`
+        UPDATE tingee_credentials SET secret_token_ciphertext = ${secretBox.seal(SEED_MERCHANT.secretToken)}
+         WHERE id = ${retired.id}`);
+    }
+  });
+
+  it('key hiện hành của merchant khác không giải mã được → mã 1, rollback mọi thay đổi, hướng dẫn sửa, không lộ bí mật', async () => {
+    const email = newEmail();
+    const { organizationId } = await seedDevData(db, { secretBox, email });
+    // BTC đã nhập key riêng ở trang Tài khoản nhận tiền (mã hóa bằng giá trị khóa cũ), rồi `.env` đổi giá trị `v1`.
+    const otherClientId = `btc-rieng-${randomUUID()}`;
+    const otherSecretToken = `secret-rieng-${randomUUID()}`;
+    const oldBox = new SecretBox(parseCredentialKeys(OTHER_VALUE_V1));
+    const { id: credentialId } = await currentCredentialOf(organizationId);
+    await db.orm.execute(sql`
+      UPDATE tingee_credentials
+         SET client_id = ${otherClientId}, secret_token_ciphertext = ${oldBox.seal(otherSecretToken)}
+       WHERE id = ${credentialId}`);
+    // Seed sẽ duyệt lại Closed Beta trước khi tới credential: phải được rollback.
+    await db.orm.execute(sql`UPDATE organizations SET closed_beta_status = 'revoked' WHERE id = ${organizationId}`);
+    const before = await currentCredentialOf(organizationId);
+    const rows = await rowCounts();
+
+    try {
+      await expect(seedDevData(db, { secretBox, email })).rejects.toBeInstanceOf(UnreadableCredentialError);
+
+      const io = captureIo();
+      expect(await runDevSeed(['--email', email], cliEnv(), io)).toBe(1);
+
+      expect(await currentCredentialOf(organizationId)).toEqual(before);
+      expect(await rowCounts()).toEqual(rows);
+      const status = await db.orm.execute<{ closed_beta_status: string }>(
+        sql`SELECT closed_beta_status FROM organizations WHERE id = ${organizationId}`,
+      );
+      expect(status.rows[0]!.closed_beta_status).toBe('revoked');
+
+      expect(io.lines).toEqual([]);
+      const message = io.errors.join('\n');
+      expect(message).toContain('không giải mã được ciphertext');
+      expect(message).toContain('Không đổi gì');
+      expect(message).toContain('TINGEE_CREDENTIAL_KEYS');
+      expect(message).toContain(`không phải key merchant demo của seed (${SEED_MERCHANT.clientId})`);
+      expect(message).toContain('giá trị cũ');
+      expect(message).toContain('docker compose down -v');
+      expect(message).toContain(`Tài khoản nhận tiền (http://localhost:3000/btc/${organizationId}/tai-khoan-nhan-tien)`);
+      // Liên kết lại key không sửa được IPN: api kiểm chữ ký bằng mọi credential của BTC, kể cả đã thay.
+      expect(message).toContain('IPN của BTC này vẫn trả 500');
+      expect(message).not.toContain('Lỗi khi ghi DB');
+      expectNoSecrets(io, [
+        before.secret_token_ciphertext,
+        otherSecretToken,
+        otherClientId,
+        SEED_MERCHANT.secretToken,
+        migrationDatabaseUrl(),
+        ...keyMaterial,
+      ]);
+    } finally {
+      // DB test dùng chung giữa các lần chạy: không để lại credential không giải mã được.
+      await db.orm.execute(sql`
+        UPDATE tingee_credentials SET secret_token_ciphertext = ${secretBox.seal(otherSecretToken)} WHERE id = ${credentialId}`);
+    }
+  });
+});
+
 describe('dữ liệu demo dùng chung với Tingee fake', () => {
+  it('fakeDemoMerchants: merchant của seed biết sẵn URL IPN của SEED_IPN_KEY; API_PUBLIC_URL thiếu/rỗng → mặc định; merchant khác không có', () => {
+    const custom = fakeDemoMerchants('http://api.tickee.test:3001');
+    expect(custom.find((m) => m.clientId === SEED_MERCHANT.clientId)?.ipnUrl).toBe(
+      tingeeIpnUrl('http://api.tickee.test:3001', SEED_IPN_KEY),
+    );
+    expect(DEFAULT_API_PUBLIC_URL).toBe('http://localhost:3001');
+    for (const unset of [undefined, '']) {
+      expect(fakeDemoMerchants(unset).find((m) => m.clientId === SEED_MERCHANT.clientId)?.ipnUrl).toBe(
+        tingeeIpnUrl('http://localhost:3001', SEED_IPN_KEY),
+      );
+    }
+    const others = custom.filter((m) => m.clientId !== SEED_MERCHANT.clientId);
+    expect(others).toHaveLength(DEMO_MERCHANTS.length - 1);
+    for (const merchant of others) expect(merchant.ipnUrl).toBeUndefined();
+    // Không lộ `ipnKey`, không sửa dữ liệu dùng chung.
+    for (const merchant of custom) expect(merchant).not.toHaveProperty('ipnKey');
+    expect(SEED_MERCHANT).not.toHaveProperty('ipnUrl');
+  });
+
+  it('merchant demo của seed biết sẵn ipnKey cố định: 22 ký tự base64url (128 bit) như khóa api sinh', () => {
+    expect(SEED_MERCHANT.ipnKey).toBe(SEED_IPN_KEY);
+    expect(SEED_IPN_KEY).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(Buffer.from(SEED_IPN_KEY, 'base64url')).toHaveLength(16);
+    expect(DEMO_MERCHANTS.filter((m) => m.ipnKey !== undefined)).toEqual([SEED_MERCHANT]);
+  });
+
   it('VA seed liên kết là một tài khoản fake trả về cho key demo và chọn được (ngân hàng không bị chặn)', async () => {
     const fake = await startTingeeFake({ merchants: DEMO_MERCHANTS });
     try {

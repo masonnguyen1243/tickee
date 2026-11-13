@@ -26,10 +26,10 @@
 # - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
 # - Stories can be worked in parallel if team capacity allows
 # - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
-# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-13-2026 08:57
+last_updated: 11-13-2026 10:07
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -406,5 +406,11 @@ action_items:
       Token giải mã được; README dev nhắc TINGEE_BASE_URL trỏ fake và không đổi giá
       trị khóa khi giữ số phiên bản (F1, F3, F4, F5)"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
+    note: "Xong qua _bmad-output/implementation-artifacts/spec-epic-3-e3-9-moi-truong-dev-va-quy-trinh.md:
+      cherry-pick 08520a6 thành cddd902 (Tingee fake gửi IPN); db:seed mã hóa lại Secret Token của
+      merchant demo khi không giải mã được, key merchant khác thì thoát 1 kèm hướng
+      dẫn; README thêm hai bẫy .env local và mục Quy trình PR; override _bmad/custom/bmad-build.toml
+      đặt done trong nhánh của story; PR template ghi luật CI đỏ. Bảo vệ nhánh main
+      bật qua gh api ngày 13/11: bắt buộc check ci và đi qua PR, không enforce admin"

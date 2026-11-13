@@ -575,3 +575,9 @@ Mỗi mục dưới đây có đúng một story nhận. Story nhận đọc m�
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-3-e3-5-link-chia-se-thieu-khoa-qr.md`
   summary: Story 4.6/4.7. Khi thiếu khóa QR, các đường còn lại (Chi tiết Vé `ownTicket`, Trang Đơn và email Vé qua `ticketsOfOrder`, "Tạo lại link") vẫn ném `Error` thường; `ErrorFilter` log "Lỗi không bắt được" không có marker. 4.6 nên gắn marker `ticket_qr_key_missing` cho các lỗi này (tại chỗ ném hoặc trong filter), mã trạng thái giữ nguyên. 4.7 nên thêm kiểm lúc khởi động: `SELECT DISTINCT qr_key_version FROM tickets WHERE status = 'valid'` so với `keys.has`, để bắt xoay khóa sai trước khi người dùng gặp.
   evidence: `ticketing/my-tickets.ts:128-129`, `ticketing/tickets.service.ts` › `ticketsOfOrder`/`regenerateShareLink`, `platform/http/error.filter.ts:57`. Có từ trước spec E3-5 D1; spec giữ các đường này là lỗi cấu hình (Sprint Change Proposal 13/11/2026 §4.6). Review E3-5 D1 #2 (medium, defer).
+
+## Deferred from: code review of spec-epic-3-e3-9-moi-truong-dev-va-quy-trinh.md (2026-11-13)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-3-e3-9-moi-truong-dev-va-quy-trinh.md`
+  summary: Hai nhánh story mở cùng lúc luôn xung đột ở dòng `last_updated` của `sprint-status.yaml` khi merge PR thứ hai. Cần một luật: hoặc không cập nhật `last_updated` trong commit trên nhánh, hoặc README ghi cách gỡ xung đột (giữ giá trị mới hơn) trên nhánh trước khi merge.
+  evidence: Có từ trước E3-9. `sync-sprint-status.md` của bmad-build (step-03 đặt `in-progress`, step-05 đặt `review`) vốn đã cập nhật `last_updated` trên nhánh. Override `on_complete` của E3-9 thêm một lần cập nhật nữa. Review E3-9 #14 (BH, ECH; medium, defer).

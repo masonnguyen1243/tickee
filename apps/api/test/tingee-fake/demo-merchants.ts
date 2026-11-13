@@ -1,7 +1,10 @@
+import { tingeeIpnUrl } from '@tickee/contracts';
+
 /*
  * Merchant demo của Tingee fake chạy ở local (`pnpm dev`, cổng 4010). Key và tài khoản đều giả, chỉ có nghĩa với fake.
  * Số VA cố định (không sinh ngẫu nhiên như `fakeAccount`) để `pnpm db:seed` liên kết đúng VA mà fake trả về: trang Tài
- * khoản nhận tiền của BTC demo thấy tài khoản đã liên kết khớp với danh sách đọc từ fake.
+ * khoản nhận tiền của BTC demo thấy tài khoản đã liên kết khớp với danh sách đọc từ fake. Cũng vậy với `ipnKey`: seed
+ * gán `SEED_IPN_KEY` cho BTC demo, nên fake biết sẵn "Đường dẫn IPN" của merchant demo mà không đọc DB.
  */
 
 /** Một dòng `items[]` của `get-va-paging` theo dạng của Tingee. */
@@ -22,7 +25,18 @@ export interface DemoMerchant {
   clientId: string;
   secretToken: string;
   accounts: DemoAccount[];
+  /**
+   * `ipnKey` của BTC nhận IPN của merchant này: fake dựng "Đường dẫn IPN" `{API_PUBLIC_URL}/v1/payments/tingee/ipn/{ipnKey}`
+   * (như ô cùng tên trên portal Tingee). Không có thì BTC dán URL IPN của mình vào ô trên trang thanh toán giả.
+   */
+  ipnKey?: string;
 }
+
+/**
+ * `ipnKey` cố định mà `pnpm db:seed` gán cho BTC demo (khi chưa BTC nào giữ): 22 ký tự base64url như khóa api sinh
+ * (128 bit). Không phải secret (nằm trong URL IPN), chỉ có nghĩa ở dev local.
+ */
+export const SEED_IPN_KEY = 'demo-btc-ipn-key-seedQ';
 
 /** Tài khoản `active`, cá nhân, nhận tiền (`credit`) ở MB Bank; ghi đè từng trường khi cần. */
 const account = (
@@ -44,6 +58,7 @@ export const DEMO_MERCHANTS: DemoMerchant[] = [
     // (`debit`) không hiện.
     clientId: 'demo-btc-co-tai-khoan',
     secretToken: 'demo-secret-co-tai-khoan',
+    ipnKey: SEED_IPN_KEY,
     accounts: [
       account({
         accountName: 'CLB CO VUA QUAN 3',
@@ -97,3 +112,22 @@ export const DEMO_MERCHANTS: DemoMerchant[] = [
 export const SEED_MERCHANT = DEMO_MERCHANTS[0]!;
 /** Tài khoản MB Bank của merchant trên: `pnpm db:seed` liên kết làm tài khoản nhận tiền mặc định của BTC demo. */
 export const SEED_PAYOUT_ACCOUNT = SEED_MERCHANT.accounts[0]!;
+
+/** Gốc URL IPN khi `API_PUBLIC_URL` chưa đặt (cổng api của `pnpm dev`). */
+export const DEFAULT_API_PUBLIC_URL = 'http://localhost:3001';
+
+/** Merchant demo như Tingee fake nhận (`FakeMerchant`): `ipnKey` thay bằng "Đường dẫn IPN" đã dựng. */
+export type FakeDemoMerchant = Omit<DemoMerchant, 'ipnKey'> & { ipnUrl?: string };
+
+/**
+ * Merchant demo cho Tingee fake ở dev local: merchant có `ipnKey` biết sẵn "Đường dẫn IPN"
+ * `tingeeIpnUrl(apiPublicUrl, ipnKey)` (`apiPublicUrl` thiếu hoặc rỗng → `DEFAULT_API_PUBLIC_URL`); merchant khác không
+ * có (BTC dán URL IPN vào ô trên trang thanh toán giả). Mỗi lần gọi trả object mới: fake sửa `ipnUrl` không đụng tới
+ * `DEMO_MERCHANTS`.
+ */
+export function fakeDemoMerchants(apiPublicUrl: string | undefined): FakeDemoMerchant[] {
+  const origin = apiPublicUrl || DEFAULT_API_PUBLIC_URL;
+  return DEMO_MERCHANTS.map(({ ipnKey, ...merchant }) =>
+    ipnKey ? { ...merchant, ipnUrl: tingeeIpnUrl(origin, ipnKey) } : { ...merchant },
+  );
+}
