@@ -13,6 +13,9 @@ import { startTingeeFake } from './server.js';
  * Không có tiền nào được chuyển. Merchant có `ipnKey` (merchant của BTC demo) biết sẵn đường dẫn
  * `{API_PUBLIC_URL}/v1/payments/tingee/ipn/{ipnKey}` (`API_PUBLIC_URL` đọc từ `.env`, mặc định http://localhost:3001);
  * BTC khác dán URL IPN của mình (trang Tài khoản nhận tiền) vào ô trên trang giả, fake nhớ tới khi khởi động lại.
+ *
+ * Đối soát bù (Story 4.1): fake nhớ trạng thái thanh toán của từng link và trả lời API tra đơn Gateway theo hợp đồng tạm
+ * (`GET_ORDER_PATH`), nên worker (`TINGEE_ORDER_STATUS_QUERY=true`) phát được Vé cả khi IPN không tới (Đường dẫn IPN sai).
  */
 
 const port = Number(process.env.TINGEE_FAKE_PORT ?? 4010);

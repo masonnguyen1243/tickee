@@ -3,7 +3,7 @@ import { EventJobsModule } from './modules/event/index.js';
 import { IdentityJanitorModule } from './modules/identity/index.js';
 import { OrderingJobsModule } from './modules/ordering/index.js';
 import { OrganizerJobsModule } from './modules/organizer/index.js';
-import { PaymentProcessingModule } from './modules/payment/index.js';
+import { PaymentJobsModule } from './modules/payment/index.js';
 import { TicketingModule } from './modules/ticketing/index.js';
 import { TingeeModule } from './modules/tingee/index.js';
 import { APP_CONFIG, type WorkerConfig } from './platform/config/index.js';
@@ -15,8 +15,9 @@ import { createLoggerModule } from './platform/logging/index.js';
 /**
  * Gốc DI của vai `worker`: không mở HTTP, chạy pg-boss, các job định kỳ, job gửi email (lời mời Admin, email Vé,
  * email tiền về muộn và email đổi giờ/địa điểm cho Người mua), job revalidate trang Sự kiện công khai (gọi
- * `<WEB_ORIGIN>/api/revalidate`) và job hết hạn Giữ chỗ của Đơn. Có sẵn adapter Tingee, Vé (khóa QR) và lõi xử lý IPN của `payment` (`IpnProcessor`,
- * `OrderPayments`) để Đối soát bù (Story 4.1) đi cùng đường xử lý với IPN.
+ * `<WEB_ORIGIN>/api/revalidate`), job hết hạn Giữ chỗ của Đơn và job Đối soát bù (Story 4.1: tra Tingee khi IPN trễ
+ * hoặc mất, đi cùng đường xử lý với IPN qua `IpnProcessor` và `OrderPayments`; cờ `TINGEE_ORDER_STATUS_QUERY`). Có sẵn
+ * adapter Tingee và Vé (khóa QR).
  */
 @Module({})
 export class WorkerModule {
@@ -31,8 +32,8 @@ export class WorkerModule {
         // Adapter Tingee (`TINGEE_CLIENT`, toàn cục) và Vé + Mã QR vé (`TicketsService`, toàn cục) như vai api.
         TingeeModule.forRoot({ baseUrl: config.TINGEE_BASE_URL }),
         TicketingModule.forRoot(config),
-        // Lõi xử lý IPN (không controller): `IpnProcessor` → `ordering.markPaid` / `markExpired`.
-        PaymentProcessingModule,
+        // Đối soát bù trên lõi xử lý IPN (không controller): `IpnProcessor` → `ordering.markPaid` / `markExpired`.
+        PaymentJobsModule.forRoot(config),
         // Job của mô-đun miền (chỉ vai `worker` đăng ký lịch và handler).
         IdentityJanitorModule,
         OrganizerJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN }),

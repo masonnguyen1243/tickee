@@ -61,6 +61,16 @@ export const JobQueue = {
   ORDERING_SEND_EVENT_CHANGE_EMAIL: 'ordering.send-event-change-email',
   /** Dead-letter của `ORDERING_SEND_EVENT_CHANGE_EMAIL`: job hết lượt retry được chép sang đây. */
   ORDERING_SEND_EVENT_CHANGE_EMAIL_DEAD_LETTER: 'ordering.send-event-change-email.dead-letter',
+  /**
+   * Đối soát bù (`payment`, Story 4.1, FR-20, AD-8): tra trạng thái đơn Gateway của một Đơn theo `orderId` (mã Đơn) bằng
+   * credential chụp ở `orders.payout_account_id`, rồi đưa kết quả vào cùng đường xử lý IPN (nguồn `reconciliation`).
+   * Payload `{ orderId, failures }` (id Đơn, số lần tra lỗi liên tiếp; không credential, không PII). TX2 gắn link enqueue
+   * job đầu bằng chính `tx` (queue khai báo ở `ordering` để TX2 enqueue mà không import `payment`); mỗi job xong enqueue
+   * mốc kế hoặc dừng. Id job cố định theo (Đơn, mốc, số lần lỗi).
+   */
+  PAYMENT_RECONCILE_ORDER: 'payment.reconcile-order',
+  /** Dead-letter của `PAYMENT_RECONCILE_ORDER`: job hết lượt retry (lỗi DB) được chép sang đây. */
+  PAYMENT_RECONCILE_ORDER_DEAD_LETTER: 'payment.reconcile-order.dead-letter',
 } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];
 

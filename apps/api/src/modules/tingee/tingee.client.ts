@@ -3,7 +3,13 @@ import { Logger } from '@nestjs/common';
 import { ErrorCode } from '@tickee/contracts';
 import { z } from 'zod';
 import { AppError } from '../../platform/http/index.js';
-import { DOMAIN_ERROR_MESSAGES, domainErrorOf, TINGEE_ERROR_CODES, type TingeeDomainError } from './errors.js';
+import {
+  DOMAIN_ERROR_MESSAGES,
+  domainErrorOf,
+  TINGEE_ERROR_CODES,
+  TINGEE_ORDER_NOT_FOUND_CODE,
+  type TingeeDomainError,
+} from './errors.js';
 import { sign, tingeeTimestamp } from './signing.js';
 
 /** Token DI của `TingeeClient`; test thay bằng client trỏ vào Tingee fake. */
@@ -20,6 +26,15 @@ export const TINGEE_ACCOUNT_PAGE_SIZE = 200;
 
 /** Đường dẫn `create-link` của Cổng thanh toán (`developers.tingee.vn/docs/payment-gateway/create-payment-link`). */
 export const TINGEE_CREATE_LINK_PATH = '/v1/payment-gateway/create-link';
+
+/**
+ * Đường dẫn tra đơn Gateway theo `orderId` (Đối soát bù, Story 4.1). Hợp đồng tạm: Tingee chưa công bố API này (tài liệu
+ * công khai đọc ngày 13/11/2026 chỉ có `create-link`). Khi Tingee xác nhận, chỉ sửa file này và Tingee fake.
+ */
+export const TINGEE_GET_ORDER_PATH = '/v1/payment-gateway/get-order';
+
+/** Timeout của lời gọi tra đơn Gateway: worker tra tuần tự, một Đơn chậm không được giữ cả lô. */
+export const TINGEE_ORDER_STATUS_TIMEOUT_MS = 5_000;
 
 /**
  * API key của một BTC trên Tingee (`organizer` giải mã ngay trước khi gọi). Không bao giờ log, không giữ lâu hơn lời gọi.
@@ -124,6 +139,14 @@ export interface TingeeClient {
    * `TINGEE_PAYMENT_LINK_TIMEOUT_MS`. Lỗi luôn là `CreateLinkError` (`rejected` / `ambiguous`).
    */
   createPaymentLink(credential: TingeeCredential, input: PaymentLinkInput): Promise<string>;
+  /**
+   * Tra trạng thái đơn Gateway theo `orderId` (mã Đơn) (Story 4.1, hợp đồng tạm `TINGEE_GET_ORDER_PATH`, body
+   * `{ requestId: uuid v4, orderId }`): `data` của phản hồi khi `code = '00'` (chưa kiểm dạng: bên gọi đưa qua whitelist
+   * IPN), `null` khi Tingee không tìm thấy đơn (`TINGEE_ORDER_NOT_FOUND_CODE`). Còn lại ném lỗi miền như `listAccounts`
+   * (key sai → `TINGEE_CREDENTIAL_INVALID`; timeout `TINGEE_ORDER_STATUS_TIMEOUT_MS`, lỗi mạng, HTTP lỗi, mã lạ →
+   * `PAYMENT_PROVIDER_UNAVAILABLE`…). Chỉ đọc, gọi lại bao nhiêu lần cũng được.
+   */
+  getGatewayOrder(credential: TingeeCredential, orderId: string): Promise<unknown | null>;
 }
 
 export interface TingeeClientOptions {
@@ -132,6 +155,8 @@ export interface TingeeClientOptions {
   timeoutMs?: number;
   /** Timeout của `create-link`; mặc định `TINGEE_PAYMENT_LINK_TIMEOUT_MS`. */
   paymentLinkTimeoutMs?: number;
+  /** Timeout của tra đơn Gateway; mặc định `TINGEE_ORDER_STATUS_TIMEOUT_MS`. */
+  orderStatusTimeoutMs?: number;
   now?: () => Date;
 }
 
@@ -185,11 +210,13 @@ export class HttpTingeeClient implements TingeeClient {
   private readonly logger = new Logger('Tingee');
   private readonly timeoutMs: number;
   private readonly paymentLinkTimeoutMs: number;
+  private readonly orderStatusTimeoutMs: number;
   private readonly now: () => Date;
 
   constructor(private readonly options: TingeeClientOptions) {
     this.timeoutMs = options.timeoutMs ?? TINGEE_TIMEOUT_MS;
     this.paymentLinkTimeoutMs = options.paymentLinkTimeoutMs ?? TINGEE_PAYMENT_LINK_TIMEOUT_MS;
+    this.orderStatusTimeoutMs = options.orderStatusTimeoutMs ?? TINGEE_ORDER_STATUS_TIMEOUT_MS;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -261,9 +288,37 @@ export class HttpTingeeClient implements TingeeClient {
     return url.data;
   }
 
+  /**
+   * Hợp đồng tạm (Story 4.1): `{ requestId, orderId }`, không `merchantId`. Không log ở đây ngoài mã Tingee (người gọi log
+   * kèm BTC và mã Đơn); không bao giờ log `data` hay body.
+   */
+  async getGatewayOrder(credential: TingeeCredential, orderId: string): Promise<unknown | null> {
+    const path = TINGEE_GET_ORDER_PATH;
+    const envelope = await this.reply(credential, path, { requestId: randomUUID(), orderId }, this.orderStatusTimeoutMs, [
+      TINGEE_ORDER_NOT_FOUND_CODE,
+    ]);
+    if (envelope.code === TINGEE_ORDER_NOT_FOUND_CODE) return null;
+    return this.dataOf(path, envelope);
+  }
+
   /** Gửi một request ký bằng credential của BTC; trả `data` khi `code === '00'`, không thì ném lỗi miền. */
   private async post(credential: TingeeCredential, path: string, payload: Record<string, unknown>): Promise<unknown> {
-    const sent = await this.send(credential, path, payload, this.timeoutMs);
+    return this.dataOf(path, await this.reply(credential, path, payload, this.timeoutMs));
+  }
+
+  /**
+   * Gửi một request ký bằng credential của BTC; trả envelope khi Tingee trả lời được: HTTP 2xx, hoặc mã đã biết (bảng mã,
+   * và `extraKnownCodes` của người gọi) kèm HTTP lỗi. Không tới được, phản hồi không đọc được, HTTP lỗi với mã lạ → ném
+   * `PAYMENT_PROVIDER_UNAVAILABLE`.
+   */
+  private async reply(
+    credential: TingeeCredential,
+    path: string,
+    payload: Record<string, unknown>,
+    timeoutMs: number,
+    extraKnownCodes: readonly string[] = [],
+  ): Promise<Envelope> {
+    const sent = await this.send(credential, path, payload, timeoutMs);
     if (sent.kind === 'failed') {
       if (sent.httpStatus === null) this.logger.warn({ path, reason: sent.reason }, 'Không gọi được Tingee');
       else this.logger.warn({ path, httpStatus: sent.httpStatus, reason: sent.reason }, 'Phản hồi Tingee không đọc được');
@@ -271,12 +326,18 @@ export class HttpTingeeClient implements TingeeClient {
     }
     const { envelope, httpStatus } = sent;
     // Mã đã biết (key sai, merchant bị khóa) vẫn là lỗi miền dù Tingee kèm HTTP 4xx; còn lại HTTP lỗi là Tingee tạm lỗi.
-    const known = envelope !== null && TINGEE_ERROR_CODES.has(envelope.code);
+    const known =
+      envelope !== null && (TINGEE_ERROR_CODES.has(envelope.code) || extraKnownCodes.includes(envelope.code));
     const ok = httpStatus >= 200 && httpStatus < 300;
     if (!envelope || (!ok && !known)) {
       this.logger.warn({ path, httpStatus }, 'Tingee trả lỗi HTTP');
       throw tingeeError(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE, new TingeeTransportError(`${path}: HTTP ${httpStatus}`));
     }
+    return envelope;
+  }
+
+  /** `data` của envelope khi `code === '00'`; mã khác → ném lỗi miền theo bảng mã. */
+  private dataOf(path: string, envelope: Envelope): unknown {
     const { code } = envelope;
     if (code === '00') return envelope.data;
     const domain = domainErrorOf(code);

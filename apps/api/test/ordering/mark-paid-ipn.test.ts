@@ -91,6 +91,10 @@ async function expiredOrder() {
 const ipnPaid = (orderId: string, amount: number, paidAt: Date | null = null) =>
   db.transaction((tx) => payments.markPaid(tx, orderId, 'ipn', amount, { paidAt }));
 
+/** Kết quả tra của Đối soát bù (Story 4.1) báo tiền về. */
+const reconciled = (orderId: string, amount: number, paidAt: Date | null = null) =>
+  db.transaction((tx) => payments.markPaid(tx, orderId, 'reconciliation', amount, { paidAt }));
+
 const setEvent = (eventId: string, set: string) => h.db.pool.query(`UPDATE events SET ${set} WHERE id = $1`, [eventId]);
 const ENDED = "effective_end_at = now() - interval '1 minute'";
 const CANCELLED = "status = 'cancelled'";
@@ -340,6 +344,72 @@ describe('markPaid nguồn ipn: lỗi giữa chừng', () => {
 
   it('không có Đơn → lỗi', async () => {
     await expect(ipnPaid(randomUUID(), 1_000)).rejects.toThrow(/không có Đơn/);
+  });
+});
+
+describe('markPaid nguồn reconciliation (Story 4.1)', () => {
+  it('Đơn pending khớp tiền → paid (paid_source reconciliation, paid_at = paidAt), held → sold, N Vé, đúng một email Vé; tra lại → already_settled, không đổi gì', async () => {
+    const order = await pendingOrder();
+    const paidAt = new Date(Date.now() - 3 * 60_000);
+    expect(await reconciled(order.id, order.total, paidAt)).toEqual({ outcome: 'paid' });
+    const state = await orderState(h, order.code);
+    expect(state).toMatchObject({ status: 'paid', paid_source: 'reconciliation', paid_amount: '450000', tickets: 3 });
+    expect(state.paid_at!.toISOString()).toBe(paidAt.toISOString());
+    expect(await inventory(h, order.a)).toEqual({ capacity: 5, sold: 2, held: 0 });
+    expect(await inventory(h, order.b)).toEqual({ capacity: 3, sold: 1, held: 0 });
+    expect(await buyerEmails(order.id)).toEqual([{ kind: 'tickets', orderId: order.id }]);
+    expect(await auditCount(order.id)).toBe(1);
+
+    // Hỏi lại cùng khoản tiền (kể cả số liệu khác): không bao giờ là trả trùng.
+    expect(await reconciled(order.id, order.total, paidAt)).toEqual({ outcome: 'already_settled' });
+    expect(await reconciled(order.id, order.total + 1_000)).toEqual({ outcome: 'already_settled' });
+    expect(await orderState(h, order.code)).toEqual(state);
+    expect(await buyerEmails(order.id)).toHaveLength(1);
+    expect(await auditCount(order.id)).toBe(1);
+    await expectInvariants(h, order.eventId);
+  });
+
+  it('Đơn đã rời pending/expired (paid qua IPN, review, cancelled) → already_settled, kể cả Sự kiện đã hủy hay đã kết thúc; Đơn, Vé, tồn kho không đổi', async () => {
+    const paid = await pendingOrder();
+    expect(await ipnPaid(paid.id, paid.total)).toEqual({ outcome: 'paid' });
+    const before = await orderState(h, paid.code);
+    await setEvent(paid.eventId, ENDED);
+    expect(await reconciled(paid.id, paid.total)).toEqual({ outcome: 'already_settled' });
+    await setEvent(paid.eventId, CANCELLED);
+    expect(await reconciled(paid.id, paid.total)).toEqual({ outcome: 'already_settled' });
+    expect(await orderState(h, paid.code)).toEqual(before);
+    expect(before).toMatchObject({ status: 'paid', paid_source: 'ipn', tickets: 3 });
+    await expectInvariants(h, paid.eventId);
+
+    const review = await pendingOrder();
+    expect(await ipnPaid(review.id, review.total - 1)).toEqual({ outcome: 'mismatch' });
+    expect(await reconciled(review.id, review.total)).toEqual({ outcome: 'already_settled' });
+    expect(await orderState(h, review.code)).toMatchObject({ status: 'review', tickets: 0 });
+
+    const cancelled = await expiredOrder();
+    await h.db.pool.query("UPDATE orders SET status = 'cancelled' WHERE id = $1", [cancelled.id]);
+    expect(await reconciled(cancelled.id, cancelled.total)).toEqual({ outcome: 'already_settled' });
+    expect(await orderState(h, cancelled.code)).toMatchObject({ status: 'cancelled', tickets: 0 });
+    await expectInvariants(h, cancelled.eventId);
+  });
+
+  it('Đơn còn chờ tiền đi bước 3–7 như IPN: expired còn chỗ → bán lại, paid (reconciliation); lệch tiền → mismatch; Sự kiện hủy → event_cancelled', async () => {
+    const late = await expiredOrder();
+    expect(await reconciled(late.id, late.total)).toEqual({ outcome: 'paid' });
+    expect(await orderState(h, late.code)).toMatchObject({ status: 'paid', paid_source: 'reconciliation', tickets: 3 });
+    expect(await inventory(h, late.a)).toEqual({ capacity: 5, sold: 2, held: 0 });
+    await expectInvariants(h, late.eventId);
+
+    const mismatch = await pendingOrder();
+    expect(await reconciled(mismatch.id, mismatch.total - 1_000)).toEqual({ outcome: 'mismatch' });
+    expect(await orderState(h, mismatch.code)).toMatchObject({ status: 'review', paid_source: null, tickets: 0 });
+    expect(await inventory(h, mismatch.a)).toEqual({ capacity: 5, sold: 0, held: 0 });
+
+    const cancelled = await pendingOrder();
+    await setEvent(cancelled.eventId, CANCELLED);
+    expect(await reconciled(cancelled.id, cancelled.total)).toEqual({ outcome: 'event_cancelled' });
+    expect(await orderState(h, cancelled.code)).toMatchObject({ status: 'review', tickets: 0 });
+    await expectInvariants(h, cancelled.eventId);
   });
 });
 

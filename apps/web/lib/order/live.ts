@@ -8,6 +8,24 @@ import { BuyerOrderStatus, type BuyerOrderView } from '@tickee/contracts';
 /** Polling khi SSE chưa kết nối mà Đơn đang chờ tiền (AD-17: 2 giây ở màn chờ thanh toán). */
 export const ORDER_WAITING_POLL_MS = 2_000;
 
+/**
+ * Polling khi SSE chưa kết nối mà Đơn đã hết hạn nhưng tiền còn có thể về muộn (Story 4.1): Đối soát bù tra tiếp Đơn
+ * `expired` tới `expires_at` + 24 giờ, Đơn có thể chuyển `paid`/`under_review` trong cửa sổ đó.
+ */
+export const ORDER_LATE_PAYMENT_POLL_MS = 30_000;
+
+/** Mốc tra cuối cùng của Đối soát bù cho Đơn `expired`: `expires_at` + 24 giờ. */
+const RECONCILE_LAST_CHECK_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Đệm sau mốc tra cuối: job của mốc đó có thể tra lại sau 1, 2, 4 phút khi Tingee lỗi (7 phút), cộng độ trễ của worker.
+ * Không có đệm thì khoản tiền tìm được ở lần tra cuối không bao giờ tới Trang Đơn qua polling.
+ */
+const RECONCILE_RETRY_MARGIN_MS = 15 * 60 * 1000;
+
+/** Cửa sổ sau `expiresAt` mà Đơn `expired` còn có thể chuyển `paid`/`under_review` qua Đối soát bù. */
+export const ORDER_LATE_PAYMENT_WINDOW_MS = RECONCILE_LAST_CHECK_MS + RECONCILE_RETRY_MARGIN_MS;
+
 /** Sau chừng này ms ở màn chờ trong lần mở trang, `reassurance-line` thay dòng chờ (EXPERIENCE › Chờ lâu). */
 export const LONG_WAIT_MS = 120_000;
 
@@ -15,9 +33,23 @@ export const LONG_WAIT_MS = 120_000;
 export const isWaiting = (buyerStatus: string): boolean =>
   buyerStatus === BuyerOrderStatus.AWAITING_PAYMENT || buyerStatus === BuyerOrderStatus.CONFIRMING;
 
-/** Chu kỳ polling của Trang Đơn khi SSE chưa kết nối: 2 giây khi đang chờ tiền, trạng thái khác (hoặc chưa có) không. */
-export function orderPollInterval(order: Pick<BuyerOrderView, 'buyerStatus'> | undefined): number | false {
-  return order && isWaiting(order.buyerStatus) ? ORDER_WAITING_POLL_MS : false;
+/**
+ * Chu kỳ polling của Trang Đơn khi SSE chưa kết nối: 2 giây khi đang chờ tiền; 30 giây khi Đơn `expired` mà giờ máy chủ
+ * (`serverNow`, không theo đồng hồ máy) còn trước `expiresAt` + 24 giờ (tiền về muộn qua Đối soát bù); trạng thái khác
+ * (hoặc chưa có) không.
+ */
+export function orderPollInterval(
+  order: Pick<BuyerOrderView, 'buyerStatus' | 'expiresAt' | 'serverNow'> | undefined,
+): number | false {
+  if (!order) return false;
+  if (isWaiting(order.buyerStatus)) return ORDER_WAITING_POLL_MS;
+  if (
+    order.buyerStatus === BuyerOrderStatus.EXPIRED &&
+    Date.parse(order.serverNow) < Date.parse(order.expiresAt) + ORDER_LATE_PAYMENT_WINDOW_MS
+  ) {
+    return ORDER_LATE_PAYMENT_POLL_MS;
+  }
+  return false;
 }
 
 const momentKey = (code: string) => `tickee:order-moment:${code}`;

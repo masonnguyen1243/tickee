@@ -127,10 +127,10 @@ describe('trang thanh toán giả → IPN tới api thật', () => {
     expect(order.tickets).toHaveLength(2);
     await expectInvariants(h, placed.eventId);
 
-    // Bấm lại: IPN mới (mã giao dịch mới) cho Đơn đã paid → api chỉ lưu, vẫn đúng 2 Vé.
+    // Bấm lại: IPN gửi lại của cùng lần trả (cùng mã giao dịch, Story 4.1) → api coi là IPN lặp, vẫn đúng 2 Vé.
     expect((await press(placed.checkoutUrl, 'success')).status).toBe(303);
     expect(await orderState(h, placed.code)).toMatchObject({ status: 'paid', tickets: 2 });
-    expect((await paymentEventsOf(h, org.orgId, placed.code)).map((e) => e.status)).toEqual(['success', 'success']);
+    expect((await paymentEventsOf(h, org.orgId, placed.code)).map((e) => e.status)).toEqual(['success']);
     await expectInvariants(h, placed.eventId);
   });
 

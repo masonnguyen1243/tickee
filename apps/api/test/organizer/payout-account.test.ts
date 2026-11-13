@@ -111,6 +111,7 @@ beforeAll(async () => {
       return accounts;
     },
     createPaymentLink: (credential, input) => http.createPaymentLink(credential, input),
+    getGatewayOrder: (credential, orderId) => http.getGatewayOrder(credential, orderId),
   };
   h = await createHarness({ TINGEE_BASE_URL: fake.url }, { overrides: [{ provide: TINGEE_CLIENT, useValue: client }] });
   owner = await signUp(h);

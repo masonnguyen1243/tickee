@@ -18,5 +18,23 @@ export {
   type IpnOutcome,
   type IpnReviewItem,
 } from './ipn-processor.js';
-export { PaymentModule, PaymentProcessingModule, type PaymentConfig } from './payment.module.js';
+export {
+  PaymentJobsModule,
+  PaymentModule,
+  PaymentProcessingModule,
+  type PaymentConfig,
+  type PaymentJobsConfig,
+} from './payment.module.js';
+export {
+  GATEWAY_PENDING_STATUS,
+  PAYMENT_RECONCILIATION_STOPPED_ALERT,
+  RECONCILIATION_SETTINGS,
+  reconciliationSettings,
+  ReconciliationWorker,
+  type ReconcileOutcome,
+  type ReconciliationConfig,
+  type ReconciliationError,
+  type ReconciliationSettings,
+  type ReconciliationStopReason,
+} from './reconciliation-worker.js';
 export { openReviewsOf, type OpenReview } from './review-read.js';

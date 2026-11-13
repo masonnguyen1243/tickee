@@ -8,6 +8,8 @@ import {
   LONG_WAIT_MS,
   markOrderMoment,
   nextMoment,
+  ORDER_LATE_PAYMENT_POLL_MS,
+  ORDER_LATE_PAYMENT_WINDOW_MS,
   ORDER_WAITING_POLL_MS,
   orderPollInterval,
 } from '@/lib/order/live';
@@ -18,16 +20,35 @@ import {
  */
 
 describe('orderPollInterval', () => {
-  it('2 giây khi awaiting_payment/confirming; trạng thái khác, lạ hay chưa có Đơn → không polling', () => {
+  const expiresAt = '2026-11-13T03:15:00.000Z';
+  const order = (buyerStatus: string, serverNow = '2026-11-13T03:10:00.000Z') => ({ buyerStatus, expiresAt, serverNow });
+  /** Giờ máy chủ lệch `ms` so với `expiresAt`. */
+  const afterExpiry = (ms: number) => new Date(Date.parse(expiresAt) + ms).toISOString();
+
+  it('2 giây khi awaiting_payment/confirming; trạng thái khác (trừ expired), lạ hay chưa có Đơn → không polling', () => {
     expect(ORDER_WAITING_POLL_MS).toBe(2_000);
-    expect(orderPollInterval({ buyerStatus: 'awaiting_payment' })).toBe(2_000);
-    expect(orderPollInterval({ buyerStatus: 'confirming' })).toBe(2_000);
-    for (const buyerStatus of ['paid', 'expired', 'under_review', 'cancelled_by_organizer', 'event_cancelled', 'loai_moi']) {
-      expect(orderPollInterval({ buyerStatus }), buyerStatus).toBe(false);
+    expect(orderPollInterval(order('awaiting_payment'))).toBe(2_000);
+    expect(orderPollInterval(order('confirming'))).toBe(2_000);
+    for (const buyerStatus of ['paid', 'under_review', 'cancelled_by_organizer', 'event_cancelled', 'loai_moi']) {
+      expect(orderPollInterval(order(buyerStatus)), buyerStatus).toBe(false);
       expect(isWaiting(buyerStatus)).toBe(false);
     }
+    expect(isWaiting('expired')).toBe(false);
     expect(orderPollInterval(undefined)).toBe(false);
     expect(LONG_WAIT_MS).toBe(120_000);
+  });
+
+  it('Story 4.1: expired mà giờ máy chủ còn trước expiresAt + 24 giờ 15 phút → 30 giây (tiền về muộn qua Đối soát bù, kể cả lần tra lại của mốc cuối); từ mốc đó → không polling', () => {
+    expect(ORDER_LATE_PAYMENT_POLL_MS).toBe(30_000);
+    expect(ORDER_LATE_PAYMENT_WINDOW_MS).toBe((24 * 60 + 15) * 60 * 1000);
+    // Mốc tra cuối (+ 24 giờ) và các lần tra lại của nó (tới + 7 phút) vẫn trong cửa sổ.
+    expect(orderPollInterval(order('expired', afterExpiry(24 * 60 * 60 * 1000 + 7 * 60_000)))).toBe(30_000);
+    // Hết hạn sớm (IPN expired trước expiresAt), vừa hết hạn, sát mốc cuối.
+    expect(orderPollInterval(order('expired', afterExpiry(-5 * 60_000)))).toBe(30_000);
+    expect(orderPollInterval(order('expired', afterExpiry(0)))).toBe(30_000);
+    expect(orderPollInterval(order('expired', afterExpiry(ORDER_LATE_PAYMENT_WINDOW_MS - 1)))).toBe(30_000);
+    expect(orderPollInterval(order('expired', afterExpiry(ORDER_LATE_PAYMENT_WINDOW_MS)))).toBe(false);
+    expect(orderPollInterval(order('expired', afterExpiry(2 * ORDER_LATE_PAYMENT_WINDOW_MS)))).toBe(false);
   });
 });
 

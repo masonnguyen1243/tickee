@@ -250,11 +250,17 @@ describe('POST /checkout/:orderId: Thanh toán', () => {
     // Merchant khác không đổi.
     expect(fake.merchant(A.clientId).ipnUrl).toBe(ipnUrlAt('khoa-btc-a'));
 
-    // Bấm lại: IPN mới, `providerTransactionCode` và `requestId` mới.
+    // Bấm lại: IPN mới (`requestId` mới) của cùng lần trả (Story 4.1: link giữ mã giao dịch, như Tingee gửi lại IPN).
     expect((await press(link.orderId, { ipnUrl: url, status: 'success' })).status).toBe(303);
     const again = expectSignedLikeTingee(received[1]!, B);
-    expect(again.providerTransactionCode).not.toBe(body.providerTransactionCode);
+    expect(again.providerTransactionCode).toBe(body.providerTransactionCode);
+    expect(again.paidAt).toBe(body.paidAt);
     expect(again.requestId).not.toBe(body.requestId);
+    expect(fake.order(link.orderId)).toMatchObject({
+      status: 'success',
+      providerTransactionCode: body.providerTransactionCode,
+      paidAmount: 620_000,
+    });
 
     // Link mới của cùng merchant: ô điền sẵn URL đã lưu (tới khi fake khởi động lại).
     const next = await createLink(B, accountB);
