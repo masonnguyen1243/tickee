@@ -20,6 +20,7 @@ export {
   OrderPayments,
   OrderPaymentsModule,
   orderForPayment,
+  type GatewaySource,
   type MarkPaidOptions,
   type MarkPaidOutcome,
   type MarkPaidResult,
@@ -30,6 +31,16 @@ export { markExpired, OrderingJobsModule, type MarkExpiredResult } from './order
 export { type OrderingConfig } from './order-rate-limit.js';
 export { OrderingModule } from './ordering.module.js';
 export { ORDER_HOLD } from './orders.service.js';
+export {
+  orderForReconciliation,
+  RECONCILE_AFTER_EXPIRY_MS,
+  RECONCILE_MAX_FAILURES,
+  RECONCILE_ORDER_QUEUE,
+  ReconcileOrderPayload,
+  scheduleNextReconciliation,
+  scheduleReconciliationRetry,
+  type OrderForReconciliation,
+} from './reconciliation-jobs.js';
 export { AVAILABILITY_CLOCK, type AvailabilityClock } from './public-availability.controller.js';
 export { type PaidSource } from './schema.js';
 export { saleStatusOf, sellability, sellabilityOf } from './sellability.js';

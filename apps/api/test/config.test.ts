@@ -101,6 +101,24 @@ describe('loadConfig', () => {
     expect(config).toMatchObject({ APP_ROLE: 'worker', WEB_ORIGIN: 'https://tickee.vn' });
   });
 
+  it('vai worker: TINGEE_ORDER_STATUS_QUERY (Story 4.1) mặc định tắt; nhận true/false, 1/0…; giá trị lạ → lỗi, không in giá trị', () => {
+    const flag = (value: string | undefined) => {
+      const config = loadConfig({ ...workerEnv, TINGEE_ORDER_STATUS_QUERY: value });
+      return config.APP_ROLE === 'worker' ? config.TINGEE_ORDER_STATUS_QUERY : null;
+    };
+    expect(flag(undefined)).toBe(false);
+    expect(flag('')).toBe(false);
+    expect(flag('true')).toBe(true);
+    expect(flag('1')).toBe(true);
+    expect(flag('false')).toBe(false);
+    expect(flag('0')).toBe(false);
+    const err = issuesOf({ ...workerEnv, TINGEE_ORDER_STATUS_QUERY: SECRET });
+    expect(err.issues.map((i) => i.variable)).toEqual(['TINGEE_ORDER_STATUS_QUERY']);
+    expect(err.message).not.toContain(SECRET);
+    // Vai api không đọc biến này.
+    expect(loadConfig({ ...apiEnv, TINGEE_ORDER_STATUS_QUERY: 'true' })).not.toHaveProperty('TINGEE_ORDER_STATUS_QUERY');
+  });
+
   it('vai worker: thiếu REVALIDATE_SECRET → dừng và nêu tên biến; ngắn hơn 32 ký tự → lỗi, không in giá trị', () => {
     const missing = issuesOf({ ...workerEnv, REVALIDATE_SECRET: undefined });
     expect(missing.issues).toEqual([{ variable: 'REVALIDATE_SECRET', reason: 'thiếu' }]);
@@ -167,8 +185,9 @@ describe('loadConfig', () => {
     // Key Tingee là của từng BTC (lưu mã hóa trong DB): env Tingee chỉ còn URL và khóa mã hóa.
     const tingeeKeys = Object.keys(loadConfig(apiEnv)).filter((k) => k.startsWith('TINGEE_'));
     expect(tingeeKeys.sort()).toEqual(['TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS']);
+    // Worker thêm cờ Đối soát bù (Story 4.1), không phải credential.
     const workerTingeeKeys = Object.keys(loadConfig(workerEnv)).filter((k) => k.startsWith('TINGEE_'));
-    expect(workerTingeeKeys.sort()).toEqual(['TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS']);
+    expect(workerTingeeKeys.sort()).toEqual(['TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS', 'TINGEE_ORDER_STATUS_QUERY']);
   });
 
   it('vai worker (Story 3.5): cần TINGEE_BASE_URL, TINGEE_CREDENTIAL_KEYS, TICKET_QR_KEYS như vai api; lỗi không in giá trị', () => {

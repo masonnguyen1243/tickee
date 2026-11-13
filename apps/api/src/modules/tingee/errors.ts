@@ -28,6 +28,12 @@ export const TINGEE_ERROR_CODES: ReadonlyMap<string, TingeeDomainError> = new Ma
   TABLE.flatMap(([domain, codes]) => codes.map((code) => [code, domain] as const)),
 );
 
+/**
+ * Mã "không tìm thấy đơn" của API tra đơn Gateway (hợp đồng tạm, Story 4.1; chờ Tingee xác nhận). Không phải lỗi miền:
+ * `getGatewayOrder` trả `null`.
+ */
+export const TINGEE_ORDER_NOT_FOUND_CODE = '2004';
+
 /** Mã Tingee (`code` của phản hồi, khác `'00'`) → lỗi miền. */
 export function domainErrorOf(tingeeCode: string): TingeeDomainError {
   return TINGEE_ERROR_CODES.get(tingeeCode) ?? ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE;

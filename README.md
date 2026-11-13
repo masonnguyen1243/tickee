@@ -121,8 +121,15 @@ không có tiền nào được chuyển. Trang có ô "Đường dẫn IPN" (nh
 Trang giả chỉ chuyển trang khi api trả ACK (HTTP 2xx kèm JSON `"code":"00"`). api từ chối, URL trỏ nhầm dịch vụ khác
 (trả 2xx nhưng không phải ACK), không tới được hoặc quá 10 giây không trả lời thì trang giả báo lỗi (kèm HTTP status và
 body nhận được) và không chuyển trang. Quá 10 giây thì IPN đã được gửi và có thể api đã xử lý: xem Trang Đơn trước khi
-bấm lại. Mỗi lần bấm gửi một IPN mới (`requestId` mới); riêng IPN `success` mang mã giao dịch mới, IPN `expired` /
-`canceled` không có mã giao dịch.
+bấm lại. Mỗi lần bấm gửi một IPN mới (`requestId` mới). Mọi IPN `success` của một link mang cùng mã giao dịch (một lần
+trả của link, như Tingee gửi lại IPN), nên bấm lại chỉ là IPN lặp; IPN `expired` / `canceled` không có mã giao dịch.
+
+Đối soát bù (Story 4.1) ở local: fake nhớ trạng thái thanh toán của từng link (nút "Đã thanh toán (giả lập)" đánh dấu
+link đã trả trước khi gửi IPN; "Hết hạn" / "Hủy" chỉ đổi link chưa trả) và trả lời API tra đơn Gateway theo hợp đồng tạm.
+Với `TINGEE_ORDER_STATUS_QUERY=true` (`.env.example`), worker tra mỗi Đơn có link sau 2, 5, 10 phút kể từ lúc tạo link,
+lúc hết hạn, rồi 30 phút, 2 giờ, 24 giờ sau hết hạn. Muốn thử IPN mất: sửa ô "Đường dẫn IPN" thành URL sai (vd. đổi
+cổng) rồi bấm "Đã thanh toán (giả lập)" (trang giả báo lỗi gửi IPN); khoảng 2 phút sau worker tra fake, Đơn thành
+`paid` và Trang Đơn hiện Vé.
 
 Với BTC demo của `pnpm db:seed` thì không cần cấu hình gì thêm: đăng nhập bằng email BTC demo, tạo Sự kiện có Hạng vé có
 phí, bấm "Mở bán", mua Vé rồi bấm "Đã thanh toán (giả lập)". Seed gán cho BTC demo khóa cố định `SEED_IPN_KEY`, nên fake
@@ -264,6 +271,7 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | api | bắt buộc; OAuth client Google, redirect URI `<API_PUBLIC_URL>/v1/auth/callback/google` |
 | `TINGEE_BASE_URL`        | api, worker | bắt buộc; origin Tingee Open API (UAT `https://uat-open-api.tingee.vn`). Env không có credential Tingee: mỗi BTC nhập API key của mình ở trang Tài khoản nhận tiền. `.env` local phải là `http://localhost:4010` (Tingee fake mà `pnpm dev` chạy sẵn): trỏ Tingee thật thì key demo lỗi và Đơn có phí báo "Chưa tạo được link thanh toán" (xem "Hai bẫy của `.env` local"). Với Tingee fake: BTC demo của `pnpm db:seed` đã liên kết sẵn, hoặc nhập key merchant demo (`demo-btc-co-tai-khoan` / `demo-secret-co-tai-khoan`: có tài khoản; `demo-btc-chua-lien-ket` / `demo-secret-chua-lien-ket`: chưa liên kết ngân hàng). Worker đọc cùng ba biến Tingee/Vé với api (cùng giá trị): Đối soát bù (Story 4.1) đi cùng đường xử lý IPN và phát Vé |
 | `TINGEE_CREDENTIAL_KEYS` | api, worker | bắt buộc; khóa AES-256-GCM mã hóa Secret Token Tingee của BTC: `v<k>:<base64 của 32 byte>`, nhiều khóa cách nhau bằng dấu phẩy, không trùng `k`. Mã hóa bằng khóa có `k` lớn nhất, giải mã theo tiền tố `v<k>:` của ciphertext; xoay khóa thì thêm khóa mới và giữ khóa cũ. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì api không giải mã được Secret Token đã lưu (local: `pnpm db:seed` mã hóa lại key demo, xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32`. `pnpm db:seed` cũng đọc biến này để mã hóa key demo |
+| `TINGEE_ORDER_STATUS_QUERY` | worker   | mặc định tắt; `true` bật Đối soát bù (Story 4.1): worker tra trạng thái đơn Gateway khi IPN trễ hoặc mất, kết quả đi cùng đường xử lý IPN. Tingee chưa công bố API tra đơn: adapter theo hợp đồng tạm mà chỉ Tingee fake hiểu, nên chỉ bật ở local (`.env.example`) và test; staging bật khi đã thay bằng hợp đồng thật. Tắt: job tra xong ngay, không gọi Tingee |
 | `TICKET_QR_KEYS`         | api, worker | bắt buộc; khóa HMAC-SHA256 ký Mã QR vé (`t<k>.<ticketId>.<sig>`), cùng dạng `TINGEE_CREDENTIAL_KEYS` nhưng là khóa khác. Ký Vé mới bằng khóa có `k` lớn nhất; Vé lưu `k` (không lưu chuỗi QR) nên xoay khóa thì thêm khóa mới và giữ khóa cũ tới khi không còn Vé nào dùng. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì Mã QR đã gửi không còn khớp và link chia sẻ trả 404 (xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32` |
 | `NEXT_PUBLIC_API_BASE_URL` | web       | gốc REST của api; client thêm `/v1`; nhúng lúc build. `next build` thiếu biến thì dừng; lệnh dev ở gốc tự đặt `http://localhost:3001` (xem "Biến build của web") |
 | `TICKEE_UI_KIT`          | web         | `1` bật `/ui-kit`; production không đặt (404) |

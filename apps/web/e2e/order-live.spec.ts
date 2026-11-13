@@ -273,7 +273,13 @@ test.describe('Trang Đơn tự cập nhật (Story 3.7)', () => {
     // SSE bị từ chối (503) → mở lại sau 1, 2… giây.
     expect(api.lives.length).toBeGreaterThanOrEqual(2);
 
-    api.state.order = order({ buyerStatus: 'expired', payment: { ...order().payment, checkoutUrl: null } });
+    // Hết hạn đã quá cửa sổ tiền về muộn (expiresAt + 24 giờ 15 phút): Trang Đơn thôi polling hẳn.
+    api.state.order = order({
+      buyerStatus: 'expired',
+      payment: { ...order().payment, checkoutUrl: null },
+      expiresAt: new Date(Date.now() - 25 * 60 * 60_000).toISOString(),
+      serverNow: new Date().toISOString(),
+    });
     await expect(banner(page)).toHaveText('Hết thời gian giữ chỗ. Chỗ đã được trả lại.', { timeout: 5_000 });
     const settled = api.gets.length;
     await page.waitForTimeout(3_000);

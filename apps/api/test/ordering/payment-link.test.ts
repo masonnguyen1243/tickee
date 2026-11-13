@@ -85,6 +85,7 @@ beforeAll(async () => {
         if (hook) await hook(input);
       }
     },
+    getGatewayOrder: (credential, orderId) => http.getGatewayOrder(credential, orderId),
   };
   h = await createHarness({ TINGEE_BASE_URL: fake.url }, { overrides: [{ provide: TINGEE_CLIENT, useValue: client }] });
   boss = h.app.get<PgBoss>(BOSS);

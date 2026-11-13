@@ -13,9 +13,10 @@ export const PAYMENT_EVENT_KINDS = ['payment', 'status'] as const;
 export type PaymentEventKind = (typeof PAYMENT_EVENT_KINDS)[number];
 
 /**
- * Sự kiện thanh toán nhận từ Tingee (Story 3.5, AD-7): mỗi IPN hợp lệ (đã qua chữ ký) đúng một dòng, chỉ các trường
- * trong whitelist. Không bao giờ lưu `description`, `orderInfo` (nội dung tự do) hay `customerEmail` (PII của người trả).
- * Chỉ INSERT/SELECT (`APPEND_ONLY_TABLES`).
+ * Sự kiện thanh toán nhận từ Tingee (Story 3.5, AD-7): mỗi IPN hợp lệ (đã qua chữ ký), hoặc mỗi kết quả tra trạng thái
+ * của Đối soát bù (Story 4.1, `success`/`expired`/`canceled`; kết quả "chưa trả" không lưu), đúng một dòng, chỉ các
+ * trường trong whitelist. IPN và kết quả tra cùng khóa chống lặp là một dòng. Không bao giờ lưu `description`,
+ * `orderInfo` (nội dung tự do) hay `customerEmail` (PII của người trả). Chỉ INSERT/SELECT (`APPEND_ONLY_TABLES`).
  *
  * - `organization_id`: BTC sở hữu `ipnKey` của URL nhận IPN (luôn có).
  * - `order_id`: Đơn có mã `provider_order_id` thuộc chính BTC đó; `null` khi mã sai dạng, không có Đơn, hoặc Đơn thuộc BTC
@@ -69,7 +70,8 @@ export const paymentEvents = pgTable(
 
 /**
  * Mục Cần xử lý (Story 3.6, AD-7): mỗi khoản tiền về (`payment_events` loại `payment`) không thành Vé là đúng một mục,
- * tạo trong cùng transaction với event. `payment` sở hữu; hàng Cần xử lý (Story 4.3) và duyệt/từ chối/đánh dấu đã hoàn
+ * tạo trong cùng transaction với event. Ngoại lệ: mã Đơn sai định dạng (chỉ lưu), và kết quả tra của Đối soát bù cho
+ * Đơn đã chốt (`already_settled`, Story 4.1: dòng gắn Đơn, không Vé, không mục; là lần hỏi lại khoản tiền đã ghi nhận). `payment` sở hữu; hàng Cần xử lý (Story 4.3) và duyệt/từ chối/đánh dấu đã hoàn
  * (Story 4.4) đọc và ghi bảng này.
  *
  * - `organization_id`: BTC sở hữu `ipnKey` của IPN (luôn có); bằng BTC của Đơn khi có Đơn (IPN chỉ gắn Đơn của chính

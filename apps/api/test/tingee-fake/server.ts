@@ -31,10 +31,30 @@ import { parseTingeeTimestamp, sign, tingeeTimestamp, verifySignature } from '..
  * kết quả); phản hồi khác (HTTP ≠ 2xx, hoặc 2xx mà không phải ACK, vd. URL trỏ nhầm dịch vụ khác) → 502 kèm HTTP status
  * và body bên nhận; lỗi mạng hay timeout → 502; URL không phải http(s) hay `status` lạ → 400, không gửi gì; link lạ →
  * 404. Mỗi lần gửi được ghi lại (`ipnDeliveries`). Không bao giờ log hay hiện secret, chữ ký.
+ *
+ * Tra đơn Gateway (Story 4.1, hợp đồng tạm `GET_ORDER_PATH`, chờ Tingee xác nhận): mỗi link giữ trạng thái thanh toán
+ * (`pending` = chưa trả, link còn · `success` · `expired` · `canceled`), mã giao dịch ổn định, `paidAmount`, `paidAt`.
+ * Nút "Đã thanh toán (giả lập)" chuyển link sang `success` trước khi gửi IPN (IPN gửi không tới vẫn là đã trả: giả IPN
+ * mất) và mọi IPN `success` của link mang cùng mã giao dịch; "Hết hạn"/"Hủy" chỉ đổi link còn `pending`. `POST
+ * /v1/payment-gateway/get-order` (`{ requestId, orderId }`, ký như mọi API) trả `00` với `data` dùng đúng tên trường của
+ * IPN, hoặc `2004` khi merchant gọi không có link này. `orderReplies` cài trước phản hồi của các lần tra kế tiếp. Test
+ * dùng `fake.markPaid` / `fake.markExpired` để đổi trạng thái link mà không gửi IPN.
  */
 
 /** `create-link` của Cổng thanh toán (`developers.tingee.vn/docs/payment-gateway/create-payment-link`). */
 export const CREATE_LINK_PATH = '/v1/payment-gateway/create-link';
+
+/** Tra đơn Gateway theo `orderId` (hợp đồng tạm của Story 4.1, cùng giá trị với `TINGEE_GET_ORDER_PATH` của adapter). */
+export const GET_ORDER_PATH = '/v1/payment-gateway/get-order';
+
+/** Mã "không tìm thấy đơn" của tra đơn Gateway (hợp đồng tạm). */
+export const ORDER_NOT_FOUND_CODE = '2004';
+
+/** `merchantId` mà fake điền vào IPN và kết quả tra (số của Tingee, không phải Client ID). */
+const FAKE_MERCHANT_ID = 29267;
+
+/** Trạng thái thanh toán của một link trên fake (`status` của kết quả tra). */
+export type FakeOrderStatus = 'pending' | 'success' | 'expired' | 'canceled';
 
 /** Timestamp cũ hơn chừng này (hoặc ở tương lai quá 1 phút) bị từ chối. */
 const MAX_SKEW_MS = 10 * 60 * 1000;
@@ -65,6 +85,8 @@ export interface FakeMerchant {
   linkReplies?: FakeLinkReply[];
   /** Hoãn mọi phản hồi `create-link` chừng này ms (giả Tingee chậm, để test gọi song song chồng nhau). */
   linkDelayMs?: number;
+  /** Phản hồi của các lần tra đơn Gateway kế tiếp (`GET_ORDER_PATH`), lấy lần lượt; hết thì trả trạng thái link. */
+  orderReplies?: FakeLinkReply[];
   /**
    * "Đường dẫn IPN" của merchant (như ô cùng tên trên portal Tingee: một URL cho mỗi merchant). Trang thanh toán giả
    * điền sẵn URL này, và lưu đè bằng URL vừa gửi IPN thành công (api trả ACK: 2xx + `code: '00'`).
@@ -102,13 +124,17 @@ export type FakeIpnPayload = Record<string, unknown>;
 
 let ipnSeq = 0;
 
+/** Mã giao dịch mới, duy nhất trong tiến trình (dạng `providerTransactionCode` của Tingee). */
+export function fakeTransactionCode(): string {
+  ipnSeq += 1;
+  return `tg-txn-${randomInt(100_000, 999_999)}-${String(ipnSeq).padStart(6, '0')}`;
+}
+
 /**
  * Body IPN `success` như Tingee gửi cho `orderId` (mã Đơn) với `amount` = `paidAmount` = `amount`; mỗi lần gọi một
  * `providerTransactionCode` và `requestId` mới. `overrides` thay hoặc thêm trường.
  */
 export function fakeIpnPayload(orderId: string, amount: number, overrides: FakeIpnPayload = {}): FakeIpnPayload {
-  ipnSeq += 1;
-  const n = String(ipnSeq).padStart(6, '0');
   return {
     requestId: randomUUID(),
     orderId,
@@ -121,9 +147,9 @@ export function fakeIpnPayload(orderId: string, amount: number, overrides: FakeI
     billId: null,
     customerEmail: 'nguoi-tra@vidu.vn',
     paymentMethod: 'qr',
-    providerTransactionCode: `tg-txn-${randomInt(100_000, 999_999)}-${n}`,
+    providerTransactionCode: fakeTransactionCode(),
     paidAt: new Date().toISOString(),
-    merchantId: 29267,
+    merchantId: FAKE_MERCHANT_ID,
     ...overrides,
   };
 }
@@ -199,6 +225,19 @@ export interface IpnDelivery {
   sentAt: Date;
 }
 
+/** Trạng thái thanh toán của một link (bản chụp): `providerTransactionCode`, `paidAmount`, `paidAt` chỉ có khi `success`. */
+export interface FakeOrderState {
+  orderId: string;
+  /** Merchant tạo link. */
+  clientId: string;
+  amount: number;
+  status: FakeOrderStatus;
+  providerTransactionCode: string | null;
+  paidAmount: number | null;
+  /** ISO 8601 `…Z`. */
+  paidAt: string | null;
+}
+
 export interface TingeeFake {
   url: string;
   requests: RecordedRequest[];
@@ -206,6 +245,16 @@ export interface TingeeFake {
   ipnDeliveries: IpnDelivery[];
   /** Merchant theo Client ID (cùng object đã truyền vào, sửa được). */
   merchant(clientId: string): FakeMerchant;
+  /** Trạng thái thanh toán của link `orderId`; fake chưa tạo link này → lỗi. */
+  order(orderId: string): FakeOrderState;
+  /**
+   * Người mua đã trả link `orderId` mà không gửi IPN (giả IPN mất): link → `success` với mã giao dịch mới (hoặc
+   * `providerTransactionCode`), `paidAmount` (mặc định đúng số tiền của link), `paidAt` = bây giờ. Link đã `success` thì
+   * giữ nguyên. Trả trạng thái sau đó.
+   */
+  markPaid(orderId: string, options?: { paidAmount?: number; providerTransactionCode?: string }): FakeOrderState;
+  /** Link `orderId` hết hạn (hoặc bị hủy) mà không gửi IPN; chỉ đổi link còn `pending`. Trả trạng thái sau đó. */
+  markExpired(orderId: string, status?: 'expired' | 'canceled'): FakeOrderState;
   /** Ký IPN bằng Secret Token của merchant `clientId` (`signIpn`). */
   signIpn(clientId: string, body: string | FakeIpnPayload, options?: SignIpnOptions): SignedIpn;
   /** Lời gọi theo đường dẫn, vd. `calls('/v1/get-va-paging')`. */
@@ -243,7 +292,7 @@ export function fakeAccount(overrides: FakeAccount = {}): FakeAccount {
 
 type Reply = { httpStatus?: number; code: string; message: string; data?: unknown };
 
-/** Một link đã tạo: trang `GET /checkout/:orderId` của fake đọc lại. */
+/** Một link đã tạo: trang `GET /checkout/:orderId` và tra đơn Gateway của fake đọc lại. */
 interface FakeLink {
   /** Merchant tạo link: ký IPN bằng Secret Token của merchant này và gửi tới `ipnUrl` của nó. */
   clientId: string;
@@ -251,6 +300,51 @@ interface FakeLink {
   amount: number;
   description: string;
   returnUrl: string | null;
+  status: FakeOrderStatus;
+  providerTransactionCode: string | null;
+  paidAmount: number | null;
+  paidAt: string | null;
+}
+
+/** Link → `success` (lần trả của link: mã giao dịch ổn định); đã `success` thì giữ nguyên. */
+function payLink(link: FakeLink, options: { paidAmount?: number; providerTransactionCode?: string } = {}): void {
+  if (link.status === 'success') return;
+  link.status = 'success';
+  link.providerTransactionCode = options.providerTransactionCode ?? fakeTransactionCode();
+  link.paidAmount = options.paidAmount ?? link.amount;
+  link.paidAt = new Date().toISOString();
+}
+
+/** Link còn `pending` → `expired`/`canceled`; trạng thái khác giữ nguyên. */
+function expireLink(link: FakeLink, status: 'expired' | 'canceled'): void {
+  if (link.status === 'pending') link.status = status;
+}
+
+const stateOf = (link: FakeLink): FakeOrderState => ({
+  orderId: link.orderId,
+  clientId: link.clientId,
+  amount: link.amount,
+  status: link.status,
+  providerTransactionCode: link.providerTransactionCode,
+  paidAmount: link.paidAmount,
+  paidAt: link.paidAt,
+});
+
+/** `data` của kết quả tra đơn Gateway: đúng tên trường của IPN (hợp đồng tạm). */
+function orderData(link: FakeLink): Record<string, unknown> {
+  const paid = link.status === 'success';
+  return {
+    orderId: link.orderId,
+    amount: link.amount,
+    paidAmount: link.paidAmount,
+    status: link.status,
+    providerTransactionCode: link.providerTransactionCode,
+    paidAt: link.paidAt,
+    statusCode: paid ? '00' : '01',
+    billId: null,
+    paymentMethod: paid ? 'qr' : null,
+    merchantId: FAKE_MERCHANT_ID,
+  };
 }
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -408,8 +502,23 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
           amount,
           description: typeof description === 'string' ? description : '',
           returnUrl: typeof returnUrl === 'string' ? returnUrl : null,
+          status: 'pending',
+          providerTransactionCode: null,
+          paidAmount: null,
+          paidAt: null,
         });
         return ok(`${baseUrl}/checkout/${encodeURIComponent(orderId)}?r=${requestId}`);
+      }
+      case GET_ORDER_PATH: {
+        if ('merchantId' in body) return fail('400', 'merchantId chỉ dùng với key Master Merchant');
+        if (Object.values(body).some((v) => v === '')) return fail('400', 'Không truyền chuỗi rỗng');
+        const { requestId, orderId } = body;
+        if (typeof requestId !== 'string' || !UUID_V4.test(requestId)) return fail('400', 'requestId phải là UUID v4');
+        if (typeof orderId !== 'string' || !ORDER_ID.test(orderId)) return fail('400', 'orderId không hợp lệ');
+        // Đơn của merchant khác: như Tingee, key này không thấy đơn đó.
+        const link = links.get(orderId);
+        if (!link || link.clientId !== merchant.clientId) return fail(ORDER_NOT_FOUND_CODE, 'Không tìm thấy đơn hàng');
+        return ok(orderData(link));
       }
       default:
         return fail('404', 'Không có API này');
@@ -476,9 +585,17 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
       return;
     }
 
+    // Người mua đã trả (hoặc link hết hạn) trên Tingee trước khi IPN đi: IPN gửi không tới thì Đối soát bù vẫn tra ra.
+    // Mọi IPN `success` của một link là của cùng một lần trả (cùng mã giao dịch), như Tingee gửi lại.
+    if (status === 'success') payLink(link);
+    else expireLink(link, status);
     const payload =
       status === 'success'
-        ? fakeIpnPayload(link.orderId, link.amount)
+        ? fakeIpnPayload(link.orderId, link.amount, {
+            paidAmount: link.paidAmount,
+            providerTransactionCode: link.providerTransactionCode,
+            paidAt: link.paidAt,
+          })
         : fakeStatusIpnPayload(link.orderId, link.amount, status);
     const ipn = signIpn(merchant.secretToken, payload);
     const result = await deliverIpn(url, ipn);
@@ -578,6 +695,7 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
       else if (merchant.behavior === 'error') reply = fail('500', 'Lỗi hệ thống', 500);
       else if (merchant.behavior === 'hang') reply = 'hang';
       else if (path === CREATE_LINK_PATH) reply = await createLinkReply(body, merchant);
+      else if (path === GET_ORDER_PATH) reply = orderReply(body, merchant);
       else reply = route(path, body, merchant);
 
       options.log?.(`${req.method} ${path} → ${reply === 'hang' ? 'treo' : reply.code}`);
@@ -608,6 +726,21 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
     return route(CREATE_LINK_PATH, body, merchant);
   }
 
+  /** Tra đơn Gateway sau khi qua kiểm key, giờ và chữ ký: phản hồi cài trước (nếu có), không thì trạng thái link. */
+  function orderReply(body: Record<string, unknown>, merchant: FakeMerchant): Reply | 'hang' {
+    const scripted = merchant.orderReplies?.shift();
+    if (scripted === 'hang') return 'hang';
+    if (scripted) return { httpStatus: scripted.httpStatus, code: scripted.code, message: 'Kịch bản test', data: scripted.data };
+    return route(GET_ORDER_PATH, body, merchant);
+  }
+
+  /** Link `orderId` mà fake đã tạo; chưa tạo → lỗi (lỗi của test). */
+  function linkFor(orderId: string): FakeLink {
+    const link = links.get(orderId);
+    if (!link) throw new Error(`Tingee fake: chưa có link ${orderId}`);
+    return link;
+  }
+
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, options.host ?? '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   baseUrl = `http://${options.host ?? '127.0.0.1'}:${port}`;
@@ -626,6 +759,19 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
       const merchant = findMerchant(clientId);
       if (!merchant) throw new Error(`Tingee fake: không có merchant ${clientId}`);
       return signIpn(merchant.secretToken, body, options);
+    },
+    order(orderId) {
+      return stateOf(linkFor(orderId));
+    },
+    markPaid(orderId, options) {
+      const link = linkFor(orderId);
+      payLink(link, options);
+      return stateOf(link);
+    },
+    markExpired(orderId, status = 'expired') {
+      const link = linkFor(orderId);
+      expireLink(link, status);
+      return stateOf(link);
     },
     calls,
     waitFor(path, count = 1) {

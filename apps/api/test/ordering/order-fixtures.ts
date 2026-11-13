@@ -118,11 +118,13 @@ export async function paidReadyOrg(
 
 /**
  * Tingee giả cho test của 3.2/3.3: `create-link` luôn bị từ chối rõ ràng bằng mã thường (`1006`), nên Đơn có phí vẫn
- * `pending`, chưa có link (`payment.linkError = 'provider_error'`) và hết hạn theo job (a) như trước Story 3.4.
+ * `pending`, chưa có link (`payment.linkError = 'provider_error'`) và hết hạn theo job (a) như trước Story 3.4. Không
+ * có link nên không có Đối soát bù; lỡ tra thì Tingee "không tìm thấy đơn".
  */
 export const REJECTING_TINGEE: TingeeClient = {
   listAccounts: () => Promise.resolve([]),
   createPaymentLink: () => Promise.reject(CreateLinkError.rejected('1006')),
+  getGatewayOrder: () => Promise.resolve(null),
 };
 
 /** Override của harness cho test của 3.2/3.3 (`REJECTING_TINGEE`). */

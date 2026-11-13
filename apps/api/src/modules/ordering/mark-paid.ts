@@ -16,22 +16,32 @@ import { checkoutFunnelEvents, orderItems, orders, type PaidSource } from './sch
  * Kết quả `markPaid` (AD-1, AD-7), đủ để bên gọi chọn mục Cần xử lý (Story 3.6):
  * - `paid`: Đơn vừa chuyển `paid` (từ `pending`, hoặc từ `expired` khi tiền về muộn còn chỗ) và Vé đã phát.
  * - `lost_race`: chỉ nguồn `free` — Đơn không còn `pending` (một lần gọi khác đã chuyển trước), không phát gì.
+ * - `already_settled`: chỉ nguồn `reconciliation` — Đơn đã rời `pending`/`expired` (khoản tiền này đã được ghi nhận, vd.
+ *   IPN tới trước), không đổi gì, không tạo mục.
  * - `event_cancelled`: Sự kiện đã hủy.
  * - `duplicate_payment`: Đơn đã `paid`/`cancelled`/`refunded`/`review` (trả trùng).
  * - `mismatch`: số tiền ghi nhận khác `total_amount`.
  * - `orphan`: tiền về muộn mà không phát được Vé, kèm `reason` (`event_ended`/`event_locked`/`sold_out`).
  *
- * Khác `paid`/`lost_race`, Đơn `pending`/`expired` đã chuyển `review` trong `tx` (trừ `duplicate_payment`, và
- * `event_cancelled` khi Đơn ở trạng thái khác: giữ nguyên); bên gọi (`payment`) tạo `review_item` trong cùng `tx`.
+ * Khác `paid`/`lost_race`/`already_settled`, Đơn `pending`/`expired` đã chuyển `review` trong `tx` (trừ
+ * `duplicate_payment`, và `event_cancelled` khi Đơn ở trạng thái khác: giữ nguyên); bên gọi (`payment`) tạo `review_item`
+ * trong cùng `tx`.
  */
 export type MarkPaidResult =
   | { outcome: 'paid' }
   | { outcome: 'lost_race' }
+  | { outcome: 'already_settled' }
   | { outcome: 'event_cancelled' }
   | { outcome: 'duplicate_payment' }
   | { outcome: 'mismatch' }
   | { outcome: 'orphan'; reason: ReviewItemReason };
 export type MarkPaidOutcome = MarkPaidResult['outcome'];
+
+/**
+ * Nguồn ghi nhận tiền qua Cổng thanh toán Tingee: IPN đẩy về (`ipn`) và kết quả tra trạng thái của Đối soát bù
+ * (`reconciliation`, Story 4.1). Cùng khóa, cùng thứ tự kiểm 3–7 của AD-7.
+ */
+export type GatewaySource = Extract<PaidSource, 'ipn' | 'reconciliation'>;
 
 /** Tùy chọn của nguồn có phí. `paidAt`: lúc Tingee báo tiền về; thiếu → đồng hồ DB. Nguồn `free` bỏ qua. */
 export interface MarkPaidOptions {
@@ -179,7 +189,11 @@ export class OrderPayments {
    *      khi còn bán).
    *   `paid_at` = `options.paidAt` (thiếu → đồng hồ DB); Vé `issued_at` = đồng hồ DB. `pending → review` nhả `held`.
    *   `orphan` `sold_out` enqueue email báo Người mua (`orphan_sold_out`) trong `tx`.
-   * - `reconciliation`, `manual`: chưa làm (Story 4.1, 4.4) → ném lỗi.
+   * - `reconciliation` (Story 4.1, kết quả tra trạng thái đơn Gateway): như `ipn` (cùng khóa, bước 3–7, bán lại có điều
+   *   kiện khi tiền về muộn), trừ một điều: sau khi khóa Đơn, Đơn không còn `pending`/`expired` → `already_settled`, không
+   *   đổi Đơn, không tạo mục. Tra theo `orderId` là hỏi lại khoản tiền của chính đơn Gateway đó, không bao giờ là trả
+   *   trùng (khoản trả thật lần hai vẫn tới bằng IPN và đi bước 4).
+   * - `manual`: chưa làm (Story 4.4) → ném lỗi.
    *
    * `paid` luôn kèm đúng một job email Vé (`tickets`) trong `tx`. Bên gọi đã `ready()` trước transaction. Lỗi bất kỳ
    * (phát Vé, enqueue, audit…) → ném, cả `tx` rollback (không Vé, không job).
@@ -191,7 +205,10 @@ export class OrderPayments {
     paidAmount: number,
     options: MarkPaidOptions = {},
   ): Promise<MarkPaidResult> {
-    if (source !== 'free' && source !== 'ipn') throw new Error(`markPaid: nguồn ${source} chưa hỗ trợ`);
+    // Danh sách cho phép: nguồn mới chưa làm (vd. `manual`, Story 4.4) không bao giờ rơi vào đường Đơn 0đ.
+    if (source !== 'free' && source !== 'ipn' && source !== 'reconciliation') {
+      throw new Error(`markPaid: nguồn ${source} chưa hỗ trợ`);
+    }
     if (source === 'free' && paidAmount !== 0) throw new Error('markPaid: Đơn 0đ chỉ ghi nhận 0đ');
 
     const [current] = await tx
@@ -203,8 +220,8 @@ export class OrderPayments {
 
     // Thứ tự khóa: Sự kiện → Đơn → tồn kho theo id. TX1 đã khóa Sự kiện thì khóa lại không chờ.
     const event = await lockEventByIdForShare(tx, current.eventId);
-    if (source === 'ipn') {
-      return this.settleIpn(tx, orderId, event, current.totalAmount, paidAmount, options.paidAt ?? null);
+    if (source === 'ipn' || source === 'reconciliation') {
+      return this.settleGateway(tx, orderId, source, event, current.totalAmount, paidAmount, options.paidAt ?? null);
     }
     // Đơn 0đ đã bán (`sold += n`) ngay trong TX1.
     const paid = await this.pay(tx, orderId, {
@@ -218,10 +235,14 @@ export class OrderPayments {
     return paid ? { outcome: 'paid' } : { outcome: 'lost_race' };
   }
 
-  /** Bước 3–7 của AD-7 cho IPN `success` (xem `markPaid`). Sự kiện đã khóa `FOR SHARE`. */
-  private async settleIpn(
+  /**
+   * Bước 3–7 của AD-7 cho khoản tiền `success` qua Cổng thanh toán (IPN hoặc Đối soát bù, xem `markPaid`). Sự kiện đã
+   * khóa `FOR SHARE`.
+   */
+  private async settleGateway(
     tx: Tx,
     orderId: string,
+    source: GatewaySource,
     event: PublicEventRef,
     totalAmount: number,
     paidAmount: number,
@@ -238,6 +259,10 @@ export class OrderPayments {
       .for('no key update');
     if (!locked) throw new Error('markPaid: không có Đơn này');
     const status = locked.status;
+
+    // Đối soát bù hỏi lại khoản tiền của chính đơn Gateway: Đơn đã rời `pending`/`expired` nghĩa là khoản này đã được ghi
+    // nhận (IPN tới trước, hay một lần tra trước). Không bao giờ thành "Thanh toán trùng" hay mục Cần xử lý khác.
+    if (source === 'reconciliation' && !isReviewable(status)) return { outcome: 'already_settled' };
 
     // 3. Sự kiện đã hủy.
     if (event.status === EventStatus.CANCELLED) {
@@ -280,7 +305,7 @@ export class OrderPayments {
     }
     // Đơn đã khóa nên CAS không thể thua; 0 dòng là lỗi lập trình → ném, cả `tx` rollback (kể cả phép tồn kho trên).
     const paidAt = reportedPaidAt ?? now;
-    if (!(await this.pay(tx, orderId, { from: status, source: 'ipn', paidAt, paidAmount, issuedAt: now, lines }))) {
+    if (!(await this.pay(tx, orderId, { from: status, source, paidAt, paidAmount, issuedAt: now, lines }))) {
       throw new Error(`markPaid: CAS ${status} → paid thua dù đã khóa Đơn`);
     }
     return { outcome: 'paid' };

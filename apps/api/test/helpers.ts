@@ -53,7 +53,8 @@ export const TEST_REVALIDATE_SECRET = 'test-only-revalidate-secret-0123456789abc
 
 /**
  * Cấu hình vai `worker` cho test: cùng DB, cùng origin web, SMTP giả, Tingee (cổng 1: lỡ gọi thì lỗi ngay) và khóa
- * credential/QR với `apiConfig`.
+ * credential/QR với `apiConfig`. Đối soát bù bật (`TINGEE_ORDER_STATUS_QUERY`, Story 4.1): Tingee fake giả lập hợp đồng
+ * tạm của API tra đơn Gateway.
  */
 export const workerConfig = (overrides: Partial<WorkerConfig> = {}): WorkerConfig => {
   const api = apiConfig();
@@ -69,6 +70,7 @@ export const workerConfig = (overrides: Partial<WorkerConfig> = {}): WorkerConfi
     TINGEE_BASE_URL: api.TINGEE_BASE_URL,
     TINGEE_CREDENTIAL_KEYS: api.TINGEE_CREDENTIAL_KEYS,
     TICKET_QR_KEYS: api.TICKET_QR_KEYS,
+    TINGEE_ORDER_STATUS_QUERY: true,
     ...overrides,
   };
 };

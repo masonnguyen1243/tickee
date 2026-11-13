@@ -4,11 +4,19 @@ import { and, eq, gte, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm'
 import type { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
-import { BOSS, defineQueue, JOB_COMPLETED, QueueProducer, registerQueueWorker } from '../../platform/jobs/index.js';
+import {
+  BOSS,
+  defineQueue,
+  JOB_COMPLETED,
+  QueueProducer,
+  registerQueueWorker,
+  type EnsurableQueue,
+} from '../../platform/jobs/index.js';
 import { BuyerEmailWorker, ORDERING_JOBS_CONFIG, type OrderingJobsConfig } from './buyer-email-jobs.js';
 import { EventChangeEmailWorker } from './event-change-email-jobs.js';
 import { releaseOrderHeld } from './inventory.service.js';
 import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
+import { RECONCILE_ORDER_QUEUE } from './reconciliation-jobs.js';
 import { orders } from './schema.js';
 
 /*
@@ -45,8 +53,22 @@ export type ExpiryKind = 'hold' | 'link';
 
 const kindOf = (linked: boolean): ExpiryKind => (linked ? 'link' : 'hold');
 
-/** Tạo queue hết hạn Đơn và dead-letter (gọi lại không sao); `updateQueue` áp lại cấu hình cho môi trường đã có queue. */
-export const ensureOrderQueues = (boss: PgBoss): Promise<void> => EXPIRE_ORDER_QUEUE.ensure(boss);
+/**
+ * Các queue mà TX1/TX2 enqueue vào: hết hạn Đơn (TX1, TX2) và Đối soát bù (TX2, Story 4.1), mỗi queue kèm dead-letter.
+ */
+const ORDER_QUEUES: EnsurableQueue = {
+  name: `${EXPIRE_ORDER_QUEUE.name}, ${RECONCILE_ORDER_QUEUE.name}`,
+  async ensure(boss) {
+    await EXPIRE_ORDER_QUEUE.ensure(boss);
+    await RECONCILE_ORDER_QUEUE.ensure(boss);
+  },
+};
+
+/**
+ * Tạo queue hết hạn Đơn, queue Đối soát bù và dead-letter của chúng (gọi lại không sao); `updateQueue` áp lại cấu hình
+ * cho môi trường đã có queue.
+ */
+export const ensureOrderQueues = (boss: PgBoss): Promise<void> => ORDER_QUEUES.ensure(boss);
 
 /**
  * Enqueue job hết hạn bằng chính `tx` của người gọi (`tx` rollback thì không có job), chạy từ `startAfter`: (a) từ TX1
@@ -123,7 +145,7 @@ export async function expireOrder(db: Database, orderId: string, kind: ExpiryKin
 export type MarkExpiredResult = 'expired' | 'skipped';
 
 /**
- * Hết hạn (b) của AD-4 (Story 3.5): Tingee báo link `expired`/`canceled` (IPN, sau này cả tra trạng thái của Story 4.1).
+ * Hết hạn (b) của AD-4 (Story 3.5): Tingee báo link `expired`/`canceled` (IPN, hoặc kết quả tra của Đối soát bù, 4.1).
  * Trong `tx` của bên gọi: CAS `UPDATE orders SET status = 'expired' WHERE id = :id AND status = 'pending'`, không xét
  * hạn (Tingee đã xác nhận link không còn trả được), rồi `held -= n` cho từng dòng và `order_changed`. 0 dòng (Đơn không còn `pending` hoặc
  * không có) → `skipped`, không đổi gì. Gọi song song với job (a)/(c) cho cùng Đơn thì chỉ một bên thắng CAS, nên chỗ
@@ -144,13 +166,13 @@ export async function markExpired(tx: Tx, orderId: string): Promise<MarkExpiredR
 }
 
 /**
- * Vai `api`: start pg-boss (producer) và tạo queue lúc khởi động; trước TX1, `ready()` chờ việc đó xong (lần trước lỗi
- * thì làm lại). Không đăng ký handler.
+ * Vai `api`: start pg-boss (producer) và tạo queue (hết hạn Đơn, Đối soát bù) lúc khởi động; trước TX1/TX2, `ready()`
+ * chờ việc đó xong (lần trước lỗi thì làm lại). Không đăng ký handler.
  */
 @Injectable()
 export class OrderQueues extends QueueProducer {
   constructor(@Inject(BOSS) boss: PgBoss) {
-    super(boss, EXPIRE_ORDER_QUEUE, 'khi tạo Đơn');
+    super(boss, ORDER_QUEUES, 'khi tạo Đơn');
   }
 }
 

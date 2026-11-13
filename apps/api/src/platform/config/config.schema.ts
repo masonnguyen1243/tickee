@@ -122,6 +122,13 @@ export const workerConfigSchema = z.object({
   REVALIDATE_SECRET: z.string().min(32),
   /** Cùng giá trị với vai api (Story 3.5): worker giải mã credential Tingee của BTC và phát Vé (`markPaid`). */
   ...tingeeAndTickets,
+  /**
+   * Cờ Đối soát bù (Story 4.1): `true` thì job tra gọi API tra đơn Gateway của Tingee. Tingee chưa công bố API này
+   * (13/11/2026): `tingee` làm theo hợp đồng tạm và Tingee fake giả lập đúng hợp đồng đó. Tắt (mặc định): job tra xong
+   * ngay, không gọi Tingee, không enqueue mốc kế. Nhận `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off`. Bật ở local
+   * (`.env.example`, Tingee fake) và trong test; staging chỉ bật khi hợp đồng thật đã thay hợp đồng tạm.
+   */
+  TINGEE_ORDER_STATUS_QUERY: z.stringbool().default(false),
 });
 
 export const migrateConfigSchema = z.object({

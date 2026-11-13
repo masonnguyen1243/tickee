@@ -14,6 +14,7 @@ export {
   defaultPayoutTargetOf,
   ipnRecipientOf,
   payoutAccountCredentialOf,
+  payoutCredentialOf,
   payoutRecipientOf,
   type IpnCredential,
   type IpnRecipient,

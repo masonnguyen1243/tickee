@@ -10,6 +10,9 @@ import {
   parseTingeeTimestamp,
   TINGEE_ACCOUNT_PAGE_SIZE,
   TINGEE_CREATE_LINK_PATH,
+  TINGEE_GET_ORDER_PATH,
+  TINGEE_ORDER_NOT_FOUND_CODE,
+  TINGEE_ORDER_STATUS_TIMEOUT_MS,
   TINGEE_PAYMENT_LINK_TIMEOUT_MS,
   TINGEE_TIMEOUT_MS,
   tingeePortalUrl,
@@ -20,6 +23,8 @@ import { AppError } from '../../src/platform/http/index.js';
 import {
   CREATE_LINK_PATH,
   fakeAccount,
+  GET_ORDER_PATH,
+  ORDER_NOT_FOUND_CODE,
   startTingeeFake,
   type FakeAccount,
   type TingeeFake,
@@ -414,6 +419,114 @@ describe('HttpTingeeClient.createPaymentLink (Story 3.4)', () => {
       body: '{}',
     });
     expect(((await res.json()) as { code: string }).code).toBe('90');
+  });
+});
+
+describe('HttpTingeeClient.getGatewayOrder (Story 4.1, hợp đồng tạm)', () => {
+  const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  let seq = 0;
+
+  /** Link mới của merchant `credential` trên fake (mã Đơn mới mỗi lần). */
+  async function link(credential: TingeeCredential, account: FakeAccount, amount = 450_000): Promise<string> {
+    seq += 1;
+    const orderId = `TKGETORD${String(seq).padStart(2, '0')}`;
+    await client.createPaymentLink(credential, {
+      orderId,
+      amount,
+      vaAccountNumber: String(account.vaAccountNumber),
+      expireInMinute: 15,
+      returnUrl: `http://web.tickee.test/orders/${orderId}`,
+      description: `Thanh toán Đơn ${orderId}`,
+    });
+    return orderId;
+  }
+
+  beforeEach(() => {
+    fake.merchant(A.clientId).orderReplies = [];
+  });
+
+  it('đúng đường dẫn, body { requestId uuid v4, orderId } (không merchantId), ký bằng credential của BTC; 00 → data dùng tên trường IPN', async () => {
+    expect(TINGEE_GET_ORDER_PATH).toBe(GET_ORDER_PATH);
+    const orderId = await link(A, mb);
+    fake.reset();
+
+    expect(await client.getGatewayOrder(A, orderId)).toEqual({
+      orderId,
+      amount: 450_000,
+      paidAmount: null,
+      status: 'pending',
+      providerTransactionCode: null,
+      paidAt: null,
+      statusCode: '01',
+      billId: null,
+      paymentMethod: null,
+      merchantId: 29267,
+    });
+    const paid = fake.markPaid(orderId);
+    expect(await client.getGatewayOrder(A, orderId)).toMatchObject({
+      orderId,
+      status: 'success',
+      paidAmount: 450_000,
+      providerTransactionCode: paid.providerTransactionCode,
+      paidAt: paid.paidAt,
+      statusCode: '00',
+    });
+
+    const [first, second] = fake.calls(GET_ORDER_PATH);
+    expect(first).toMatchObject({ clientId: A.clientId, signatureValid: true });
+    expect(first!.timestamp).toMatch(/^\d{17}$/);
+    expect(first!.body).toEqual({ requestId: expect.stringMatching(UUID_V4), orderId });
+    expect(second!.body.requestId).not.toBe(first!.body.requestId);
+  });
+
+  it('không tìm thấy đơn (2004, kể cả đơn của merchant khác) → null', async () => {
+    expect(TINGEE_ORDER_NOT_FOUND_CODE).toBe(ORDER_NOT_FOUND_CODE);
+    expect(await client.getGatewayOrder(A, 'TKKHONGCO0')).toBeNull();
+    const ofB = await link(B, vcb);
+    expect(await client.getGatewayOrder(A, ofB)).toBeNull();
+    expect(await client.getGatewayOrder(B, ofB)).toMatchObject({ orderId: ofB, status: 'pending' });
+    // 2004 kèm HTTP 404 vẫn là "không tìm thấy", không phải Tingee tạm lỗi.
+    await withServerOnce(404, JSON.stringify({ code: '2004', message: 'x' }), async (c) => {
+      expect(await c.getGatewayOrder(A, 'TK00000000')).toBeNull();
+    });
+  });
+
+  it('key sai (92, 97) → TINGEE_CREDENTIAL_INVALID; merchant bị khóa → MERCHANT_SUSPENDED', async () => {
+    const orderId = await link(A, mb);
+    const unknown = await errorOf(client.getGatewayOrder({ clientId: 'khong-co', secretToken: 'x' }, orderId));
+    expect(unknown.code).toBe(ErrorCode.TINGEE_CREDENTIAL_INVALID);
+    const wrongSecret = await errorOf(client.getGatewayOrder({ clientId: A.clientId, secretToken: 'sai-secret' }, orderId));
+    expect(wrongSecret.code).toBe(ErrorCode.TINGEE_CREDENTIAL_INVALID);
+    expect((await errorOf(client.getGatewayOrder(SUSPENDED, orderId))).code).toBe(ErrorCode.MERCHANT_SUSPENDED);
+  });
+
+  it('timeout riêng 5 giây (mặc định): treo → PAYMENT_PROVIDER_UNAVAILABLE theo timeout tra, không phải 15 giây', async () => {
+    expect(TINGEE_ORDER_STATUS_TIMEOUT_MS).toBe(5_000);
+    const orderId = await link(A, mb);
+    // Client dựng không có `orderStatusTimeoutMs` gửi tra đơn với timeout 5 giây (không chờ treo thật).
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    await new HttpTingeeClient({ baseUrl: fake.url }).getGatewayOrder(A, orderId);
+    expect(timeout).toHaveBeenCalledTimes(1);
+    expect(timeout).toHaveBeenCalledWith(5_000);
+    timeout.mockRestore();
+
+    const quick = new HttpTingeeClient({ baseUrl: fake.url, timeoutMs: 60_000, orderStatusTimeoutMs: 300 });
+    fake.merchant(A.clientId).orderReplies = ['hang'];
+    const started = Date.now();
+    expect((await errorOf(quick.getGatewayOrder(A, orderId))).code).toBe(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE);
+    expect(Date.now() - started).toBeLessThan(3_000);
+  });
+
+  it('HTTP 500, lỗi mạng, JSON hỏng, mã lạ → PAYMENT_PROVIDER_UNAVAILABLE', async () => {
+    const orderId = await link(A, mb);
+    expect((await errorOf(client.getGatewayOrder(BROKEN, orderId))).code).toBe(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE);
+    const down = new HttpTingeeClient({ baseUrl: 'http://127.0.0.1:1' });
+    expect((await errorOf(down.getGatewayOrder(A, orderId))).code).toBe(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE);
+    await withServerOnce(200, '<html>lỗi</html>', async (c) => {
+      expect((await errorOf(c.getGatewayOrder(A, orderId))).code).toBe(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE);
+    });
+    fake.merchant(A.clientId).orderReplies = [{ code: '1006' }];
+    expect((await errorOf(client.getGatewayOrder(A, orderId))).code).toBe(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE);
   });
 });
 

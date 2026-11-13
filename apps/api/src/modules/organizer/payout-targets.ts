@@ -5,8 +5,8 @@ import type { TingeeCredential } from '../tingee/index.js';
 import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
 
 /*
- * Read model tài khoản nhận tiền cho `ordering` (Story 3.4, AD-6, AD-35) và người nhận IPN cho `payment` (Story 3.5,
- * AD-7). `organizer` chỉ đọc: không ghi gì, không giữ secret. Khóa giải mã (`SecretBox`) do bên gọi truyền vào;
+ * Read model tài khoản nhận tiền cho `ordering` (Story 3.4, AD-6, AD-35), người nhận IPN cho `payment` (Story 3.5,
+ * AD-7) và credential đã chụp của Đơn cho Đối soát bù (Story 4.1). `organizer` chỉ đọc: không ghi gì, không giữ secret. Khóa giải mã (`SecretBox`) do bên gọi truyền vào;
  * credential đã giải mã chỉ sống trong lời gọi Tingee hay lần kiểm chữ ký của bên gọi, không bao giờ được lưu hay log.
  */
 
@@ -120,6 +120,33 @@ export async function payoutAccountCredentialOf(db: DbExecutor, payoutAccountId:
     .from(pa)
     .where(eq(pa.id, payoutAccountId));
   return row?.credentialId ?? null;
+}
+
+/**
+ * Credential Tingee (Secret Token giải mã bằng `secretBox`) mà tài khoản nhận tiền `payoutAccountId` của BTC
+ * `organizationId` được đọc bằng: credential đã ký link của một Đơn (`orders.payout_account_id`, chụp ở TX2), kể cả khi
+ * tài khoản hay credential đã bị thay hoặc gỡ mềm (`retired_at`). Đối soát bù (Story 4.1) gọi ngay trước lời gọi Tingee;
+ * credential không được lưu hay log. Tài khoản không có, hoặc không thuộc BTC đó → `null`. Ciphertext hỏng hay thiếu
+ * khóa giải mã → ném `SecretBoxError`.
+ */
+export async function payoutCredentialOf(
+  db: DbExecutor,
+  secretBox: SecretBox,
+  input: { organizationId: string; payoutAccountId: string },
+): Promise<TingeeCredential | null> {
+  const [row] = await db
+    .select({ clientId: cred.clientId, secretTokenCiphertext: cred.secretTokenCiphertext })
+    .from(pa)
+    .innerJoin(cred, eq(cred.id, pa.tingeeCredentialId))
+    .where(
+      and(
+        eq(pa.id, input.payoutAccountId),
+        eq(pa.organizationId, input.organizationId),
+        eq(cred.organizationId, input.organizationId),
+      ),
+    );
+  if (!row) return null;
+  return { clientId: row.clientId, secretToken: secretBox.open(row.secretTokenCiphertext) };
 }
 
 /** Người nhận tiền hiện cho Người mua (`recipient-trust-block`). Không có credential hay VA. */

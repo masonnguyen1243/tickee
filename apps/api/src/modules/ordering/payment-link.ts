@@ -17,6 +17,7 @@ import { CreateLinkError, TINGEE_CLIENT, type TingeeClient } from '../tingee/ind
 import { releaseOrderHeld } from './inventory.service.js';
 import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
 import { enqueueOrderExpiry, OrderQueues } from './order-jobs.js';
+import { enqueueReconciliation, firstCheckAt } from './reconciliation-jobs.js';
 import { orders } from './schema.js';
 
 /*
@@ -29,7 +30,8 @@ import { orders } from './schema.js';
  *
  * Gọi Tingee NGOÀI transaction (timeout 5 giây). Kết quả:
  * - ok → TX2: CAS gắn link (`WHERE status = 'pending' AND payment_link IS NULL`), chụp `payout_account_id`, `expires_at`
- *   = lượt + 15 phút, enqueue job (c) bằng chính `tx`. 0 dòng (job (a) đã thắng) → không có link.
+ *   = lượt + 15 phút, enqueue job (c) và job Đối soát bù đầu tiên (Story 4.1) bằng chính `tx`. 0 dòng (job (a) đã thắng)
+ *   → không có link.
  * - rõ ràng, nhóm tạm ngừng (merchant bị khóa, key không còn dùng được, VA chưa được cho phép) hoặc BTC không còn tài
  *   khoản mặc định → một transaction: CAS `pending → expired`, nhả chỗ, `payment_link_error = 'sales_paused'`.
  * - rõ ràng, mã khác → trả lượt, `payment_link_error = 'provider_error'`, Đơn vẫn `pending` (thử lại được).
@@ -184,9 +186,9 @@ export class PaymentLinks {
 
   /**
    * TX2: CAS gắn link, chụp tài khoản nhận tiền, `expires_at` = lượt + `PAYMENT_LINK_MINUTES` (đồng hồ DB lúc giành lượt,
-   * trước khi gửi request: không bao giờ muộn hơn hạn thật của link), rồi enqueue job (c) bằng chính `tx` chạy từ
-   * `expires_at + PAYMENT_LINK_GRACE_SECONDS` và phát `order_changed`. 0 dòng: Đơn đã hết hạn trước khi gắn link (job (a)
-   * thắng) → không làm gì.
+   * trước khi gửi request: không bao giờ muộn hơn hạn thật của link), rồi enqueue bằng chính `tx` job (c) chạy từ
+   * `expires_at + PAYMENT_LINK_GRACE_SECONDS` và job Đối soát bù đầu tiên chạy từ lượt + 2 phút (Story 4.1, id cố định
+   * theo Đơn và mốc), rồi phát `order_changed`. 0 dòng: Đơn đã hết hạn trước khi gắn link (job (a) thắng) → không làm gì.
    */
   private async attach(order: LinkCandidate, checkoutUrl: string, payoutAccountId: string): Promise<void> {
     const attached = await this.db.transaction(async (tx) => {
@@ -206,10 +208,13 @@ export class PaymentLinks {
             isNotNull(orders.paymentLinkAttemptAt),
           ),
         )
-        .returning({ ...orderSignalColumns, expiresAt: orders.expiresAt });
+        .returning({ ...orderSignalColumns, expiresAt: orders.expiresAt, attemptAt: orders.paymentLinkAttemptAt });
       if (!row) return false;
+      // CAS đòi `payment_link_attempt_at IS NOT NULL`: thiếu là lỗi lập trình → ném, cả TX2 rollback.
+      if (!row.attemptAt) throw new Error('TX2: Đơn vừa gắn link không có payment_link_attempt_at');
       const startAfter = new Date(row.expiresAt.getTime() + PAYMENT_LINK_GRACE_SECONDS * 1000);
       await enqueueOrderExpiry(this.boss, tx, order.id, startAfter, 'link');
+      await enqueueReconciliation(this.boss, tx, order.id, firstCheckAt(row.attemptAt));
       await notifyOrderChanged(tx, row);
       return true;
     });

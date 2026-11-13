@@ -3,7 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import type { PgBoss } from 'pg-boss';
 import { describe, expect, it } from 'vitest';
 import { OrderPayments } from '../src/modules/ordering/index.js';
-import { IpnProcessor } from '../src/modules/payment/index.js';
+import { IpnProcessor, ReconciliationWorker } from '../src/modules/payment/index.js';
 import { TicketsService } from '../src/modules/ticketing/index.js';
 import { TINGEE_CLIENT } from '../src/modules/tingee/index.js';
 import { ConfigError, loadConfig } from '../src/platform/config/index.js';
@@ -33,11 +33,13 @@ describe('vai worker', () => {
     }
   });
 
-  it('Story 3.5: DI resolve được lõi xử lý IPN, OrderPayments, Vé và Tingee (không có controller)', async () => {
+  it('Story 3.5, 4.1: DI resolve được lõi xử lý IPN, worker Đối soát bù, OrderPayments, Vé và Tingee (không có controller)', async () => {
     const app = await NestFactory.createApplicationContext(WorkerModule.forRoot(workerConfig()), { logger: false });
     try {
       await app.init();
       expect(app.get(IpnProcessor)).toBeInstanceOf(IpnProcessor);
+      // Story 4.1: worker Đối soát bù (queue `payment.reconcile-order`).
+      expect(app.get(ReconciliationWorker)).toBeInstanceOf(ReconciliationWorker);
       expect(app.get(OrderPayments)).toBeInstanceOf(OrderPayments);
       expect(app.get(TicketsService)).toBeInstanceOf(TicketsService);
       expect(app.get(TINGEE_CLIENT)).toBeDefined();
@@ -47,7 +49,10 @@ describe('vai worker', () => {
   });
 
   it('Story 3.5: thiếu TINGEE_* hay TICKET_QR_KEYS → ConfigError nêu đúng tên biến', () => {
-    const env: Record<string, string | undefined> = { ...workerConfig() };
+    // Env là chuỗi như process.env (cờ boolean của cấu hình test viết lại thành "true").
+    const env: Record<string, string | undefined> = Object.fromEntries(
+      Object.entries(workerConfig()).map(([key, value]) => [key, String(value)]),
+    );
     expect(loadConfig(env).APP_ROLE).toBe('worker');
     for (const variable of ['TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS', 'TICKET_QR_KEYS']) {
       const error = (() => {
