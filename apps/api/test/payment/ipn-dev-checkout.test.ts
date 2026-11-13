@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { BuyerOrder, orderPath, tingeeIpnUrl } from '@tickee/contracts';
+import { BuyerOrderView, orderPath, tingeeIpnUrl } from '@tickee/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { TingeeCredential } from '../../src/modules/tingee/index.js';
 import { TEST_WEB_ORIGIN } from '../helpers.js';
@@ -73,7 +73,7 @@ async function placePaid(quantity: number) {
   const res = await postOrder(h, buyer, sale.event.slug, orderBody([{ ticketTypeId: tierId, quantity }]));
   expect(res.status).toBe(201);
   const order = parseOrder(res.body);
-  expect(order.status).toBe('pending');
+  expect(order.buyerStatus).toBe('awaiting_payment');
   expect(order.payment?.checkoutUrl).toEqual(expect.any(String));
   return { buyer, eventId: sale.event.id, tierId, code: order.code, checkoutUrl: order.payment!.checkoutUrl! };
 }
@@ -120,10 +120,10 @@ describe('trang thanh toán giả → IPN tới api thật', () => {
     });
     expect(await inventory(h, placed.tierId)).toEqual({ capacity: 5, sold: 2, held: 0 });
     // Trang Đơn (poll) thấy Thành công kèm Vé.
-    const order = BuyerOrder.parse(
+    const order = BuyerOrderView.parse(
       (await h.http.get(`/v1/me/orders/${placed.code}`).set('cookie', placed.buyer.cookie).expect(200)).body,
     );
-    expect(order.status).toBe('paid');
+    expect(order.buyerStatus).toBe('paid');
     expect(order.tickets).toHaveLength(2);
     await expectInvariants(h, placed.eventId);
 

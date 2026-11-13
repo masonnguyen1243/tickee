@@ -4,7 +4,7 @@ import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
 import { users } from '../../src/modules/identity/schema.js';
 import { members, organizations, payoutAccounts, tingeeCredentials } from '../../src/modules/organizer/schema.js';
 import { ConfigError, loadConfig, type MigrateConfig } from '../../src/platform/config/index.js';
-import { CredentialKeysError, parseCredentialKeys, SecretBox } from '../../src/platform/crypto/index.js';
+import { CredentialKeysError, parseCredentialKeys, SecretBox, SecretBoxError } from '../../src/platform/crypto/index.js';
 import { Database, type Tx } from '../../src/platform/db/index.js';
 import { SEED_IPN_KEY, SEED_MERCHANT, SEED_PAYOUT_ACCOUNT } from '../tingee-fake/demo-merchants.js';
 
@@ -16,6 +16,12 @@ import { SEED_IPN_KEY, SEED_MERCHANT, SEED_PAYOUT_ACCOUNT } from '../tingee-fake
  *
  * Chạy bằng `tickee_migrator` (như vai migrate), trong một transaction. Chỉ thêm phần còn thiếu, nên chạy lại không tạo
  * trùng. Không gọi Tingee, không ghi audit (không có người thao tác thật).
+ *
+ * Key Tingee hiện hành của BTC phải giải mã được bằng `TINGEE_CREDENTIAL_KEYS` (đổi giá trị khóa mà giữ số phiên bản, hay
+ * bỏ phiên bản cũ, làm api không đọc được Secret Token). Key của merchant demo của seed (`SEED_MERCHANT`) thì seed mã hóa
+ * lại tại chỗ bằng khóa hiện hành: Secret Token demo là hằng số, dòng credential giữ nguyên nên tài khoản nhận tiền và
+ * Đơn cũ vẫn trỏ đúng. Key khác thì seed không biết Secret Token gốc: ném `UnreadableCredentialError`, không đổi gì.
+ * Credential đã thay (`retired_at`) không bị đụng tới, kể cả khi không giải mã được.
  */
 
 export const DEFAULT_SEED_EMAIL = 'btc.demo@tickee.local';
@@ -40,6 +46,35 @@ const RANDOM_IPN_KEY_CHANGE =
   `Khóa định tuyến IPN ngẫu nhiên (${SEED_IPN_KEY} thuộc BTC khác): Tingee fake gửi IPN của merchant demo về BTC kia; ` +
   'dán URL IPN của BTC này (trang Tài khoản nhận tiền) vào ô "Đường dẫn IPN" trên trang thanh toán giả';
 
+/** Lý do `secretBox` không mở được `ciphertext` (message của `SecretBoxError`, không chứa bí mật); mở được → `null`. */
+function unreadableReason(secretBox: SecretBox, ciphertext: string): string | null {
+  try {
+    secretBox.open(ciphertext);
+    return null;
+  } catch (err) {
+    if (err instanceof SecretBoxError) return err.message;
+    throw err;
+  }
+}
+
+/**
+ * Key Tingee hiện hành của BTC demo không giải mã được bằng `TINGEE_CREDENTIAL_KEYS` và không phải key merchant demo: seed
+ * không biết Secret Token gốc nên không mã hóa lại được. Ném trong transaction nên không đổi gì. `message` không chứa
+ * ciphertext, Secret Token hay Client ID.
+ */
+export class UnreadableCredentialError extends Error {
+  override readonly name = 'UnreadableCredentialError';
+  readonly organizationId: string;
+  /** Message của `SecretBoxError` (vd. "không có khóa phiên bản v2"). */
+  readonly reason: string;
+
+  constructor(organizationId: string, reason: string) {
+    super(`Key Tingee hiện hành của BTC không giải mã được bằng TINGEE_CREDENTIAL_KEYS (${reason})`);
+    this.organizationId = organizationId;
+    this.reason = reason;
+  }
+}
+
 export interface DevSeedOptions {
   /** Mã hóa Secret Token demo bằng đúng khóa api dùng (`TINGEE_CREDENTIAL_KEYS`), để api giải mã được. */
   secretBox: SecretBox;
@@ -54,7 +89,11 @@ export interface DevSeedResult {
   changes: string[];
 }
 
-/** Bảo đảm BTC demo của `email` đủ điều kiện bán Vé có phí. Một transaction; chỉ thêm phần còn thiếu. */
+/**
+ * Bảo đảm BTC demo của `email` đủ điều kiện bán Vé có phí. Một transaction; chỉ thêm phần còn thiếu, và mã hóa lại Secret
+ * Token của merchant demo khi bản đang lưu không giải mã được. Key hiện hành của merchant khác không giải mã được →
+ * `UnreadableCredentialError`, rollback.
+ */
 export async function seedDevData(db: Database, { secretBox, email }: DevSeedOptions): Promise<DevSeedResult> {
   return db.transaction(async (tx) => {
     // Hai lần seed cùng lúc: lần sau chờ lần trước commit rồi thấy dữ liệu đã có.
@@ -111,12 +150,17 @@ export async function seedDevData(db: Database, { secretBox, email }: DevSeedOpt
       changes.push(seedKey ? SEED_IPN_KEY_CHANGE : RANDOM_IPN_KEY_CHANGE);
     }
 
-    let [credential] = await tx
-      .select({ id: tingeeCredentials.id })
+    const [existing] = await tx
+      .select({
+        id: tingeeCredentials.id,
+        clientId: tingeeCredentials.clientId,
+        secretTokenCiphertext: tingeeCredentials.secretTokenCiphertext,
+      })
       .from(tingeeCredentials)
       .where(and(eq(tingeeCredentials.organizationId, organizationId), isNull(tingeeCredentials.retiredAt)));
-    if (!credential) {
-      [credential] = await tx
+    let credentialId: string;
+    if (!existing) {
+      const [created] = await tx
         .insert(tingeeCredentials)
         .values({
           organizationId,
@@ -125,8 +169,24 @@ export async function seedDevData(db: Database, { secretBox, email }: DevSeedOpt
           createdBy: userId,
         })
         .returning({ id: tingeeCredentials.id });
-      if (!credential) throw new Error('INSERT tingee_credentials không trả về dòng nào');
+      if (!created) throw new Error('INSERT tingee_credentials không trả về dòng nào');
+      credentialId = created.id;
       changes.push(`Key Tingee của merchant demo ${SEED_MERCHANT.clientId}`);
+    } else {
+      credentialId = existing.id;
+      const reason = unreadableReason(secretBox, existing.secretTokenCiphertext);
+      if (reason !== null) {
+        if (existing.clientId !== SEED_MERCHANT.clientId) throw new UnreadableCredentialError(organizationId, reason);
+        // Sửa tại chỗ (không thay dòng): tài khoản nhận tiền và Đơn cũ trỏ cùng credential, plaintext không đổi.
+        await tx
+          .update(tingeeCredentials)
+          .set({ secretTokenCiphertext: secretBox.seal(SEED_MERCHANT.secretToken) })
+          .where(eq(tingeeCredentials.id, existing.id));
+        changes.push(
+          `Mã hóa lại Secret Token của merchant demo ${SEED_MERCHANT.clientId} bằng khóa v${secretBox.currentVersion} ` +
+            `của TINGEE_CREDENTIAL_KEYS (bản đang lưu không giải mã được: ${reason})`,
+        );
+      }
     }
     // BTC demo seed trước đây (khóa ngẫu nhiên) nhận `SEED_IPN_KEY` nếu chưa BTC nào giữ; BTC khác đang giữ thì giữ
     // nguyên khóa. Như lúc BTC lưu key lần đầu: BTC có key thì có `ipnKey`.
@@ -158,7 +218,7 @@ export async function seedDevData(db: Database, { secretBox, email }: DevSeedOpt
       const accountLast4 = account.accountNumber.slice(-4);
       await tx.insert(payoutAccounts).values({
         organizationId,
-        tingeeCredentialId: credential.id,
+        tingeeCredentialId: credentialId,
         vaAccountNumber: account.vaAccountNumber,
         bankBin: account.bankBin,
         bankName: account.bankName,
@@ -221,8 +281,27 @@ function describeDbError(err: unknown): string {
 }
 
 /**
- * CLI của seed; trả mã thoát (0 = xong, kể cả "không đổi"). Tham số sai, thiếu biến, `NODE_ENV=production` hoặc lỗi DB:
- * mã ≠ 0 và không đổi gì trong DB.
+ * Hướng dẫn khi key hiện hành của BTC (không phải key merchant demo của seed) không giải mã được; không in bí mật nào.
+ * api kiểm chữ ký IPN bằng mọi credential của BTC, kể cả đã thay: liên kết lại key chỉ sửa việc tạo link thanh toán mới.
+ */
+function unreadableCredentialHelp(err: UnreadableCredentialError, email: string, webOrigin: string): string {
+  return [
+    `Key Tingee hiện hành của BTC "${DEMO_ORGANIZATION_NAME}" (${email}) không giải mã được bằng TINGEE_CREDENTIAL_KEYS ` +
+      `(${err.reason}). Đây không phải key merchant demo của seed (${SEED_MERCHANT.clientId}) nên seed không mã hóa lại ` +
+      'được. Không đổi gì.',
+    'Cách sửa:',
+    '  - Đầy đủ: khôi phục trong .env giá trị cũ của phiên bản khóa đã mã hóa key này (không đổi giá trị của phiên bản',
+    '    đã dùng; muốn đổi khóa thì thêm v<k+1> và giữ khóa cũ), khởi động lại `pnpm dev`, rồi chạy lại `pnpm db:seed`.',
+    '  - Không còn giá trị cũ: dựng lại DB local (`docker compose down -v`, rồi `pnpm dev` và `pnpm db:seed`).',
+    `  - Liên kết lại key Tingee ở trang Tài khoản nhận tiền (${webOrigin}/btc/${err.organizationId}/tai-khoan-nhan-tien)`,
+    '    chỉ sửa được việc tạo link thanh toán mới: còn credential nào của BTC (hiện hành hay đã thay) không giải mã được',
+    '    thì IPN của BTC này vẫn trả 500.',
+  ].join('\n');
+}
+
+/**
+ * CLI của seed; trả mã thoát (0 = xong, kể cả "không đổi"). Tham số sai, thiếu biến, `NODE_ENV=production`, lỗi DB hoặc
+ * key hiện hành của merchant khác không giải mã được: mã ≠ 0 và không đổi gì trong DB.
  */
 export async function runDevSeed(
   argv: readonly string[],
@@ -269,10 +348,15 @@ export async function runDevSeed(
     max: 1,
     applicationName: 'tickee-dev-seed',
   });
+  const webOrigin = env.WEB_ORIGIN || 'http://localhost:3000';
   let result: DevSeedResult;
   try {
     result = await seedDevData(db, { secretBox, email });
   } catch (err) {
+    if (err instanceof UnreadableCredentialError) {
+      io.err(unreadableCredentialHelp(err, email, webOrigin));
+      return 1;
+    }
     io.err(`Lỗi khi ghi DB (${describeDbError(err)}). Không đổi gì.`);
     return 1;
   } finally {
@@ -285,7 +369,6 @@ export async function runDevSeed(
     io.out('Đã seed dữ liệu dev:');
     for (const change of result.changes) io.out(`  + ${change}`);
   }
-  const webOrigin = env.WEB_ORIGIN || 'http://localhost:3000';
   io.out(`Đăng nhập ${webOrigin}/dang-nhap bằng email ${email} (mã OTP xem ở Mailpit http://localhost:8025).`);
   return 0;
 }

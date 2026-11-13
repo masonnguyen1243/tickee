@@ -1,0 +1,36 @@
+# Override của dự án cho bmad-build (commit vào repo, áp cho mọi người). Không sửa .claude/skills/bmad-build/*:
+# các file đó bị ghi đè mỗi lần cập nhật BMad. Luật gộp: xem .claude/skills/bmad-build/customize.toml.
+
+[workflow]
+
+# Retro Epic 3 (F1, E3-9): Build chỉ đặt story `review`, nên sprint-status lệch sau mỗi story và phải sửa tay trên
+# `main`. Override này đặt `done` ngay trong nhánh của story, bằng một commit riêng sau commit của Build.
+on_complete = '''
+### Sprint-status `done` trong nhánh của story
+
+Chạy mục này ngay, trước khi dừng chờ người dùng (kể cả khi bước trên vừa nói "Stop and wait for the user").
+
+File: `{project-root}/_bmad-output/implementation-artifacts/sprint-status.yaml`. Không có file này thì bỏ qua mục này.
+
+1. Kiểm nhánh trước khi sửa gì: chạy `git branch --show-current`. Nhánh là `main` (hoặc rỗng, tức detached HEAD) thì
+   DỪNG: không sửa, không commit sprint-status, và báo người dùng rằng sprint-status chưa được đặt `done` vì đang ở
+   `main`; phải tạo nhánh rồi chạy lại mục này. Không bao giờ commit lên `main`.
+2. `{story_key}` có giá trị: đặt `development_status[{story_key}]` thành `done` (kể cả khi bước trước vừa đặt `review`).
+   Không đổi trạng thái epic.
+3. `{story_key}` rỗng: tìm trong `action_items` mục mà `{spec_file}` xử lý. Khớp khi `id` mang cùng mã retro với spec,
+   so cả đoạn mã kèm dấu `-` theo sau (vd. spec `spec-epic-3-e3-1-….md` hay tiêu đề bắt đầu bằng `E3-1:` khớp
+   `id: "epic-3-retro-e3-1-…"` nhưng không bao giờ khớp `epic-3-retro-e3-10-…`), hoặc `action`/`note` của mục nêu tên
+   file spec. Khớp đúng một mục:
+   - đặt `status: done`;
+   - đặt `note` trỏ spec (đường dẫn tính từ gốc repo, vd. "Xong qua _bmad-output/implementation-artifacts/spec-….md");
+     mục đã có `note` thì nối thêm câu này vào cuối, không xóa nội dung cũ;
+   - Intent của spec nói rõ chỉ làm một phần của mục: giữ `status` (hoặc đặt `in-progress` nếu đang `open`), chỉ nối
+     `note` nêu phần đã xong qua spec này.
+   Không khớp mục nào, hoặc khớp nhiều hơn một: không sửa `action_items`, báo người dùng.
+4. Không có gì để đổi (đã `done` và `note` đã trỏ spec) thì dừng, không commit.
+5. Cập nhật `last_updated` theo đúng định dạng đang dùng trong file (`MM-DD-YYYY HH:MM`). Giữ nguyên comment, thứ tự và
+   cấu trúc YAML.
+6. Commit riêng trên nhánh hiện tại, chỉ file này (file khác đã stage không bị cuốn vào):
+   `git commit --only {project-root}/_bmad-output/implementation-artifacts/sprint-status.yaml -m "chore: sprint-status <story_key hoặc id action item> done"`.
+   Không push. Ngay sau khi commit, báo người dùng một dòng kèm hash commit.
+'''
