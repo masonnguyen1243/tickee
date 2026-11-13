@@ -41,7 +41,8 @@ export const sharedTicketStatusSchema = z.enum(SharedTicketStatus);
  * `200` của `GET /v1/shared-tickets/:token` (`shareScope`, `cache-control: no-store`): đúng một Vé, gồm tên, giờ bắt đầu
  * và địa điểm hiện tại của Sự kiện, tên Hạng vé đã chụp lúc phát, "Vé k/N" (`seq`/`count`), trạng thái và Mã QR vé.
  * Không bao giờ có tên, SĐT, email Người mua, mã Đơn hay id user. Token sai dạng hoặc không khớp, Vé đã hủy, Sự kiện đã
- * hủy, hay giờ máy chủ đã quá `effective_end_at` → cùng một `404 SHARED_TICKET_NOT_FOUND`.
+ * hủy, giờ máy chủ đã quá `effective_end_at`, hay khóa QR của Vé không còn trên máy chủ (xoay khóa, AD-29) → cùng một
+ * `404 SHARED_TICKET_NOT_FOUND`.
  */
 export const SharedTicketView = z.object({
   eventName: z.string(),

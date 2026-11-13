@@ -4,6 +4,7 @@ export { signTicketQr, TICKET_QR_KEYS, TicketQrKeys, verifyTicketQr, type Verifi
 export { hashShareToken, shareTokenOf } from './share-token.js';
 export { TicketingModule, TicketingRoutesModule, type TicketingConfig } from './ticketing.module.js';
 export {
+  TICKET_QR_KEY_MISSING_ALERT,
   TicketsService,
   type IssuedTicket,
   type IssueTicketsInput,

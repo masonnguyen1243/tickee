@@ -26,7 +26,8 @@ export class SharedTicketsController {
 
   /**
    * `GET /v1/shared-tickets/:token`: `SharedTicketView` (Mã QR vé, Sự kiện, Hạng vé, "Vé k/N", trạng thái). Token sai,
-   * Vé hủy, Sự kiện hủy, quá `effective_end_at` → cùng một `404 SHARED_TICKET_NOT_FOUND`.
+   * Vé hủy, Sự kiện hủy, quá `effective_end_at`, khóa QR của Vé không có trong `TICKET_QR_KEYS` → cùng một `404
+   * SHARED_TICKET_NOT_FOUND`.
    */
   @Public()
   @Get('shared-tickets/:token')

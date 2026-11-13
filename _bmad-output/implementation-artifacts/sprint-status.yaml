@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-13-2026 08:37
+last_updated: 11-13-2026 08:57
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -347,7 +347,7 @@ action_items:
       là nguồn sự thật; sơ đồ spine payment→organizer; bảng sở hữu email (B2, D1,
       E1, E5)"
     owner: "Mason"
-    status: in-progress
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
     note: "Phần tài liệu xong qua sprint-change-proposal-2026-11-13-doi-chieu-spec-epic-3.md
       (Mason duyệt 13/11): epics.md có luật nguồn đúng (story done thì spec + spine
@@ -355,8 +355,11 @@ action_items:
       PRD FR-33 và EXPERIENCE dùng danh sách hoàn tiền hai phần (Đơn paid_amount >
       0 + mọi review_item open gắn Đơn của Sự kiện); spine thêm cạnh payment→organizer,
       EmailTransport về platform và bảng email theo mô-đun; AD-29 và deferred-work
-      ghi hệ quả xoay khóa QR với link chia sẻ. Còn lại: vá D1 bằng spec nhỏ trước
-      Story 4.1 (sharedTicket thiếu khóa → 404, test Vé khóa cũ; proposal §4.6)"
+      ghi hệ quả xoay khóa QR với link chia sẻ. Phần code D1 xong qua spec-epic-3-e3-5-link-chia-se-thieu-khoa-qr.md
+      (13/11): link chia sẻ của Vé có khóa QR không có trên instance trả 404 chung,
+      log error có marker ticket_qr_key_missing; test xoay khóa v1/v2 (test/ticketing/qr-key-rotation.test.ts).
+      Bàn giao 4.6 (cảnh báo theo marker, gộp trùng) và 4.6/4.7 (marker cho các đường
+      còn lại, kiểm lúc khởi động) ở deferred-work.md"
   - id: "epic-3-retro-e3-6-ban-giao-deferred"
     epic: 3
     action: "E3-6 (trước Epic 4): ghi bàn giao có story nhận vào deferred-work.md:
