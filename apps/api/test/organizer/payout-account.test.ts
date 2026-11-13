@@ -112,6 +112,7 @@ beforeAll(async () => {
     },
     createPaymentLink: (credential, input) => http.createPaymentLink(credential, input),
     getGatewayOrder: (credential, orderId) => http.getGatewayOrder(credential, orderId),
+    getMerchantServiceStatus: (credential) => http.getMerchantServiceStatus(credential),
   };
   h = await createHarness({ TINGEE_BASE_URL: fake.url }, { overrides: [{ provide: TINGEE_CLIENT, useValue: client }] });
   owner = await signUp(h);
@@ -270,6 +271,8 @@ describe('chưa kết nối Tingee', () => {
       canReplaceKey: true,
       ipnUrl: null,
       tingeePortalUrl: 'https://baas.tingee.vn',
+      // Story 4.2: dịch vụ thanh toán của BTC mới chưa bao giờ bị ngắt.
+      paymentService: { status: 'active', reason: null, since: null, checkedAt: null },
     });
     const res = await h.http.get(`/v1/orgs/${orgId}/notices`).set('cookie', admin.cookie).expect(200);
     const notice = StatusNoticeList.parse(res.body).find((n) => n.code === 'PAYOUT_ACCOUNT_NOT_LINKED');
@@ -331,6 +334,7 @@ describe('kết nối bằng key', () => {
       canReplaceKey: true,
       ipnUrl: `${IPN_PREFIX}${key}`,
       tingeePortalUrl: 'https://baas.tingee.vn',
+      paymentService: { status: 'active', reason: null, since: null, checkedAt: null },
     });
     expect(await noticeCodes(owner.cookie)).toContain('PAYOUT_ACCOUNT_NOT_LINKED');
     expect(await audits()).toEqual([

@@ -162,6 +162,13 @@
       "when": 1794454233931,
       "tag": "0022_event_time_venue_version",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794561272220,
+      "tag": "0023_payment_service_status",
+      "breakpoints": true
     }
   ]
 }

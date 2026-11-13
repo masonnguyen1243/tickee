@@ -71,6 +71,20 @@ export const JobQueue = {
   PAYMENT_RECONCILE_ORDER: 'payment.reconcile-order',
   /** Dead-letter của `PAYMENT_RECONCILE_ORDER`: job hết lượt retry (lỗi DB) được chép sang đây. */
   PAYMENT_RECONCILE_ORDER_DEAD_LETTER: 'payment.reconcile-order.dead-letter',
+  /**
+   * Dò dịch vụ thanh toán của các BTC đang `suspended` (`organizer`, Story 4.2, AD-32): job cron mỗi
+   * `PAYMENT_SERVICE_PROBE_INTERVAL_MINUTES` phút, chỉ vai worker lên lịch. Không payload; tuần tự qua các BTC
+   * `suspended`. Không dead-letter: lần lỗi được lần chạy kế tiếp làm lại.
+   */
+  ORGANIZER_PROBE_PAYMENT_SERVICE: 'organizer.probe-payment-service',
+  /**
+   * Dịch vụ thanh toán của một BTC vừa mở lại (Story 4.2, AD-32): `organizer` enqueue bằng chính `tx` tắt cờ (mọi đường:
+   * dò, "Kiểm tra lại", Quản trị Tingee, lưu key mới); `payment` nhận job và enqueue job tra của Đối soát bù
+   * (`PAYMENT_RECONCILE_ORDER`) tại đồng hồ DB cho mọi Đơn còn mở của BTC. Payload `PaymentServiceResumedPayload` (chỉ id).
+   */
+  PAYMENT_SERVICE_RESUMED: 'payment.service-resumed',
+  /** Dead-letter của `PAYMENT_SERVICE_RESUMED`: job hết lượt retry (lỗi DB) được chép sang đây. */
+  PAYMENT_SERVICE_RESUMED_DEAD_LETTER: 'payment.service-resumed.dead-letter',
 } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];
 
@@ -97,3 +111,7 @@ export const SendEventChangeEmailPayload = z.object({
   userId: z.uuid().optional(),
 });
 export type SendEventChangeEmailPayload = z.infer<typeof SendEventChangeEmailPayload>;
+
+/** Payload của job `payment.service-resumed` (Story 4.2): chỉ id BTC vừa được mở lại dịch vụ thanh toán. */
+export const PaymentServiceResumedPayload = z.object({ organizationId: z.uuid() });
+export type PaymentServiceResumedPayload = z.infer<typeof PaymentServiceResumedPayload>;

@@ -1,5 +1,5 @@
 import { JobQueue, OrderStatus } from '@tickee/contracts';
-import { eq } from 'drizzle-orm';
+import { and, asc, eq, gt, isNotNull, or } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 import { dbClock, type Database, type DbExecutor, type Tx } from '../../platform/db/index.js';
@@ -139,6 +139,33 @@ export async function orderForReconciliation(db: DbExecutor, orderId: string): P
     .from(orders)
     .where(eq(orders.id, orderId));
   return row ?? null;
+}
+
+/** Đơn `expired` còn được Đối soát bù khi mở lại dịch vụ: `expires_at` trong chừng này trước (mốc sau hết hạn cuối cùng). */
+export const RECONCILE_RESUMED_EXPIRED_WINDOW_MS = RECONCILE_AFTER_EXPIRY_MS[RECONCILE_AFTER_EXPIRY_MS.length - 1]!;
+
+/**
+ * Đơn còn mở của BTC để Đối soát bù khi dịch vụ thanh toán mở lại (Story 4.2): Đơn đã có link (`payment_link`), còn
+ * `pending`, hoặc `expired` với `expires_at` trong `RECONCILE_RESUMED_EXPIRED_WINDOW_MS` trước `now` (đồng hồ DB của người
+ * gọi). Theo lúc tạo rồi id. Không có index `(organization_id, status)`: quét theo BTC, chỉ chạy mỗi lần mở lại.
+ */
+export async function reconcilableOrderIdsOf(db: DbExecutor, organizationId: string, now: Date): Promise<string[]> {
+  const since = new Date(now.getTime() - RECONCILE_RESUMED_EXPIRED_WINDOW_MS);
+  const rows = await db
+    .select({ id: orders.id })
+    .from(orders)
+    .where(
+      and(
+        eq(orders.organizationId, organizationId),
+        isNotNull(orders.paymentLink),
+        or(
+          eq(orders.status, OrderStatus.PENDING),
+          and(eq(orders.status, OrderStatus.EXPIRED), gt(orders.expiresAt, since)),
+        ),
+      ),
+    )
+    .orderBy(asc(orders.createdAt), asc(orders.id));
+  return rows.map((row) => row.id);
 }
 
 /**

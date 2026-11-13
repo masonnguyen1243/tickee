@@ -45,8 +45,10 @@ import {
   orderBody,
   paidReadyOrg,
   parseOrder,
+  paymentServiceOf,
   postOrder,
   resetOrderRateLimit,
+  resetPaymentService,
   type Org,
   type PayoutSpec,
   type User,
@@ -95,6 +97,21 @@ const NEXT_PAYOUT: PayoutSpec = {
 };
 /** Mã Tingee đi nhánh "tạm ngừng bán" (key, merchant, VA). */
 const PAUSE_CODES = ['1007', '1033', '1034', '92', '97', '1009', '1133', '2023', '1023', '1045', '1024', '1072'];
+/** Lý do ngắt dịch vụ thanh toán mà mã bật (Story 4.2); nhóm VA không bật cờ. */
+const SERVICE_REASON: Readonly<Record<string, string | null>> = {
+  '1007': 'tingee_disabled',
+  '1033': 'token',
+  '1034': 'tingee_disabled',
+  '92': 'credential_invalid',
+  '97': 'credential_invalid',
+  '1009': 'credential_invalid',
+  '1133': 'gateway_permission_missing',
+  '2023': null,
+  '1023': null,
+  '1045': null,
+  '1024': null,
+  '1072': null,
+};
 
 let fake: TingeeFake;
 let h: Harness;
@@ -124,6 +141,7 @@ beforeAll(async () => {
       }
     },
     getGatewayOrder: (credential, orderId) => http.getGatewayOrder(credential, orderId),
+    getMerchantServiceStatus: (credential) => http.getMerchantServiceStatus(credential),
   };
   h = await createHarness({ TINGEE_BASE_URL: fake.url }, { overrides: [{ provide: TINGEE_CLIENT, useValue: client }] });
   boss = h.app.get<PgBoss>(BOSS);
@@ -138,6 +156,8 @@ beforeEach(async () => {
   afterNextLink = null;
   gateFault.next = false;
   await resetOrderRateLimit(h);
+  // Mã ngắt dịch vụ của test trước đã bật cờ của BTC dùng chung (Story 4.2).
+  await resetPaymentService(h, org.orgId);
 });
 afterAll(async () => {
   await h.close();
@@ -390,7 +410,7 @@ describe('tạo link khi gửi Đơn', () => {
     expect(h.logs.text).not.toContain(broken);
   });
 
-  it.each(PAUSE_CODES)('Tingee trả %s → 201 expired, sales_paused, nhả chỗ; không thử lại', async (code) => {
+  it.each(PAUSE_CODES)('Tingee trả %s → 201 expired, sales_paused, nhả chỗ; không thử lại; cờ dịch vụ theo mã', async (code) => {
     fake.merchant(MAIN.clientId).linkReplies = [{ code }];
     const placed = await place(2);
     expect(placed.status).toBe(201);
@@ -398,6 +418,11 @@ describe('tạo link khi gửi Đơn', () => {
     expect(placed.order.payment).toMatchObject({ checkoutUrl: null, linkError: 'sales_paused' });
     expect(await inventory(h, placed.tierId)).toEqual({ capacity: 5, sold: 0, held: 0 });
     await expectInventoryConsistent(placed.eventId);
+    // Story 4.2: mã ngắt dịch vụ của key hiện hành bật cờ của BTC; nhóm VA không bật.
+    const reason = SERVICE_REASON[code];
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject(
+      reason ? { status: 'suspended', reason } : { status: 'active', reason: null },
+    );
     const warning = h.logs.lines.find((l) => l.orderCode === placed.order.code && l.tingeeCode === code);
     expect(warning).toMatchObject({ organizationId: org.orgId });
     expect(parseOrder((await retry(placed.buyer, placed.order.code).expect(200)).body).buyerStatus).toBe('expired');
@@ -492,10 +517,10 @@ describe('tạo link khi gửi Đơn', () => {
 
 describe('job (a) hết hạn Đơn trong lúc chờ Tingee', () => {
   it.each([
-    ['1007 (tạm ngừng)', { code: '1007' }],
-    ['HTTP 500 (mơ hồ)', { code: '500', httpStatus: 500 }],
-    ['1006 (từ chối thường)', { code: '1006' }],
-  ])('%s tới sau khi job (a) đã hết hạn Đơn → giữ expired, nhả chỗ đúng một lần, không ghi đè lý do', async (_name, reply) => {
+    ['1007 (tạm ngừng)', { code: '1007' }, { status: 'suspended', reason: 'tingee_disabled' }],
+    ['HTTP 500 (mơ hồ)', { code: '500', httpStatus: 500 }, { status: 'active', reason: null }],
+    ['1006 (từ chối thường)', { code: '1006' }, { status: 'active', reason: null }],
+  ])('%s tới sau khi job (a) đã hết hạn Đơn → giữ expired, nhả chỗ đúng một lần, không ghi đè lý do', async (_name, reply, flag) => {
     const sale = await eventOnSale(org, [{ name: 'Đơn nam', price: 300_000, capacity: 5 }]);
     const tierId = sale.tiers[0]!.id;
     // Một Đơn chờ khác trên cùng Hạng vé: `held` phải còn đúng phần của Đơn này.
@@ -516,6 +541,8 @@ describe('job (a) hết hạn Đơn trong lúc chờ Tingee', () => {
     expect(await linkRow(order.code)).toMatchObject({ status: 'expired', payment_link: null, payment_link_error: null });
     expect(await inventory(h, tierId)).toEqual({ capacity: 5, sold: 0, held: 1 });
     await expectInventoryConsistent(sale.event.id);
+    // Story 4.2: Tingee đã báo ngắt dịch vụ thì cờ vẫn bật dù Đơn đã hết hạn trước; mã khác không bật.
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject(flag);
   });
 });
 

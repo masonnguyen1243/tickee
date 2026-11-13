@@ -20,6 +20,7 @@ import {
   parseOrder,
   postOrder,
   resetOrderRateLimit,
+  resetPaymentService,
   type Org,
   type PayoutSpec,
   type User,
@@ -72,6 +73,8 @@ beforeAll(async () => {
 beforeEach(async () => {
   await resetOrderRateLimit(h);
   fake.merchant(MAIN.clientId).linkReplies = [];
+  // Mã ngắt dịch vụ (1007) của test trước đã bật cờ của BTC dùng chung (Story 4.2).
+  await resetPaymentService(h, org.orgId);
 });
 afterEach(() => {
   vi.restoreAllMocks();

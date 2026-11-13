@@ -24,6 +24,27 @@ describe('nội dung status-banner theo mã (AD-34)', () => {
   });
 });
 
+describe('dịch vụ thanh toán bị ngắt (Story 4.2-a): tiêu đề theo câu đã chốt, chưa có hành động', () => {
+  it('bốn mã, cùng nội dung cho Owner và Admin', () => {
+    const titles = {
+      PAYMENT_SERVICE_SUSPENDED_TOKEN: 'Mọi Sự kiện có phí đang Tạm ngừng bán',
+      PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID: 'Key Tingee không còn dùng được',
+      PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING: 'Key Tingee chưa được cấp quyền Cổng thanh toán',
+      PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED: 'Tingee đang tạm ngừng dịch vụ thanh toán của BTC',
+    } as const;
+    for (const [code, title] of Object.entries(titles) as [keyof typeof titles, string][]) {
+      for (const role of ['owner', 'admin'] as const) {
+        const content = statusNoticeContent(code, role);
+        expect(content.title, `${code} ${role}`).toBe(title);
+        expect(content.action, `${code} ${role}`).toBeUndefined();
+      }
+    }
+    expect(statusNoticeContent('PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED', 'owner').description).toBe(
+      'Mọi Sự kiện có phí đang Tạm ngừng bán.',
+    );
+  });
+});
+
 describe('chưa liên kết tài khoản nhận tiền: câu theo vai (Story 2.6)', () => {
   it('Owner có nút "Liên kết ngay" tới Tài khoản nhận tiền; Admin chỉ được nhắc nhờ Owner', () => {
     expect(statusNoticeContent('PAYOUT_ACCOUNT_NOT_LINKED', 'owner')).toMatchObject({

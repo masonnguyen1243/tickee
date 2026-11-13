@@ -13,7 +13,13 @@ import type { PgBoss } from 'pg-boss';
 import { parseCredentialKeys, SecretBox } from '../../platform/crypto/index.js';
 import { DATABASE, dbNow, type Database } from '../../platform/db/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
-import { defaultPayoutTargetOf, type PayoutTarget } from '../organizer/index.js';
+import {
+  defaultPayoutTargetOf,
+  suspendPaymentService,
+  type PaymentServiceSuspension,
+  type PayoutTarget,
+  type SuspensionInput,
+} from '../organizer/index.js';
 import { CreateLinkError, TINGEE_CLIENT, type TingeeClient } from '../tingee/index.js';
 import { releaseOrderHeld } from './inventory.service.js';
 import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
@@ -40,11 +46,14 @@ import { paymentLinkBlock } from './sellability.js';
  *   = lượt + 15 phút, enqueue job (c) và job Đối soát bù đầu tiên (Story 4.1) bằng chính `tx`. 0 dòng (job (a) đã thắng)
  *   → không có link.
  * - rõ ràng, nhóm tạm ngừng (merchant bị khóa, key không còn dùng được, VA chưa được cho phép) hoặc BTC không còn tài
- *   khoản mặc định → một transaction: CAS `pending → expired`, nhả chỗ, `payment_link_error = 'sales_paused'`.
+ *   khoản mặc định → một transaction: CAS `pending → expired`, nhả chỗ, `payment_link_error = 'sales_paused'`. Mã ngắt
+ *   dịch vụ (merchant bị ngắt, hết Token, key hiện hành không còn dùng được; Story 4.2) còn bật cờ dịch vụ thanh toán
+ *   của BTC trong cùng transaction (`organizer.suspendPaymentService`: mọi Hạng vé > 0đ "Tạm ngừng bán" từ đó); nhóm VA
+ *   (`PAYMENT_ACCOUNT_NOT_ALLOWED`) không bật cờ.
  * - rõ ràng, mã khác → trả lượt, `payment_link_error = 'provider_error'`, Đơn vẫn `pending` (thử lại được).
  * - mơ hồ → như nhóm tạm ngừng nhưng `payment_link_error = 'timeout'`.
  * Mỗi lần Tingee từ chối hoặc kết quả mơ hồ đều log cảnh báo (BTC, mã Đơn, mã Tingee hoặc loại lỗi); không bao giờ log
- * credential, checkout URL, VA hay tên chủ tài khoản. Story 3.4 chưa báo BTC (banner "Cổng thanh toán" ở Story 4.2).
+ * credential, checkout URL, VA hay tên chủ tài khoản. BTC được báo qua cờ dịch vụ thanh toán (`notices`, Story 4.2).
  */
 
 /** Token DI của cấu hình tạo link. */
@@ -198,8 +207,15 @@ export class PaymentLinks {
           { ...context, tingeeCode: err.tingeeCode, domainCode: err.code },
           paused ? 'Tingee từ chối tạo link; Đơn hết hạn (tạm ngừng bán)' : 'Tingee từ chối tạo link; Đơn chờ thử lại',
         );
-        if (paused) await this.expire(order.id, PaymentLinkError.SALES_PAUSED);
-        else await this.release(order.id);
+        if (!paused) {
+          await this.release(order.id);
+          return;
+        }
+        // Mã ngắt dịch vụ của key hiện hành (không phải nhóm VA): bật cờ của BTC cùng transaction hết hạn Đơn.
+        const suspension = err.serviceReason
+          ? { organizationId: order.organizationId, reason: err.serviceReason, credentialId: target.credentialId }
+          : null;
+        await this.expire(order.id, PaymentLinkError.SALES_PAUSED, suspension);
         return;
       }
       // Mơ hồ (kể cả lỗi lạ không phải `CreateLinkError`: không biết Tingee đã nhận request chưa): không gọi lại.
@@ -272,18 +288,29 @@ export class PaymentLinks {
 
   /**
    * Một transaction: CAS `pending → expired` (chưa có link) kèm lý do, rồi nhả chỗ như mọi đường hết hạn khác
-   * (`releaseOrderHeld`) và phát `order_changed`. Lượt không được trả. 0 dòng (job (a) đã hết hạn Đơn) → không làm gì.
+   * (`releaseOrderHeld`) và phát `order_changed`. Lượt không được trả. 0 dòng (job (a) đã hết hạn Đơn) → Đơn không đổi.
+   * `suspension` (Tingee báo ngắt dịch vụ bằng key hiện hành): bật cờ dịch vụ thanh toán của BTC trong cùng transaction,
+   * kể cả khi job (a) đã hết hạn Đơn trước (Tingee vẫn đã báo ngắt), rồi log sau commit.
    */
-  private async expire(orderId: string, reason: PaymentLinkError): Promise<void> {
-    await this.db.transaction(async (tx) => {
+  private async expire(orderId: string, reason: PaymentLinkError, suspension: SuspensionInput | null = null): Promise<void> {
+    const suspended = await this.db.transaction(async (tx): Promise<PaymentServiceSuspension | null> => {
       const [expired] = await tx
         .update(orders)
         .set({ status: OrderStatus.EXPIRED, paymentLinkError: reason })
         .where(and(eq(orders.id, orderId), eq(orders.status, OrderStatus.PENDING), isNull(orders.paymentLink)))
         .returning(orderSignalColumns);
-      if (!expired) return;
-      await releaseOrderHeld(tx, orderId);
-      await notifyOrderChanged(tx, expired);
+      if (expired) {
+        await releaseOrderHeld(tx, orderId);
+        await notifyOrderChanged(tx, expired);
+      }
+      return suspension ? suspendPaymentService(tx, suspension) : null;
     });
+    if (!suspension || suspended === null) return;
+    const context = { organizationId: suspension.organizationId, reason: suspension.reason, result: suspended };
+    if (suspended === 'suspended' || suspended === 'reason_changed') {
+      this.logger.warn(context, 'Tingee ngắt dịch vụ thanh toán của BTC; mọi Hạng vé có phí Tạm ngừng bán');
+    } else if (suspended === 'stale_credential') {
+      this.logger.log(context, 'Key Tingee vừa bị thay; không bật cờ dịch vụ thanh toán');
+    }
   }
 }

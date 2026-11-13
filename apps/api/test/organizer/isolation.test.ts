@@ -67,6 +67,8 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/credential/replacement/begin');
     expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/credential/replacement/preview');
     expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/credential/replacement');
+    // Story 4.2-a: "Kiểm tra lại" dịch vụ thanh toán (chỉ Owner).
+    expect(guarded).toContain('POST /v1/orgs/:orgId/payment-service/check');
     // Story 2.7: Sự kiện (Owner và Admin).
     expect(guarded).toContain('POST /v1/orgs/:orgId/events');
     expect(guarded).toContain('GET /v1/orgs/:orgId/events');
@@ -102,6 +104,9 @@ describe('cách ly BTC', () => {
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/overview')).toBe(Permission.ORDERS_VIEW);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/overview/live')).toBe(Permission.ORDERS_VIEW);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/pending-payment-count')).toBe(Permission.EVENTS_MANAGE);
+    expect(routes.find((r) => r.method === 'POST' && r.path === '/v1/orgs/:orgId/payment-service/check')?.permission).toBe(
+      Permission.PAYOUT_ACCOUNT_MANAGE,
+    );
     expect(guarded).toContain('GET /v1/orgs/:orgId/test-owner-only');
     expect(guarded).toContain('POST /v1/orgs/:orgId/test-owner-only/items/:itemId');
   });

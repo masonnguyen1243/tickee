@@ -58,6 +58,11 @@ export const ErrorCode = {
    */
   CLOSED_BETA_TRANSITION_INVALID: 'CLOSED_BETA_TRANSITION_INVALID',
   /**
+   * Quản trị Tingee mở lại dịch vụ thanh toán của một BTC đang `active` (không bị ngắt; kể cả khi một đường mở lại khác
+   * vừa thắng). Không đổi gì.
+   */
+  PAYMENT_SERVICE_NOT_SUSPENDED: 'PAYMENT_SERVICE_NOT_SUSPENDED',
+  /**
    * Tingee từ chối API key của BTC: Client ID không tồn tại hoặc bị khóa, Secret Token sai, hoặc key chưa được cấp quyền
    * nhóm dịch vụ cần dùng. Không lưu gì.
    */

@@ -1,4 +1,4 @@
-import { RealtimeSignal, type RealtimeTopic } from '@tickee/contracts';
+import { RealtimeSignal, type OrganizationRealtimeTopic, type RealtimeTopic } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import type { Tx } from '../db/index.js';
 
@@ -19,13 +19,23 @@ export interface RealtimeIds {
  * organizationId, eventId}`), không PII. Không gọi trong TX1 tạo Đơn (AD-17).
  */
 export const realtime = {
-  async notify(tx: Tx, topic: RealtimeTopic, ids: RealtimeIds): Promise<void> {
+  async notify(tx: Tx, topic: Exclude<RealtimeTopic, OrganizationRealtimeTopic>, ids: RealtimeIds): Promise<void> {
     const payload = RealtimeSignal.parse({
       type: topic,
       id: ids.id,
       organizationId: ids.organizationId,
       eventId: ids.eventId,
     });
+    await tx.execute(sql`SELECT pg_notify(${REALTIME_CHANNEL}, ${JSON.stringify(payload)})`);
+  },
+
+  /**
+   * Tín hiệu cấp BTC (`ORGANIZATION_REALTIME_TOPICS`, vd. `org_status_changed` của Story 4.2) trong `tx`, như `notify`:
+   * payload `{type, id: organizationId, organizationId}`, không có `eventId`, nên bộ lọc của stream một Sự kiện không
+   * khớp. Chỉ nhận topic cấp BTC (kiểu `OrganizationRealtimeTopic`).
+   */
+  async notifyOrganization(tx: Tx, topic: OrganizationRealtimeTopic, organizationId: string): Promise<void> {
+    const payload = RealtimeSignal.parse({ type: topic, id: organizationId, organizationId });
     await tx.execute(sql`SELECT pg_notify(${REALTIME_CHANNEL}, ${JSON.stringify(payload)})`);
   },
 };

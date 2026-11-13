@@ -157,6 +157,7 @@ async function openPage(
     canReplaceKey: !state.everLinked,
     ipnUrl: state.credential ? IPN_URL : null,
     tingeePortalUrl: PORTAL,
+    paymentService: { status: 'active', reason: null, since: null, checkedAt: null },
   });
   // Xác nhận lại như api (Story 2.13-a): mỗi token dùng một lần; `reauthHeaders` ghi header của mọi lần gọi thao tác.
   // `consume: false`: chỉ kiểm (bước đầu của đổi key); xóa `issued` để giả lập lần xác nhận quá 5 phút.

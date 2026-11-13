@@ -1,4 +1,4 @@
-import { ErrorCode } from '@tickee/contracts';
+import { ErrorCode, PaymentServiceReason } from '@tickee/contracts';
 
 /*
  * Bảng mã lỗi Tingee → mã lỗi miền (`@tickee/contracts`, AD-9). Chỉ mô-đun `tingee` biết mã Tingee. Dùng chung cho mọi
@@ -37,6 +37,26 @@ export const TINGEE_ORDER_NOT_FOUND_CODE = '2004';
 /** Mã Tingee (`code` của phản hồi, khác `'00'`) → lỗi miền. */
 export function domainErrorOf(tingeeCode: string): TingeeDomainError {
   return TINGEE_ERROR_CODES.get(tingeeCode) ?? ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE;
+}
+
+/**
+ * Mã Tingee → lý do ngắt dịch vụ thanh toán của BTC (Story 4.2, AD-32; Mason chốt 13/11/2026): 1033 ("gói dịch vụ đã hết
+ * hạn") → `token`; 1007, 1034 (merchant bị khóa) → `tingee_disabled`; 1133 (key chưa được cấp quyền "Cổng thanh toán")
+ * → `gateway_permission_missing`; mã còn lại của `TINGEE_CREDENTIAL_INVALID` (92, 97, 1009) → `credential_invalid`. Mã
+ * khác (kể cả nhóm VA `PAYMENT_ACCOUNT_NOT_ALLOWED`, mã lạ) → `null`: không phải ngắt dịch vụ. Mã Token (1033) chờ Tingee
+ * xác nhận (`deferred-work.md`).
+ */
+export function paymentServiceReasonOf(tingeeCode: string): PaymentServiceReason | null {
+  if (tingeeCode === '1033') return PaymentServiceReason.TOKEN;
+  if (tingeeCode === '1133') return PaymentServiceReason.GATEWAY_PERMISSION_MISSING;
+  switch (domainErrorOf(tingeeCode)) {
+    case ErrorCode.MERCHANT_SUSPENDED:
+      return PaymentServiceReason.TINGEE_DISABLED;
+    case ErrorCode.TINGEE_CREDENTIAL_INVALID:
+      return PaymentServiceReason.CREDENTIAL_INVALID;
+    default:
+      return null;
+  }
 }
 
 /** Thông điệp tiếng Việt nói người dùng làm được gì. */

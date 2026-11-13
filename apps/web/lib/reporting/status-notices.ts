@@ -21,6 +21,15 @@ export const STATUS_NOTICE_CONTENT: Readonly<Record<StatusNoticeCode, StatusNoti
     title: 'Closed Beta đã bị thu hồi',
     description: 'Hạng vé có phí của BTC đang Tạm ngừng bán. Hạng vé 0đ vẫn bán bình thường.',
   },
+  // Dịch vụ thanh toán bị ngắt (Story 4.2-a): chỉ tiêu đề theo câu đã chốt; hành động theo vai ("Mua thêm Token" mở
+  // `data.tingeePortalUrl`, "Nhập lại key"…) ở Story 4.2-b.
+  PAYMENT_SERVICE_SUSPENDED_TOKEN: { title: 'Mọi Sự kiện có phí đang Tạm ngừng bán' },
+  PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID: { title: 'Key Tingee không còn dùng được' },
+  PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING: { title: 'Key Tingee chưa được cấp quyền Cổng thanh toán' },
+  PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED: {
+    title: 'Tingee đang tạm ngừng dịch vụ thanh toán của BTC',
+    description: 'Mọi Sự kiện có phí đang Tạm ngừng bán.',
+  },
   // Chưa có kênh liên hệ Tingee nên không có nút (quyết định 02/11/2026).
   CLOSED_BETA_PENDING: {
     title: 'Chờ duyệt Closed Beta',

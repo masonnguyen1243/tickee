@@ -6,7 +6,7 @@ import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
 
 /*
  * Read model tài khoản nhận tiền cho `ordering` (Story 3.4, AD-6, AD-35), người nhận IPN cho `payment` (Story 3.5,
- * AD-7) và credential đã chụp của Đơn cho Đối soát bù (Story 4.1). `organizer` chỉ đọc: không ghi gì, không giữ secret. Khóa giải mã (`SecretBox`) do bên gọi truyền vào;
+ * AD-7), credential đã chụp của Đơn cho Đối soát bù (Story 4.1) và credential hiện hành cho dò dịch vụ (Story 4.2). `organizer` chỉ đọc: không ghi gì, không giữ secret. Khóa giải mã (`SecretBox`) do bên gọi truyền vào;
  * credential đã giải mã chỉ sống trong lời gọi Tingee hay lần kiểm chữ ký của bên gọi, không bao giờ được lưu hay log.
  */
 
@@ -18,6 +18,11 @@ export interface PayoutTarget {
   payoutAccountId: string;
   /** VA Tingee dùng để nhận tiền (`create-link` truyền số này). */
   vaAccountNumber: string;
+  /**
+   * `tingee_credentials.id` của credential hiện hành (Story 4.2): lời gọi bằng key này bị từ chối thì chỉ bật cờ dịch vụ
+   * thanh toán khi credential vẫn hiện hành lúc ghi (`suspendPaymentService`).
+   */
+  credentialId: string;
   credential: TingeeCredential;
   /** Tên chủ tài khoản (PII). */
   accountName: string;
@@ -40,6 +45,7 @@ export async function defaultPayoutTargetOf(
       vaAccountNumber: pa.vaAccountNumber,
       accountName: pa.accountName,
       bankName: pa.bankName,
+      credentialId: cred.id,
       clientId: cred.clientId,
       secretTokenCiphertext: cred.secretTokenCiphertext,
     })
@@ -58,6 +64,7 @@ export async function defaultPayoutTargetOf(
   return {
     payoutAccountId: row.payoutAccountId,
     vaAccountNumber: row.vaAccountNumber,
+    credentialId: row.credentialId,
     credential: { clientId: row.clientId, secretToken: secretBox.open(row.secretTokenCiphertext) },
     accountName: row.accountName,
     bankName: row.bankName,

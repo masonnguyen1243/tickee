@@ -40,6 +40,7 @@ async function openDashboard(page: Page, { role = 'owner' as Role, path = base, 
         canReplaceKey: true,
         ipnUrl: null,
         tingeePortalUrl: 'https://baas.tingee.vn',
+        paymentService: { status: 'active', reason: null, since: null, checkedAt: null },
       },
     }),
     [`GET /orgs/${ORG_ID}/members`]: () => ({

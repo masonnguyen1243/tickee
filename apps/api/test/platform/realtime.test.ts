@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { Controller, Get, Inject, Param, Req, Res } from '@nestjs/common';
-import { ErrorResponse, RealtimeTopic } from '@tickee/contracts';
+import { ErrorResponse, RealtimeTopic, type OrganizationRealtimeTopic } from '@tickee/contracts';
 import type { Request, Response } from 'express';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Public } from '../../src/platform/http/index.js';
@@ -70,7 +70,7 @@ async function stream(id: string): Promise<SseClient> {
   return s;
 }
 
-const commit = (topic: RealtimeTopic, target: ReturnType<typeof ids>) =>
+const commit = (topic: Exclude<RealtimeTopic, OrganizationRealtimeTopic>, target: ReturnType<typeof ids>) =>
   h.db.transaction((tx) => realtime.notify(tx, topic, target));
 
 describe('SSE và notify', () => {
@@ -122,6 +122,25 @@ describe('SSE và notify', () => {
     await s.waitForMessages(1, 1_000);
     await sleep(200);
     expect(s.messages).toHaveLength(1);
+  });
+
+  it('tín hiệu cấp BTC (Story 4.2): notifyOrganization không có eventId; stream lọc theo BTC nhận, topic cấp Sự kiện → ném', async () => {
+    const organizationId = randomUUID();
+    const s = await stream(organizationId);
+    await h.db.transaction((tx) => realtime.notifyOrganization(tx, RealtimeTopic.ORG_STATUS_CHANGED, organizationId));
+    const [message] = await s.waitForMessages(1, 1_000);
+    expect(message!.raw).toBe('{"type":"org_status_changed"}');
+    // Topic cấp Sự kiện bị chặn ở kiểu; lách kiểu thì payload sai dạng → ném.
+    await expect(
+      h.db.transaction((tx) =>
+        realtime.notifyOrganization(tx, RealtimeTopic.ORDER_CHANGED as typeof RealtimeTopic.ORG_STATUS_CHANGED, organizationId),
+      ),
+    ).rejects.toThrow();
+    // `org_status_changed` kèm Sự kiện: bị chặn ở kiểu; lách kiểu thì payload sai dạng → ném.
+    const orgTopic = RealtimeTopic.ORG_STATUS_CHANGED as unknown as typeof RealtimeTopic.ORDER_CHANGED;
+    await expect(
+      h.db.transaction((tx) => realtime.notify(tx, orgTopic, { ...ids(), organizationId, id: organizationId })),
+    ).rejects.toThrow();
   });
 
   it('payload sai dạng: notify ném (tx rollback); NOTIFY lạ trên kênh bị bỏ qua kèm log, không làm hỏng hub', async () => {

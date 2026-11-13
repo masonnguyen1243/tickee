@@ -36,6 +36,7 @@ import {
   ordersOfEvent,
   paidReadyOrg,
   parseOrder,
+  paymentServiceOf,
   postOrder,
   resetOrderRateLimit,
   type Org,
@@ -95,6 +96,7 @@ function workerWith(enabled: boolean, secretBox?: SecretBox): ReconciliationWork
   const client: TingeeClient = {
     listAccounts: (credential) => http.listAccounts(credential),
     createPaymentLink: (credential, input) => http.createPaymentLink(credential, input),
+    getMerchantServiceStatus: (credential) => http.getMerchantServiceStatus(credential),
     async getGatewayOrder(credential, orderId) {
       try {
         return await http.getGatewayOrder(credential, orderId);
@@ -581,6 +583,8 @@ describe('I/O Matrix', () => {
       { level: 50, reason: 'credential_invalid', organizationId: own.orgId, orderCode: placed.code },
     ]);
     expect(await orderState(h, placed.code)).toMatchObject({ status: 'pending', tickets: 0 });
+    // Story 4.2: key cũ đã gỡ không bật cờ dịch vụ thanh toán; BTC vẫn bán bằng key mới.
+    expect(await paymentServiceOf(h, own.orgId)).toMatchObject({ status: 'active', reason: null });
     // Đơn hết hạn theo job (c) hiện có.
     const expiry = await boss.findJobs(JobQueue.ORDERING_EXPIRE_ORDER, { data: { orderId: placed.orderId } });
     expect(expiry.map((j) => (j.data as { linked?: boolean }).linked ?? false).sort()).toEqual([false, true]);

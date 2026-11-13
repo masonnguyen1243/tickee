@@ -1,5 +1,6 @@
 import {
   EventSaleReason,
+  PaymentServiceStatus,
   TierSaleStatus,
   toEventIso,
   type EventAvailability,
@@ -17,6 +18,7 @@ import {
   type PublicEventRef,
   type TicketTypeRow,
 } from '../event/index.js';
+import { paymentServiceStateOf } from '../organizer/index.js';
 import { inventoryOf } from './inventory.service.js';
 
 /*
@@ -28,18 +30,16 @@ import { inventoryOf } from './inventory.service.js';
  * đọc qua `paymentLinkBlock`) trước mọi lời gọi Tingee.
  */
 
-/** Trạng thái dịch vụ thanh toán của BTC (chỉ áp cho Hạng vé > 0đ). */
-export type PaymentServiceStatus = 'active' | 'suspended';
-
 /**
- * Trạng thái dịch vụ thanh toán của BTC. Chưa có `payment_service_status` (Epic 4) nên luôn `active`; Epic 4 thay phần
- * thân hàm này bằng truy vấn thật.
+ * Trạng thái dịch vụ thanh toán của BTC (chỉ áp cho Hạng vé > 0đ; Story 4.2): cờ `payment_service_status` đọc qua read
+ * model của `organizer`. `suspended` → mọi Hạng vé > 0đ "Tạm ngừng bán" ở trang công khai, TX1 và chốt link; không
+ * chặn `publishReadiness`. BTC không còn → `active` (Sự kiện đã tra luôn có BTC).
  */
 export async function paymentServiceStatus(
-  _db: DbExecutor,
-  _scope: Pick<AccessContext, 'organizationId'>,
+  db: DbExecutor,
+  scope: Pick<AccessContext, 'organizationId'>,
 ): Promise<PaymentServiceStatus> {
-  return 'active';
+  return (await paymentServiceStateOf(db, scope))?.status ?? PaymentServiceStatus.ACTIVE;
 }
 
 type SaleEvent = Pick<PublicEventRef, 'status' | 'lockedAt' | 'effectiveEndAt' | 'refundPolicy'>;
@@ -112,8 +112,8 @@ export type LinkFacts = Pick<SaleFacts, 'event' | 'orgLocked' | 'paidOk'>;
 /**
  * Chốt link thanh toán (E3-2, hàm thuần): lý do Đơn có phí đã giữ chỗ không được tạo link mới tại `now`, `null` khi còn
  * bán. Cùng thứ tự với trang công khai và TX1 (`blockingReason`: hủy > khóa > kết thúc > Ẩn), rồi `paused` khi BTC không
- * còn đủ điều kiện bán Vé có phí (`paidOk`). Không xét giờ mở/đóng bán, tồn kho hay chính sách hoàn vé: Đơn đã giữ chỗ
- * khi còn bán. Story 4.2 thay thân `paymentServiceStatus` là chốt này tự áp cho "Tạm ngừng bán".
+ * còn đủ điều kiện bán Vé có phí (`paidOk`, gồm dịch vụ thanh toán `active` của Story 4.2). Không xét giờ mở/đóng bán, tồn
+ * kho hay chính sách hoàn vé: Đơn đã giữ chỗ khi còn bán.
  */
 export function linkBlockOf(facts: LinkFacts, now: Date): EventSaleReason | null {
   return blockingReason(facts.event, facts.orgLocked, now) ?? (facts.paidOk ? null : EventSaleReason.PAUSED);
@@ -122,7 +122,7 @@ export function linkBlockOf(facts: LinkFacts, now: Date): EventSaleReason | null
 /** BTC đủ điều kiện bán Vé có phí: Closed Beta đã duyệt, còn tài khoản nhận tiền, dịch vụ thanh toán `active`. */
 async function paidOkOf(db: DbExecutor, scope: Pick<AccessContext, 'organizationId'>): Promise<boolean> {
   const [paid, payment] = await Promise.all([paidSalesAllowed(db, scope), paymentServiceStatus(db, scope)]);
-  return paid.closedBetaApproved && paid.payoutLinked && payment === 'active';
+  return paid.closedBetaApproved && paid.payoutLinked && payment === PaymentServiceStatus.ACTIVE;
 }
 
 /**

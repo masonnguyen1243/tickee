@@ -6,10 +6,14 @@ import {
   ClosedBetaQueueQuery,
   ClosedBetaStatus,
   ClosedBetaTransitionInvalidDetails,
+  SuspendedPaymentServiceOrganization,
+  SuspendedPaymentServiceOrganizationList,
 } from '../src/admin.js';
 import { ErrorCode } from '../src/errors.js';
 import { safeReturnTo } from '../src/identity.js';
+import { PaymentServiceReason, PaymentServiceState, paymentServiceCheckApiPath } from '../src/organizer.js';
 import {
+  PAYMENT_SERVICE_NOTICE_CODES,
   sortStatusNotices,
   STATUS_BANNER_LIMIT,
   STATUS_NOTICE_PRIORITY,
@@ -95,5 +99,43 @@ describe('thông báo trạng thái (AD-34)', () => {
 
   it('dashboard hiện tối đa 2 banner', () => {
     expect(STATUS_BANNER_LIMIT).toBe(2);
+  });
+});
+
+describe('dịch vụ thanh toán của BTC (Story 4.2)', () => {
+  it('bốn mã notice ở bậc 4: sau Closed Beta bị thu hồi, trước chưa liên kết tài khoản nhận tiền; mỗi lý do một mã', () => {
+    const rank = (code: StatusNoticeCode) => STATUS_NOTICE_PRIORITY.indexOf(code);
+    const codes = Object.values(PaymentServiceReason).map((reason) => PAYMENT_SERVICE_NOTICE_CODES[reason]);
+    expect(new Set(codes).size).toBe(4);
+    for (const code of codes) {
+      expect(rank(code)).toBeGreaterThan(rank('CLOSED_BETA_REVOKED'));
+      expect(rank(code)).toBeLessThan(rank('PAYOUT_ACCOUNT_NOT_LINKED'));
+    }
+    expect(PAYMENT_SERVICE_NOTICE_CODES).toEqual({
+      token: 'PAYMENT_SERVICE_SUSPENDED_TOKEN',
+      credential_invalid: 'PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID',
+      gateway_permission_missing: 'PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING',
+      tingee_disabled: 'PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED',
+    });
+  });
+
+  it('trạng thái: lý do và mốc có thể null; lý do lạ bị từ chối; danh sách Quản trị chỉ có id, tên, lý do, mốc', () => {
+    const state = { status: 'suspended', reason: 'token', since: '2026-11-13T01:02:03.000Z', checkedAt: null };
+    expect(PaymentServiceState.parse(state)).toEqual(state);
+    expect(PaymentServiceState.safeParse({ ...state, reason: 'khac' }).success).toBe(false);
+    expect(PaymentServiceState.parse({ status: 'active', reason: null, since: null, checkedAt: null }).status).toBe(
+      'active',
+    );
+    const row = { id: ID, name: 'CLB Cờ Vua', reason: 'tingee_disabled', since: state.since, checkedAt: null };
+    expect(SuspendedPaymentServiceOrganizationList.parse([row])).toEqual([row]);
+    expect(Object.keys(SuspendedPaymentServiceOrganization.shape).sort()).toEqual([
+      'checkedAt',
+      'id',
+      'name',
+      'reason',
+      'since',
+    ]);
+    expect(ErrorCode.PAYMENT_SERVICE_NOT_SUSPENDED).toBe('PAYMENT_SERVICE_NOT_SUSPENDED');
+    expect(paymentServiceCheckApiPath(ID)).toBe(`/orgs/${ID}/payment-service/check`);
   });
 });

@@ -37,6 +37,7 @@ import {
 import type { DefaultPayoutChangeReason } from './payout-default-email.js';
 import { DefaultPayoutQueues, enqueueDefaultPayoutChanged } from './payout-default-jobs.js';
 import { lockOrganization } from './organization-lock.js';
+import { PaymentServiceQueues, paymentServiceStateDto, resumeAfterNewKey } from './payment-service.js';
 import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
 
 /*
@@ -55,6 +56,9 @@ import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
  * tiêu một lần xác nhận của session (`consumeReauth`; thiếu → `REAUTH_REQUIRED`); thao tác lỗi sau đó (404) thì
  * rollback, lần xác nhận còn dùng được. Mỗi lần tài khoản mặc định đổi, cùng transaction enqueue email cảnh báo Owner và
  * mọi Admin.
+ *
+ * Dịch vụ thanh toán (Story 4.2): tổng quan kèm cờ `payment_service_*` của BTC; đổi key hợp lệ khi BTC đang bị ngắt vì
+ * key (`credential_invalid`, `gateway_permission_missing`) thì tắt cờ trong cùng transaction thay key.
  */
 
 const cred = tingeeCredentials;
@@ -172,6 +176,7 @@ export class PayoutAccountService {
     @Inject(PAYOUT_ACCOUNT_SETTINGS) private readonly settings: PayoutAccountSettings,
     @Inject(BOSS) private readonly boss: PgBoss,
     @Inject(DefaultPayoutQueues) private readonly defaultPayoutQueues: DefaultPayoutQueues,
+    @Inject(PaymentServiceQueues) private readonly paymentServiceQueues: PaymentServiceQueues,
   ) {}
 
   /** Credential, các tài khoản nhận tiền hiện hành, URL IPN, link portal. Không gọi Tingee. */
@@ -417,7 +422,8 @@ export class PayoutAccountService {
    * tiêu). Rồi trong một transaction: tiêu lần xác nhận, credential cũ `retired_at` (giữ ciphertext cho IPN/Đối soát bù
    * của Đơn cũ), mọi tài khoản hiện hành bị hủy liên kết (gỡ mềm), credential mới (Secret Token mã hóa) và tài khoản đã
    * chọn (mặc định) được chèn, kèm audit và email cảnh báo (tài khoản mặc định cũ, hoặc "chưa có", → tài khoản mới).
-   * `ipnKey` không đổi. Trả tổng quan mới.
+   * BTC đang bị ngắt dịch vụ thanh toán vì key (`credential_invalid`, `gateway_permission_missing`) → tắt cờ trong cùng
+   * transaction (đường `new_key`, Story 4.2); lý do khác giữ cờ. `ipnKey` không đổi. Trả tổng quan mới.
    */
   async replaceKey(
     ctx: AccessContext,
@@ -431,6 +437,8 @@ export class PayoutAccountService {
     if (isBlockedBankBin(chosen.bankBin)) throw bankNotSupported();
     const secretTokenCiphertext = this.settings.secretBox.seal(input.secretToken);
     await this.defaultPayoutQueues.ready();
+    // Tắt cờ dịch vụ thanh toán (nếu có) enqueue job "đã mở lại" bằng `tx` bên dưới.
+    await this.paymentServiceQueues.ready();
 
     try {
       return await this.db.transaction(async (tx) => {
@@ -528,6 +536,10 @@ export class PayoutAccountService {
         // BTC đã hủy hết tài khoản trước khi đổi key: không có tài khoản mặc định cũ ("chưa có tài khoản nhận tiền").
         const previousDefault = current.find((row) => row.isDefault)?.id ?? null;
         await this.notifyDefaultChanged(tx, ctx, previousDefault, account.id, 'tingee_key_replaced');
+        // `credential_invalid`: Tingee vừa nhận key mới (`listAccounts` ở trên). `gateway_permission_missing`:
+        // `listAccounts` không thấy được quyền "Cổng thanh toán", nên tin Owner; lần tạo link kế kiểm lại (thiếu quyền thì
+        // bật cờ lại). Lý do khác key mới không chữa được.
+        await resumeAfterNewKey(this.boss, tx, ctx);
         return this.overviewOf(tx, ctx);
       });
     } catch (err) {
@@ -584,7 +596,13 @@ export class PayoutAccountService {
 
   private async overviewOf(db: DbExecutor, ctx: AccessContext): Promise<PayoutAccountOverview> {
     const [org] = await db
-      .select({ ipnKey: organizations.tingeeIpnKey })
+      .select({
+        ipnKey: organizations.tingeeIpnKey,
+        status: organizations.paymentServiceStatus,
+        reason: organizations.paymentServiceReason,
+        since: organizations.paymentServiceSince,
+        checkedAt: organizations.paymentServiceCheckedAt,
+      })
       .from(organizations)
       .where(orgScope(ctx)({ organizationId: organizations.id }));
     if (!org) throw notAMember();
@@ -600,6 +618,7 @@ export class PayoutAccountService {
       canReplaceKey: !(await this.hasEverLinked(db, ctx)),
       ipnUrl: org.ipnKey ? tingeeIpnUrl(this.settings.apiPublicUrl, org.ipnKey) : null,
       tingeePortalUrl: this.settings.tingeePortalUrl,
+      paymentService: paymentServiceStateDto(org),
     };
   }
 

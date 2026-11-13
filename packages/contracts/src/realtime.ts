@@ -17,7 +17,8 @@ import { z } from 'zod';
  * - `event_orders_changed`: Owner, Admin → Đơn gần đây, số liệu Sự kiện (Story 3.11).
  * - `event_checkins_changed`: Owner, Admin, CTV được giao → số liệu check-in.
  * - `org_review_items_changed`: Owner, Admin → số mục Cần xử lý.
- * - `org_status_changed`: thành viên BTC → `notices`, vai trò.
+ * - `org_status_changed`: thành viên BTC → `notices`, vai trò. Tín hiệu cấp BTC (Story 4.2: cờ dịch vụ thanh toán bật,
+ *   đổi lý do hoặc tắt): `id` = `organizationId`, không có `eventId`.
  */
 export const RealtimeTopic = {
   ORDER_CHANGED: 'order_changed',
@@ -30,17 +31,30 @@ export type RealtimeTopic = (typeof RealtimeTopic)[keyof typeof RealtimeTopic];
 export const REALTIME_TOPICS = Object.values(RealtimeTopic) as [RealtimeTopic, ...RealtimeTopic[]];
 export const realtimeTopicSchema = z.enum(RealtimeTopic);
 
+/** Topic cấp BTC: tín hiệu không gắn Sự kiện nào (`eventId` vắng, `id` = `organizationId`). */
+export const ORGANIZATION_REALTIME_TOPICS = [RealtimeTopic.ORG_STATUS_CHANGED] as const;
+export type OrganizationRealtimeTopic = (typeof ORGANIZATION_REALTIME_TOPICS)[number];
+
+const isOrganizationTopic = (topic: RealtimeTopic): topic is OrganizationRealtimeTopic =>
+  (ORGANIZATION_REALTIME_TOPICS as readonly RealtimeTopic[]).includes(topic);
+
 /**
  * Payload của `NOTIFY` (chỉ giữa các tiến trình của Tickee, không bao giờ tới trình duyệt): loại thay đổi, id đối tượng
- * đổi (vd. id Đơn), BTC và Sự kiện của nó. Không có PII, không có trạng thái: người đăng ký tự tải lại REST. Hub lọc
- * theo các id này sau khi đã kiểm quyền lúc mở stream.
+ * đổi (vd. id Đơn), BTC và Sự kiện của nó. Tín hiệu cấp BTC (`ORGANIZATION_REALTIME_TOPICS`) không có `eventId`, nên bộ
+ * lọc của stream một Sự kiện (so `eventId`) không bao giờ khớp nó. Không có PII, không có trạng thái: người đăng ký tự
+ * tải lại REST. Hub lọc theo các id này sau khi đã kiểm quyền lúc mở stream.
  */
-export const RealtimeSignal = z.strictObject({
-  type: realtimeTopicSchema,
-  id: z.uuid(),
-  organizationId: z.uuid(),
-  eventId: z.uuid(),
-});
+export const RealtimeSignal = z
+  .strictObject({
+    type: realtimeTopicSchema,
+    id: z.uuid(),
+    organizationId: z.uuid(),
+    eventId: z.uuid().optional(),
+  })
+  .refine((signal) => (signal.eventId === undefined) === isOrganizationTopic(signal.type), {
+    message: 'Tín hiệu cấp BTC không có eventId; tín hiệu khác bắt buộc có eventId',
+    path: ['eventId'],
+  });
 export type RealtimeSignal = z.infer<typeof RealtimeSignal>;
 
 /**
