@@ -19,6 +19,8 @@ export const testCredentialKey = (version: number, fill: number): string =>
 export const TEST_CREDENTIAL_KEYS = testCredentialKey(1, 7);
 /** Khóa ký Mã QR vé chỉ dùng trong test (cùng dạng, khác giá trị với `TEST_CREDENTIAL_KEYS`). */
 export const TEST_TICKET_QR_KEYS = testCredentialKey(1, 9);
+/** Khóa QR phiên bản 2 cho test xoay khóa (AD-29): ghép `${TEST_TICKET_QR_KEYS},${TEST_TICKET_QR_KEY_V2}` = đang xoay. */
+export const TEST_TICKET_QR_KEY_V2 = testCredentialKey(2, 11);
 
 /** Origin web giả lập trong test: CORS và Better Auth chỉ tin origin này. */
 export const TEST_WEB_ORIGIN = 'http://web.tickee.test';

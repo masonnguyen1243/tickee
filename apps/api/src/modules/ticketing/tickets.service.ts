@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   ErrorCode,
   SHARE_TOKEN_PATTERN,
@@ -23,6 +23,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Một câu cho mọi lý do link chia sẻ không mở được (không lộ lý do nào). */
 const sharedTicketNotFound = () =>
   new AppError(ErrorCode.SHARED_TICKET_NOT_FOUND, 'Link không đúng hoặc không còn hiệu lực.');
+
+/**
+ * Marker `alert` của dòng log khi link chia sẻ hợp lệ nhưng khóa QR của Vé đã bị gỡ khỏi `TICKET_QR_KEYS` (xoay khóa sai,
+ * AD-29). Cảnh báo vận hành (Story 4.6) bắt theo marker này.
+ */
+export const TICKET_QR_KEY_MISSING_ALERT = 'ticket_qr_key_missing';
 
 /** Một dòng của Đơn cần phát Vé: Hạng vé, tên Hạng vé đã chụp lúc đặt, số Vé. */
 export interface TicketIssueLine {
@@ -56,6 +62,8 @@ export interface IssuedTicket {
  */
 @Injectable()
 export class TicketsService {
+  private readonly logger = new Logger('TicketsService');
+
   constructor(@Inject(TICKET_QR_KEYS) private readonly keys: TicketQrKeys) {}
 
   /**
@@ -152,7 +160,9 @@ export class TicketsService {
    * `GET /v1/shared-tickets/:token` (`shareScope`, AD-29): đúng một Vé theo hash của token. Chỉ đọc, không ghi gì (người
    * nhận link không thành chủ Vé). Token sai dạng hoặc không khớp, Vé `cancelled`, Sự kiện đã hủy, hay đồng hồ DB đã quá
    * `effective_end_at` (AD-14) → cùng một `404 SHARED_TICKET_NOT_FOUND`. Không trả tên, SĐT, email Người mua, mã Đơn hay
-   * id user.
+   * id user. Khóa `qr_key_version` của Vé không có trong `TICKET_QR_KEYS` của instance (khóa cũ đã gỡ, hoặc instance
+   * chưa có khóa mới) → cũng `404` chung, kèm log `error` có marker `TICKET_QR_KEY_MISSING_ALERT` (id Vé, id Sự kiện,
+   * phiên bản khóa của Vé và phiên bản hiện hành; không có token).
    */
   async sharedTicket(db: DbExecutor, token: string): Promise<SharedTicketView> {
     if (!SHARE_TOKEN_PATTERN.test(token)) throw sharedTicketNotFound();
@@ -172,6 +182,21 @@ export class TicketsService {
     if (!row || row.status !== 'valid') throw sharedTicketNotFound();
     const event = await ticketEventById(db, row.eventId);
     if (!eventOpenForTickets(event)) throw sharedTicketNotFound();
+    if (!this.keys.has(row.qrKeyVersion)) {
+      // Kiểm sau các lý do 404 khác: chỉ cảnh báo khi link lẽ ra còn mở được. `currentVersion` phân biệt khóa cũ đã gỡ
+      // (Vé có phiên bản nhỏ hơn) với instance chưa có khóa mới khi đang deploy dần (Vé có phiên bản lớn hơn).
+      this.logger.error(
+        {
+          ticketId: row.id,
+          eventId: row.eventId,
+          qrKeyVersion: row.qrKeyVersion,
+          currentVersion: this.keys.currentVersion,
+          alert: TICKET_QR_KEY_MISSING_ALERT,
+        },
+        'Link chia sẻ Vé: TICKET_QR_KEYS của instance này không có khóa của Vé; trả 404',
+      );
+      throw sharedTicketNotFound();
+    }
     return {
       eventName: event.name,
       eventStartsAt: toEventIso(event.startsAt),
