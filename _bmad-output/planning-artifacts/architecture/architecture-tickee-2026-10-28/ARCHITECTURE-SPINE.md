@@ -7,7 +7,7 @@ paradigm: 'Modular monolith (NestJS) — một codebase, ba vai chạy: api, wor
 scope: 'Toàn bộ Tickee MVP v1: trang mua Vé, dashboard BTC, check-in CTV, Quản trị Tingee, tích hợp Tingee Payment Gateway'
 status: final
 created: '2026-10-28'
-updated: '2026-11-11'
+updated: '2026-11-13'
 binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37, FR-38, NFR-1, NFR-2, NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-8, NFR-9, NFR-10, NFR-11, NFR-12]
 sources:
   - _bmad-output/planning-artifacts/prds/prd-tickee-2026-10-27/prd.md
@@ -37,10 +37,18 @@ companions:
 | `ticketing` | Vé, bản chụp trên Vé, Mã QR vé, link chia sẻ Vé, trạng thái Vé và check-in |
 | `checkin` | Lời mời CTV, phân công CTV theo Sự kiện, màn quét, tra tay |
 | `reporting` | Dashboard, CSV, danh sách hoàn tiền, thông báo trạng thái (`notices`) — chỉ đọc |
-| `integration` | Gửi email (`EmailTransport`), kết nối Google Sheets và ánh xạ dòng, danh mục thông báo |
+| `integration` | Kết nối Google Sheets và ánh xạ dòng, danh mục thông báo |
 | `admin` | Báo cáo vi phạm; endpoint của Quản trị Tingee. Ghi dữ liệu của mô-đun khác bằng service công khai của mô-đun đó (vd. Closed Beta qua `organizer`); chỉ luồng ghi từ hai mô-đun trở lên mới qua `flows` (AD-25: `lockEvent`/`lockOrganization`, `voidTickets`) |
 | `tingee` | Adapter Tingee — không sở hữu bảng |
-| `platform` (shared kernel) | DB và transaction, cổng `AccessResolver` và guard quyền, `orgScope`, `audit_events`, hàng đợi job, realtime (SSE/NOTIFY), config, log |
+| `platform` (shared kernel) | DB và transaction, cổng `AccessResolver` và guard quyền, `orgScope`, `audit_events`, hàng đợi job, realtime (SSE/NOTIFY), cổng gửi email `EmailTransport` (SMTP; Mailpit ở local) và `escapeHtml`, config, log |
+
+**Email theo mô-đun** *(E3-5, 13/11/2026)*. Mô-đun sở hữu nghiệp vụ kích hoạt email thì sở hữu mẫu email, queue và handler. Queue khai báo tên trong `packages/contracts` (AD-12). Handler gửi qua `EmailTransport` của `platform` và chỉ đọc dữ liệu của mô-đun khác qua read model (AD-33). Email mới theo cùng luật.
+
+| Mô-đun | Email | Cách gửi |
+| --- | --- | --- |
+| `identity` | Mã đăng nhập OTP; mã xác nhận lại (step-up); email bảo mật khi bật/tắt 2FA | Gửi đồng bộ trong request, không qua queue |
+| `organizer` | Lời mời Admin; báo chuyển Owner; báo đổi tài khoản nhận tiền mặc định hoặc đổi key | Queue `organizer.send-admin-invitation`, `organizer.notify-ownership-transferred`, `organizer.notify-default-payout-changed` |
+| `ordering` | Email Vé (mỗi Vé một link chia sẻ); tiền về muộn khi Hạng vé đã hết (`orphan_sold_out`); báo đổi giờ/địa điểm | Queue `ordering.send-buyer-email` (phân biệt bằng `kind`), `ordering.send-event-change-email` (job gốc theo phiên bản Sự kiện, job con theo Người mua) |
 
 Hướng phụ thuộc giữa các mô-đun. Mũi tên = được phép gọi service công khai hoặc đọc read model. Không vẽ: mọi mô-đun được gọi `platform`; `flows` được gọi mọi mô-đun; controller gọi một mô-đun hoặc một flow; `apps/web` chỉ gọi HTTP `/v1`.
 
@@ -62,6 +70,7 @@ flowchart TD
   integration --> organizer
   integration --> identity
   payment --> ordering
+  payment --> organizer
   payment --> tingee
   ordering --> ticketing
   ordering --> event
@@ -331,15 +340,15 @@ Hiện thực (Story 3.11):
 ### AD-28 — Hủy và khóa Sự kiện
 
 - **Binds:** FR-33, FR-35, FR-37; `flows`, `event`, `ordering`, `ticketing`
-- **Prevents:** Vé hợp lệ được phát hoặc còn quét xanh cho Sự kiện đã hủy; danh sách hoàn tiền thiếu người trả tiền sau khi hủy.
-- **Rule:** `flows.cancelEvent` trong một transaction: khóa dòng Sự kiện `FOR UPDATE` và chuyển `cancelled`; Đơn `pending` → `cancelled` (nhả chỗ); Đơn `paid` → `cancelled` với `cancel_reason = event_cancelled`; mọi Vé `valid` → `cancelled`; enqueue email cho người mua. Tiền về sau đó đi theo AD-7 (bước 3): mỗi khoản một `review_item` loại `event_cancelled`; Đơn `pending`/`expired` → `review`, Đơn `cancelled` (và `paid`, `review`) giữ nguyên. Danh sách hoàn tiền là truy vấn động: mọi Đơn có `paid_amount` > 0 thuộc Sự kiện, chưa `refunded`, cộng mọi `review_items` loại `event_cancelled` chưa `resolved` của Sự kiện (khoản tiền về sau khi hủy: Đơn `review`/`cancelled` không ghi `paid_amount`; số tiền lấy từ `payment_events` của mục). Khóa Sự kiện hoặc BTC chỉ chặn bán (AD-21); Đơn `pending` vẫn được trả tiền và phát Vé, Đơn `expired` thì không được bán lại (AD-7 bước 6: `orphan` `event_locked`). `flows.voidTickets` (Quản trị Tingee chọn vô hiệu) chuyển Vé `valid` → `cancelled` với `cancel_reason = voided`, ghi audit.
+- **Prevents:** Vé hợp lệ được phát hoặc còn quét xanh cho Sự kiện đã hủy; danh sách hoàn tiền thiếu khoản tiền đã về, dù về trước hay sau khi hủy.
+- **Rule:** `flows.cancelEvent` trong một transaction: khóa dòng Sự kiện `FOR UPDATE` và chuyển `cancelled`; Đơn `pending` → `cancelled` (nhả chỗ); Đơn `paid` → `cancelled` với `cancel_reason = event_cancelled`; mọi Vé `valid` → `cancelled`; enqueue email cho người mua. Tiền về sau đó đi theo AD-7 (bước 3): mỗi khoản một `review_item` loại `event_cancelled`; Đơn `pending`/`expired` → `review`, Đơn `cancelled` (và `paid`, `review`) giữ nguyên. Danh sách hoàn tiền là truy vấn động gồm hai phần: (1) mọi Đơn có `paid_amount` > 0 thuộc Sự kiện, chưa `refunded`; (2) mọi `review_items` còn `open` gắn Đơn của Sự kiện, mọi loại (`event_cancelled`, `amount_mismatch`, `orphan`, `duplicate_payment`), mở trước hay sau khi hủy, mỗi mục một dòng, số tiền lấy từ `payment_events` của mục. Phần (2) phủ các khoản tiền đã về mà không thành `paid_amount`: Đơn `review`/`cancelled` không ghi `paid_amount`, và khoản trả thứ hai của Đơn `paid` nằm ở mục `duplicate_payment`. Mục `unmatched` không gắn Đơn nên không vào danh sách; nó ở hàng Cần xử lý của BTC. Một khoản không vào cả hai phần: duyệt tay phát Vé (Story 4.4) đóng mục và ghi `paid_amount` qua `markPaid` trong cùng transaction. Khóa Sự kiện hoặc BTC chỉ chặn bán (AD-21); Đơn `pending` vẫn được trả tiền và phát Vé, Đơn `expired` thì không được bán lại (AD-7 bước 6: `orphan` `event_locked`). `flows.voidTickets` (Quản trị Tingee chọn vô hiệu) chuyển Vé `valid` → `cancelled` với `cancel_reason = voided`, ghi audit.
 
 ### AD-29 — Link chia sẻ Vé
 
 - **Binds:** FR-22, FR-23, UJ-1; `ticketing`
 - **Prevents:** Mỗi người build tự mở một đường công khai `/tickets/:id` đoán được và không hết hạn.
 - **Rule:** Mỗi Vé có `share_token` 128 bit khó đoán, suy ra bằng khóa bí mật, DB chỉ lưu hash; chủ Vé tạo lại được, tạo lại thì link cũ mất hiệu lực. `GET /v1/shared-tickets/:token` không cần đăng nhập (`shareScope`), trả Mã QR vé, tên Sự kiện, Hạng vé, số thứ tự Vé và trạng thái; không trả SĐT, email hay tên người mua. Token sai, Vé đã hủy, Sự kiện đã hủy hoặc quá `effective_end_at` → `404` chung. Email gửi Vé (FR-23) dùng link này. Người nhận link không thấy Vé trong "Vé của tôi" của mình.
-- **Token (Mason, 11/11/2026, Story 3.8):** token = 16 byte đầu của HMAC-SHA256(khóa con, `share:<ticketId>:<share_version>`), base64url (22 ký tự). Khóa con = HMAC-SHA256(khóa `TICKET_QR_KEYS` phiên bản `tickets.qr_key_version` của Vé, nhãn riêng), tách miền với chữ ký Mã QR vé (AD-16); không thêm biến env. DB lưu `share_token_hash` (SHA-256, unique) và `share_version` (bắt đầu 1); máy chủ tính lại token khi cần (Trang Đơn của chủ Vé, worker email), nên chia sẻ lặp ra cùng một link. "Tạo lại link" (`POST /v1/me/tickets/:ticketId/share-link`, chỉ chủ Vé, audit `ticket.share_link_regenerated`) tăng `share_version` và ghi hash mới trong cùng một `UPDATE`; Mã QR vé không đổi. Lộ DB không lộ link.
+- **Token (Mason, 11/11/2026, Story 3.8):** token = 16 byte đầu của HMAC-SHA256(khóa con, `share:<ticketId>:<share_version>`), base64url (22 ký tự). Khóa con = HMAC-SHA256(khóa `TICKET_QR_KEYS` phiên bản `tickets.qr_key_version` của Vé, nhãn riêng), tách miền với chữ ký Mã QR vé (AD-16); không thêm biến env. DB lưu `share_token_hash` (SHA-256, unique) và `share_version` (bắt đầu 1); máy chủ tính lại token khi cần (Trang Đơn của chủ Vé, worker email), nên chia sẻ lặp ra cùng một link. "Tạo lại link" (`POST /v1/me/tickets/:ticketId/share-link`, chỉ chủ Vé, audit `ticket.share_link_regenerated`) tăng `share_version` và ghi hash mới trong cùng một `UPDATE`; Mã QR vé không đổi. Lộ DB không lộ link. Hệ quả: token buộc vào khóa QR của Vé. Gỡ một phiên bản khóa khỏi `TICKET_QR_KEYS` làm hỏng mọi link chia sẻ của Vé ký bằng khóa đó (route công khai trả `404` chung); ký lại Vé sang khóa mới cũng đổi token, nên link cũ, kể cả trong email đã gửi, không còn khớp. Quy trình xoay khóa (Story 4.7) phải tính cả link chia sẻ.
 - **Link web:** `{WEB_ORIGIN}/xem-ve#<token>` (dựng bằng `sharedTicketUrl` của contracts). Token nằm sau `#` nên không tới server web, không vào log web, `Referer` hay ảnh xem trước của ứng dụng chat; trang chạy ở trình duyệt, gọi API không kèm cookie, `noindex`, `referrer: no-referrer`. API vẫn nhận token trong đường dẫn: log request của api che đoạn token.
 
 ### AD-30 — Lời mời CTV
@@ -535,7 +544,7 @@ erDiagram
 | Token, Tạm ngừng bán (FR-15, FR-34) | `organizer`, `tingee`, `integration` | AD-9, AD-21, AD-32 |
 | Thanh toán qua Gateway, màn Thành công (FR-16–FR-18) | `ordering`, `apps/web` | AD-4, AD-6, AD-17 |
 | IPN, Đối soát bù, Cần xử lý (FR-19–FR-21) | `payment` | AD-1, AD-3, AD-7, AD-8 |
-| Vé, Vé của tôi, link chia sẻ, email, Social Ticket Card (FR-22–FR-25) | `ticketing`, `integration`, `apps/web` | AD-1, AD-12, AD-14, AD-16, AD-29, AD-35 |
+| Vé, Vé của tôi, link chia sẻ, email, Social Ticket Card (FR-22–FR-25) | `ticketing`, `ordering` (email Vé), `apps/web` | AD-1, AD-12, AD-14, AD-16, AD-29, AD-35 |
 | Check-in, CTV, tra tay, thời gian thực (FR-26–FR-30) | `checkin`, `ticketing` | AD-14, AD-15, AD-17, AD-30, AD-35 |
 | Dashboard, CSV, Sheets (FR-31, FR-32) | `reporting`, `integration` | AD-23, AD-33, AD-34 |
 | Hủy Sự kiện, danh sách hoàn tiền (FR-33) | `flows`, `reporting` | AD-27, AD-28 |

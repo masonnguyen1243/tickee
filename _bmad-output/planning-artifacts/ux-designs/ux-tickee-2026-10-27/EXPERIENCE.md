@@ -2,7 +2,7 @@
 title: Tickee
 status: final
 created: 2026-10-27
-updated: 2026-11-09
+updated: 2026-11-13
 sources:
   - ../../prds/prd-tickee-2026-10-27/prd.md
   - ../../prds/prd-tickee-2026-10-27/addendum.md
@@ -170,7 +170,7 @@ Hành vi. Spec hình ảnh ở `DESIGN.md` › Components (hoặc mặc định 
 | `countdown-chip` | Trang Đơn, `order-card` | Đếm tới hạn link theo `serverNow` (không theo đồng hồ máy). Về 0 mà Đơn vẫn chờ → "Đang xác nhận thanh toán", **không** tự chuyển Hết hạn; chỉ hiện Hết hạn khi máy chủ báo (AD-4). Không nhấp nháy. |
 | `recipient-trust-block` | Trang Đơn | Tĩnh; hiện "Tiền chuyển thẳng cho {BTC}" kèm tên chủ tài khoản và ngân hàng của tài khoản nhận tiền của Đơn, ngay khi màn mở. Trang Tingee hiển thị tên người nhận nào đang chờ Tingee trả lời (Architecture Open Questions); có câu trả lời thì chỉnh copy cho khớp. |
 | `reassurance-line` | Trang Đơn | Xuất hiện thay dòng "Đang chờ thanh toán" sau một khoảng chờ (`[ASSUMPTION]` ~2 phút, khớp mốc Đối soát bù FR-20 — Open Questions #14); copy ở State Patterns › Chờ lâu. Thông báo cho trình đọc màn hình (`aria-live="polite"`). |
-| `ticket-card` | Thành công, Chi tiết Vé | Mở Chi tiết Vé → tăng độ sáng màn hình nếu trình duyệt cho phép `[ASSUMPTION]`. Chia sẻ từng Vé bằng link hoặc ảnh (FR-22). |
+| `ticket-card` | Thành công, Chi tiết Vé | Mở Chi tiết Vé → giữ màn hình không tối bằng Screen Wake Lock nếu trình duyệt cho phép (không có API chỉnh độ sáng; spec 3.9). Chia sẻ từng Vé bằng link hoặc ảnh (FR-22). |
 | `social-ticket-card` | Chi tiết Vé (nút "Tải ảnh Story") | Tạo ảnh tại chỗ rồi lưu/chia sẻ qua Web Share API (fallback tải ảnh). Ảnh **không bao giờ chứa Mã QR vé** hay thông tin check-in được (FR-25). Chỉ hiện với Vé hợp lệ; Vé Đã hủy không có nút `[ASSUMPTION]`. Đang tạo ảnh → spinner trong nút; lỗi → toast "Chưa tạo được ảnh. Thử lại." `[ASSUMPTION]`. |
 | `order-card` | Vé của tôi › Đơn đang chờ | Chờ thanh toán: đếm ngược theo `serverNow`; "Tiếp tục thanh toán" mở Trang Đơn của đúng Đơn đó (không tạo Đơn mới); về 0 → "Đang xác nhận thanh toán", rời nhóm chờ khi máy chủ báo Hết hạn hoặc Đã thanh toán. "BTC đang kiểm tra thanh toán": không hành động chính, hiện kênh liên hệ BTC (SĐT, email BTC đã nhập). Đã hủy: hiện kênh liên hệ BTC. Không bao giờ có QR. Tự cập nhật khi trạng thái Đơn đổi (Đơn được duyệt → thành Vé trong nhóm hiệu lực). |
 
@@ -326,7 +326,7 @@ Minh họa: [Vé của tôi](mockups/key-success-ticket.html) (mục 3).
 | Sự kiện bị khóa (góc nhìn BTC) | Tổng quan Sự kiện | `status-banner` danger "Sự kiện bị khóa — ngừng nhận Đơn."; Vé đã phát vẫn check-in được trừ khi Quản trị Tingee vô hiệu (`[ASSUMPTION]` kế thừa PRD (FR-35)). Nút "Mở bán"/"Ẩn" tắt kèm lý do. |
 | Mất mạng | Dashboard | Toast một lần "Mất kết nối. Đang thử lại…"; số liệu real-time giữ giá trị cuối + nhãn "Cập nhật lúc HH:MM" `[ASSUMPTION]`. |
 | Owner chưa bật 2FA | Danh sách Sự kiện của BTC | Thẻ gợi ý có thể đóng "Bật xác thực hai lớp để bảo vệ tài khoản nhận tiền." + "Bật ngay" → Bảo mật tài khoản. Không chặn thao tác. Không dùng `status-banner` (banner đi qua `reporting.notices`, Story 2.5). |
-| Sau khi Hủy Sự kiện | Sự kiện (BTC) | `status-badge` "Đã hủy"; `status-banner` danger trên Tổng quan "Sự kiện đã hủy · {n} Đơn cần hoàn tiền" + "Xuất danh sách hoàn tiền"; tab Đơn lọc sẵn Đơn Đã thanh toán chưa "Đã hoàn tay"; mọi thao tác bán tắt (FR-33). Xem Flow 4. |
+| Sau khi Hủy Sự kiện | Sự kiện (BTC) | `status-badge` "Đã hủy"; `status-banner` danger trên Tổng quan "Sự kiện đã hủy · {n} Đơn cần hoàn tiền" + "Xuất danh sách hoàn tiền"; tab Đơn lọc sẵn Đơn Đã thanh toán chưa "Đã hoàn tay"; khoản tiền đang ở hàng Cần xử lý của Sự kiện (lệch số tiền, về muộn, trả trùng, về sau khi hủy) cũng nằm trong danh sách hoàn tiền và được đánh dấu "Đã hoàn tay" từ hàng Cần xử lý (Story 4.4); mọi thao tác bán tắt (FR-33, AD-28). Xem Flow 4. |
 | Đã hoàn tay hết | Sự kiện (BTC) | Banner đổi sang neutral "Đã hoàn tay mọi Đơn." và có thể đóng `[ASSUMPTION]`. |
 
 ### Tài khoản (mọi vai)
