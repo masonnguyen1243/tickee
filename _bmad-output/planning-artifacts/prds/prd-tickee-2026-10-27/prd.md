@@ -2,7 +2,7 @@
 title: Tickee
 status: final
 created: 2026-10-27
-updated: 2026-11-09
+updated: 2026-11-13
 ---
 
 # PRD: Tickee — MVP v1
@@ -396,7 +396,7 @@ Mỗi Vé trong Đơn đã thanh toán có một Mã QR vé riêng được ký 
 **Hệ quả:**
 - Đơn có N Vé thì sinh ra N Mã QR vé khác nhau. Mỗi Mã QR vé check-in độc lập.
 - Người mua chia sẻ từng Vé cho người đi cùng, bằng cách gửi link Vé hoặc ảnh Vé. `[ASSUMPTION: MVP không có chuyển nhượng Vé sang Tài khoản Tickee khác]`
-- Link Vé chứa mã ngẫu nhiên, không đoán được. Chủ Vé tạo lại link được; link cũ mất hiệu lực. Người mở link không cần đăng nhập, chỉ thấy Vé đó (Mã QR vé, Sự kiện, Hạng vé, số thứ tự Vé, trạng thái), không thấy SĐT, email hay tên Người mua. Vé đã hủy, quá mốc kết thúc hoặc link sai đều báo "không tìm thấy" như nhau (AD-29).
+- Link Vé chứa mã 128 bit không đoán được, máy chủ tính bằng khóa bí mật, nên chia sẻ lặp lại ra cùng một link. Chủ Vé tạo lại link được; link cũ mất hiệu lực. Người mở link không cần đăng nhập, chỉ thấy Vé đó (Mã QR vé, Sự kiện, Hạng vé, số thứ tự Vé, trạng thái), không thấy SĐT, email hay tên Người mua. Vé đã hủy, quá mốc kết thúc hoặc link sai đều báo "không tìm thấy" như nhau (AD-29).
 - Người mua không tra được Vé theo SĐT.
 
 #### FR-23: Gửi Vé qua email
@@ -484,8 +484,8 @@ Khi Owner hoặc Admin hủy Sự kiện, hệ thống ngừng bán, vô hiệu 
 
 **Hệ quả:**
 - Sau khi hủy, quét Vé của Sự kiện này đều báo "vé không hợp lệ".
-- Danh sách cần hoàn tiền gồm Người mua, SĐT, email, số tiền đã trả và mã Đơn.
-- BTC tự chuyển hoàn tiền ngoài hệ thống rồi đánh dấu từng Đơn là "Đã hoàn tay".
+- Danh sách cần hoàn tiền gồm Người mua, SĐT, email, số tiền đã trả và mã Đơn, cho mọi khoản tiền đã về mà chưa hoàn: Đơn đã thanh toán, và các khoản về mà không thành Vé (lệch số tiền, về muộn, trả trùng), dù về trước hay sau khi hủy (AD-28).
+- BTC tự chuyển hoàn tiền ngoài hệ thống rồi đánh dấu từng khoản là "Đã hoàn tay".
 
 #### FR-34: Token
 Owner xem số dư Token, hạn mức âm hoặc hạn mức trả sau do Tingee cấp, đặt ngưỡng cảnh báo và bấm mua thêm Token. Admin chỉ xem được.

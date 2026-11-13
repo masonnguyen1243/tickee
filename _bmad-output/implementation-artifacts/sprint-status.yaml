@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-12-2026 19:29
+last_updated: 11-13-2026 08:37
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -347,8 +347,16 @@ action_items:
       là nguồn sự thật; sơ đồ spine payment→organizer; bảng sở hữu email (B2, D1,
       E1, E5)"
     owner: "Mason"
-    status: open
+    status: in-progress
     ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
+    note: "Phần tài liệu xong qua sprint-change-proposal-2026-11-13-doi-chieu-spec-epic-3.md
+      (Mason duyệt 13/11): epics.md có luật nguồn đúng (story done thì spec + spine
+      thắng) và sửa 7 điểm lệch của 3.3/3.4/3.6/3.8/3.9/3.10/FR-17; AD-28, AC 7.1/7.2,
+      PRD FR-33 và EXPERIENCE dùng danh sách hoàn tiền hai phần (Đơn paid_amount >
+      0 + mọi review_item open gắn Đơn của Sự kiện); spine thêm cạnh payment→organizer,
+      EmailTransport về platform và bảng email theo mô-đun; AD-29 và deferred-work
+      ghi hệ quả xoay khóa QR với link chia sẻ. Còn lại: vá D1 bằng spec nhỏ trước
+      Story 4.1 (sharedTicket thiếu khóa → 404, test Vé khóa cũ; proposal §4.6)"
   - id: "epic-3-retro-e3-6-ban-giao-deferred"
     epic: 3
     action: "E3-6 (trước Epic 4): ghi bàn giao có story nhận vào deferred-work.md:
@@ -357,8 +365,13 @@ action_items:
       trần Vé đang giữ), 4.7 (HTTP/2), 7.4 (test BTC bị khóa), polling Đơn expired,
       Wake Lock /xem-ve"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
+    note: "Xong qua sprint-change-proposal-2026-11-13-doi-chieu-spec-epic-3.md: deferred-work.md
+      có phần \"retrospective Epic 3 — bàn giao có story nhận (E3-6)\" với 11 mục,
+      mỗi mục một story nhận: 4.1 (B4, B5, C5 polling Đơn expired), 4.4/7.1/7.2/7.5
+      (C6), 5.8 (C2, D4, NFR-1 p95), 4.6 + 5.8 (A2 trần Vé đang giữ), 4.7 (C4 HTTP/2),
+      7.4 (B7), 5.3 (D5 Wake Lock /xem-ve)"
   - id: "epic-3-retro-e3-7-no-ky-thuat-truoc-epic-4"
     epic: 3
     action: "E3-7 (trước Epic 4): Trang Đơn ẩn QR và shareToken sau khi Sự kiện kết

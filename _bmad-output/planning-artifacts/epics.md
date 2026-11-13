@@ -17,6 +17,8 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 
 **Thứ tự hiệu lực khi các nguồn khác nhau:** Architecture Spine (28/10) được viết sau PRD và UX (27/10), và đã chủ động thay đổi một số điểm. Hai thay đổi chính là chuyển sang **Tingee Payment Gateway (redirect)** thay cho QR động/tĩnh tự render, và **không cho chọn tài khoản VietinBank làm tài khoản nhận tiền**. Khi PRD hoặc UX mâu thuẫn với Architecture về cơ chế kỹ thuật, story theo Architecture. Hành vi sản phẩm không bị Architecture đổi thì vẫn theo PRD/UX. Các điểm bị thay đổi được ghi ở mục "Điều chỉnh do Architecture" bên dưới. Từ 09/11/2026, PRD và UX đã được cập nhật theo các điểm này (Sprint Change Proposal 09/11/2026, E2-4).
 
+**Story đã xong (`done`):** Từ 13/11/2026 (E3-5), spec đã duyệt của story (`implementation-artifacts/spec-*.md`) và `ARCHITECTURE-SPINE.md` là nguồn đúng về hành vi đã triển khai. AC ở đây lệch với spec hoặc spine của story đã `done` thì spec và spine thắng. AC trong tài liệu này ràng buộc story chưa làm; story mới chạm hành vi đã ship thì đọc spine và spec của story đó. Lệch có chủ đích phát hiện lúc build được ghi trong spec (Boundaries, Design Notes); lần đối chiếu sau mỗi retro gom các lệch đáng kể về đây.
+
 ## Requirements Inventory
 
 ### Functional Requirements
@@ -206,7 +208,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 - UX-DR17: Màn `/orders/:code`: lấy trạng thái qua REST + `useLiveResource`, không tin tham số trên URL. Các trạng thái theo `buyerStatus`: `awaiting_payment` (đang chờ), `confirming` ("Đang xác nhận thanh toán" khi đồng hồ về 0), `paid` → Thành công, `expired` → Hết hạn, `under_review` → "BTC đang kiểm tra thanh toán", `event_cancelled`. Sau ~2 phút chờ thì hiện `reassurance-line`. Kiểm tra ngay khi `visibilitychange`. Mất mạng → dòng nhỏ trấn an.
 - UX-DR18: Màn Thành công: stage chứa wordmark, tên Sự kiện, "Vé của bạn đã sẵn sàng!", "Đã gửi Vé tới {email}". `ticket-card` đầu tiên chồng mép stage khoảng 30px với hiệu ứng trượt lên và rung nhẹ (tắt khi reduced motion). Mỗi Vé có "Chia sẻ Vé". Nút "Xem Vé của tôi". Thông báo `polite`.
 - UX-DR19: Màn Hết hạn: "Hết thời gian giữ chỗ. Chỗ đã được trả lại." + "Mua lại" + dòng phụ "Nếu bạn đã chuyển tiền, đừng chuyển lại".
-- UX-DR20: `ticket-card` dáng cuống vé (đường xé nét đứt + hai khuyết), khác hẳn màn thanh toán. Nhãn "Mã QR vé · đưa cho CTV ở cổng". QR tối thiểu 200×200. Đã check-in/Đã hủy → QR mờ (.25) + badge. Mở Chi tiết Vé thì tăng độ sáng màn hình nếu trình duyệt cho phép.
+- UX-DR20: `ticket-card` dáng cuống vé (đường xé nét đứt + hai khuyết), khác hẳn màn thanh toán. Nhãn "Mã QR vé · đưa cho CTV ở cổng". QR tối thiểu 200×200. Đã check-in/Đã hủy → QR mờ (.25) + badge. Mở Chi tiết Vé thì giữ màn hình không tối bằng Screen Wake Lock nếu trình duyệt cho phép (không có API chỉnh độ sáng; spec 3.9).
 - UX-DR21: Vé của tôi có ba nhóm (Vé còn hiệu lực · Đơn đang chờ · Lịch sử), Skeleton và empty-state không có nút khám phá. `order-card` không bao giờ có QR: Chờ thanh toán (đếm ngược + "Tiếp tục thanh toán" mở lại đúng Đơn), "BTC đang kiểm tra thanh toán" (liên hệ BTC), Đã hủy. Tự cập nhật khi trạng thái đổi.
 - UX-DR22: Chi tiết Vé qua link chia sẻ (AD-29): xem được không cần đăng nhập. Vé đã check-in → QR mờ + badge. Vé đã hủy hoặc hết hiệu lực, hay link sai → `empty-state` chung, không lộ thông tin. Chủ Vé tạo lại link được (link cũ mất hiệu lực).
 - UX-DR23: `social-ticket-card` 9:16 (1080×1920) trên nền stage. Không có QR, mã Vé, mã Đơn hay tên Người mua, không có hình cuống vé. Chỉ hiện với Vé hợp lệ. Spinner khi đang tạo ảnh; lỗi → toast "Chưa tạo được ảnh. Thử lại." Chia sẻ bằng Web Share API, fallback tải ảnh.
@@ -314,7 +316,7 @@ Owner tạo BTC, có thể bật 2FA (kèm mã khôi phục), mời Admin, liên
 
 ### Epic 3: Người mua mua Vé và nhận Vé ngay
 Người mua chọn Vé, đăng nhập, điền form, thanh toán qua Gateway, tự thấy "Thành công", nhận email, xem "Vé của tôi" và chia sẻ Vé. Sự kiện miễn phí đi trọn luồng. IPN xử lý đủ 7 nhánh AD-7 (tạo `review_item`), Người mua thấy "BTC đang kiểm tra thanh toán". Kết thúc bằng khung dashboard tối thiểu: `stat-card` doanh thu và "Đơn gần đây" realtime (không có bộ lọc, không CSV). Test đồng thời chạy trong CI.
-**FRs covered:** FR-3, FR-11, FR-12, FR-13, FR-14, FR-16, FR-17, FR-18, FR-19, FR-22, FR-23, FR-24, FR-31 (một phần)
+**FRs covered:** FR-3, FR-11, FR-12, FR-13, FR-14, FR-16, FR-18, FR-19, FR-22, FR-23, FR-24, FR-31 (một phần)
 **UX-DR chính:** UX-DR15–22, UX-DR35 (một phần)
 
 ### Epic 4: Thanh toán đáng tin khi có sự cố
@@ -1028,9 +1030,9 @@ So that tôi có vé vào cổng mà không cần thanh toán.
 **When** có người gửi Đơn tiếp
 **Then** báo "Hết vé" như Story 3.2
 
-**Given** Sự kiện miễn phí
+**Given** Đơn tổng 0đ, kể cả ở Sự kiện có Hạng vé có phí
 **When** một Người mua gửi thêm Đơn
-**Then** tổng số Vé của Người mua đó trên Sự kiện (cộng mọi Đơn `paid`) không vượt giới hạn Vé/Đơn của Sự kiện; vượt thì báo "Bạn đã nhận đủ số Vé tối đa cho Sự kiện này."; kiểm trong cùng transaction với bán có điều kiện
+**Then** số Vé trong các Đơn `paid` tổng 0đ của Người mua đó trên Sự kiện, cộng số Vé xin thêm, không vượt giới hạn Vé/Đơn của Sự kiện; Vé có phí không tính; vượt thì 409 `FREE_TICKET_LIMIT_REACHED` "Bạn đã nhận đủ số Vé tối đa cho Sự kiện này."; kiểm trong cùng transaction với bán có điều kiện *(Mason chốt 10/11, spec 3.3)*
 
 ### Story 3.4: Tạo link thanh toán Gateway và màn thanh toán
 
@@ -1042,10 +1044,11 @@ So that tôi yên tâm chuyển tiền.
 
 **Given** TX1 đã commit một Đơn có phí
 **When** server tạo link
-**Then** `tingee.createPaymentLink()` gọi `POST /v1/payment-gateway/create-link` ngoài transaction (timeout 5 giây), ký bằng credential của tài khoản nhận tiền mặc định, `vaAccountNumber` = VA của tài khoản mặc định (không gửi `merchantId`), `orderId` = mã Đơn, `amount` = `orders.total_amount`, `expireInMinute` = 15, `returnUrl` = `/orders/:code`; adapter ký timestamp UNIX ms (FR-16, AD-5, AD-6, AD-9)
+**Then** `tingee.createPaymentLink()` gọi `POST /v1/payment-gateway/create-link` ngoài transaction (timeout 5 giây), ký bằng credential của tài khoản nhận tiền mặc định, `vaAccountNumber` = VA của tài khoản mặc định (không gửi `merchantId`), `orderId` = mã Đơn, `amount` = `orders.total_amount`, `expireInMinute` = 15, `returnUrl` = `/orders/:code`; header `x-request-timestamp` dạng `yyyyMMddHHmmssSSS` giờ Việt Nam như các API Tingee khác (Tingee production trả `90` cho UNIX ms, 10/11) (FR-16, AD-5, AD-6, AD-9)
 **And** BTC không còn tài khoản nhận tiền nào → không tạo link, Hạng vé có phí "Tạm ngừng bán" (FR-5)
-**And** TX2 lưu link bằng `WHERE status='pending' AND payment_link IS NULL`, chụp `orders.payout_account_id`, đặt `expires_at` = hạn link do Tingee trả; checkout URL chỉ trả cho trình duyệt sau khi TX2 commit; p95 dưới 2 giây (NFR-1)
-**And** nếu TX2 cập nhật 0 dòng (job hết hạn 60 giây đã thắng) thì không trả checkout URL; API trả `ORDER_EXPIRED` và web hiện màn Hết hạn của Story 3.7; link Tingee đã tạo tự hết hạn sau 15 phút, tiền nếu vẫn về sẽ đi nhánh tiền về muộn của Story 3.6
+**And** TX2 lưu link bằng `WHERE status='pending' AND payment_link IS NULL`, chụp `orders.payout_account_id`, đặt `expires_at` = thời điểm giành lượt gọi (`payment_link_attempt_at`, đồng hồ DB) + 15 phút, vì Tingee không trả hạn link; checkout URL chỉ trả cho trình duyệt sau khi TX2 commit; p95 dưới 2 giây (NFR-1)
+**And** nếu TX2 cập nhật 0 dòng (job hết hạn 60 giây đã thắng) thì không trả checkout URL; API trả Đơn (`BuyerOrderView`) ở trạng thái `expired` thay vì mã lỗi, và web hiện màn Hết hạn của Story 3.7; link Tingee đã tạo tự hết hạn sau 15 phút, tiền nếu vẫn về sẽ đi nhánh tiền về muộn của Story 3.6
+**And** kết quả tạo link nằm ở `linkError` của Đơn (`provider_error` | `sales_paused` | `timeout` | null), lưu trong DB, nên tải lại trang vẫn hiện đúng màn (spec 3.4)
 
 **Given** Tingee trả lỗi rõ ràng (không phải timeout)
 **When** màn thanh toán hiện
@@ -1166,8 +1169,8 @@ So that không có khoản tiền nào về tài khoản mà không ai biết.
 
 **Given** `review_items`
 **When** tạo mục
-**Then** mỗi Đơn tối đa một mục `open` cho mỗi loại, **trừ** `duplicate_payment`: loại này unique theo `(order_id, type, payment_event_id)`, nên mỗi khoản trả trùng là một mục riêng và BTC hoàn đủ từng khoản
-**And** mục `duplicate_payment` và `unmatched` chỉ kết thúc bằng `refunded` hoặc `dismissed`
+**Then** mỗi khoản tiền (`payment_event_id`) có tối đa một mục; `amount_mismatch` và `orphan` có thêm ràng buộc tối đa một mục `open` mỗi Đơn mỗi loại; `duplicate_payment` và `event_cancelled` là một mục cho mỗi khoản (khoản trả thứ hai cho Đơn của Sự kiện đã hủy cũng vào `event_cancelled`, spec 3.6), nên BTC hoàn đủ từng khoản
+**And** mục `duplicate_payment`, `unmatched` và `event_cancelled` chỉ kết thúc bằng `refunded` hoặc `dismissed`
 **And** test tích hợp với Tingee fake phủ đủ 7 nhánh của bảng AD-7, cộng các trường hợp: trả trùng hai lần, Đơn `review` nhận thêm tiền, tiền về muộn nhiều Hạng vé thiếu chỗ một hạng, tiền về sau `effective_end_at`, `orderId` không theo định dạng mã Đơn Tickee, Đơn thuộc BTC khác BTC sở hữu `ipnKey`
 
 ### Story 3.7: Trang Đơn tự chuyển "Thành công" theo thời gian thực
@@ -1214,7 +1217,7 @@ So that mỗi người tự vào cổng bằng Vé của mình.
 
 **Given** mỗi Vé
 **When** được phát
-**Then** có `share_token` ngẫu nhiên 128 bit, DB chỉ lưu hash (AD-29)
+**Then** có token link chia sẻ 128 bit, là HMAC của `share:<ticketId>:<share_version>` bằng khóa con suy từ khóa `TICKET_QR_KEYS` phiên bản `qr_key_version` của Vé; DB chỉ lưu `share_token_hash`; máy chủ tính lại token khi cần, nên chia sẻ lặp ra cùng một link (AD-29, Mason 11/11)
 
 **Given** `markPaid` đã enqueue job email Vé
 **When** worker xử lý
@@ -1231,7 +1234,7 @@ So that mỗi người tự vào cổng bằng Vé của mình.
 **When** bấm "Chia sẻ Vé" trên `ticket-card`
 **Then** Web Share API chia sẻ link; fallback sao chép link kèm toast "Đã sao chép"
 **And** chủ Vé tạo lại được link; link cũ mất hiệu lực ngay
-**And** tạo lại link chỉ thu hồi đường xem, **không** đổi Mã QR vé; `Dialog` xác nhận ghi rõ "Ai đã thấy hoặc chụp mã QR vẫn có thể dùng mã để vào cổng." *(Câu hỏi mở cho Architecture: có thêm `qr_version` vào phần được ký của AD-16 để đổi được mã khi gửi nhầm hay không.)*
+**And** tạo lại link chỉ thu hồi đường xem, **không** đổi Mã QR vé; `Dialog` xác nhận ghi rõ "Ai đã thấy hoặc chụp mã QR vẫn có thể dùng mã để vào cổng." *(Đã chốt 11/11/2026: không thêm `qr_version`; đổi mã khi gửi nhầm chưa có ở MVP. Xem AD-16, AD-29.)*
 
 ### Story 3.9: Vé của tôi và Chi tiết Vé
 
@@ -1248,12 +1251,12 @@ So that tôi không bao giờ mất dấu Đơn hay Vé.
 
 **Given** Đơn `pending`
 **When** hiện trong nhóm Đơn đang chờ
-**Then** `order-card` (không bao giờ có QR) có đếm ngược theo `serverNow` + "Tiếp tục thanh toán" mở lại đúng Đơn đó, không tạo Đơn mới; đồng hồ về 0 thì thẻ hiện "Đang xác nhận thanh toán" (`confirming`) và vẫn ở nhóm; chỉ khi API trả `buyerStatus` = `expired` (qua `order_changed` hoặc REST) thẻ mới đổi "Hết hạn" rồi rời nhóm (AD-4, UX-DR17)
+**Then** `order-card` (không bao giờ có QR) có đếm ngược theo `serverNow` + "Tiếp tục thanh toán" mở lại đúng Đơn đó, không tạo Đơn mới; đồng hồ về 0 thì thẻ hiện "Đang xác nhận thanh toán" (`confirming`) và vẫn ở nhóm; chỉ khi API trả `buyerStatus` = `expired` (qua `order_changed` hoặc REST) thẻ mới đổi "Hết hạn" (không nút); API còn trả Đơn `expired` trong nhóm này 30 phút sau `expires_at` (đồng hồ DB), để tiền về muộn chuyển `paid` vẫn thấy được; quá mốc thì thẻ rời nhóm ở lần tải sau (AD-4, UX-DR17)
 **And** Đơn `under_review` hiện "BTC đang kiểm tra thanh toán" + kênh liên hệ BTC; Đơn bị từ chối hiện badge "Đã hủy" + liên hệ BTC; thẻ tự cập nhật qua `order_changed`
 
 **Given** Vé hợp lệ
 **When** mở Chi tiết Vé
-**Then** `ticket-card` + Mã QR vé đầy đủ; tăng độ sáng màn hình nếu trình duyệt cho phép; Vé đã check-in hiện QR mờ (.25) + badge "Đã check-in" (UX-DR20)
+**Then** `ticket-card` + Mã QR vé đầy đủ; giữ màn hình không tối bằng Screen Wake Lock khi đang hiện QR (trình duyệt không có API chỉnh độ sáng; không hỗ trợ hoặc bị từ chối thì bỏ qua, không báo lỗi); Vé đã check-in hiện QR mờ (.25) + badge "Đã check-in" (UX-DR20)
 
 **Given** `now()` vượt `effective_end_at` của Sự kiện (so tại request)
 **When** mở Vé của tôi
@@ -1272,12 +1275,13 @@ So that tôi không đến sai giờ, sai chỗ.
 
 **Acceptance Criteria:**
 
-**Given** Sự kiện đã phát ít nhất một Vé
+**Given** Sự kiện không ở `draft` hay `cancelled`, có ít nhất một Người mua (một `user_id` có Đơn `paid` của Sự kiện, tính cả Đơn 0đ), và sau khi sửa Sự kiện chưa kết thúc (`effective_end_at` mới > `now()` của DB)
 **When** Owner/Admin sửa thời gian hoặc địa điểm
-**Then** trước khi lưu, `Dialog` báo "Email sẽ được gửi tới {n} Người mua." (FR-7, UX-DR41)
+**Then** trước khi lưu, `Dialog` báo "Email sẽ được gửi tới {n} Người mua.", `n` lấy từ `GET /v1/orgs/:orgId/events/:eventId/buyer-count` theo cùng định nghĩa Người mua (FR-7, UX-DR41)
 **And** sau khi lưu, enqueue job email trong cùng transaction với khóa idempotent gồm phiên bản Sự kiện, để mỗi lần sửa gửi đúng một lượt (AD-12)
+**And** mỗi Người mua nhận một email dù có nhiều Đơn, gửi tới `buyer_email` của Đơn `paid` mới nhất của người đó (spec 3.10)
 
-**Given** Sự kiện chưa phát Vé nào, hoặc chỉ sửa trường khác
+**Given** Sự kiện chưa có Người mua nào, đã kết thúc sau khi sửa, hoặc chỉ sửa trường khác
 **When** lưu
 **Then** không gửi email
 
@@ -1950,7 +1954,7 @@ So that không ai mua thêm, Vé cũ không vào cổng được và mọi Ngư�
 **Given** đã xác nhận
 **When** gọi `flows.cancelEvent`
 **Then** trong một transaction: khóa dòng Sự kiện `FOR UPDATE` và chuyển `cancelled` bằng compare-and-set; Đơn `pending` → `cancelled` (nhả chỗ); Đơn `paid` → `cancelled` với `cancel_reason = event_cancelled`; mọi Vé `valid` (kể cả đã check-in) → `cancelled`; enqueue email cho từng Người mua có Vé; audit ghi lại (FR-33, AD-27, AD-28, NFR-5)
-**And** Đơn đang `review` giữ nguyên `review` và loại cũ; `review_item` đang `open` của Đơn đó vẫn mở, nút "Duyệt tay phát Vé" bị tắt (Story 4.4); Đơn có `paid_amount` > 0 vẫn nằm trong danh sách hoàn tiền của Story 7.2
+**And** Đơn đang `review` giữ nguyên `review` và loại cũ; `review_item` đang `open` của Đơn đó vẫn mở, nút "Duyệt tay phát Vé" bị tắt (Story 4.4); khoản tiền của mục đó nằm trong danh sách hoàn tiền của Story 7.2 (AD-28), vì Đơn `review` không ghi `paid_amount`
 
 **Given** Sự kiện đã hủy
 **When** người mua mở trang công khai, "Vé của tôi" hoặc link chia sẻ Vé
@@ -1973,21 +1977,21 @@ So that tôi không sót người nào và biết lúc nào đã hoàn hết.
 
 **Given** Sự kiện `cancelled`
 **When** mở dashboard của Sự kiện
-**Then** banner "{n} Đơn cần hoàn tiền" + "Xuất danh sách hoàn tiền"; `n` là truy vấn động: mọi Đơn có `paid_amount` > 0 của Sự kiện chưa `refunded`, kể cả Đơn có tiền về sau khi hủy (FR-33, UX-DR40, AD-28)
+**Then** banner "{n} Đơn cần hoàn tiền" + "Xuất danh sách hoàn tiền". Danh sách hoàn tiền là truy vấn động theo AD-28, mỗi khoản một dòng: (1) Đơn có `paid_amount` > 0 của Sự kiện chưa `refunded`; (2) mọi `review_item` còn `open` gắn Đơn của Sự kiện, mọi loại (`event_cancelled`, `amount_mismatch`, `orphan`, `duplicate_payment`), mở trước hay sau khi hủy, số tiền lấy từ `payment_events` của mục. `n` là số Đơn còn ít nhất một dòng (FR-33, UX-DR40, AD-28)
 
 **Given** bấm "Xuất danh sách hoàn tiền"
 **When** tải
-**Then** CSV gồm Người mua, SĐT, email, số tiền đã trả, mã Đơn, thời điểm thanh toán; cùng chuẩn CSV của Story 6.3 (UTF-8 BOM, chống CSV injection); audit ghi lại (FR-33)
+**Then** CSV mỗi khoản một dòng: Người mua, SĐT, email, số tiền, mã Đơn, thời điểm thanh toán; cùng chuẩn CSV của Story 6.3 (UTF-8 BOM, chống CSV injection); audit ghi lại (FR-33)
 
-**Given** một Đơn trong danh sách
+**Given** một dòng Đơn (phần 1) trong danh sách
 **When** bấm "Đã hoàn tay" và xác nhận
 **Then** Đơn → `refunded` bằng compare-and-set kèm `Idempotency-Key`, ghi người thực hiện và thời điểm; `n` giảm ngay (FR-33, AD-3, AD-31, NFR-11)
 
-**Given** mọi Đơn đã `refunded`
+**Given** danh sách không còn dòng nào
 **When** mở dashboard
 **Then** banner chuyển sang trạng thái "Đã hoàn tay hết" (UX-DR40)
 
-**And** `review_item` loại `event_cancelled` dùng chung thao tác "Đã hoàn tay" của Story 4.4, nên Đơn đó không bị tính hai lần
+**And** dòng `review_item` (phần 2) dùng chung thao tác "Đã hoàn tay" của Story 4.4 (mục → `resolved` `refunded`); một khoản không bao giờ vào cả hai phần, vì "Duyệt tay phát Vé" của 4.4 đóng mục và ghi `paid_amount` qua `markPaid` trong cùng transaction
 
 ### Story 7.3: Người mua báo cáo Sự kiện
 

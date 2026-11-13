@@ -370,6 +370,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md`
   summary: Story 4.7/4.6. Quy trình xoay khóa QR. Nếu gỡ khỏi `TICKET_QR_KEYS` một phiên bản khóa mà còn Vé đang dùng, thì `GET /v1/me/orders/:code` của các Đơn đó trả 500. Hiện chưa có lệnh tra phiên bản nào còn dùng, chưa kiểm lúc khởi động, cũng chưa có công cụ ký lại (`qr_key_version` vẫn sửa được để phục vụ việc này).
   evidence: Review 3.3 (BH) triage #8. `ticketsOfOrder` → `signTicketQr` ném lỗi khi thiếu khóa, đúng như thiết kế; README đã dặn giữ khóa cũ. Cần một runbook xoay khóa (`SELECT DISTINCT qr_key_version FROM tickets`), và tùy chọn kiểm lúc khởi động.
+- Ghi thêm (13/11/2026, retro Epic 3 D1, E3-5): phạm vi xoay khóa rộng hơn Trang Đơn. Token link chia sẻ (AD-29, `ticketing/share-token.ts`) là HMAC bằng khóa con suy từ khóa `qr_key_version` của Vé. (1) Gỡ một phiên bản khóa: route công khai `GET /v1/shared-tickets/:token` 500, Chi tiết Vé 500, job email Vé retry rồi vào dead-letter. Spec nhỏ trước 4.1 sửa route công khai về `404` chung và thêm test Vé khóa cũ (Sprint Change Proposal 13/11/2026 §4.6); Chi tiết Vé, Trang Đơn và email vẫn là lỗi cấu hình. (2) Ký lại bằng `UPDATE tickets SET qr_key_version = 2`: QR đúng nhưng `share_token_hash` vẫn là hash của token cũ, nên mọi link, kể cả trong email đã gửi, 404 im lặng. Runbook của 4.7 phải chọn một trong ba: giữ khóa cũ trong `TICKET_QR_KEYS` tới khi mọi Vé của nó qua `effective_end_at` (chỉ ngừng ký Vé mới bằng khóa đó); công cụ ký lại tính lại `share_token_hash` và gửi lại email Vé (link cũ chết); hoặc tách khóa link chia sẻ khỏi khóa QR (đổi AD-29). Kèm lệnh tra `SELECT qr_key_version, count(*) FROM tickets WHERE status = 'valid' GROUP BY 1`.
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md`
   summary: Story 3.9/7.5. `BuyerTicket` chưa có `status`/`checkedInAt`, và `ticketsOfOrder` không lọc Vé `cancelled`. Khi đã có luồng hủy hoặc vô hiệu Vé, Vé đã hủy vẫn hiện thẻ với QR quét được.
   evidence: Review 3.3 (BH, EC) triage #11. Hiện chưa có đường nào đặt `tickets.status = 'cancelled'`. Story làm hủy Vé (7.1/7.5) hoặc hiển thị Vé (3.9: đã check-in hay đã hủy thì QR mờ .25 + badge) phải thêm `status` vào contract và render đúng.
@@ -526,3 +527,41 @@ E3-7 (retro Epic 3) gom 4 việc ship riêng được. Mason chọn tách ngày 
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-3-e3-7-e2-e3-tach-orders-service-va-dong-ho-db.md`
   summary: Mục hoãn của review D3 ở trên (test giả `Date` của app cho `event/public-event.ts` › `endedNow`, ghi "nên làm cùng mục gom đồng hồ DB của E3-7") vẫn mở. Việc gom đồng hồ DB của E3-7 chỉ gom câu `SELECT now()`/`SELECT clock_timestamp()` đứng riêng về `platform/db/clock.ts`; `endedNow` là `now()` viết nội tuyến, spec giữ nguyên nên test đó không thuộc phạm vi.
   evidence: Review E3-7 (E2 + E3) BH triage #3. Chưa có story nhận; nên làm khi một story Epic 4 chạm `endedNow` hoặc luật "Kết thúc" (E3-2, Story 4.2).
+
+## Deferred from: retrospective Epic 3 (2026-11-12) — bàn giao có story nhận (E3-6)
+
+Mỗi mục dưới đây có đúng một story nhận. Story nhận đọc mục này khi lập spec. Nguồn: `_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md`; ghi theo `_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-13-doi-chieu-spec-epic-3.md`.
+
+- source_spec: `_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md`
+  summary: Story 4.1 (B4). IPN `expired`/`canceled` nhả chỗ ngay, bỏ qua 5 phút ân hạn mà job (c) dành cho tiền về sát hạn. 4.1 quyết: giữ nhả ngay, hay để Đối soát bù tra lại trước khi nhả.
+  evidence: `payment/ipn-processor.ts:293-297` so với job (c) trong `ordering/order-jobs.ts` (chạy ở `expires_at` + 5 phút). Retro Epic 3 B4 (LOW).
+- source_spec: `_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md`
+  summary: Story 4.1 (B5). `IpnProcessor.process` hard-code nguồn `ipn`; Đối soát bù gọi `markPaid` nguồn `reconciliation` phải truyền nguồn vào. Chống lặp giữa IPN và Đối soát bù dựa vào việc API tra trạng thái trả đúng `providerTransactionCode` như IPN (unique `(organization_id, provider_transaction_code)` của `payment_events`).
+  evidence: `payment/ipn-processor.ts:274`. Xác nhận dạng mã giao dịch bằng UAT Tingee (E3-3) hoặc câu trả lời của Tingee (action item Epic 4 về API tra trạng thái theo `orderId`). Retro Epic 3 B5 (LOW).
+- source_spec: `_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md`
+  summary: Story 4.1 (C5). Trang Đơn thôi polling khi Đơn `expired`, trong khi `expired` còn chuyển được sang `paid`/`review` khi tiền về muộn. 4.1 tra tiếp Đơn `expired` tới 24 giờ, nên Trang Đơn (và thẻ "Hết hạn" của Vé của tôi, 30 phút) cần vẫn nhận được thay đổi trong cửa sổ đó.
+  evidence: `apps/web/lib/order/live.ts:19-21`. Câu "Nếu bạn đã chuyển tiền, đừng chuyển lại — kiểm tra Vé của tôi hoặc email." giảm tác hại. Retro Epic 3 C5 (LOW).
+- source_spec: `_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md`
+  summary: Story 4.4, 7.1, 7.2, 7.5 (C6). Mọi nơi mới ghi `orders.status` (4.4 "Từ chối" và "Duyệt tay phát Vé"; 7.1 hủy Sự kiện; 7.2 "Đã hoàn tay" → `refunded`) phải phát `order_changed` và `event_orders_changed` trong cùng `tx` (AD-17). Hiện việc này chỉ dựa vào quy ước. Cân nhắc hàm chung `transitionOrder(tx, …)` phát tín hiệu sẵn. Riêng 7.5: doanh thu Tổng quan phải bỏ Đơn có toàn bộ Vé `voided`.
+  evidence: `eventRevenueOf` (`ordering/event-overview-read.ts:17-29`) cộng mọi Đơn `paid`, chưa biết Vé `voided`; `epics.md` Story 7.5. Các mục 4.4 (đóng `review_item` không đổi Đơn) và 7.1 (tín hiệu khi hủy) ở phần "build of spec-3-7" và "build of spec-3-11" là trường hợp riêng của mục này. Retro Epic 3 C6 (LOW).
+- source_spec: `_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md`
+  summary: Story 5.8 (C2). Đo trong bài test tải: commit có `NOTIFY` bị Postgres tuần tự hóa, và một số transaction vẫn `NOTIFY` khi đang giữ khóa dòng `ticket_type_inventory`; 3.11 thêm một commit `NOTIFY` cho mỗi Đơn. Nếu nghẽn thì dời `NOTIFY` ra sau khóa nóng hoặc gom.
+  evidence: `ordering/order-changed.ts:36-40` (đã cấm `NOTIFY` trong TX1 vì lý do này); `notifyOrderChanged` ở `mark-paid.ts:134,336`, `order-jobs.ts:117,142`, `payment-link.ts:251`; `announceOrderCreated` ở `orders.service.ts:161`. Spec 3.11 triage #2 chỉ xét round trip. Chưa đo trên PG 18. Retro Epic 3 C2 (MEDIUM, chưa đo).
+- source_spec: `_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md`
+  summary: Story 5.8 (D4). Fan-out email đổi giờ/địa điểm gửi tuần tự, SMTP không pool. Đo với N lớn trên Mailpit; nếu chậm thì bật pool hoặc chạy job con song song.
+  evidence: vòng gửi ở `ordering/event-change-email-jobs.ts:203`, `createTransport` không pool ở `platform/email/smtp-transport.ts:15`. Retro Epic 3 D4 (LOW, chưa đo).
+- source_spec: `_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md`
+  summary: Story 5.8 (NFR-1). AC 3.4 "p95 tạo link dưới 2 giây" chưa có test hay ghi chép nào. Đo trong 5.8 (Tingee fake có độ trễ cấu hình được, đo từ gửi Đơn tới khi có checkout URL) và ghi vào báo cáo tải.
+  evidence: Spec 3.4 và các mục trước của file này không nhắc. Retro Epic 3 E5.
+- source_spec: `_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md`
+  summary: Story 4.6 và 5.8 (A2). Giữ chỗ hàng loạt bằng nhiều tài khoản OTP. Server tạo link ngay sau TX1, nên mỗi Đơn có phí giữ chỗ khoảng 20 phút (15 phút link + 5 phút ân hạn), không phải 60 giây. Giới hạn hiện có theo user và theo IP; chưa có trần số Vé đang giữ. Cần quyết trước 4.6: trần Vé đang giữ (theo IP hoặc theo Sự kiện), hay chỉ tạo link khi Người mua bấm "Thanh toán". 4.6 nhận phần cảnh báo, 5.8 đo.
+  evidence: Retro Epic 3 A2 (MEDIUM) và câu hỏi mở 5. Chưa có trong bảng triage của 3.2/3.4.
+- source_spec: `_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md`
+  summary: Story 4.7 (C4). Checklist deploy: edge phục vụ API bằng HTTP/2. Ba loại trang giữ SSE dài hạn tới cùng origin API (Trang Đơn, Vé của tôi, Tổng quan), mà HTTP/1.1 chỉ cho 6 kết nối mỗi origin.
+  evidence: Spec 3.7 #8, #28 reject với tiền đề "≥ 6 tab Trang Đơn"; 3.9 và 3.11 thêm hai loại trang. Retro Epic 3 C4 (LOW).
+- source_spec: `_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md`
+  summary: Story 7.4 (B7). Nối cờ "BTC bị khóa" thật vào `organizationLocked` và thêm ca test nhánh "BTC bị khóa" của AD-7 bước 6 tại `markPaid`.
+  evidence: `event/sale-rules.ts:20-22` (`organizationLocked` luôn `false`), `ordering/mark-paid.ts:266`. Retro Epic 3 B7 (LOW).
+- source_spec: `_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md`
+  summary: Story 5.3 (D5). `/xem-ve` (người nhận link chia sẻ) không giữ màn hình sáng, khác Chi tiết Vé. Người đi cùng thường là người đưa QR ở cổng. Khi làm màn quét, thêm Screen Wake Lock cho `/xem-ve` bằng hook của 3.9. Chấp nhận thiếu ở MVP nếu 5.3 không kịp.
+  evidence: Hook Wake Lock ở `apps/web/lib/tickets/wake-lock.ts` (spec 3.9). Đúng phạm vi spec 3.8. Retro Epic 3 D5 (LOW).
