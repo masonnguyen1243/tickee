@@ -28,6 +28,7 @@ const CONFIRMING = 'Đang xác nhận thanh toán. Nếu bạn đã trả, vé s
 const REASSURANCE = 'Nếu bạn đã chuyển, vé sẽ về trong vài phút — đừng chuyển lại.';
 const OFFLINE = 'Mất kết nối — vé vẫn được gửi qua email và Vé của tôi.';
 const SUCCESS = 'Vé của bạn đã sẵn sàng!';
+const EVENT_ENDED_UNPAID = 'Sự kiện đã kết thúc. Đơn này không thanh toán được nữa.';
 
 const ticketId = (n: number) => `019a3b2c-0b00-7abc-8def-${String(n).padStart(12, '0')}`;
 const ticket = (n: number, count: number) => ({
@@ -422,6 +423,61 @@ test.describe('Màn theo buyerStatus', () => {
       await expect(ended.getByRole('link', { name: 'Xem Vé của tôi' })).toHaveAttribute('href', '/tickets');
       expect(await vibrations()).toEqual([]);
     }
+  });
+
+  test('E3-2: Đơn chưa trả mà Sự kiện đã kết thúc (chờ tiền, xác nhận, hết hạn) → câu đã kết thúc + liên hệ BTC; không màn thanh toán, không "Thử lại", không "Mua lại"', async ({
+    page,
+  }) => {
+    const api = await mockOrderApi(page);
+    // Trước Kết thúc (hay khi Sự kiện chỉ Ẩn: `ended` vẫn false, máy chủ vẫn trả link): màn thanh toán như cũ.
+    await page.goto(ORDER_PATH);
+    await expect(page.locator('[data-slot="order-payment"]')).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Thanh toán/ })).toBeVisible();
+    await expect(page.locator('[data-slot="order-event-ended"]')).toHaveCount(0);
+
+    // Sau Kết thúc: máy chủ thôi trả link (`checkoutUrl: null`); Trang Đơn đổi màn ở lần tải sau.
+    const ended = { ...order().event, ended: true };
+    const noLink = { ...order().payment, checkoutUrl: null };
+    const cases = [
+      order({ event: ended, payment: noLink }),
+      order({ event: ended, payment: { ...noLink, linkError: 'provider_error' } }),
+      order({ buyerStatus: 'confirming', event: ended, payment: noLink }),
+      order({ buyerStatus: 'expired', event: ended, payment: noLink }),
+      order({ buyerStatus: 'expired', event: ended, payment: { ...noLink, linkError: 'sales_paused' } }),
+    ];
+    for (const next of cases) {
+      api.state.order = next;
+      await page.reload();
+      const block = page.locator('[data-slot="order-event-ended"]');
+      await expect(block.locator('[data-slot="status-banner"]')).toHaveText(EVENT_ENDED_UNPAID);
+      await expect(page.locator('[data-slot="order-status-announcement"]')).toHaveText(EVENT_ENDED_UNPAID);
+      await expectContact(page);
+      await expect(page.locator('[data-slot="order-payment"]')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /^Thanh toán/ })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Thử lại' })).toHaveCount(0);
+      await expect(page.getByRole('link', { name: 'Mua lại' })).toHaveCount(0);
+      await expect(page.getByRole('link', { name: 'Về trang Sự kiện' })).toHaveCount(0);
+      await expect(page.getByText('Hết thời gian giữ chỗ.', { exact: false })).toHaveCount(0);
+      await expect(page.locator('[data-slot="order-code"]')).toHaveText(CODE);
+      await expect(page.locator('[data-slot="order-summary"]')).toBeVisible();
+    }
+  });
+
+  test('E3-2: under_review mà Sự kiện đã kết thúc → vẫn màn của under_review ("BTC đang kiểm tra thanh toán" + liên hệ BTC), không khối đã kết thúc', async ({
+    page,
+  }) => {
+    const api = await mockOrderApi(page);
+    api.state.order = order({
+      buyerStatus: 'under_review',
+      event: { ...order().event, ended: true },
+      payment: { ...order().payment, checkoutUrl: null },
+    });
+    await page.goto(ORDER_PATH);
+    await expect(banner(page)).toHaveText('BTC đang kiểm tra thanh toán');
+    await expect(page.locator('[data-slot="order-status-announcement"]')).toHaveText('BTC đang kiểm tra thanh toán');
+    await expectContact(page);
+    await expect(page.locator('[data-slot="order-event-ended"]')).toHaveCount(0);
+    await expect(page.getByText(EVENT_ENDED_UNPAID)).toHaveCount(0);
   });
 
   test('buyerStatus lạ (kể cả kèm Vé) → "Chúng tôi đang cập nhật trạng thái Đơn." + liên hệ BTC, không QR, không lỗi', async ({

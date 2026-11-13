@@ -4,7 +4,9 @@ import {
   EVENT_SLUG_BASE_MAX,
   EventBuyerCount,
   EventDraftInput,
+  EventPendingPaymentCount,
   eventBuyerCountApiPath,
+  eventPendingPaymentCountApiPath,
   isEventYearInRange,
   effectiveEndAt,
   eventIsoToLocal,
@@ -296,5 +298,12 @@ describe('báo Người mua khi đổi giờ hoặc địa điểm (Story 3.10)'
     expect(SendEventChangeEmailPayload.parse({ eventId, version: 1 })).toEqual({ eventId, version: 1 });
     expect(SendEventChangeEmailPayload.safeParse({ eventId, version: 0 }).success).toBe(false);
     expect(SendEventChangeEmailPayload.safeParse({ eventId, version: 1, userId: 'x' }).success).toBe(false);
+  });
+
+  it('EventPendingPaymentCount và đường API (E3-2)', () => {
+    expect(EventPendingPaymentCount.parse({ orders: 2 })).toEqual({ orders: 2 });
+    expect(EventPendingPaymentCount.safeParse({ orders: -1 }).success).toBe(false);
+    expect(EventPendingPaymentCount.safeParse({ orders: 1.5 }).success).toBe(false);
+    expect(eventPendingPaymentCountApiPath('o1', 'e1')).toBe('/orgs/o1/events/e1/pending-payment-count');
   });
 });

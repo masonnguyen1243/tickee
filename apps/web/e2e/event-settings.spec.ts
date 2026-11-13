@@ -8,7 +8,8 @@ import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
  * Tab "Cài đặt" của Sự kiện (Story 2.12): form thông tin (dùng chung với wizard bước 1), Ẩn / Hiện lại (không hỏi xác
  * nhận) và "Kết thúc" qua `Dialog`. API giả có trạng thái, luật trạng thái như server. Story 3.10: lưu lệnh đổi giờ hoặc
  * địa điểm của Sự kiện đã mở bán, chưa kết thúc → đếm Người mua (`GET …/buyer-count`) rồi `Dialog` "Email sẽ được gửi tới
- * {n} Người mua." trước khi `PATCH`.
+ * {n} Người mua." trước khi `PATCH`. E3-2: bấm "Kết thúc" → đếm Đơn đang chờ thanh toán (`GET …/pending-payment-count`)
+ * rồi mới mở `Dialog` nêu đủ hậu quả (và số Đơn đó khi > 0).
  */
 
 test.use({ timezoneId: 'America/New_York' });
@@ -41,8 +42,14 @@ type State = {
   failCount?: boolean;
   /** Chặn phản hồi `GET …/buyer-count` tới khi promise xong. */
   holdCount?: Promise<void>;
-  /** Session hết hạn: `GET …/buyer-count` và `GET /identity/me` trả 401. */
+  /** Session hết hạn: `GET …/buyer-count`, `GET …/pending-payment-count` và `GET /identity/me` trả 401. */
   signedOut?: boolean;
+  /** `GET …/pending-payment-count` trả số này (E3-2). */
+  pendingOrders: number;
+  /** `GET …/pending-payment-count` trả 500. */
+  failPendingCount?: boolean;
+  /** Chặn phản hồi `GET …/pending-payment-count` tới khi promise xong. */
+  holdPendingCount?: Promise<void>;
   /** Chặn phản hồi `PATCH` tới khi promise xong. */
   holdPatch?: Promise<void>;
   /** Chặn phản hồi Ẩn/Hiện lại/Kết thúc tới khi promise xong. */
@@ -56,6 +63,12 @@ type State = {
 };
 
 const NOT_STARTED_MESSAGE = 'Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.';
+/** Câu chữ "Kết thúc" (E3-2, C2). */
+const END_HINT = 'Kết thúc sớm: ngừng nhận Đơn và Vé hết hiệu lực ngay, không mở lại được.';
+const END_CONSEQUENCES =
+  'Ngừng nhận Đơn ngay, không mở lại được. Từ lúc này Vé hết hiệu lực: không check-in được, CTV hết quyền, Vé rời “Vé của tôi” và link chia sẻ Vé ngừng hoạt động.';
+const pendingNotice = (n: number) =>
+  `Còn ${n} Đơn đang chờ thanh toán. Người mua đang ở trang thanh toán vẫn có thể chuyển tiền trong tối đa 15 phút; khoản đó không thành Vé và bạn sẽ phải hoàn tay.`;
 
 const EFFECTIVE_END = '2099-11-16T23:59:59+07:00';
 
@@ -89,6 +102,7 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
     description: null,
     endedManuallyAt: null,
     buyers: 0,
+    pendingOrders: 0,
     ...initial,
   };
   await mockIdentityApi(page, { 'GET /identity/me': () => (state.signedOut ? unauthenticated() : me(CONSENTED)) });
@@ -122,6 +136,11 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
       if (state.holdCount) await state.holdCount;
       if (state.signedOut) return unauthenticated();
       return state.failCount ? apiError(500, 'INTERNAL') : { status: 200, body: { buyers: state.buyers } };
+    },
+    [`GET ${eventPath}/pending-payment-count`]: async () => {
+      if (state.holdPendingCount) await state.holdPendingCount;
+      if (state.signedOut) return unauthenticated();
+      return state.failPendingCount ? apiError(500, 'INTERNAL_ERROR') : { status: 200, body: { orders: state.pendingOrders } };
     },
     [`POST ${eventPath}/hide`]: async () => {
       if (state.hold) await state.hold;
@@ -161,6 +180,8 @@ const callsTo = (calls: Call[], action: string) =>
   calls.filter((c) => c.method === 'POST' && c.path === `${eventPath}/${action}`);
 const patches = (calls: Call[]) => calls.filter((c) => c.method === 'PATCH' && c.path === eventPath);
 const buyerCounts = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === `${eventPath}/buyer-count`);
+const pendingCounts = (calls: Call[]) =>
+  calls.filter((c) => c.method === 'GET' && c.path === `${eventPath}/pending-payment-count`);
 const field = (page: Page, label: string) => page.getByLabel(label, { exact: true });
 const saveButton = (page: Page) => page.getByRole('button', { name: 'Lưu thay đổi' });
 
@@ -266,11 +287,15 @@ test('Kết thúc qua Dialog nêu hậu quả: "Hủy" không gọi api; xác nh
   const { calls } = await openApi(page);
   await page.goto(settings);
   const end = statusSection(page).getByRole('button', { name: 'Kết thúc', exact: true });
+  await expect(statusSection(page).getByText(END_HINT, { exact: true })).toBeVisible();
 
   await end.click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('heading', { name: 'Kết thúc Sự kiện?' })).toBeVisible();
-  await expect(dialog).toContainText('Ngừng nhận Đơn ngay, không mở lại được.');
+  // E3-2: đếm Đơn đang chờ thanh toán trước khi mở; 0 Đơn → chỉ câu hậu quả.
+  expect(pendingCounts(calls)).toHaveLength(1);
+  await expect(dialog.locator('[data-slot="end-event-consequences"]')).toHaveText(END_CONSEQUENCES);
+  await expect(dialog.locator('[data-slot="end-event-pending-payments"]')).toHaveCount(0);
   // `ConfirmDialog` mặc định vẫn là nút kiểu destructive (Story 3.10 thêm `confirmVariant`).
   await expect(dialog.getByRole('button', { name: 'Kết thúc', exact: true })).toHaveClass(/bg-destructive/);
   await dialog.getByRole('button', { name: 'Hủy' }).click();
@@ -292,6 +317,84 @@ test('Kết thúc qua Dialog nêu hậu quả: "Hủy" không gọi api; xác nh
   await page.waitForURL((url) => url.pathname === base && url.search === '');
   await page.goto(`/btc/${ORG_ID}`);
   await expect(page.locator('[data-slot="event-card"] [data-slot="status-badge"]')).toHaveText('Đã kết thúc');
+});
+
+test('Kết thúc khi còn Đơn đang chờ thanh toán: đếm trước (spinner, không bấm lặp) rồi Dialog nêu số Đơn và việc hoàn tay', async ({
+  page,
+}) => {
+  let release = () => {};
+  const { calls } = await openApi(page, {
+    pendingOrders: 3,
+    holdPendingCount: new Promise<void>((resolve) => (release = resolve)),
+  });
+  await page.goto(settings);
+  // Đang đếm: spinner đổi tên truy cập của nút (như nút xác nhận đang chạy trong Dialog).
+  const end = statusSection(page).getByRole('button', { name: /^Kết thúc/ });
+  await end.click();
+  await expect(end).toHaveAttribute('aria-busy', 'true');
+  await end.click({ force: true });
+  await statusSection(page).getByRole('button', { name: 'Ẩn Sự kiện' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(pendingCounts(calls)).toHaveLength(1);
+  expect(callsTo(calls, 'hide')).toEqual([]);
+
+  release();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'Kết thúc Sự kiện?' })).toBeVisible();
+  await expect(dialog.locator('[data-slot="end-event-consequences"] p').first()).toHaveText(END_CONSEQUENCES);
+  await expect(dialog.locator('[data-slot="end-event-pending-payments"]')).toHaveText(pendingNotice(3));
+  expect(pendingCounts(calls)).toHaveLength(1);
+  expect(callsTo(calls, 'end')).toEqual([]);
+
+  await dialog.getByRole('button', { name: 'Kết thúc', exact: true }).click();
+  await expect(page.getByText('Đã kết thúc Sự kiện.')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(callsTo(calls, 'end')).toHaveLength(1);
+});
+
+test('đếm Đơn đang chờ thanh toán lỗi: banner "Chưa kết thúc được" kèm lỗi, không mở Dialog; Ẩn xóa banner; bấm lại đếm được thì mở Dialog', async ({
+  page,
+}) => {
+  const { calls, state } = await openApi(page, { pendingOrders: 1, failPendingCount: true });
+  await page.goto(settings);
+  const end = statusSection(page).getByRole('button', { name: 'Kết thúc', exact: true });
+  await end.click();
+  const failure = statusSection(page).locator('[data-slot="status-banner"]');
+  await expect(failure).toContainText('Chưa kết thúc được');
+  await expect(failure).toContainText('Lỗi giả lập');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(pendingCounts(calls)).toHaveLength(1);
+  expect(callsTo(calls, 'end')).toEqual([]);
+
+  // Ẩn sau lần đếm lỗi: lỗi đếm không còn đúng chỗ, banner biến mất; Sự kiện đang ẩn vẫn Kết thúc được.
+  await statusSection(page).getByRole('button', { name: 'Ẩn Sự kiện' }).click();
+  await expect(statusSection(page).getByRole('button', { name: 'Hiện lại' })).toBeVisible();
+  await expect(statusSection(page).getByText('Chưa kết thúc được')).toHaveCount(0);
+  expect(callsTo(calls, 'hide')).toHaveLength(1);
+
+  state.failPendingCount = false;
+  await end.click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.locator('[data-slot="end-event-pending-payments"]')).toHaveText(pendingNotice(1));
+  await expect(dialog.locator('[data-slot="status-banner"]')).toHaveCount(0);
+  expect(pendingCounts(calls)).toHaveLength(2);
+  await dialog.getByRole('button', { name: 'Hủy' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(statusSection(page).getByText('Chưa kết thúc được')).toHaveCount(0);
+  expect(callsTo(calls, 'end')).toEqual([]);
+});
+
+test('đếm Đơn đang chờ thanh toán trả 401 (session hết hạn): sang trang đăng nhập kèm returnTo, không Dialog, không Kết thúc', async ({
+  page,
+}) => {
+  const { calls, state } = await openApi(page, { pendingOrders: 2 });
+  await page.goto(settings);
+  state.signedOut = true;
+  await statusSection(page).getByRole('button', { name: 'Kết thúc', exact: true }).click();
+  await page.waitForURL(`**/dang-nhap?returnTo=${encodeURIComponent(base)}`);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(pendingCounts(calls)).toHaveLength(1);
+  expect(callsTo(calls, 'end')).toEqual([]);
 });
 
 test('Kết thúc đang chạy: Esc và "Hủy" không đóng Dialog, không gửi lặp; xong thì Dialog đóng', async ({ page }) => {

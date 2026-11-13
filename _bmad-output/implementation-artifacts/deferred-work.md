@@ -500,6 +500,7 @@ E3-7 (retro Epic 3) gom 4 việc ship riêng được. Mason chọn tách ngày 
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-3-e3-7-trang-don-an-qr-sau-ket-thuc.md`
   summary: E3-2. Đơn chưa trả (`awaiting_payment`/`confirming`) mà Sự kiện đã kết thúc (BTC bấm "Kết thúc") vẫn hiện màn thanh toán và checkout link; Người mua trả thì tiền vào `review` + `orphan` `event_ended`, BTC phải hoàn tay. `BuyerOrderView.event.ended` (đồng hồ DB) đã có sẵn cho web dùng khi E3-2 chốt luật.
   evidence: Review E3-7 (BH, EC) triage #9. Đúng retro Epic 3 B1, có từ trước; `order-view.tsx` chỉ đọc `event.ended` ở nhánh `paid`. Chờ Mason chốt luật cho Đơn đang có link khi "Kết thúc"/Ẩn/khóa (E3-2).
+- Đã xử lý (13/11/2026): mục E3-2 ngay phía trên (Trang Đơn sau Kết thúc) được giải quyết bằng `_bmad-output/implementation-artifacts/spec-epic-3-e3-2-ket-thuc-va-link-dang-song.md` (Mason chốt 13/11: giữ Đơn tới khi link tự hết hạn, thôi mời trả). Sau Kết thúc máy chủ trả `payment.checkoutUrl = null`; Trang Đơn của Đơn `awaiting_payment`/`confirming`/`expired` mà `event.ended` hiện "Sự kiện đã kết thúc. Đơn này không thanh toán được nữa." kèm liên hệ BTC, không màn thanh toán, không "Thử lại", không "Mua lại". "Thử lại" và gửi lại cùng khóa qua chốt `sellability` trong `PaymentLinks` (Kết thúc, Ẩn, khóa, hủy, mất điều kiện có phí → Đơn hết hạn `sales_paused`, không gọi Tingee). Dialog "Kết thúc" nêu Vé hết hiệu lực và số Đơn đang chờ thanh toán (`GET …/pending-payment-count`).
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-3-e3-7-trang-don-an-qr-sau-ket-thuc.md`
   summary: Không test nào chứng minh `ended` đi theo đồng hồ DB chứ không theo đồng hồ app: mọi test đẩy mốc bằng `effective_end_at = now() - 1s`, cả hai đồng hồ đều đã quá. Thêm một ca giả `Date` của app (vd. `vi.useFakeTimers({ toFake: ['Date'] })`) lùi về trước mốc rồi kiểm `ended: true`, `tickets: []` cho biểu thức chung `endedNow`.
   evidence: Review E3-7 (VG) triage #2. Yếu điểm chung của `event/public-event.ts` › `endedNow` (Trang Đơn, Chi tiết Vé, link chia sẻ, email); repo chưa có mẫu giả `Date` trong harness Nest/HTTP. Nên làm cùng mục gom đồng hồ DB của E3-7.
@@ -602,3 +603,26 @@ Mỗi mục dưới đây có đúng một story nhận. Story nhận đọc m�
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-1-doi-soat-bu-khi-ipn-tre-hoac-mat.md`
   summary: Khi thay hợp đồng tạm của API tra đơn Gateway, kiểm API tra thật có cần cấp quyền nhóm dịch vụ riêng cho key merchant không. Mã 1133 ("key chưa được cấp quyền nhóm dịch vụ") hiện ánh xạ `TINGEE_CREDENTIAL_INVALID`, nên nếu key chỉ có quyền "Cổng thanh toán" mà API tra thuộc nhóm khác thì mọi Đơn dừng ngay với lý do `credential_invalid`, đọc như BTC thu hồi key.
   evidence: Review 4.1 (BH; maybe-false, nếu đúng thì medium; chưa kiểm được). Cần Tingee xác nhận nhóm quyền của API tra. `apps/api/src/modules/tingee/errors.ts` (1133), `payment/reconciliation-worker.ts` (`lookup`).
+
+## Deferred from: build E3-2 + Story 4.2, tách phạm vi (2026-11-13)
+
+Mason chọn tách ngày 13/11/2026: làm E3-2 trước (`spec-epic-3-e3-2-ket-thuc-va-link-dang-song.md`), Story 4.2 làm ngay sau và dùng lại chốt `sellability` trong `PaymentLinks.ensure` của E3-2.
+
+- source_spec: none
+  summary: Story 4.2. Cờ `payment_service_status` tự "Tạm ngừng bán" mọi Hạng vé > 0đ khi Tingee trả `MERCHANT_SUSPENDED` hoặc key hiện hành trả `TINGEE_CREDENTIAL_INVALID`, tự mở lại (job dò 5 phút, "Kiểm tra lại", Quản trị Tingee, lưu key mới) kèm Đối soát bù mọi Đơn còn mở; banner dashboard qua `notices`; nhãn trạng thái bán trên dashboard lấy từ `sellability` (C5 của E2-6). Tingee chưa xác nhận `getMerchantServiceStatus` gọi bằng key merchant, spec phải ghi phương án dự phòng và Tingee fake phải giả lập được.
+  evidence: Gộp với E3-2 thành hai mục tiêu ship riêng được (hai PR độc lập); 4.2 riêng đã vượt ngưỡng spec. Hai phần chỉ dính ở chốt `sellability` trong `PaymentLinks.ensure`, nên làm E3-2 trước.
+
+## Deferred from: code review of spec-epic-3-e3-2-ket-thuc-va-link-dang-song.md (2026-11-13)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-3-e3-2-ket-thuc-va-link-dang-song.md`
+  summary: Story 4.2. Không test nào chứng minh chốt link (`PaymentLinks.attempt` → `paymentLinkBlock` với `dbNow`) và `BuyerOrderView.payment.checkoutUrl` (qua `endedNow`) đi theo đồng hồ DB chứ không theo đồng hồ app; gộp vào mục E3-7 VG #2 (test giả `Date` cho `endedNow`), làm cùng lúc khi 4.2 chạm lại chốt này.
+  evidence: Review E3-2 #9 (VG, BH). Mọi test kết thúc Sự kiện bằng `POST …/end` rồi thử ngay, nên hai đồng hồ luôn cùng quá mốc; thay `dbNow` bằng `new Date()` không test nào đỏ. Harness Nest chưa có mẫu giả `Date`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-3-e3-2-ket-thuc-va-link-dang-song.md`
+  summary: Lệnh "Kết thúc" (`EventStatusService.transition`) đặt `ended_manually_at` = `effective_end_at` bằng đồng hồ app (`new Date()`), trong khi chốt link, Trang Đơn và mọi `ended` so bằng `now()` của DB; app chạy nhanh hơn DB thì trong khoảng lệch đó vẫn tạo link và trả checkout URL. Nên lấy giờ bằng `dbNow(tx)` (cả Ẩn/Hiện lại dùng `now` cho `notEnded`).
+  evidence: Review E3-2 #10 (ECH, low). Có từ Story 2.12 (`apps/api/src/modules/event/event-status.service.ts:110`); spec E3-2 cấm đổi `EventStatusService`. Lệch đồng hồ thường ở mức ms nhờ NTP.
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-3-e3-2-ket-thuc-va-link-dang-song.md`
+  summary: Story 7.1. Khi có đường hủy Sự kiện, Đơn chưa có link của Sự kiện đã hủy bị chốt link E3-2 hết hạn `sales_paused` và Trang Đơn hiện "Sự kiện tạm ngừng bán. Bạn thử lại sau nhé." + "Về trang Sự kiện" (`buyerStatusOf` trả `expired`, không phải `event_cancelled`). 7.1 phải chọn câu cho Đơn `expired` của Sự kiện đã hủy (vd. ưu tiên `event_cancelled` hoặc kiểm `event.status` trước câu `SALES_PAUSED`).
+  evidence: Review E3-2 #11 (BH, ECH). Hiện chưa xảy ra: không code nào đặt `events.status = 'cancelled'` (Story 7.1 backlog). `apps/web/app/(buyer)/orders/[code]/order-view.tsx` › `StatusBlock`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-3-e3-2-ket-thuc-va-link-dang-song.md`
+  summary: Thẻ Đơn ở "Vé của tôi" (`order-card` › `AwaitingPayment`) vẫn hiện đếm ngược + "Tiếp tục thanh toán" cho Đơn chờ tiền của Sự kiện đã kết thúc; nút dẫn tới Trang Đơn đang báo "Sự kiện đã kết thúc. Đơn này không thanh toán được nữa." Cần đổi thẻ theo `event.ended` cho cùng một câu ở mọi nơi.
+  evidence: Review E3-2 #12 (BH, low). Spec E3-2 (Never) giữ nguyên `order-card`. `apps/web/components/tickee/order-card.tsx:48-56`.

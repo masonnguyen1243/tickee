@@ -2,12 +2,14 @@ import { EventAvailability, EventDetail, ErrorResponse, PublicEvent, TicketTypeD
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AVAILABILITY_CLOCK, sellability } from '../../src/modules/ordering/index.js';
+import { linkBlockOf } from '../../src/modules/ordering/sellability.js';
 import { signUpPlatformAdmin } from '../admin/platform-admin.js';
 import { createHarness, signUp, type Harness } from '../identity/harness.js';
 
 /*
  * Story 2.11-a: `ordering.sellability` qua `GET /v1/events/:slug/availability` trên Postgres thật. Mỗi test dùng một
- * BTC và Sự kiện mới (slug mới) nên memo 2 giây không lẫn giữa các test. Đồng hồ tiêm được để kiểm hạn memo.
+ * BTC và Sự kiện mới (slug mới) nên memo 2 giây không lẫn giữa các test. Đồng hồ tiêm được để kiểm hạn memo. E3-2: luật
+ * chốt link thanh toán (`linkBlockOf`, hàm thuần); đường thật qua `PaymentLinks` ở `payment-link.test.ts`.
  */
 
 let h: Harness;
@@ -254,6 +256,41 @@ describe('sellability(db, eventId)', () => {
     const other = await newEvent();
     await expect(sellability(h.db.orm, other.id)).rejects.toMatchObject({ code: 'EVENT_NOT_FOUND' });
     await expect(sellability(h.db.orm, 'khong-phai-uuid')).rejects.toMatchObject({ code: 'EVENT_NOT_FOUND' });
+  });
+});
+
+describe('linkBlockOf (hàm thuần, E3-2)', () => {
+  const now = new Date('2099-11-16T10:00:00+07:00');
+  const event = {
+    status: 'published' as const,
+    lockedAt: null,
+    effectiveEndAt: new Date('2099-11-16T23:59:59+07:00'),
+    refundPolicy: 'Hoàn 100% trước 7 ngày.',
+  };
+  const facts = { event, orgLocked: false, paidOk: true };
+
+  it('còn bán → null; không xét chính sách hoàn vé (Đơn đã giữ chỗ)', () => {
+    expect(linkBlockOf(facts, now)).toBeNull();
+    expect(linkBlockOf({ ...facts, event: { ...event, refundPolicy: null } }, now)).toBeNull();
+  });
+
+  it('từng lý do: hủy, khóa Sự kiện, khóa BTC, kết thúc (kể cả đúng mốc), Ẩn, mất điều kiện có phí', () => {
+    expect(linkBlockOf({ ...facts, event: { ...event, status: 'cancelled' } }, now)).toBe('cancelled');
+    expect(linkBlockOf({ ...facts, event: { ...event, lockedAt: now } }, now)).toBe('locked');
+    expect(linkBlockOf({ ...facts, orgLocked: true }, now)).toBe('locked');
+    expect(linkBlockOf({ ...facts, event: { ...event, effectiveEndAt: now } }, now)).toBe('ended');
+    expect(linkBlockOf({ ...facts, event: { ...event, status: 'hidden' } }, now)).toBe('hidden');
+    expect(linkBlockOf({ ...facts, paidOk: false }, now)).toBe('paused');
+  });
+
+  it('nhiều lý do cùng lúc: hủy > khóa > kết thúc > Ẩn > mất điều kiện có phí', () => {
+    const ended = { ...event, effectiveEndAt: new Date(now.getTime() - 1_000) };
+    expect(linkBlockOf({ event: { ...ended, status: 'cancelled', lockedAt: now }, orgLocked: true, paidOk: false }, now)).toBe(
+      'cancelled',
+    );
+    expect(linkBlockOf({ event: { ...ended, status: 'hidden' }, orgLocked: true, paidOk: false }, now)).toBe('locked');
+    expect(linkBlockOf({ event: { ...ended, status: 'hidden' }, orgLocked: false, paidOk: false }, now)).toBe('ended');
+    expect(linkBlockOf({ event: { ...event, status: 'hidden' }, orgLocked: false, paidOk: false }, now)).toBe('hidden');
   });
 });
 

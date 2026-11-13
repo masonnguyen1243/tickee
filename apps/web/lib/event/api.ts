@@ -4,6 +4,8 @@ import {
   EventDetail,
   EventForm,
   EventList,
+  EventPendingPaymentCount,
+  eventPendingPaymentCountApiPath,
   FormQuestion,
   PublishReadiness,
   TicketTypeDetail,
@@ -57,6 +59,13 @@ export const updateEvent = (orgId: string, eventId: string, body: EventDraftInpu
  */
 export const fetchEventBuyerCount = (orgId: string, eventId: string) =>
   apiRequest(eventBuyerCountApiPath(orgId, eventId), { schema: EventBuyerCount });
+
+/**
+ * Số Đơn đang chờ thanh toán (Đơn `pending` có link còn hạn) của Sự kiện (E3-2): hỏi trước khi mở `Dialog` "Kết thúc"
+ * để báo "Còn {n} Đơn đang chờ thanh toán.".
+ */
+export const fetchEventPendingPaymentCount = (orgId: string, eventId: string) =>
+  apiRequest(eventPendingPaymentCountApiPath(orgId, eventId), { schema: EventPendingPaymentCount });
 
 const eventPath = (orgId: string, eventId: string) => `${eventsPath(orgId)}/${encodeURIComponent(eventId)}`;
 const ticketTypesPath = (orgId: string, eventId: string) => `${eventPath(orgId, eventId)}/ticket-types`;

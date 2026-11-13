@@ -24,7 +24,8 @@ import { inventoryOf } from './inventory.service.js';
  * (`saleStatusOf`); trang Sự kiện công khai (`GET /v1/events/:slug/availability`) và tạo Đơn (TX1, Story 3.2, trong `tx`
  * sau khi khóa Sự kiện) cùng đọc dữ liệu qua `sellabilityOf` rồi gọi hàm đó, nên không có hai bộ luật. Luật điều kiện
  * (chính sách hoàn vé, khóa BTC, Closed Beta, tài khoản nhận tiền) lấy từ `event` (`sale-rules.ts`), dùng chung với
- * `publishReadiness`.
+ * `publishReadiness`. Chốt link thanh toán (E3-2, `PaymentLinks`) hỏi phần cấp Sự kiện của cùng luật (`linkBlockOf`,
+ * đọc qua `paymentLinkBlock`) trước mọi lời gọi Tingee.
  */
 
 /** Trạng thái dịch vụ thanh toán của BTC (chỉ áp cho Hạng vé > 0đ). */
@@ -105,6 +106,25 @@ export function saleStatusOf(facts: SaleFacts, now: Date): EventAvailability {
   return { eventReason: anyPaused ? EventSaleReason.PAUSED : null, tiers: result };
 }
 
+/** Phần dữ liệu luật bán mà chốt link thanh toán cần (`linkBlockOf`): Sự kiện, khóa BTC, điều kiện bán Vé có phí. */
+export type LinkFacts = Pick<SaleFacts, 'event' | 'orgLocked' | 'paidOk'>;
+
+/**
+ * Chốt link thanh toán (E3-2, hàm thuần): lý do Đơn có phí đã giữ chỗ không được tạo link mới tại `now`, `null` khi còn
+ * bán. Cùng thứ tự với trang công khai và TX1 (`blockingReason`: hủy > khóa > kết thúc > Ẩn), rồi `paused` khi BTC không
+ * còn đủ điều kiện bán Vé có phí (`paidOk`). Không xét giờ mở/đóng bán, tồn kho hay chính sách hoàn vé: Đơn đã giữ chỗ
+ * khi còn bán. Story 4.2 thay thân `paymentServiceStatus` là chốt này tự áp cho "Tạm ngừng bán".
+ */
+export function linkBlockOf(facts: LinkFacts, now: Date): EventSaleReason | null {
+  return blockingReason(facts.event, facts.orgLocked, now) ?? (facts.paidOk ? null : EventSaleReason.PAUSED);
+}
+
+/** BTC đủ điều kiện bán Vé có phí: Closed Beta đã duyệt, còn tài khoản nhận tiền, dịch vụ thanh toán `active`. */
+async function paidOkOf(db: DbExecutor, scope: Pick<AccessContext, 'organizationId'>): Promise<boolean> {
+  const [paid, payment] = await Promise.all([paidSalesAllowed(db, scope), paymentServiceStatus(db, scope)]);
+  return paid.closedBetaApproved && paid.payoutLinked && payment === 'active';
+}
+
 /**
  * Đọc dữ liệu luật bán của một Sự kiện đã tra (không còn nháp): Hạng vé, tồn kho (không khóa), khóa BTC và điều kiện bán
  * Vé có phí (chỉ khi có Hạng vé > 0đ). `db` là `tx` khi gọi trong TX1.
@@ -114,11 +134,7 @@ export async function saleFactsOf(db: DbExecutor, event: PublicEventRef): Promis
   const scope = { organizationId: event.organizationId };
   const [tiers, orgLocked] = await Promise.all([ticketTypesOf(db, scope, event.id), organizationLocked(db, scope)]);
   const inventory = await inventoryOf(db, tiers.map((t) => t.id));
-  let paidOk = true;
-  if (tiers.some((t) => t.price > 0)) {
-    const [paid, payment] = await Promise.all([paidSalesAllowed(db, scope), paymentServiceStatus(db, scope)]);
-    paidOk = paid.closedBetaApproved && paid.payoutLinked && payment === 'active';
-  }
+  const paidOk = tiers.some((t) => t.price > 0) ? await paidOkOf(db, scope) : true;
   const remaining = (ticketTypeId: string): number => {
     const row = inventory.get(ticketTypeId);
     return row ? Math.max(0, row.capacity - row.sold - row.held) : 0;
@@ -141,4 +157,17 @@ export async function sellabilityOf(
  */
 export async function sellability(db: DbExecutor, eventId: string, now: Date = new Date()): Promise<EventAvailability> {
   return sellabilityOf(db, await saleEventById(db, eventId), now);
+}
+
+/**
+ * Chốt link thanh toán của một Đơn có phí thuộc Sự kiện `eventId` (E3-2, `PaymentLinks`): đọc Sự kiện (không khóa),
+ * khóa BTC và điều kiện bán Vé có phí (luôn đọc: Đơn có phí), rồi `linkBlockOf` tại `now` (đồng hồ DB của người gọi).
+ * Không đọc Hạng vé hay tồn kho. Id sai dạng, không tồn tại hoặc Sự kiện còn nháp → `404 EVENT_NOT_FOUND` (không xảy
+ * ra với Đơn đã có).
+ */
+export async function paymentLinkBlock(db: DbExecutor, eventId: string, now: Date): Promise<EventSaleReason | null> {
+  const event = await saleEventById(db, eventId);
+  const scope = { organizationId: event.organizationId };
+  const [orgLocked, paidOk] = await Promise.all([organizationLocked(db, scope), paidOkOf(db, scope)]);
+  return linkBlockOf({ event, orgLocked, paidOk }, now);
 }

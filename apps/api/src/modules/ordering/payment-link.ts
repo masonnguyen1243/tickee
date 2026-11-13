@@ -6,11 +6,12 @@ import {
   PAYMENT_LINK_GRACE_SECONDS,
   PAYMENT_LINK_MINUTES,
   PaymentLinkError,
+  type EventSaleReason,
 } from '@tickee/contracts';
 import { and, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { parseCredentialKeys, SecretBox } from '../../platform/crypto/index.js';
-import { DATABASE, type Database } from '../../platform/db/index.js';
+import { DATABASE, dbNow, type Database } from '../../platform/db/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
 import { defaultPayoutTargetOf, type PayoutTarget } from '../organizer/index.js';
 import { CreateLinkError, TINGEE_CLIENT, type TingeeClient } from '../tingee/index.js';
@@ -19,6 +20,7 @@ import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
 import { enqueueOrderExpiry, OrderQueues } from './order-jobs.js';
 import { enqueueReconciliation, firstCheckAt } from './reconciliation-jobs.js';
 import { orders } from './schema.js';
+import { paymentLinkBlock } from './sellability.js';
 
 /*
  * Bảo đảm link thanh toán Gateway cho một Đơn có phí (Story 3.4, AD-4, AD-5, AD-6). Một hàm cho hai điểm vào: tạo Đơn
@@ -27,6 +29,11 @@ import { orders } from './schema.js';
  * Một lần gọi tại một thời điểm: trước khi gọi Tingee, CAS giành "lượt" (`payment_link_attempt_at`) với điều kiện Đơn
  * `pending`, chưa có link, còn lượt và còn hạn (TX1 đặt sẵn lượt cho lần gọi đầu). Chỉ kết quả rõ ràng mới trả lượt;
  * lượt không được trả (kết quả mơ hồ, process chết giữa chừng) thì không bao giờ gọi lại cùng `orderId`.
+ *
+ * Chốt link (E3-2): đang giữ lượt, trước khi đọc nơi nhận tiền và gọi Tingee, hỏi `sellability` (`paymentLinkBlock`,
+ * đồng hồ DB): Sự kiện hủy, Sự kiện hoặc BTC bị khóa, đã kết thúc, Ẩn, hoặc BTC không còn đủ điều kiện bán Vé có phí →
+ * log cảnh báo kèm lý do rồi hết hạn Đơn như nhóm tạm ngừng dưới đây (`sales_paused`), không gọi Tingee. Mọi đường
+ * (lần gọi đầu sau TX1, gửi lại cùng khóa, "Thử lại") đều qua chốt này.
  *
  * Gọi Tingee NGOÀI transaction (timeout 5 giây). Kết quả:
  * - ok → TX2: CAS gắn link (`WHERE status = 'pending' AND payment_link IS NULL`), chụp `payout_account_id`, `expires_at`
@@ -68,7 +75,7 @@ const SALES_PAUSED_CODES: ReadonlySet<string> = new Set([
 /** Phần của Đơn mà hàm bảo đảm link cần (dòng `orders` vừa đọc). */
 export type LinkCandidate = Pick<
   typeof orders.$inferSelect,
-  'id' | 'code' | 'organizationId' | 'totalAmount' | 'status' | 'paymentLink' | 'paymentLinkAttemptAt'
+  'id' | 'code' | 'organizationId' | 'eventId' | 'totalAmount' | 'status' | 'paymentLink' | 'paymentLinkAttemptAt'
 >;
 
 @Injectable()
@@ -129,9 +136,32 @@ export class PaymentLinks {
     return row !== undefined;
   }
 
-  /** Đang giữ lượt: đọc nơi nhận tiền, gọi Tingee (ngoài transaction) rồi xử lý theo kết quả. */
+  /**
+   * Đang giữ lượt: chốt link (`sellability`), đọc nơi nhận tiền, gọi Tingee (ngoài transaction) rồi xử lý theo kết quả.
+   * Chốt chặn → hết hạn Đơn (`sales_paused`), không trả lượt, không gọi Tingee. Chốt lỗi (DB) → trả lượt như khi không
+   * đọc được nơi nhận tiền.
+   */
   private async attempt(order: LinkCandidate): Promise<void> {
     const context = { organizationId: order.organizationId, orderCode: order.code };
+    let blocked: EventSaleReason | null;
+    try {
+      blocked = await paymentLinkBlock(this.db.orm, order.eventId, await dbNow(this.db.orm));
+    } catch (err) {
+      // Chưa gọi Tingee: trả lượt, Đơn vẫn chờ (thử lại được).
+      const error = err instanceof Error ? err.name : 'unknown';
+      this.logger.error({ ...context, error }, 'Không kiểm được trạng thái bán; chưa tạo được link thanh toán');
+      await this.release(order.id);
+      return;
+    }
+    if (blocked !== null) {
+      this.logger.warn(
+        { ...context, reason: blocked },
+        'Sự kiện không còn bán; Đơn hết hạn (tạm ngừng bán), không gọi Tingee',
+      );
+      await this.expire(order.id, PaymentLinkError.SALES_PAUSED);
+      return;
+    }
+
     let target: PayoutTarget | null;
     try {
       target = await defaultPayoutTargetOf(this.db.orm, this.settings.secretBox, order.organizationId);
@@ -228,9 +258,9 @@ export class PaymentLinks {
   }
 
   /**
-   * Trả lượt khi chắc chắn chưa có link: Tingee từ chối rõ ràng bằng mã thường, hoặc chưa gọi Tingee vì không đọc được
-   * nơi nhận tiền (vd. không giải mã được credential). Ghi `provider_error`; Đơn vẫn `pending`, thử lại được. Đơn đã rời
-   * `pending` (job (a) thắng) → không đổi gì.
+   * Trả lượt khi chắc chắn chưa có link: Tingee từ chối rõ ràng bằng mã thường, hoặc chưa gọi Tingee vì chốt link lỗi
+   * hay không đọc được nơi nhận tiền (vd. không giải mã được credential). Ghi `provider_error`; Đơn vẫn `pending`, thử
+   * lại được. Đơn đã rời `pending` (job (a) thắng) → không đổi gì.
    */
   private async release(orderId: string): Promise<void> {
     await this.db.orm

@@ -27,8 +27,8 @@ type OrderRow = typeof orders.$inferSelect;
  * `BuyerOrderView`, kèm `serverNow`. `buyerStatus` theo bảng của `buyerStatusOf` tại `serverNow`; Vé (theo `seq`, kèm
  * Mã QR vé và token link chia sẻ) chỉ khi `buyerStatus = paid` và Sự kiện chưa kết thúc: Vé chỉ đọc sau khi đọc xong
  * Sự kiện (cùng đợt với các truy vấn khác), Sự kiện không còn dùng được cho Vé (`eventOpenForTickets`: đã hủy hay đã quá
- * `effective_end_at`, FR-24, AD-14) thì không đọc Vé, không ký gì. Đơn có phí kèm phần thanh toán (`paymentOf`);
- * `organizer` là tên và kênh liên hệ BTC hiện tại.
+ * `effective_end_at`, FR-24, AD-14) thì không đọc Vé, không ký gì. Đơn có phí kèm phần thanh toán (`paymentOf`, đọc
+ * sau Sự kiện: Sự kiện đã kết thúc thì không trả checkout URL); `organizer` là tên và kênh liên hệ BTC hiện tại.
  */
 export async function buyerOrderView(db: DbExecutor, tickets: TicketsService, row: OrderRow): Promise<BuyerOrderView> {
   const eventRead = saleEventById(db, row.eventId);
@@ -49,7 +49,7 @@ export async function buyerOrderView(db: DbExecutor, tickets: TicketsService, ro
       const withTickets = row.status === OrderStatus.PAID && eventOpenForTickets(saleEvent);
       return withTickets ? tickets.ticketsOfOrder(db, row.id) : [];
     }),
-    paymentOf(row, db),
+    eventRead.then((saleEvent) => paymentOf(row, db, saleEvent.ended)),
     organizerContactOf(db, { organizationId: row.organizationId }),
   ]);
   if (!organizer) throw new Error('Không đọc được BTC của Đơn');
@@ -84,10 +84,11 @@ export async function buyerOrderView(db: DbExecutor, tickets: TicketsService, ro
 }
 
 /**
- * Phần thanh toán của Đơn có phí (Đơn 0đ → `null`): checkout URL chỉ khi `pending` và đã có link; lý do lần tạo link
- * gần nhất thất bại; người nhận tiền theo tài khoản đã chụp (chưa chụp: tài khoản mặc định hiện tại).
+ * Phần thanh toán của Đơn có phí (Đơn 0đ → `null`): checkout URL chỉ khi `pending`, đã có link và Sự kiện chưa kết thúc
+ * (`eventEnded`, đồng hồ DB; E3-2: sau "Kết thúc" máy chủ thôi mời trả, link tự hết hạn); lý do lần tạo link gần nhất
+ * thất bại; người nhận tiền theo tài khoản đã chụp (chưa chụp: tài khoản mặc định hiện tại).
  */
-async function paymentOf(row: OrderRow, db: DbExecutor): Promise<BuyerOrderPayment | null> {
+async function paymentOf(row: OrderRow, db: DbExecutor, eventEnded: boolean): Promise<BuyerOrderPayment | null> {
   if (row.totalAmount === 0) return null;
   const recipient = await payoutRecipientOf(db, {
     organizationId: row.organizationId,
@@ -95,7 +96,7 @@ async function paymentOf(row: OrderRow, db: DbExecutor): Promise<BuyerOrderPayme
   });
   if (!recipient) throw new Error('Không đọc được BTC của Đơn');
   return {
-    checkoutUrl: row.status === OrderStatus.PENDING ? row.paymentLink : null,
+    checkoutUrl: row.status === OrderStatus.PENDING && !eventEnded ? row.paymentLink : null,
     linkError: row.paymentLinkError,
     recipient,
   };

@@ -3,6 +3,7 @@ export { type OrderingJobsConfig } from './buyer-email-jobs.js';
 export { enqueueEventChangeEmail, EventChangeEmailQueues, paidBuyerCount } from './event-change-email-jobs.js';
 export {
   eventRevenueOf,
+  pendingPaymentCountOf,
   recentOrdersOf,
   type EventOrdersScope,
   type EventRevenue,

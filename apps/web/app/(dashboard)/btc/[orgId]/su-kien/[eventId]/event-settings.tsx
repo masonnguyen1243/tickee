@@ -7,6 +7,7 @@ import {
   eventPath,
   formatEventDateTime,
   notifiesBuyers,
+  PAYMENT_LINK_MINUTES,
   type EventDetail,
 } from '@tickee/contracts';
 import Link from 'next/link';
@@ -25,6 +26,7 @@ import {
   eventQueryKey,
   eventsQueryKey,
   fetchEventBuyerCount,
+  fetchEventPendingPaymentCount,
   hideEvent,
   unhideEvent,
   updateEvent,
@@ -52,6 +54,10 @@ import { isEventEnded } from '../event-status';
  * Story 3.10: lưu lệnh đổi giờ hoặc địa điểm của Sự kiện đã mở bán, theo đồng hồ máy chưa kết thúc sau khi sửa
  * (`notifiesBuyers`), thì đếm Người mua trước; có người → `Dialog` "Email sẽ được gửi tới {n} Người mua." rồi mới lưu,
  * không có ai → lưu luôn. Đếm lỗi → banner "Chưa lưu được thông tin", không lưu.
+ *
+ * E3-2: bấm "Kết thúc" thì đếm Đơn đang chờ thanh toán trước (nút có spinner, chặn bấm lặp) rồi mới mở `Dialog`; `Dialog`
+ * nêu đủ hậu quả (Vé hết hiệu lực) và, khi còn Đơn đang chờ thanh toán, số Đơn đó cùng việc BTC phải hoàn tay khoản
+ * chuyển muộn. Đếm lỗi → banner "Chưa kết thúc được", không mở `Dialog`.
  */
 
 const NOT_STARTED_REASON = 'Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.';
@@ -245,32 +251,58 @@ const STALE_CODES = [ErrorCode.EVENT_STATUS_CONFLICT, ErrorCode.EVENT_ALREADY_EN
 const STALE_MESSAGE = 'Trạng thái Sự kiện vừa đổi. Đã tải lại.';
 const isStale = (error: unknown) => STALE_CODES.some((code) => hasErrorCode(error, code));
 
+/** Hậu quả của "Kết thúc" (E3-2, C2): cạnh nút và trong `Dialog`. */
+const END_HINT = 'Kết thúc sớm: ngừng nhận Đơn và Vé hết hiệu lực ngay, không mở lại được.';
+const END_CONSEQUENCES =
+  'Ngừng nhận Đơn ngay, không mở lại được. Từ lúc này Vé hết hiệu lực: không check-in được, CTV hết quyền, Vé rời “Vé của tôi” và link chia sẻ Vé ngừng hoạt động.';
+/** Còn Đơn có link thanh toán chưa hết hạn: Người mua vẫn chuyển được tiền, khoản đó không thành Vé. */
+const pendingPaymentsNotice = (orders: number) =>
+  `Còn ${orders.toLocaleString('vi-VN')} Đơn đang chờ thanh toán. Người mua đang ở trang thanh toán vẫn có thể chuyển tiền trong tối đa ${PAYMENT_LINK_MINUTES} phút; khoản đó không thành Vé và bạn sẽ phải hoàn tay.`;
+
 function StatusActions({ orgId, event }: { orgId: string; event: EventDetail }) {
   const goToLogin = useGoToLogin();
   const cache = useEventSaved(orgId);
   const titleId = useId();
   const reasonId = useId();
-  const [confirmEnd, setConfirmEnd] = useState(false);
+  /** `Dialog` "Kết thúc" đang mở, kèm số Đơn đang chờ thanh toán đếm ngay trước khi mở. */
+  const [confirmEnd, setConfirmEnd] = useState<{ pendingOrders: number } | null>(null);
 
   const change = useMutation({
     mutationFn: (action: StatusAction) => ACTIONS[action].call(orgId, event.id),
     onSuccess: (saved, action) => {
       cache.saved(saved);
-      setConfirmEnd(false);
+      setConfirmEnd(null);
       toast.success(ACTIONS[action].done);
     },
     onError: (error) => {
       if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
       else if (isStale(error)) {
-        setConfirmEnd(false);
+        setConfirmEnd(null);
         toast.info(STALE_MESSAGE);
         cache.reload(event.id);
       }
     },
   });
 
+  // Đếm Đơn đang chờ thanh toán trước khi mở `Dialog` "Kết thúc" (E3-2).
+  const count = useMutation({
+    mutationFn: () => fetchEventPendingPaymentCount(orgId, event.id),
+    onSuccess: ({ orders }) => setConfirmEnd({ pendingOrders: orders }),
+    onError: (error) => {
+      if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
+    },
+  });
+  const busy = change.isPending || count.isPending;
+
   const failure = change.error && !isStale(change.error) && !handledElsewhere(change.error) ? change.error : null;
+  const countFailure = count.error && !handledElsewhere(count.error) ? count.error : null;
   const pending = change.isPending ? change.variables : null;
+  /** Ẩn / Hiện lại: lỗi đếm của lần bấm "Kết thúc" trước đó không còn đúng chỗ. */
+  const changeStatus = (action: 'hide' | 'unhide') => {
+    if (busy) return;
+    count.reset();
+    change.mutate(action);
+  };
 
   const now = Date.now();
   const ended = isEventEnded(event, now);
@@ -309,7 +341,7 @@ function StatusActions({ orgId, event }: { orgId: string; event: EventDetail }) 
                 type="button"
                 variant="secondary"
                 loading={pending === 'unhide'}
-                onClick={() => !change.isPending && change.mutate('unhide')}
+                onClick={() => changeStatus('unhide')}
               >
                 Hiện lại
               </Button>
@@ -323,7 +355,7 @@ function StatusActions({ orgId, event }: { orgId: string; event: EventDetail }) 
                 type="button"
                 variant="secondary"
                 loading={pending === 'hide'}
-                onClick={() => !change.isPending && change.mutate('hide')}
+                onClick={() => changeStatus('hide')}
               >
                 Ẩn Sự kiện
               </Button>
@@ -332,7 +364,7 @@ function StatusActions({ orgId, event }: { orgId: string; event: EventDetail }) 
         )}
 
         <div className="flex flex-col gap-stack">
-          <p className="text-body">Kết thúc sớm: ngừng nhận Đơn ngay, không mở lại được.</p>
+          <p className="text-body">{END_HINT}</p>
           {!started ? (
             <p id={reasonId} className="text-meta text-muted-foreground">
               {event.status === 'hidden' ? NOT_STARTED_REASON_HIDDEN : NOT_STARTED_REASON}
@@ -344,11 +376,12 @@ function StatusActions({ orgId, event }: { orgId: string; event: EventDetail }) 
               variant="destructive"
               disabled={!started}
               aria-describedby={!started ? reasonId : undefined}
+              loading={count.isPending}
               onClick={() => {
-                if (change.isPending) return;
+                if (busy) return;
                 // Lỗi của Ẩn/Hiện lại trước đó không hiện trong Dialog.
                 change.reset();
-                setConfirmEnd(true);
+                count.mutate();
               }}
             >
               Kết thúc
@@ -372,16 +405,27 @@ function StatusActions({ orgId, event }: { orgId: string; event: EventDetail }) 
       {failure && !confirmEnd ? (
         <StatusBanner tone="danger" title="Chưa đổi được trạng thái" description={messageOf(failure)} />
       ) : null}
+      {countFailure && !confirmEnd ? (
+        <StatusBanner tone="danger" title="Chưa kết thúc được" description={messageOf(countFailure)} />
+      ) : null}
 
       <ConfirmDialog
-        open={confirmEnd}
+        open={confirmEnd !== null}
         onOpenChange={(open) => {
           if (open) return;
           change.reset();
-          setConfirmEnd(false);
+          setConfirmEnd(null);
         }}
         title="Kết thúc Sự kiện?"
-        description="Ngừng nhận Đơn ngay, không mở lại được."
+        descriptionAsChild
+        description={
+          <div className="flex flex-col gap-2 wrap-break-word" data-slot="end-event-consequences">
+            <p>{END_CONSEQUENCES}</p>
+            {confirmEnd && confirmEnd.pendingOrders > 0 ? (
+              <p data-slot="end-event-pending-payments">{pendingPaymentsNotice(confirmEnd.pendingOrders)}</p>
+            ) : null}
+          </div>
+        }
         confirmLabel="Kết thúc"
         onConfirm={() => change.mutate('end')}
         // Dialog che các nút khác, nên đang chạy chỉ có thể là "Kết thúc".

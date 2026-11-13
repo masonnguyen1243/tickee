@@ -1,5 +1,11 @@
 import { Body, Controller, Get, Inject, Param, Patch } from '@nestjs/common';
-import { EventDraftInput, Permission, type EventBuyerCount, type EventDetail } from '@tickee/contracts';
+import {
+  EventDraftInput,
+  Permission,
+  type EventBuyerCount,
+  type EventDetail,
+  type EventPendingPaymentCount,
+} from '@tickee/contracts';
 import type { PgBoss } from 'pg-boss';
 import { PublicPageQueues } from '../modules/event/index.js';
 import { EventChangeEmailQueues } from '../modules/ordering/index.js';
@@ -7,13 +13,14 @@ import { Access, RequirePermission, type AccessContext } from '../platform/acces
 import { DATABASE, type Database } from '../platform/db/index.js';
 import { parseRequest } from '../platform/http/index.js';
 import { BOSS } from '../platform/jobs/index.js';
-import { eventBuyerCount, updateEvent } from './event-update.flow.js';
+import { eventBuyerCount, eventPendingPaymentCount, updateEvent } from './event-update.flow.js';
 
 /**
- * Sửa thông tin Sự kiện (Story 2.12) và số Người mua (Story 3.10). Owner và Admin (`events.manage`). Đặt ở flows vì lệnh
- * sửa ghi `event` và enqueue email của `ordering` trong một transaction, còn số Người mua đọc Đơn của `ordering`. Các
- * route khác của Sự kiện ở `modules/event/events.controller.ts`. Sự kiện lạ, sai dạng hoặc của BTC khác → 404
- * `EVENT_NOT_FOUND`. Lệnh sửa kiểm body trước, chờ hai queue sẵn sàng (ngoài transaction) rồi mới chạy flow.
+ * Sửa thông tin Sự kiện (Story 2.12), số Người mua (Story 3.10) và số Đơn đang chờ thanh toán (E3-2). Owner và Admin
+ * (`events.manage`). Đặt ở flows vì lệnh sửa ghi `event` và enqueue email của `ordering` trong một transaction, còn hai
+ * số đếm đọc Đơn của `ordering`. Các route khác của Sự kiện ở `modules/event/events.controller.ts`. Sự kiện lạ, sai dạng
+ * hoặc của BTC khác → 404 `EVENT_NOT_FOUND`. Lệnh sửa kiểm body trước, chờ hai queue sẵn sàng (ngoài transaction) rồi
+ * mới chạy flow.
  */
 @Controller('orgs/:orgId/events/:eventId')
 export class EventEditController {
@@ -42,5 +49,15 @@ export class EventEditController {
   @RequirePermission(Permission.EVENTS_MANAGE)
   buyerCount(@Access() ctx: AccessContext, @Param('eventId') eventId: string): Promise<EventBuyerCount> {
     return eventBuyerCount(this.db, ctx, eventId);
+  }
+
+  /** Số Đơn đang chờ thanh toán (`pending`, có link, còn hạn) của Sự kiện: `{ orders }`. Web hỏi trước `Dialog` "Kết thúc". */
+  @Get('pending-payment-count')
+  @RequirePermission(Permission.EVENTS_MANAGE)
+  pendingPaymentCount(
+    @Access() ctx: AccessContext,
+    @Param('eventId') eventId: string,
+  ): Promise<EventPendingPaymentCount> {
+    return eventPendingPaymentCount(this.db, ctx, eventId);
   }
 }
