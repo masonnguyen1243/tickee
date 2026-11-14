@@ -4,6 +4,7 @@ import {
   TierSaleStatus,
   toEventIso,
   type EventAvailability,
+  type EventSaleStatus,
   type TierAvailability,
 } from '@tickee/contracts';
 import type { AccessContext } from '../../platform/access/index.js';
@@ -14,12 +15,14 @@ import {
   paidSalesAllowed,
   refundPolicySet,
   saleEventById,
+  saleEventsOfOrganization,
   ticketTypesOf,
+  ticketTypesOfEvents,
   type PublicEventRef,
   type TicketTypeRow,
 } from '../event/index.js';
 import { paymentServiceStateOf } from '../organizer/index.js';
-import { inventoryOf } from './inventory.service.js';
+import { inventoryOf, type InventoryRow } from './inventory.service.js';
 
 /*
  * `ordering.sellability` (AD-21, Story 2.11-a): nguồn duy nhất cho trạng thái bán. Luật nằm ở một hàm thuần
@@ -27,7 +30,8 @@ import { inventoryOf } from './inventory.service.js';
  * sau khi khóa Sự kiện) cùng đọc dữ liệu qua `sellabilityOf` rồi gọi hàm đó, nên không có hai bộ luật. Luật điều kiện
  * (chính sách hoàn vé, khóa BTC, Closed Beta, tài khoản nhận tiền) lấy từ `event` (`sale-rules.ts`), dùng chung với
  * `publishReadiness`. Chốt link thanh toán (E3-2, `PaymentLinks`) hỏi phần cấp Sự kiện của cùng luật (`linkBlockOf`,
- * đọc qua `paymentLinkBlock`) trước mọi lời gọi Tingee.
+ * đọc qua `paymentLinkBlock`) trước mọi lời gọi Tingee. Nhãn trạng thái bán trên dashboard BTC (Story 4.2-c) đọc theo lô
+ * qua `organizationSaleStatuses` rồi cũng gọi `saleStatusOf` cho từng Sự kiện.
  */
 
 /**
@@ -125,6 +129,14 @@ async function paidOkOf(db: DbExecutor, scope: Pick<AccessContext, 'organization
   return paid.closedBetaApproved && paid.payoutLinked && payment === PaymentServiceStatus.ACTIVE;
 }
 
+/** Số vé còn bán được theo tồn kho đã đọc (`capacity − sold − held`, không âm); không có dòng tồn kho → 0. */
+const remainingIn =
+  (inventory: ReadonlyMap<string, InventoryRow>) =>
+  (ticketTypeId: string): number => {
+    const row = inventory.get(ticketTypeId);
+    return row ? Math.max(0, row.capacity - row.sold - row.held) : 0;
+  };
+
 /**
  * Đọc dữ liệu luật bán của một Sự kiện đã tra (không còn nháp): Hạng vé, tồn kho (không khóa), khóa BTC và điều kiện bán
  * Vé có phí (chỉ khi có Hạng vé > 0đ). `db` là `tx` khi gọi trong TX1.
@@ -135,11 +147,7 @@ export async function saleFactsOf(db: DbExecutor, event: PublicEventRef): Promis
   const [tiers, orgLocked] = await Promise.all([ticketTypesOf(db, scope, event.id), organizationLocked(db, scope)]);
   const inventory = await inventoryOf(db, tiers.map((t) => t.id));
   const paidOk = tiers.some((t) => t.price > 0) ? await paidOkOf(db, scope) : true;
-  const remaining = (ticketTypeId: string): number => {
-    const row = inventory.get(ticketTypeId);
-    return row ? Math.max(0, row.capacity - row.sold - row.held) : 0;
-  };
-  return { event, orgLocked, paidOk, tiers, remaining };
+  return { event, orgLocked, paidOk, tiers, remaining: remainingIn(inventory) };
 }
 
 /** Trạng thái bán của một Sự kiện đã đọc (không còn nháp). Dùng khi người gọi đã tra Sự kiện (vd. theo slug). */
@@ -170,4 +178,40 @@ export async function paymentLinkBlock(db: DbExecutor, eventId: string, now: Dat
   const scope = { organizationId: event.organizationId };
   const [orgLocked, paidOk] = await Promise.all([organizationLocked(db, scope), paidOkOf(db, scope)]);
   return linkBlockOf({ event, orgLocked, paidOk }, now);
+}
+
+/**
+ * Trạng thái bán cấp Sự kiện của mọi Sự kiện đã mở bán (không còn nháp) của BTC, mới tạo trước: nhãn trạng thái bán trên
+ * dashboard BTC (Story 4.2-c, retro Epic 2 C5). Cùng luật `saleStatusOf` với trang công khai, TX1 và chốt link (AD-21):
+ * `reason` = `eventReason`; `partial` = `reason` là `paused` mà còn ít nhất một Hạng vé `on_sale` (khớp câu "một phần" của
+ * trang công khai; Hạng vé còn lại hết vé, chưa mở hay đã đóng thì `false`).
+ *
+ * Đọc theo lô, số truy vấn không tăng theo số Sự kiện: Sự kiện, Hạng vé và tồn kho mỗi thứ một truy vấn theo danh sách
+ * Sự kiện; khóa BTC và điều kiện bán Vé có phí (chỉ khi BTC có Hạng vé > 0đ) đọc một lần cho cả BTC. `now` là đồng hồ DB
+ * của người gọi (AD-14); gọi trong một transaction để mọi truy vấn cùng một snapshot.
+ */
+export async function organizationSaleStatuses(
+  db: DbExecutor,
+  scope: Pick<AccessContext, 'organizationId'>,
+  now: Date,
+): Promise<EventSaleStatus[]> {
+  const events = await saleEventsOfOrganization(db, scope);
+  if (events.length === 0) return [];
+  const eventIds = events.map((e) => e.id);
+  const [tiers, orgLocked] = await Promise.all([ticketTypesOfEvents(db, scope, eventIds), organizationLocked(db, scope)]);
+  const inventory = await inventoryOf(db, tiers.map((t) => t.id));
+  const paidOk = tiers.some((t) => t.price > 0) ? await paidOkOf(db, scope) : true;
+  const tiersByEvent = new Map<string, TicketTypeRow[]>();
+  for (const tier of tiers) {
+    const list = tiersByEvent.get(tier.eventId);
+    if (list) list.push(tier);
+    else tiersByEvent.set(tier.eventId, [tier]);
+  }
+  const remaining = remainingIn(inventory);
+  return events.map((event) => {
+    const result = saleStatusOf({ event, orgLocked, paidOk, tiers: tiersByEvent.get(event.id) ?? [], remaining }, now);
+    const reason = result.eventReason;
+    const partial = reason === EventSaleReason.PAUSED && result.tiers.some((t) => t.status === TierSaleStatus.ON_SALE);
+    return { eventId: event.id, reason, partial };
+  });
 }

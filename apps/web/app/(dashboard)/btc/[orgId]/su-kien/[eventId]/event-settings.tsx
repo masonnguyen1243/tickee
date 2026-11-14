@@ -31,6 +31,7 @@ import {
   unhideEvent,
   updateEvent,
 } from '@/lib/event/api';
+import { refreshEventSaleStatus } from '@/lib/event/sale-status';
 
 import {
   EventInfoFields,
@@ -64,17 +65,31 @@ const NOT_STARTED_REASON = 'Sự kiện chưa bắt đầu — dùng Ẩn để 
 /** Sự kiện đang ẩn đã dừng nhận Đơn: không gợi ý "dùng Ẩn". */
 const NOT_STARTED_REASON_HIDDEN = 'Sự kiện chưa bắt đầu.';
 
-/** Cập nhật cache sau khi Sự kiện đổi (chi tiết + danh sách). */
+/** Trạng thái hoặc mốc kết thúc của Sự kiện đổi: nhãn dự phòng theo Sự kiện mới đúng hơn dòng trạng thái bán cũ. */
+const saleFieldsChanged = (before: EventDetail | undefined, after: EventDetail) =>
+  !before ||
+  before.status !== after.status ||
+  before.endedManuallyAt !== after.endedManuallyAt ||
+  before.effectiveEndAt !== after.effectiveEndAt;
+
+/**
+ * Cập nhật cache sau khi Sự kiện đổi (chi tiết + danh sách + trạng thái bán của badge dashboard, Story 4.2-c). Chỉ bỏ dòng
+ * trạng thái bán cũ của Sự kiện khi trạng thái hoặc mốc kết thúc đổi (sửa tên, địa điểm của Sự kiện đang "Tạm ngừng bán"
+ * không làm badge nháy "Đang mở bán").
+ */
 function useEventSaved(orgId: string) {
   const queryClient = useQueryClient();
   return {
     saved: (event: EventDetail) => {
+      const before = queryClient.getQueryData<EventDetail>(eventQueryKey(orgId, event.id));
       queryClient.setQueryData(eventQueryKey(orgId, event.id), event);
       void queryClient.invalidateQueries({ queryKey: eventsQueryKey(orgId) });
+      void refreshEventSaleStatus(queryClient, orgId, saleFieldsChanged(before, event) ? event.id : undefined);
     },
     reload: (eventId: string) => {
       void queryClient.invalidateQueries({ queryKey: eventQueryKey(orgId, eventId) });
       void queryClient.invalidateQueries({ queryKey: eventsQueryKey(orgId) });
+      void refreshEventSaleStatus(queryClient, orgId);
     },
   };
 }

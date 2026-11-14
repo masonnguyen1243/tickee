@@ -110,12 +110,15 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/overview/live');
     // Story 4.2-b: stream cấp BTC của `reporting` (Owner và Admin, như `notices`).
     expect(guarded).toContain('GET /v1/orgs/:orgId/live');
+    // Story 4.2-c: trạng thái bán trên dashboard của `ordering` (ngoài tiền tố `…/events/`, như danh sách Sự kiện).
+    expect(guarded).toContain('GET /v1/orgs/:orgId/event-sale-status');
     const permissionOf = (path: string) => routes.find((r) => r.method === 'GET' && r.path === path)?.permission;
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/overview')).toBe(Permission.ORDERS_VIEW);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/overview/live')).toBe(Permission.ORDERS_VIEW);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/pending-payment-count')).toBe(Permission.EVENTS_MANAGE);
     expect(permissionOf('/v1/orgs/:orgId/live')).toBe(Permission.ORG_READ);
     expect(permissionOf('/v1/orgs/:orgId/notices')).toBe(Permission.ORG_READ);
+    expect(permissionOf('/v1/orgs/:orgId/event-sale-status')).toBe(Permission.EVENTS_MANAGE);
     expect(routes.find((r) => r.method === 'POST' && r.path === '/v1/orgs/:orgId/payment-service/check')?.permission).toBe(
       Permission.PAYOUT_ACCOUNT_MANAGE,
     );

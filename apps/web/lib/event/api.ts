@@ -6,6 +6,8 @@ import {
   EventList,
   EventPendingPaymentCount,
   eventPendingPaymentCountApiPath,
+  EventSaleStatusList,
+  eventSaleStatusApiPath,
   FormQuestion,
   PublishReadiness,
   TicketTypeDetail,
@@ -32,6 +34,13 @@ export const eventFormQueryKey = (orgId: string, eventId: string) => ['event', '
 /** Điều kiện mở bán của một Sự kiện (wizard bước 4). */
 export const eventReadinessQueryKey = (orgId: string, eventId: string) =>
   ['event', 'publish-readiness', orgId, eventId] as const;
+/**
+ * Trạng thái bán của mọi Sự kiện đã mở bán của BTC (Story 4.2-c): thẻ Sự kiện ở trang chủ BTC và badge thẻ "Thông tin" của
+ * tab Tổng quan dùng chung. Điểm làm mới (`refreshEventSaleStatus`): lưu Sự kiện, Ẩn/Hiện lại/Kết thúc, mở bán, đổi Hạng
+ * vé, đổi tài khoản nhận tiền (hủy liên kết, đặt mặc định, đổi key Tingee), "Kiểm tra lại" dịch vụ thanh toán, tín hiệu
+ * cấp BTC (`org_status_changed`) và, khi không có SSE, lần polling thấy banner về điều kiện bán Vé có phí đổi.
+ */
+export const eventSaleStatusQueryKey = (orgId: string) => ['event', 'sale-status', orgId] as const;
 
 const json = (method: 'POST' | 'PATCH' | 'PUT', body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 const eventsPath = (orgId: string) => `/orgs/${encodeURIComponent(orgId)}/events`;
@@ -41,6 +50,13 @@ export const fetchEvents = (orgId: string, signal?: AbortSignal) =>
 
 export const fetchEvent = (orgId: string, eventId: string, signal?: AbortSignal) =>
   apiRequest(`${eventsPath(orgId)}/${encodeURIComponent(eventId)}`, { schema: EventDetail, init: { signal } });
+
+/**
+ * `GET /v1/orgs/:orgId/event-sale-status`: lý do bán cấp Sự kiện (`reason`, `partial`) theo đồng hồ máy chủ cho mọi Sự
+ * kiện không còn nháp của BTC — cùng luật `sellability` với trang công khai.
+ */
+export const fetchEventSaleStatus = (orgId: string, signal?: AbortSignal) =>
+  apiRequest(eventSaleStatusApiPath(orgId), { schema: EventSaleStatusList, init: { signal } });
 
 /** Tạo Sự kiện nháp (201). Giờ gửi dạng ISO có offset `+07:00`. */
 export const createEvent = (orgId: string, body: EventDraftInput) =>

@@ -738,6 +738,27 @@ test('nhiều tài khoản: thêm tài khoản thứ hai, đặt mặc định, 
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 });
 
+test('hủy liên kết tài khoản cuối làm mới trạng thái bán của Sự kiện (Story 4.2-c): về trang chủ BTC thì đọc lại', async ({
+  page,
+}) => {
+  const { calls } = await openPage(page, { initial: { ...CONNECTED, accounts: [linkedAccount(MB)] } });
+  await expect(accountRows(page)).toHaveCount(1);
+  const saleGets = () => calls.filter((c) => c.method === 'GET' && c.path === `/orgs/${ORG_ID}/event-sale-status`);
+  // Nạp cache trạng thái bán ở trang chủ BTC rồi quay lại — đều trong app (không tải lại trang).
+  const eventsTab = page.locator('[data-slot="bottom-tab-bar"]').getByRole('link', { name: 'Sự kiện' });
+  await eventsTab.click();
+  await expect.poll(() => saleGets().length).toBeGreaterThanOrEqual(1);
+  await page.goBack();
+  await expect(accountRows(page)).toHaveCount(1);
+  const before = saleGets().length;
+
+  await accountRow(page, 'MB Bank').getByRole('button', { name: 'Hủy liên kết' }).click();
+  await unlinkDialog(page).getByRole('button', { name: 'Hủy liên kết' }).click();
+  await expect(chooser(page).getByRole('heading', { name: 'Chọn tài khoản nhận tiền' })).toBeVisible();
+  await eventsTab.click();
+  await expect.poll(() => saleGets().length).toBeGreaterThan(before);
+});
+
 test('hủy liên kết tài khoản mà tab khác đã hủy: toast "Tài khoản này đã được hủy liên kết.", danh sách đọc lại', async ({
   page,
 }) => {

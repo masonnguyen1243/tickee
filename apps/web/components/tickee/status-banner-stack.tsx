@@ -5,14 +5,15 @@ import {
   organizationLiveApiPath,
   PAYMENT_SERVICE_NOTICE_CODES,
   STATUS_BANNER_LIMIT,
+  StatusNoticeCode,
   type StatusNotice,
-  type StatusNoticeCode,
 } from '@tickee/contracts';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { refreshEventSaleStatus } from '@/lib/event/sale-status';
 import { payoutAccountQueryKey } from '@/lib/organizer/api';
 import { useLiveResource } from '@/lib/realtime/use-live-resource';
 import { fetchStatusNotices, STATUS_NOTICES_POLL_MS, statusNoticesQueryKey } from '@/lib/reporting/api';
@@ -28,7 +29,17 @@ import { useCurrentOrganization } from './current-organization';
 import { StatusBanner } from './status-banner';
 import { TingeeLink } from './tingee-link';
 
-const PAYMENT_SERVICE_CODES: ReadonlySet<StatusNoticeCode> = new Set(Object.values(PAYMENT_SERVICE_NOTICE_CODES));
+/**
+ * Mã notice làm Hạng vé có phí "Tạm ngừng bán" (`paidOk` của `sellability`): bốn mã dịch vụ thanh toán, Closed Beta (thu
+ * hồi, chờ duyệt) và chưa liên kết tài khoản nhận tiền. Polling thấy tập mã này đổi thì tải lại khối "Dịch vụ thanh toán"
+ * và nhãn trạng thái bán (Story 4.2-c).
+ */
+const PAID_SALES_CODES: ReadonlySet<StatusNoticeCode> = new Set([
+  ...Object.values(PAYMENT_SERVICE_NOTICE_CODES),
+  StatusNoticeCode.CLOSED_BETA_REVOKED,
+  StatusNoticeCode.CLOSED_BETA_PENDING,
+  StatusNoticeCode.PAYOUT_ACCOUNT_NOT_LINKED,
+]);
 const pollInterval = () => STATUS_NOTICES_POLL_MS;
 
 function NoticeBanner({ notice, onDismiss }: { notice: StatusNotice; onDismiss: (notice: StatusNotice) => void }) {
@@ -65,36 +76,40 @@ function NoticeBanner({ notice, onDismiss }: { notice: StatusNotice; onDismiss: 
  * dashboard / `Providers` xử lý.
  *
  * Tự cập nhật (Story 4.2-b, AD-17): `useLiveResource` + stream cấp BTC `GET /v1/orgs/:orgId/live`; mỗi tín hiệu
- * (`org_status_changed`, `resync`) tải lại `notices` và tổng quan Tài khoản nhận tiền (khối "Dịch vụ thanh toán", chỉ khi
- * trang đó đang mở). Không có SSE thì polling `notices` 10 giây; banner dịch vụ thanh toán đổi giữa hai lần polling thì
- * tổng quan Tài khoản nhận tiền cũng tải lại.
+ * (`org_status_changed`, `resync`) tải lại `notices`, tổng quan Tài khoản nhận tiền (khối "Dịch vụ thanh toán", chỉ khi
+ * trang đó đang mở) và trạng thái bán của Sự kiện (badge "Tạm ngừng bán" ở trang chủ BTC và tab Tổng quan, Story 4.2-c).
+ * Không có SSE thì polling `notices` 10 giây; banner về điều kiện bán Vé có phí (dịch vụ thanh toán, Closed Beta, tài khoản
+ * nhận tiền) đổi giữa hai lần polling thì hai tài nguyên kia cũng tải lại.
  */
 export function StatusBannerStack({ orgId }: { orgId: string }) {
   const queryClient = useQueryClient();
-  const refreshPayoutOverview = () =>
+  const refreshPaymentServiceViews = () => {
     void queryClient.invalidateQueries({ queryKey: payoutAccountQueryKey(orgId), exact: true });
+    void refreshEventSaleStatus(queryClient, orgId);
+  };
   const { query: notices, connected } = useLiveResource({
     queryKey: statusNoticesQueryKey(orgId),
     queryFn: (signal) => fetchStatusNotices(orgId, signal),
     livePath: organizationLiveApiPath(orgId),
     pollInterval,
-    onSignal: refreshPayoutOverview,
+    onSignal: refreshPaymentServiceViews,
   });
 
-  // Polling (không có SSE nên không có `onSignal`): khối "Dịch vụ thanh toán" theo kịp banner khi cờ đổi.
-  const paymentServiceKey = notices.data
-    ?.filter((n) => PAYMENT_SERVICE_CODES.has(n.code))
+  // Polling (không có SSE nên không có `onSignal`): khối "Dịch vụ thanh toán" và badge trạng thái bán theo kịp banner khi
+  // điều kiện bán Vé có phí đổi.
+  const paidSalesKey = notices.data
+    ?.filter((n) => PAID_SALES_CODES.has(n.code))
     .map(statusNoticeDismissKey)
     .join('|');
-  const lastPaymentServiceKey = useRef(paymentServiceKey);
-  const refreshPayoutRef = useRef(refreshPayoutOverview);
-  refreshPayoutRef.current = refreshPayoutOverview;
+  const lastPaidSalesKey = useRef(paidSalesKey);
+  const refreshViewsRef = useRef(refreshPaymentServiceViews);
+  refreshViewsRef.current = refreshPaymentServiceViews;
   useEffect(() => {
-    if (paymentServiceKey === undefined) return;
-    const previous = lastPaymentServiceKey.current;
-    lastPaymentServiceKey.current = paymentServiceKey;
-    if (!connected && previous !== undefined && previous !== paymentServiceKey) refreshPayoutRef.current();
-  }, [paymentServiceKey, connected]);
+    if (paidSalesKey === undefined) return;
+    const previous = lastPaidSalesKey.current;
+    lastPaidSalesKey.current = paidSalesKey;
+    if (!connected && previous !== undefined && previous !== paidSalesKey) refreshViewsRef.current();
+  }, [paidSalesKey, connected]);
   /** Đã đóng ở lần render này của trang (sessionStorage giữ cho lần tải sau). */
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
   const [sheetOpen, setSheetOpen] = useState(false);

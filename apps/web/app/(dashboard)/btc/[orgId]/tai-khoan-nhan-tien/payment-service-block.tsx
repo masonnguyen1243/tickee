@@ -19,6 +19,7 @@ import { handledElsewhere } from '@/lib/api/handled-elsewhere';
 import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
 import { useGoToLogin } from '@/lib/auth/use-go-to-login';
+import { refreshEventSaleStatus } from '@/lib/event/sale-status';
 import { checkPaymentService, payoutAccountQueryKey } from '@/lib/organizer/api';
 import {
   PAYMENT_SERVICE_CONSEQUENCE,
@@ -64,6 +65,8 @@ export function PaymentServiceBlock({ orgId, state, portalUrl, onChangeKey, chan
       );
       void queryClient.invalidateQueries({ queryKey: payoutAccountQueryKey(orgId), exact: true });
       void queryClient.invalidateQueries({ queryKey: statusNoticesQueryKey(orgId) });
+      // Mở lại dịch vụ thì Sự kiện có phí bán lại: nhãn trạng thái bán (Story 4.2-c).
+      void refreshEventSaleStatus(queryClient, orgId);
     },
     onError: (error) => {
       if (handledElsewhere(error)) {

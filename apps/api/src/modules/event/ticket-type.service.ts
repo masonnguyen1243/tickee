@@ -6,7 +6,7 @@ import {
   type TicketTypeDetail,
   type TicketTypeField,
 } from '@tickee/contracts';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { z } from 'zod';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import type { DbExecutor, Tx } from '../../platform/db/index.js';
@@ -68,6 +68,23 @@ export function ticketTypesOf(
     .select()
     .from(ticketTypes)
     .where(and(orgScope(ctx)(ticketTypes), eq(ticketTypes.eventId, eventId)))
+    .orderBy(asc(ticketTypes.createdAt), asc(ticketTypes.id));
+}
+
+/**
+ * Bản theo lô của `ticketTypesOf` (trạng thái bán trên dashboard BTC, Story 4.2-c): một truy vấn cho Hạng vé của mọi
+ * Sự kiện trong `eventIds` thuộc BTC, tạo trước đứng trước. Danh sách rỗng → không chạm DB.
+ */
+export async function ticketTypesOfEvents(
+  db: DbExecutor,
+  ctx: Pick<AccessContext, 'organizationId'>,
+  eventIds: readonly string[],
+): Promise<TicketTypeRow[]> {
+  if (eventIds.length === 0) return [];
+  return db
+    .select()
+    .from(ticketTypes)
+    .where(and(orgScope(ctx)(ticketTypes), inArray(ticketTypes.eventId, [...eventIds])))
     .orderBy(asc(ticketTypes.createdAt), asc(ticketTypes.id));
 }
 

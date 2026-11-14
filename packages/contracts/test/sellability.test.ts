@@ -3,6 +3,8 @@ import {
   EVENT_SALE_REASON_ORDER,
   EVENT_UNAVAILABLE_REASONS,
   EventAvailability,
+  EventSaleStatusList,
+  eventSaleStatusApiPath,
   PublicEvent,
 } from '../src/sellability.js';
 
@@ -62,5 +64,28 @@ describe('trạng thái bán', () => {
     expect(PublicEvent.safeParse(withoutLimit).success).toBe(false);
     expect(PublicEvent.safeParse({ ...base, maxTicketsPerOrder: 0 }).success).toBe(false);
     expect(PublicEvent.safeParse({ ...base, maxTicketsPerOrder: 51 }).success).toBe(false);
+  });
+});
+
+describe('trạng thái bán trên dashboard BTC (Story 4.2-c)', () => {
+  const EVENT_ID = '0192f0a0-0000-7000-8000-0000000000e1';
+
+  it('EventSaleStatusList nhận reason null hoặc một EventSaleReason kèm partial; từ chối reason lạ, id sai dạng', () => {
+    const list = {
+      events: [
+        { eventId: EVENT_ID, reason: null, partial: false },
+        { eventId: TIER_ID, reason: 'paused', partial: true },
+      ],
+    };
+    expect(EventSaleStatusList.parse(list)).toEqual(list);
+    expect(EventSaleStatusList.safeParse({ events: [{ eventId: EVENT_ID, reason: 'lạ', partial: false }] }).success).toBe(
+      false,
+    );
+    expect(EventSaleStatusList.safeParse({ events: [{ eventId: 'x', reason: null, partial: false }] }).success).toBe(false);
+    expect(EventSaleStatusList.safeParse({ events: [{ eventId: EVENT_ID, reason: null }] }).success).toBe(false);
+  });
+
+  it('đường API ngoài tiền tố …/events/ (không đụng :eventId)', () => {
+    expect(eventSaleStatusApiPath('org 1')).toBe('/orgs/org%201/event-sale-status');
   });
 });
