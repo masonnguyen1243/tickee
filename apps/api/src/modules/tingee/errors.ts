@@ -40,11 +40,12 @@ export function domainErrorOf(tingeeCode: string): TingeeDomainError {
 }
 
 /**
- * Mã Tingee → lý do ngắt dịch vụ thanh toán của BTC (Story 4.2, AD-32; Mason chốt 13/11/2026): 1033 ("gói dịch vụ đã hết
- * hạn") → `token`; 1007, 1034 (merchant bị khóa) → `tingee_disabled`; 1133 (key chưa được cấp quyền "Cổng thanh toán")
- * → `gateway_permission_missing`; mã còn lại của `TINGEE_CREDENTIAL_INVALID` (92, 97, 1009) → `credential_invalid`. Mã
- * khác (kể cả nhóm VA `PAYMENT_ACCOUNT_NOT_ALLOWED`, mã lạ) → `null`: không phải ngắt dịch vụ. Mã Token (1033) chờ Tingee
- * xác nhận (`deferred-work.md`).
+ * Mã Tingee → lý do ngắt dịch vụ thanh toán của BTC theo key (Story 4.2, AD-32; Mason chốt 13/11/2026): 1033 ("gói dịch
+ * vụ đã hết hạn") → `token`; 1007, 1034 (merchant bị khóa) → `tingee_disabled`; 1133 (key chưa được cấp quyền "Cổng
+ * thanh toán") → `gateway_permission_missing`; mã còn lại của `TINGEE_CREDENTIAL_INVALID` (92, 97, 1009) →
+ * `credential_invalid`. Mã khác (kể cả nhóm VA `PAYMENT_ACCOUNT_NOT_ALLOWED`, mã lạ) → `null`. Lần dò
+ * (`getMerchantServiceStatus`) dùng thẳng hàm này: nhóm VA ở lần dò là "không biết". `create-link` dùng
+ * `createLinkServiceReasonOf` (thêm nhóm VA). Mã Token (1033) chờ Tingee xác nhận (`deferred-work.md`).
  */
 export function paymentServiceReasonOf(tingeeCode: string): PaymentServiceReason | null {
   if (tingeeCode === '1033') return PaymentServiceReason.TOKEN;
@@ -57,6 +58,19 @@ export function paymentServiceReasonOf(tingeeCode: string): PaymentServiceReason
     default:
       return null;
   }
+}
+
+/**
+ * Mã Tingee của `create-link` → lý do ngắt dịch vụ thanh toán của BTC: như `paymentServiceReasonOf`, thêm nhóm VA
+ * (`PAYMENT_ACCOUNT_NOT_ALLOWED`: 2023 VA chưa được cho phép trên Cổng thanh toán; 1023, 1045, 1024, 1072 VA lỗi) →
+ * `payout_account_not_allowed` (quyết định của Mason 14/11/2026, Story 4.2-d). Chỉ `create-link` (gọi bằng VA của tài
+ * khoản mặc định) biết VA bị từ chối.
+ */
+export function createLinkServiceReasonOf(tingeeCode: string): PaymentServiceReason | null {
+  if (domainErrorOf(tingeeCode) === ErrorCode.PAYMENT_ACCOUNT_NOT_ALLOWED) {
+    return PaymentServiceReason.PAYOUT_ACCOUNT_NOT_ALLOWED;
+  }
+  return paymentServiceReasonOf(tingeeCode);
 }
 
 /** Thông điệp tiếng Việt nói người dùng làm được gì. */

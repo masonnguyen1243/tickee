@@ -83,7 +83,7 @@ export function PaymentServiceBlock({ orgId, state, portalUrl, onChangeKey, chan
   if (state.status !== PaymentServiceStatus.SUSPENDED || !reason || !since) return null;
 
   let extra = null;
-  if (reason === PaymentServiceReason.TOKEN) {
+  if (reason === PaymentServiceReason.TOKEN || reason === PaymentServiceReason.PAYOUT_ACCOUNT_NOT_ALLOWED) {
     extra = <TingeeLink href={portalUrl}>Mở portal Tingee</TingeeLink>;
   } else if (reason === PaymentServiceReason.GATEWAY_PERMISSION_MISSING) {
     extra = <TingeeLink href={`${portalUrl}/api-credentials`}>Mở trang API key trên Tingee</TingeeLink>;

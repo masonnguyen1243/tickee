@@ -81,6 +81,7 @@ const NOTICE_DEFAULTS: Record<string, { severity: string; blocking: boolean }> =
   PAYMENT_SERVICE_SUSPENDED_TOKEN: { severity: 'danger', blocking: true },
   PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID: { severity: 'danger', blocking: true },
   PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING: { severity: 'danger', blocking: true },
+  PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED: { severity: 'danger', blocking: true },
   PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED: { severity: 'danger', blocking: true },
 };
 
@@ -89,6 +90,7 @@ export const PAYMENT_SERVICE_NOTICE: Record<string, string> = {
   token: 'PAYMENT_SERVICE_SUSPENDED_TOKEN',
   credential_invalid: 'PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID',
   gateway_permission_missing: 'PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING',
+  payout_account_not_allowed: 'PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED',
   tingee_disabled: 'PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED',
 };
 

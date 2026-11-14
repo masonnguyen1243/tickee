@@ -6,9 +6,9 @@ import {
 } from '@tickee/contracts';
 
 /*
- * Câu chữ của dịch vụ thanh toán bị ngắt (Story 4.2-b, Mason chốt 13/11/2026): khối "Dịch vụ thanh toán" ở trang Tài khoản
- * nhận tiền, toast của "Kiểm tra lại" và nhãn lý do ở tab "Tạm ngừng bán" của Quản trị Tingee. Hàm thuần, kiểm bằng
- * Vitest môi trường node.
+ * Câu chữ của dịch vụ thanh toán bị ngắt (Story 4.2-b, Mason chốt 13/11/2026; lý do `payout_account_not_allowed` chốt
+ * 14/11/2026, Story 4.2-d): khối "Dịch vụ thanh toán" ở trang Tài khoản nhận tiền, toast của "Kiểm tra lại" và nhãn lý
+ * do ở tab "Tạm ngừng bán" của Quản trị Tingee. Hàm thuần, kiểm bằng Vitest môi trường node.
  */
 
 /** Câu lý do đầu khối "Dịch vụ thanh toán" (cùng ý với tiêu đề banner của mã tương ứng). */
@@ -17,6 +17,7 @@ export const PAYMENT_SERVICE_REASON_TEXT: Readonly<Record<PaymentServiceReason, 
   tingee_disabled: 'Tingee đang tạm ngừng dịch vụ thanh toán của BTC.',
   credential_invalid: 'Key Tingee không còn dùng được.',
   gateway_permission_missing: 'Key Tingee chưa được cấp quyền Cổng thanh toán.',
+  payout_account_not_allowed: 'Tingee chưa cho tài khoản nhận tiền mặc định dùng Cổng thanh toán.',
 };
 
 /** Hậu quả, chung cho mọi lý do. */
@@ -30,6 +31,8 @@ export const PAYMENT_SERVICE_GUIDE: Readonly<Record<PaymentServiceReason, string
   credential_invalid: 'Key có thể đã bị thu hồi hoặc đổi trên Tingee. Đổi key Tingee để bán lại.',
   gateway_permission_missing:
     'Cấp quyền “Cổng thanh toán” cho key trên portal Tingee rồi bấm Kiểm tra lại. Tickee không tự kiểm tra được quyền này; nếu vẫn thiếu, lần bán vé kế tiếp sẽ tạm ngừng lại.',
+  payout_account_not_allowed:
+    'Cho phép tài khoản này trên Cổng thanh toán ở portal Tingee rồi bấm Kiểm tra lại, hoặc đặt tài khoản khác làm mặc định. Tickee không tự kiểm tra được; nếu vẫn chưa được cho phép, lần bán vé kế tiếp sẽ tạm ngừng lại.',
 };
 
 /** Nhãn ngắn của lý do (cột "Lý do" ở tab "Tạm ngừng bán" của Quản trị Tingee). */
@@ -38,6 +41,7 @@ export const PAYMENT_SERVICE_REASON_LABEL: Readonly<Record<PaymentServiceReason,
   tingee_disabled: 'Tingee ngắt dịch vụ',
   credential_invalid: 'Key không còn dùng được',
   gateway_permission_missing: 'Key thiếu quyền Cổng thanh toán',
+  payout_account_not_allowed: 'Tài khoản chưa dùng được Cổng thanh toán',
 };
 
 export type CheckToast = { kind: 'success' | 'info' | 'warning'; message: string };

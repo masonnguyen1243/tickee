@@ -169,6 +169,13 @@
       "when": 1794561272220,
       "tag": "0023_payment_service_status",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794627667499,
+      "tag": "0024_payout_account_not_allowed",
+      "breakpoints": true
     }
   ]
 }

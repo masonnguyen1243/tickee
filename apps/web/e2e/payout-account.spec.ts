@@ -28,6 +28,9 @@ import {
  * Story 4.2-b: `paymentService` của tổng quan đọc từ `state.paymentService`; `notices` thêm banner của lý do ngắt;
  * "Kiểm tra lại" (`POST …/payment-service/check`) trả lần lượt `checkReplies` (mặc định: vẫn ngắt / không ngắt), lưu key
  * mới tắt cờ khi lý do là key (như api). Giờ hiển thị theo giờ Việt Nam: các ca này chạy trình duyệt múi giờ New York.
+ *
+ * Story 4.2-d: như api, lý do `payout_account_not_allowed` (Tingee từ chối VA của tài khoản mặc định) tắt khi đặt tài
+ * khoản khác làm mặc định, hủy tài khoản mặc định hoặc lưu key mới; lý do khác không bị đổi mặc định tắt.
  */
 
 const CONSENTED = '2026-10-29T01:02:03.000Z';
@@ -224,6 +227,10 @@ async function openPage(
     return found && found.secretToken === key.secretToken ? found : null;
   };
   const reauthRequired = () => apiError(403, 'REAUTH_REQUIRED', { method: requiredMethod });
+  /** Như api (`resumeAfterDefaultChanged`): đổi hay hủy tài khoản mặc định tắt cờ khi VA mặc định bị Tingee từ chối. */
+  const defaultChanged = () => {
+    if (state.paymentService.reason === 'payout_account_not_allowed') state.paymentService = ACTIVE_SERVICE;
+  };
   // Hủy liên kết và đặt mặc định như api: id lạ hoặc đã hủy → 404; hủy tài khoản mặc định thì tài khoản liên kết sớm
   // nhất còn lại thành mặc định.
   const accountRoutes: Record<string, Handler> = {};
@@ -235,12 +242,15 @@ async function openPage(
       if (!target) return apiError(404, 'NOT_FOUND');
       state.accounts = state.accounts.filter((a) => a.id !== id);
       if (target.isDefault && state.accounts[0]) state.accounts[0] = { ...state.accounts[0], isDefault: true };
+      if (target.isDefault) defaultChanged();
       return { status: 200, body: overviewOf() };
     };
     accountRoutes[`POST /orgs/${ORG_ID}/payout-account/${id}/default`] = (request) => {
       if (!reauthGranted(request)) return reauthRequired();
-      if (!state.accounts.some((a) => a.id === id)) return apiError(404, 'NOT_FOUND');
+      const target = state.accounts.find((a) => a.id === id);
+      if (!target) return apiError(404, 'NOT_FOUND');
       state.accounts = state.accounts.map((a) => ({ ...a, isDefault: a.id === id }));
+      if (!target.isDefault) defaultChanged();
       return { status: 200, body: overviewOf() };
     };
   }
@@ -356,8 +366,9 @@ async function openPage(
       state.clientId = body.clientId;
       state.accounts = [linkedAccount(option, linkedCount, true)];
       linkedCount += 1;
-      // Như api (`resumeAfterNewKey`): key mới hợp lệ tắt cờ khi BTC bị ngắt vì key.
-      if (['credential_invalid', 'gateway_permission_missing'].includes(state.paymentService.reason ?? '')) {
+      // Như api (`resumeAfterNewKey`): key mới hợp lệ tắt cờ khi BTC bị ngắt vì key hay vì VA của tài khoản mặc định.
+      const fixedByNewKey = ['credential_invalid', 'gateway_permission_missing', 'payout_account_not_allowed'];
+      if (fixedByNewKey.includes(state.paymentService.reason ?? '')) {
         state.paymentService = ACTIVE_SERVICE;
       }
       return { status: 200, body: overviewOf() };
@@ -1212,6 +1223,14 @@ test.describe('dịch vụ thanh toán bị ngắt (Story 4.2-b)', () => {
         'Cấp quyền “Cổng thanh toán” cho key trên portal Tingee rồi bấm Kiểm tra lại. Tickee không tự kiểm tra được quyền này; nếu vẫn thiếu, lần bán vé kế tiếp sẽ tạm ngừng lại.',
       link: { name: 'Mở trang API key trên Tingee', href: `${PORTAL}/api-credentials` },
     },
+    // Story 4.2-d (Mason chốt 14/11/2026).
+    {
+      reason: 'payout_account_not_allowed',
+      text: 'Tingee chưa cho tài khoản nhận tiền mặc định dùng Cổng thanh toán.',
+      guide:
+        'Cho phép tài khoản này trên Cổng thanh toán ở portal Tingee rồi bấm Kiểm tra lại, hoặc đặt tài khoản khác làm mặc định. Tickee không tự kiểm tra được; nếu vẫn chưa được cho phép, lần bán vé kế tiếp sẽ tạm ngừng lại.',
+      link: { name: 'Mở portal Tingee', href: PORTAL },
+    },
   ];
 
   test('BTC hoạt động bình thường: không có khối "Dịch vụ thanh toán"', async ({ page }) => {
@@ -1344,6 +1363,61 @@ test.describe('dịch vụ thanh toán bị ngắt (Story 4.2-b)', () => {
     await expect(block(page)).toHaveCount(0);
     await expect(banners(page)).toHaveCount(0);
     expect(reauthHeaders[0]).toBeNull();
+  });
+
+  test('payout_account_not_allowed (Story 4.2-d): đặt tài khoản khác làm mặc định → khối và banner biến mất, không gọi "Kiểm tra lại"', async ({
+    page,
+  }) => {
+    const { calls, state } = await openPage(page, {
+      initial: {
+        ...CONNECTED,
+        accounts: [linkedAccount(MB), linkedAccount(ACB, 1)],
+        paymentService: suspended('payout_account_not_allowed'),
+      },
+    });
+    await expect(block(page).locator('[data-slot="payment-service-reason"]')).toHaveText(
+      `Tingee chưa cho tài khoản nhận tiền mặc định dùng Cổng thanh toán. ${PAUSED}`,
+    );
+    await expect(banners(page).first()).toContainText('Tài khoản nhận tiền chưa dùng được với Cổng thanh toán');
+    const action = banners(page).first().getByRole('link', { name: 'Xem cách xử lý' });
+    await expect(action).toHaveAttribute('href', PAGE_PATH);
+
+    await accountRow(page, 'ACB').getByRole('button', { name: 'Đặt làm mặc định' }).click();
+    await expect(page.getByText('ACB •••• 2222 là tài khoản mặc định.')).toBeVisible();
+    await expect(accountRow(page, 'ACB').locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
+    await expect(block(page)).toHaveCount(0);
+    await expect(banners(page)).toHaveCount(0);
+    expect(state.paymentService.status).toBe('active');
+    expect(checks(calls)).toHaveLength(0);
+  });
+
+  test('payout_account_not_allowed: hủy tài khoản mặc định → khối và banner biến mất; lý do khác (token): đổi mặc định không tắt', async ({
+    page,
+  }) => {
+    const { state } = await openPage(page, {
+      initial: {
+        ...CONNECTED,
+        accounts: [linkedAccount(MB), linkedAccount(ACB, 1)],
+        paymentService: suspended('payout_account_not_allowed'),
+      },
+    });
+    await expect(block(page)).toBeVisible();
+    await accountRow(page, 'MB Bank').getByRole('button', { name: 'Hủy liên kết' }).click();
+    await unlinkDialog(page).getByRole('button', { name: 'Hủy liên kết' }).click();
+    await expect(page.getByText('Đã hủy liên kết MB Bank •••• 4321.')).toBeVisible();
+    await expect(accountRow(page, 'ACB').locator('[data-slot="status-badge"]')).toHaveText('Mặc định');
+    await expect(block(page)).toHaveCount(0);
+    await expect(banners(page)).toHaveCount(0);
+
+    // Hết Token: đổi tài khoản mặc định không chữa được, khối giữ nguyên.
+    state.paymentService = suspended('token');
+    state.accounts = [...state.accounts, linkedAccount(MB, 2, false)];
+    await page.reload();
+    await expect(block(page)).toBeVisible();
+    await accountRow(page, 'MB Bank').getByRole('button', { name: 'Đặt làm mặc định' }).click();
+    await expect(page.getByText('MB Bank •••• 4321 là tài khoản mặc định.')).toBeVisible();
+    await expect(block(page)).toContainText('Tingee báo đã hết Token (gói dịch vụ hết hạn).');
+    await expect(banners(page).first()).toContainText('Mọi Sự kiện có phí đang Tạm ngừng bán');
   });
 
   test('cờ đổi khi đang mở trang: org_status_changed qua stream cấp BTC → khối và banner hiện rồi biến mất, không tải lại trang', async ({

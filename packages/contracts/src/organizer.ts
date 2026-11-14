@@ -374,9 +374,10 @@ export type PayoutAccount = z.infer<typeof PayoutAccount>;
 
 /**
  * Trạng thái dịch vụ thanh toán của BTC (cột `organizations.payment_service_status`, do `organizer` sở hữu). `suspended`:
- * Tingee từ chối tạo link bằng key hiện hành vì một trong bốn lý do (`PaymentServiceReason`: hết Token, merchant bị khóa,
- * key không còn dùng được, key chưa được cấp quyền "Cổng thanh toán"), mọi Hạng vé > 0đ "Tạm ngừng bán"
- * (`ordering.sellability`); Hạng vé 0đ vẫn bán. Không chặn mở bán (`publishReadiness`). Closed Beta là trục riêng.
+ * Tingee từ chối tạo link bằng key hiện hành vì một trong năm lý do (`PaymentServiceReason`: hết Token, merchant bị
+ * khóa, key không còn dùng được, key chưa được cấp quyền "Cổng thanh toán", tài khoản nhận tiền mặc định chưa dùng được
+ * với Cổng thanh toán), mọi Hạng vé > 0đ "Tạm ngừng bán" (`ordering.sellability`); Hạng vé 0đ vẫn bán. Không chặn mở
+ * bán (`publishReadiness`). Closed Beta là trục riêng.
  */
 export const PaymentServiceStatus = {
   ACTIVE: 'active',
@@ -394,25 +395,33 @@ export const paymentServiceStatusSchema = z.enum(PaymentServiceStatus);
  * - `gateway_permission_missing`: key đúng nhưng chưa được cấp quyền "Cổng thanh toán" (1133; quyết định 13/11/2026 sau
  *   review lượt 1). Dò bằng `get-va-paging` không thấy được thiếu quyền này nên job dò bỏ qua; Owner "Kiểm tra lại" tắt
  *   cờ không cần Tingee xác nhận.
+ * - `payout_account_not_allowed`: Tingee từ chối VA của tài khoản nhận tiền mặc định (`PAYMENT_ACCOUNT_NOT_ALLOWED` của
+ *   `create-link`: 2023 VA chưa được cho phép trên Cổng thanh toán; 1023, 1045, 1024, 1072 VA lỗi; quyết định của Mason
+ *   14/11/2026, Story 4.2-d). Chỉ bật khi tài khoản vừa gọi Tingee vẫn là mặc định hiện hành. Như
+ *   `gateway_permission_missing`: job dò bỏ qua, Owner "Kiểm tra lại" tắt cờ không cần Tingee xác nhận; thêm: đổi hoặc
+ *   hủy tài khoản mặc định, hay lưu key mới, cũng tắt cờ.
  */
 export const PaymentServiceReason = {
   TOKEN: 'token',
   TINGEE_DISABLED: 'tingee_disabled',
   CREDENTIAL_INVALID: 'credential_invalid',
   GATEWAY_PERMISSION_MISSING: 'gateway_permission_missing',
+  PAYOUT_ACCOUNT_NOT_ALLOWED: 'payout_account_not_allowed',
 } as const;
 export type PaymentServiceReason = (typeof PaymentServiceReason)[keyof typeof PaymentServiceReason];
 export const paymentServiceReasonSchema = z.enum(PaymentServiceReason);
 
 /**
  * Đường tắt cờ (ghi vào audit): job dò định kỳ, Owner bấm "Kiểm tra lại", Quản trị Tingee mở lại, Owner lưu key mới
- * hợp lệ (chỉ khi lý do `credential_invalid` hoặc `gateway_permission_missing`).
+ * hợp lệ (chỉ khi lý do `credential_invalid`, `gateway_permission_missing` hoặc `payout_account_not_allowed`), Owner
+ * đổi hoặc hủy tài khoản nhận tiền mặc định (chỉ khi lý do `payout_account_not_allowed`, Story 4.2-d).
  */
 export const PaymentServiceResumePath = {
   PROBE: 'probe',
   OWNER_CHECK: 'owner_check',
   PLATFORM_ADMIN: 'platform_admin',
   NEW_KEY: 'new_key',
+  DEFAULT_CHANGED: 'default_changed',
 } as const;
 export type PaymentServiceResumePath = (typeof PaymentServiceResumePath)[keyof typeof PaymentServiceResumePath];
 

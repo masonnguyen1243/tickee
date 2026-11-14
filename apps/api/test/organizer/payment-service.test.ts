@@ -5,6 +5,7 @@ import { Test } from '@nestjs/testing';
 import {
   ErrorResponse,
   EventAvailability,
+  EventSaleStatusList,
   JobQueue,
   PaymentServiceCheckResult,
   PaymentServiceReason,
@@ -77,10 +78,12 @@ import {
 /*
  * Story 4.2-a: cờ dịch vụ thanh toán của BTC trên Postgres thật và Tingee fake (server HTTP thật; `create-link` và
  * `get-va-paging` cài trước mã ngắt). Mỗi dòng của I/O Matrix: bật cờ khi tạo link bị từ chối (theo mã), không bật với
- * nhóm VA hay key vừa bị thay, bán khi đang ngắt (TX1, chốt link, trang công khai), dò (job, "Kiểm tra lại"), Quản trị
- * Tingee, lưu key mới, hai đường mở lại cùng lúc, `notices`, tổng quan Tài khoản nhận tiền; job "đã mở lại" Đối soát bù
- * mọi Đơn còn mở. Mỗi test một BTC mới. Sau mỗi nhánh có Đơn: bất biến tồn kho – Vé (`expectInvariants`). Khối "worker
- * thật" chạy lịch cron và hai job qua pg-boss.
+ * key vừa bị thay, bán khi đang ngắt (TX1, chốt link, trang công khai), dò (job, "Kiểm tra lại"), Quản trị Tingee, lưu
+ * key mới, hai đường mở lại cùng lúc, `notices`, tổng quan Tài khoản nhận tiền; job "đã mở lại" Đối soát bù mọi Đơn còn
+ * mở. Story 4.2-d: nhóm VA (fake tự trả 2023 khi VA không thuộc merchant) bật lý do `payout_account_not_allowed` khi
+ * tài khoản đã gọi vẫn là mặc định; job dò bỏ qua, "Kiểm tra lại" tắt không gọi Tingee, đổi/hủy tài khoản mặc định tắt
+ * (`default_changed`). Mỗi test một BTC mới. Sau mỗi nhánh có Đơn: bất biến tồn kho – Vé (`expectInvariants`). Khối
+ * "worker thật" chạy lịch cron và hai job qua pg-boss.
  */
 
 const MAIN: TingeeCredential = { clientId: 'tg-svc-main-5e7b', secretToken: 'tg-svc-main-secret-Rt4Ye3Wq2' };
@@ -264,6 +267,84 @@ async function addAdmin(org: Org): Promise<User> {
   return admin;
 }
 
+/** Thêm một tài khoản nhận tiền (không mặc định) đọc bằng credential hiện hành của BTC; trả id. */
+async function addAccount(org: Org, account: FakeAccount): Promise<string> {
+  const va = String(account.vaAccountNumber);
+  const { rows } = await h.db.pool.query<{ id: string }>(
+    `INSERT INTO payout_accounts
+       (organization_id, tingee_credential_id, va_account_number, bank_bin, bank_name, account_type, account_last4,
+        account_name, created_by, is_default)
+     SELECT $1, c.id, $2, '970436', $3, 'personal-account', $4, $5, $6, false
+       FROM tingee_credentials c WHERE c.organization_id = $1 AND c.retired_at IS NULL
+     RETURNING id`,
+    [org.orgId, va, String(account.bankName), va.slice(-4), String(account.accountName), org.owner.userId],
+  );
+  return rows[0]!.id;
+}
+
+/** Id tài khoản nhận tiền mặc định hiện hành của BTC. */
+async function defaultAccountId(orgId: string): Promise<string> {
+  const { rows } = await h.db.pool.query<{ id: string }>(
+    'SELECT id FROM payout_accounts WHERE organization_id = $1 AND is_default AND retired_at IS NULL',
+    [orgId],
+  );
+  return rows[0]!.id;
+}
+
+/** "Đặt làm mặc định" của Owner (đã xác nhận lại; `token` bỏ trống thì xác nhận lại ngay trước lời gọi). */
+async function setDefault(org: Org, accountId: string, token?: string): Promise<PayoutAccountOverview> {
+  const proof = token ?? (await reauthToken(h, org.owner));
+  const res = await h.http
+    .post(`/v1/orgs/${org.orgId}/payout-account/${accountId}/default`)
+    .set('cookie', org.owner.cookie)
+    .set(REAUTH_HEADER, proof);
+  expect(res.status, JSON.stringify(res.body)).toBe(200);
+  return PayoutAccountOverview.parse(res.body);
+}
+
+/** Hủy liên kết một tài khoản nhận tiền (Owner, đã xác nhận lại). */
+async function unlink(org: Org, accountId: string): Promise<PayoutAccountOverview> {
+  const token = await reauthToken(h, org.owner);
+  const res = await h.http
+    .delete(`/v1/orgs/${org.orgId}/payout-account/${accountId}`)
+    .set('cookie', org.owner.cookie)
+    .set(REAUTH_HEADER, token);
+  expect(res.status, JSON.stringify(res.body)).toBe(200);
+  return PayoutAccountOverview.parse(res.body);
+}
+
+/** Nhãn trạng thái bán của Sự kiện ở trang chủ BTC (Story 4.2-c). */
+async function saleStatusOf(org: Org, eventId: string) {
+  const res = await h.http.get(`/v1/orgs/${org.orgId}/event-sale-status`).set('cookie', org.owner.cookie).expect(200);
+  return EventSaleStatusList.parse(res.body).events.find((e) => e.eventId === eventId);
+}
+
+/**
+ * BTC có tài khoản mặc định là VA của merchant khác (`nextAccount`) trên key MAIN: `create-link` bị fake từ chối thật
+ * bằng 2023 (VA không phải tài khoản active của merchant). `extra`: thêm tài khoản `mainAccount` (VA hợp lệ) không mặc
+ * định.
+ */
+async function newRejectedVaOrg(
+  name: string,
+  extra = false,
+): Promise<{ org: Org; rejectedId: string; validId: string | null }> {
+  const org = await newOrg(name, MAIN, nextAccount);
+  const rejectedId = await defaultAccountId(org.orgId);
+  const validId = extra ? await addAccount(org, mainAccount) : null;
+  return { org, rejectedId, validId };
+}
+
+/** Bật cờ `payout_account_not_allowed` bằng đường thật: một Đơn có phí mà fake trả 2023 cho VA mặc định. */
+async function suspendViaRejectedVa(org: Org): Promise<{ sale: Sale; placed: Placed }> {
+  const sale = await newSale(org);
+  const placed = await placePaid(sale);
+  expect(placed.order).toMatchObject({
+    buyerStatus: 'expired',
+    payment: { checkoutUrl: null, linkError: 'sales_paused' },
+  });
+  return { sale, placed };
+}
+
 describe('bật cờ khi create-link bị Tingee từ chối', () => {
   it('Hết Token (1033) → Đơn expired sales_paused; cờ suspended token; audit hệ thống; org_status_changed cấp BTC; Hạng vé > 0đ paused, 0đ on_sale', async () => {
     const org = await newOrg('CLB Tennis Quận 7');
@@ -304,6 +385,10 @@ describe('bật cờ khi create-link bị Tingee từ chối', () => {
     ['Merchant bị khóa (1034)', '1034', 'tingee_disabled'],
     ['Key hỏng (97 sai chữ ký)', '97', 'credential_invalid'],
     ['Key thiếu quyền Cổng thanh toán (1133)', '1133', 'gateway_permission_missing'],
+    ['VA lỗi (1023)', '1023', 'payout_account_not_allowed'],
+    ['VA lỗi (1045)', '1045', 'payout_account_not_allowed'],
+    ['VA lỗi (1024)', '1024', 'payout_account_not_allowed'],
+    ['VA lỗi (1072)', '1072', 'payout_account_not_allowed'],
   ])('%s → Đơn sales_paused; cờ suspended lý do %s', async (_label, code, reason) => {
     const org = await newOrg(`CLB ${code}`);
     const { sale } = await suspendVia(org, code);
@@ -314,14 +399,86 @@ describe('bật cờ khi create-link bị Tingee từ chối', () => {
     await expectInvariants(h, sale.eventId);
   });
 
-  it('VA chưa cho phép (2023) → Đơn sales_paused; cờ không đổi, không audit, không tín hiệu', async () => {
-    const org = await newOrg('CLB Bóng rổ');
-    const { sale } = await suspendVia(org, '2023');
-    expect(await paymentServiceOf(h, org.orgId)).toMatchObject({ status: 'active', reason: null, since: null });
+  it('VA chưa được cho phép (2023, fake: VA không thuộc merchant; Story 4.2-d) → Đơn sales_paused; cờ suspended payout_account_not_allowed; audit hệ thống; org_status_changed; Hạng vé > 0đ paused, 0đ on_sale; nhãn Sự kiện Tạm ngừng bán', async () => {
+    const { org } = await newRejectedVaOrg('CLB Bóng rổ');
+    const { sale, placed } = await suspendViaRejectedVa(org);
+    expect(h.logs.lines.find((l) => l.orderCode === placed.code && l.tingeeCode === '2023')).toMatchObject({
+      organizationId: org.orgId,
+      domainCode: 'PAYMENT_ACCOUNT_NOT_ALLOWED',
+    });
+
+    const flag = await paymentServiceOf(h, org.orgId);
+    expect(flag).toMatchObject({ status: 'suspended', reason: 'payout_account_not_allowed', checked_at: null });
+    expect(flag.since).toBeInstanceOf(Date);
+    expect(await auditRows(org.orgId, 'organization.payment_service_suspended')).toEqual([
+      {
+        actor_user_id: null,
+        target_type: 'payment_service_reason',
+        target_id: 'payout_account_not_allowed',
+        changed_fields: ['payment_service_status', 'payment_service_reason', 'payment_service_since'],
+      },
+    ]);
+    await expect.poll(() => statusSignalsOf(org.orgId)).toEqual([
+      { type: 'org_status_changed', id: org.orgId, organizationId: org.orgId },
+    ]);
+    // AC: trang công khai (Hạng vé có phí "Tạm ngừng bán") và trang chủ BTC (nhãn Sự kiện "Tạm ngừng bán").
+    expect(await availability(sale.slug)).toEqual({
+      eventReason: 'paused',
+      tiers: [
+        { ticketTypeId: sale.paidTier, status: 'paused', remaining: 5, saleStartsAt: null },
+        { ticketTypeId: sale.freeTier, status: 'on_sale', remaining: 5, saleStartsAt: null },
+      ],
+    });
+    expect(await saleStatusOf(org, sale.eventId)).toEqual({ eventId: sale.eventId, reason: 'paused', partial: true });
+    expect(await noticeCodes(org.owner.cookie, org.orgId)).toEqual([
+      'PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED',
+    ]);
+    expect((await orderState(h, placed.code)).status).toBe('expired');
+    expect(h.logs.lines.find((l) => l.organizationId === org.orgId && l.result === 'suspended')).toMatchObject({
+      reason: 'payout_account_not_allowed',
+    });
+    expect(h.logs.text).not.toContain(MAIN.secretToken);
+    await expectInvariants(h, sale.eventId);
+  });
+
+  it('Owner đặt tài khoản khác làm mặc định trong lúc create-link bằng VA cũ đang chờ (VA cũ trả 2023) → Đơn sales_paused, cờ không đổi; Đơn kế tiếp tạo link bằng VA mới', async () => {
+    const { org, validId } = await newRejectedVaOrg('CLB Bóng đá mini', true);
+    const sale = await newSale(org);
+    const token = await reauthToken(h, org.owner);
+    afterNextLink = async (input) => {
+      expect(input.vaAccountNumber).toBe(String(nextAccount.vaAccountNumber));
+      // `setDefault` commit trước transaction bù: VA vừa bị từ chối không còn là mặc định.
+      await setDefault(org, validId!, token);
+    };
+    const placed = await placePaid(sale);
+    expect(placed.order).toMatchObject({ buyerStatus: 'expired', payment: { linkError: 'sales_paused' } });
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject({ status: 'active', reason: null });
     expect(await auditRows(org.orgId, 'organization.payment_service_suspended')).toEqual([]);
-    await sleep(200);
-    expect(statusSignalsOf(org.orgId)).toEqual([]);
-    expect((await availability(sale.slug)).tiers.map((t) => t.status)).toEqual(['on_sale', 'on_sale']);
+    expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toEqual([]);
+    expect(h.logs.lines.find((l) => l.organizationId === org.orgId && l.result === 'stale_account')).toMatchObject({
+      reason: 'payout_account_not_allowed',
+    });
+
+    const next = await placePaid(sale);
+    expect(next.order.payment?.checkoutUrl).toEqual(expect.any(String));
+    expect(fake.calls(CREATE_LINK_PATH).at(-1)?.body).toMatchObject({
+      vaAccountNumber: String(mainAccount.vaAccountNumber),
+    });
+    await expectInvariants(h, sale.eventId);
+  });
+
+  it('lý do khác (1033) mà Owner đổi tài khoản mặc định trong lúc create-link → vẫn bật cờ token (chỉ lý do VA kiểm tài khoản mặc định)', async () => {
+    const org = await newOrg('CLB Bóng đá trong nhà');
+    const otherId = await addAccount(org, nextAccount);
+    const sale = await newSale(org);
+    const token = await reauthToken(h, org.owner);
+    afterNextLink = async () => {
+      await setDefault(org, otherId, token);
+    };
+    const placed = await placePaid(sale, '1033');
+    expect(placed.order).toMatchObject({ buyerStatus: 'expired', payment: { linkError: 'sales_paused' } });
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject({ status: 'suspended', reason: 'token' });
+    expect(await auditRows(org.orgId, 'organization.payment_service_suspended')).toHaveLength(1);
     await expectInvariants(h, sale.eventId);
   });
 
@@ -451,6 +608,24 @@ describe('dò dịch vụ', () => {
       expect(jobs.find((job) => job.id === reconcileJobId(placed.orderId, checkAt))).toBeUndefined();
     }
     await expectInvariants(h, sale.eventId);
+  });
+
+  it('Tingee nhận key nhưng lý do vừa đổi sang payout_account_not_allowed trong lúc dò → không mở lại (CAS kèm lý do lúc giành lượt), skipped', async () => {
+    const org = await newOrg('CLB Bóng đá bãi biển');
+    await suspendVia(org, '1033');
+    afterNextProbe = async () => {
+      // Như create-link của một Đơn đang bay bị Tingee từ chối VA (đổi lý do của BTC đang `suspended`).
+      await h.db.orm.execute(
+        sql`UPDATE organizations SET payment_service_reason = 'payout_account_not_allowed' WHERE id = ${org.orgId}`,
+      );
+    };
+    expect(await prober.probe(org.orgId, 'probe', null)).toBe('skipped');
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject({
+      status: 'suspended',
+      reason: 'payout_account_not_allowed',
+    });
+    expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toEqual([]);
+    expect(await resumedJobsOf(org.orgId)).toEqual([]);
   });
 
   it('vẫn ngắt mã khác → đổi lý do (giữ since); cùng mã → giữ; timeout / HTTP 500 → giữ cờ; checked_at cập nhật; trong 30 giây không dò lại', async () => {
@@ -796,6 +971,170 @@ describe('dò dịch vụ', () => {
   });
 });
 
+describe('Tingee từ chối VA của tài khoản mặc định (Story 4.2-d)', () => {
+  it('job dò bỏ qua BTC có lý do payout_account_not_allowed: không gọi Tingee, cờ giữ, checked_at không đổi', async () => {
+    const { org } = await newRejectedVaOrg('CLB Bóng chày');
+    const { sale } = await suspendViaRejectedVa(org);
+
+    // BTC bị ngắt của test khác vẫn được dò: chỉ kiểm BTC này không có trong lượt và lần dò lẻ không gọi Tingee.
+    const outcomes = await probeWorker.probeSuspended();
+    expect(outcomes.has(org.orgId)).toBe(false);
+    const calls = fake.calls(ACCOUNTS_PATH).length;
+    expect(await prober.probe(org.orgId, 'probe', null)).toBe('skipped');
+    expect(fake.calls(ACCOUNTS_PATH)).toHaveLength(calls);
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject({
+      status: 'suspended',
+      reason: 'payout_account_not_allowed',
+      checked_at: null,
+    });
+    await expectInvariants(h, sale.eventId);
+  });
+
+  it('"Kiểm tra lại" của Owner: trong 30 giây → cooldown; quá 30 giây → active (owner_check), không gọi Tingee, Đối soát bù; VA vẫn bị từ chối → Đơn kế tiếp bật cờ lại', async () => {
+    const { org } = await newRejectedVaOrg('CLB Bóng bàn');
+    const { sale } = await suspendViaRejectedVa(org);
+    await h.db.orm.execute(sql`UPDATE organizations SET payment_service_checked_at = now() WHERE id = ${org.orgId}`);
+
+    expect(await checkResult(org)).toMatchObject({
+      state: { status: 'suspended', reason: 'payout_account_not_allowed', checkedAt: expect.any(String) },
+      outcome: 'cooldown',
+      retryAfterSeconds: expect.any(Number),
+    });
+    expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toEqual([]);
+
+    await ageLastCheck(org.orgId);
+    expect(await checkResult(org)).toMatchObject({
+      state: { status: 'active', reason: null, since: null },
+      outcome: 'resumed',
+    });
+    expect(fake.calls(ACCOUNTS_PATH)).toEqual([]);
+    expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toMatchObject([
+      { actor_user_id: org.owner.userId, target_type: 'payment_service_resume', target_id: 'owner_check' },
+    ]);
+    expect(await resumedJobsOf(org.orgId)).toHaveLength(1);
+    expect(await noticeCodes(org.owner.cookie, org.orgId)).toEqual([]);
+
+    // Owner chưa cho phép VA thật: lần bán kế tiếp bị từ chối lại và bật cờ mới (không mang lần kiểm tra cũ).
+    await suspendViaRejectedVa(org);
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject({
+      status: 'suspended',
+      reason: 'payout_account_not_allowed',
+      checked_at: null,
+    });
+    expect(await auditRows(org.orgId, 'organization.payment_service_suspended')).toHaveLength(2);
+    await expectInvariants(h, sale.eventId);
+  });
+
+  it('"Kiểm tra lại": lý do đổi sau lúc giành lượt → không mở lại (CAS kèm lý do), skipped', async () => {
+    const { org } = await newRejectedVaOrg('CLB Đá cầu');
+    await suspendViaRejectedVa(org);
+    const ready = PaymentServiceQueues.prototype.ready;
+    const spy = vi.spyOn(PaymentServiceQueues.prototype, 'ready');
+    spy.mockImplementationOnce(async function (this: PaymentServiceQueues) {
+      await h.db.orm.execute(sql`UPDATE organizations SET payment_service_reason = 'token' WHERE id = ${org.orgId}`);
+      return ready.call(this);
+    });
+    try {
+      expect(await prober.probe(org.orgId, 'owner_check', org.owner.userId)).toBe('skipped');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject({ status: 'suspended', reason: 'token' });
+    expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toEqual([]);
+    expect(await resumedJobsOf(org.orgId)).toEqual([]);
+  });
+
+  it('đặt tài khoản đang là mặc định → cờ giữ; đặt tài khoản khác làm mặc định → active (default_changed, actor Owner) cùng transaction, Đối soát bù; Đơn kế tiếp tạo link bằng VA mới', async () => {
+    const { org, rejectedId, validId } = await newRejectedVaOrg('CLB Quần vợt', true);
+    const { sale } = await suspendViaRejectedVa(org);
+
+    // Đã là mặc định: không đổi gì.
+    const same = await setDefault(org, rejectedId);
+    expect(same.paymentService).toMatchObject({ status: 'suspended', reason: 'payout_account_not_allowed' });
+    expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toEqual([]);
+
+    const overview = await setDefault(org, validId!);
+    expect(overview.paymentService).toEqual({ status: 'active', reason: null, since: null, checkedAt: null });
+    expect(overview.accounts.find((a) => a.id === validId)?.isDefault).toBe(true);
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject({ status: 'active', reason: null, since: null });
+    expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toEqual([
+      {
+        actor_user_id: org.owner.userId,
+        target_type: 'payment_service_resume',
+        target_id: 'default_changed',
+        changed_fields: ['payment_service_status', 'payment_service_reason', 'payment_service_since'],
+      },
+    ]);
+    expect(await resumedJobsOf(org.orgId)).toHaveLength(1);
+    await expect.poll(() => statusSignalsOf(org.orgId).length).toBe(2);
+    expect(await noticeCodes(org.owner.cookie, org.orgId)).toEqual([]);
+    expect((await availability(sale.slug)).tiers.map((t) => t.status)).toEqual(['on_sale', 'on_sale']);
+    // Không gọi Tingee khi đổi mặc định.
+    expect(fake.calls(ACCOUNTS_PATH)).toEqual([]);
+
+    const next = await placePaid(sale);
+    expect(next.order.payment?.checkoutUrl).toEqual(expect.any(String));
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject({ status: 'active' });
+    await expectInvariants(h, sale.eventId);
+  });
+
+  it('hủy tài khoản mặc định (còn tài khoản khác) → tài khoản còn lại thành mặc định, cờ active (default_changed)', async () => {
+    const { org, rejectedId, validId } = await newRejectedVaOrg('CLB Bơi thuyền', true);
+    const { sale } = await suspendViaRejectedVa(org);
+    const overview = await unlink(org, rejectedId);
+    expect(overview.accounts.map((a) => [a.id, a.isDefault])).toEqual([[validId, true]]);
+    expect(overview.paymentService).toMatchObject({ status: 'active', reason: null });
+    expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toMatchObject([
+      { actor_user_id: org.owner.userId, target_id: 'default_changed' },
+    ]);
+    expect(await resumedJobsOf(org.orgId)).toHaveLength(1);
+    await expectInvariants(h, sale.eventId);
+  });
+
+  it('hủy tài khoản mặc định cuối cùng → cờ active (default_changed); "Chưa liên kết tài khoản nhận tiền" chặn bán thay', async () => {
+    const { org, rejectedId } = await newRejectedVaOrg('CLB Chèo thuyền');
+    const { sale } = await suspendViaRejectedVa(org);
+    const overview = await unlink(org, rejectedId);
+    expect(overview.accounts).toEqual([]);
+    expect(overview.paymentService).toMatchObject({ status: 'active', reason: null });
+    expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toMatchObject([
+      { actor_user_id: org.owner.userId, target_id: 'default_changed' },
+    ]);
+    expect(await resumedJobsOf(org.orgId)).toHaveLength(1);
+    expect(await noticeCodes(org.owner.cookie, org.orgId)).toEqual(['PAYOUT_ACCOUNT_NOT_LINKED']);
+    expect((await availability(sale.slug)).tiers.map((t) => t.status)).toEqual(['paused', 'on_sale']);
+    await expectInvariants(h, sale.eventId);
+  });
+
+  it('hủy tài khoản không phải mặc định → cờ giữ', async () => {
+    const { org, validId } = await newRejectedVaOrg('CLB Lướt sóng', true);
+    await suspendViaRejectedVa(org);
+    await unlink(org, validId!);
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject({
+      status: 'suspended',
+      reason: 'payout_account_not_allowed',
+    });
+    expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toEqual([]);
+    expect(await resumedJobsOf(org.orgId)).toEqual([]);
+  });
+
+  it.each([
+    ['token', '1033'],
+    ['gateway_permission_missing', '1133'],
+    ['credential_invalid', '97'],
+  ])('lý do khác (%s): đặt tài khoản khác làm mặc định, rồi hủy tài khoản mặc định → cờ giữ', async (reason, code) => {
+    const org = await newOrg(`CLB Đổi mặc định ${code}`);
+    const otherId = await addAccount(org, nextAccount);
+    await suspendVia(org, code);
+    await setDefault(org, otherId);
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject({ status: 'suspended', reason });
+    await unlink(org, otherId);
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject({ status: 'suspended', reason });
+    expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toEqual([]);
+    expect(await resumedJobsOf(org.orgId)).toEqual([]);
+  });
+});
+
 describe('Quản trị Tingee', () => {
   const list = (cookie = platformAdmin.cookie) =>
     h.http.get('/v1/admin/organizations/payment-service/suspended').set('cookie', cookie);
@@ -906,6 +1245,18 @@ describe('lưu key mới (2.13-b)', () => {
     expect(await resumedJobsOf(org.orgId)).toHaveLength(1);
   });
 
+  it('lý do payout_account_not_allowed (Story 4.2-d) → key mới hợp lệ cũng tắt cờ (new_key)', async () => {
+    const { org } = await newRejectedVaOrg('CLB Kendo');
+    await suspendViaRejectedVa(org);
+    const res = await replace(org, NEXT, nextAccount);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(PayoutAccountOverview.parse(res.body).paymentService).toMatchObject({ status: 'active', reason: null });
+    expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toMatchObject([
+      { actor_user_id: org.owner.userId, target_id: 'new_key' },
+    ]);
+    expect(await resumedJobsOf(org.orgId)).toHaveLength(1);
+  });
+
   it('lý do token → key mới không chữa được: cờ giữ', async () => {
     const org = await newOrg('CLB Judo');
     await suspendVia(org, '1033');
@@ -998,8 +1349,10 @@ describe('notices', () => {
       token: 'PAYMENT_SERVICE_SUSPENDED_TOKEN',
       credential_invalid: 'PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID',
       gateway_permission_missing: 'PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING',
+      payout_account_not_allowed: 'PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED',
       tingee_disabled: 'PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED',
     };
+    expect(Object.keys(expected).sort()).toEqual(Object.values(PaymentServiceReason).sort());
     const versions = new Set<string>();
     for (const [reason, code] of Object.entries(expected)) {
       await h.db.orm.execute(sql`UPDATE organizations SET payment_service_reason = ${reason} WHERE id = ${org.orgId}`);
@@ -1020,7 +1373,7 @@ describe('notices', () => {
       }
     }
     // Đổi lý do thì `version` đổi.
-    expect(versions.size).toBe(4);
+    expect(versions.size).toBe(5);
   });
 });
 

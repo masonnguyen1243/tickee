@@ -47,6 +47,7 @@ describe('câu theo lý do', () => {
       tingee_disabled: 'Tingee ngắt dịch vụ',
       credential_invalid: 'Key không còn dùng được',
       gateway_permission_missing: 'Key thiếu quyền Cổng thanh toán',
+      payout_account_not_allowed: 'Tài khoản chưa dùng được Cổng thanh toán',
     });
     expect(PAYMENT_SERVICE_GUIDE.token).toBe('Mua thêm Token trên portal Tingee rồi bấm Kiểm tra lại.');
     expect(PAYMENT_SERVICE_GUIDE.tingee_disabled).toBe(
@@ -56,5 +57,15 @@ describe('câu theo lý do', () => {
       'Key có thể đã bị thu hồi hoặc đổi trên Tingee. Đổi key Tingee để bán lại.',
     );
     expect(PAYMENT_SERVICE_GUIDE.gateway_permission_missing).toContain('Tickee không tự kiểm tra được quyền này');
+  });
+
+  it('VA của tài khoản mặc định bị Tingee từ chối (Story 4.2-d, Mason chốt 14/11/2026): câu lý do, hướng dẫn, nhãn Quản trị', () => {
+    expect(PAYMENT_SERVICE_REASON_TEXT.payout_account_not_allowed).toBe(
+      'Tingee chưa cho tài khoản nhận tiền mặc định dùng Cổng thanh toán.',
+    );
+    expect(PAYMENT_SERVICE_GUIDE.payout_account_not_allowed).toBe(
+      'Cho phép tài khoản này trên Cổng thanh toán ở portal Tingee rồi bấm Kiểm tra lại, hoặc đặt tài khoản khác làm mặc định. Tickee không tự kiểm tra được; nếu vẫn chưa được cho phép, lần bán vé kế tiếp sẽ tạm ngừng lại.',
+    );
+    expect(PAYMENT_SERVICE_REASON_LABEL.payout_account_not_allowed).toBe('Tài khoản chưa dùng được Cổng thanh toán');
   });
 });

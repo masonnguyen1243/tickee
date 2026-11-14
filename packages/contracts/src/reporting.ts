@@ -32,6 +32,13 @@ export const StatusNoticeCode = {
    */
   PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING: 'PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING',
   /**
+   * Tingee từ chối VA của tài khoản nhận tiền mặc định (`payout_account_not_allowed`, nhóm
+   * `PAYMENT_ACCOUNT_NOT_ALLOWED` của `create-link`, Story 4.2-d): mọi Hạng vé có phí Tạm ngừng bán tới khi Owner cho
+   * phép VA trên Cổng thanh toán rồi bấm "Kiểm tra lại", đặt tài khoản khác làm mặc định, hủy tài khoản mặc định hoặc
+   * lưu key mới hợp lệ (danger, chặn bán, không đóng được).
+   */
+  PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED: 'PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED',
+  /**
    * Tingee đang khóa merchant của BTC (`tingee_disabled`, Story 4.2): mọi Hạng vé có phí Tạm ngừng bán (danger, chặn bán,
    * không đóng được).
    */
@@ -55,10 +62,11 @@ export const statusNoticeCodeSchema = z.enum(StatusNoticeCode);
  */
 export const STATUS_NOTICE_PRIORITY: readonly StatusNoticeCode[] = [
   StatusNoticeCode.CLOSED_BETA_REVOKED,
-  // Bậc 4: một BTC chỉ có tối đa một trong bốn mã (mỗi lý do ngắt một mã).
+  // Bậc 4: một BTC chỉ có tối đa một trong năm mã (mỗi lý do ngắt một mã).
   StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_TOKEN,
   StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID,
   StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING,
+  StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED,
   StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED,
   StatusNoticeCode.PAYOUT_ACCOUNT_NOT_LINKED,
   StatusNoticeCode.CLOSED_BETA_PENDING,
@@ -69,6 +77,7 @@ export const PAYMENT_SERVICE_NOTICE_CODES: Readonly<Record<PaymentServiceReason,
   token: StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_TOKEN,
   credential_invalid: StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID,
   gateway_permission_missing: StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING,
+  payout_account_not_allowed: StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED,
   tingee_disabled: StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED,
 };
 

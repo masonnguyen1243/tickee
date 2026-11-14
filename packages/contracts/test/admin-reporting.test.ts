@@ -17,6 +17,7 @@ import {
   PaymentServiceCheckOutcome,
   PaymentServiceCheckResult,
   PaymentServiceReason,
+  PaymentServiceResumePath,
   PaymentServiceState,
   paymentServiceCheckApiPath,
 } from '../src/organizer.js';
@@ -113,10 +114,10 @@ describe('thông báo trạng thái (AD-34)', () => {
 });
 
 describe('dịch vụ thanh toán của BTC (Story 4.2)', () => {
-  it('bốn mã notice ở bậc 4: sau Closed Beta bị thu hồi, trước chưa liên kết tài khoản nhận tiền; mỗi lý do một mã', () => {
+  it('năm mã notice ở bậc 4: sau Closed Beta bị thu hồi, trước chưa liên kết tài khoản nhận tiền; mỗi lý do một mã', () => {
     const rank = (code: StatusNoticeCode) => STATUS_NOTICE_PRIORITY.indexOf(code);
     const codes = Object.values(PaymentServiceReason).map((reason) => PAYMENT_SERVICE_NOTICE_CODES[reason]);
-    expect(new Set(codes).size).toBe(4);
+    expect(new Set(codes).size).toBe(5);
     for (const code of codes) {
       expect(rank(code)).toBeGreaterThan(rank('CLOSED_BETA_REVOKED'));
       expect(rank(code)).toBeLessThan(rank('PAYOUT_ACCOUNT_NOT_LINKED'));
@@ -125,8 +126,19 @@ describe('dịch vụ thanh toán của BTC (Story 4.2)', () => {
       token: 'PAYMENT_SERVICE_SUSPENDED_TOKEN',
       credential_invalid: 'PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID',
       gateway_permission_missing: 'PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING',
+      payout_account_not_allowed: 'PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED',
       tingee_disabled: 'PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED',
     });
+    // Story 4.2-d: lý do VA và đường mở lại khi đổi tài khoản mặc định.
+    expect(PaymentServiceReason.PAYOUT_ACCOUNT_NOT_ALLOWED).toBe('payout_account_not_allowed');
+    expect(PaymentServiceResumePath.DEFAULT_CHANGED).toBe('default_changed');
+    expect(Object.values(PaymentServiceResumePath).sort()).toEqual([
+      'default_changed',
+      'new_key',
+      'owner_check',
+      'platform_admin',
+      'probe',
+    ]);
   });
 
   it('trạng thái: lý do và mốc có thể null; lý do lạ bị từ chối; danh sách Quản trị chỉ có id, tên, lý do, mốc', () => {

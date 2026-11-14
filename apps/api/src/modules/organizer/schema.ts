@@ -29,15 +29,22 @@ export const organizations = pgTable(
     /**
      * Dịch vụ thanh toán của BTC (AD-32, Story 4.2, `PaymentServiceStatus`): `suspended` khi `create-link` bằng key hiện
      * hành bị Tingee từ chối vì hết Token (`token`), merchant bị khóa (`tingee_disabled`), key không còn dùng được
-     * (`credential_invalid`) hoặc key chưa được cấp quyền "Cổng thanh toán" (`gateway_permission_missing`); mọi Hạng vé
-     * > 0đ "Tạm ngừng bán" (`ordering.sellability`). Bật/tắt bằng compare-and-set (`payment-service.ts`).
+     * (`credential_invalid`), key chưa được cấp quyền "Cổng thanh toán" (`gateway_permission_missing`) hoặc VA của tài
+     * khoản mặc định chưa dùng được với Cổng thanh toán (`payout_account_not_allowed`, Story 4.2-d); mọi Hạng vé > 0đ
+     * "Tạm ngừng bán" (`ordering.sellability`). Bật/tắt bằng compare-and-set (`payment-service.ts`).
      */
     paymentServiceStatus: text('payment_service_status', { enum: ['active', 'suspended'] })
       .notNull()
       .default('active'),
     /** Lý do ngắt (`PaymentServiceReason`); có đúng khi `suspended`. */
     paymentServiceReason: text('payment_service_reason', {
-      enum: ['token', 'tingee_disabled', 'credential_invalid', 'gateway_permission_missing'],
+      enum: [
+        'token',
+        'tingee_disabled',
+        'credential_invalid',
+        'gateway_permission_missing',
+        'payout_account_not_allowed',
+      ],
     }),
     /** Lúc bắt đầu ngắt (giữ nguyên khi chỉ đổi lý do); có đúng khi `suspended`. */
     paymentServiceSince: timestamptz('payment_service_since'),
@@ -57,7 +64,7 @@ export const organizations = pgTable(
     // Lý do và mốc bắt đầu có đúng khi `suspended`.
     check(
       'organizations_payment_service_reason_check',
-      sql`(${t.paymentServiceStatus} = 'active' AND ${t.paymentServiceReason} IS NULL AND ${t.paymentServiceSince} IS NULL) OR (${t.paymentServiceStatus} = 'suspended' AND ${t.paymentServiceReason} IN ('token', 'tingee_disabled', 'credential_invalid', 'gateway_permission_missing') AND ${t.paymentServiceSince} IS NOT NULL)`,
+      sql`(${t.paymentServiceStatus} = 'active' AND ${t.paymentServiceReason} IS NULL AND ${t.paymentServiceSince} IS NULL) OR (${t.paymentServiceStatus} = 'suspended' AND ${t.paymentServiceReason} IN ('token', 'tingee_disabled', 'credential_invalid', 'gateway_permission_missing', 'payout_account_not_allowed') AND ${t.paymentServiceSince} IS NOT NULL)`,
     ),
     // Job dò và danh sách của Quản trị Tingee chỉ đọc BTC `suspended` (ít dòng).
     index('organizations_payment_service_suspended_idx')

@@ -37,9 +37,10 @@ export type AuditAction =
   | 'organization.closed_beta_revoked'
   /**
    * Dịch vụ thanh toán của BTC bị ngắt (Story 4.2, AD-32; actor: hệ thống): `create-link` bằng key hiện hành bị Tingee
-   * từ chối vì hết Token, merchant bị khóa, key không còn dùng được hoặc key chưa được cấp quyền "Cổng thanh toán". Đối
-   * tượng: lý do (`{ type: 'payment_service_reason', id: 'token' | 'tingee_disabled' | 'credential_invalid' |
-   * 'gateway_permission_missing' }`; BTC ở `organization_id`).
+   * từ chối vì hết Token, merchant bị khóa, key không còn dùng được, key chưa được cấp quyền "Cổng thanh toán", hoặc VA
+   * của tài khoản mặc định chưa dùng được với Cổng thanh toán (Story 4.2-d). Đối tượng: lý do (`{ type:
+   * 'payment_service_reason', id: 'token' | 'tingee_disabled' | 'credential_invalid' | 'gateway_permission_missing' |
+   * 'payout_account_not_allowed' }`; BTC ở `organization_id`).
    */
   | 'organization.payment_service_suspended'
   /**
@@ -49,8 +50,9 @@ export type AuditAction =
   | 'organization.payment_service_reason_changed'
   /**
    * Dịch vụ thanh toán của BTC mở lại (Story 4.2). Đối tượng: đường mở lại (`{ type: 'payment_service_resume', id:
-   * 'probe' | 'owner_check' | 'platform_admin' | 'new_key' }`; BTC ở `organization_id`); actor: Owner bấm "Kiểm tra lại"
-   * hoặc lưu key mới, Quản trị Tingee mở lại, `null` với job dò.
+   * 'probe' | 'owner_check' | 'platform_admin' | 'new_key' | 'default_changed' }`; BTC ở `organization_id`); actor:
+   * Owner bấm "Kiểm tra lại", lưu key mới hoặc đổi/hủy tài khoản nhận tiền mặc định (`default_changed`, Story 4.2-d),
+   * Quản trị Tingee mở lại, `null` với job dò.
    */
   | 'organization.payment_service_resumed'
   /**

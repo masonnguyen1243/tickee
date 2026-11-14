@@ -217,6 +217,14 @@ const SERVICE_BANNERS = [
     action: 'Xem cách xử lý',
     admin: `${PAUSED} Nhờ Owner cấp quyền Cổng thanh toán cho key Tingee.`,
   },
+  // Story 4.2-d (Mason chốt 14/11): Tingee từ chối VA của tài khoản nhận tiền mặc định.
+  {
+    code: 'PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED',
+    title: 'Tài khoản nhận tiền chưa dùng được với Cổng thanh toán',
+    owner: PAUSED,
+    action: 'Xem cách xử lý',
+    admin: `${PAUSED} Nhờ Owner cho phép tài khoản trên Cổng thanh toán Tingee hoặc chọn tài khoản nhận tiền khác.`,
+  },
 ];
 
 const noticeOf = (code: string) => (code === TOKEN ? tokenNotice() : statusNotice(code));

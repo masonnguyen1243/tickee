@@ -30,7 +30,7 @@ import { StatusBanner } from './status-banner';
 import { TingeeLink } from './tingee-link';
 
 /**
- * Mã notice làm Hạng vé có phí "Tạm ngừng bán" (`paidOk` của `sellability`): bốn mã dịch vụ thanh toán, Closed Beta (thu
+ * Mã notice làm Hạng vé có phí "Tạm ngừng bán" (`paidOk` của `sellability`): năm mã dịch vụ thanh toán, Closed Beta (thu
  * hồi, chờ duyệt) và chưa liên kết tài khoản nhận tiền. Polling thấy tập mã này đổi thì tải lại khối "Dịch vụ thanh toán"
  * và nhãn trạng thái bán (Story 4.2-c).
  */
