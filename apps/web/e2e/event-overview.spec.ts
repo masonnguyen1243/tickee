@@ -21,6 +21,8 @@ const eventPath = `/orgs/${ORG_ID}/events/${EVENT_ID}`;
 const overviewPath = `${eventPath}/overview`;
 /** "Bây giờ" của các ca cần nhãn giờ cố định: 12/11/2026 10:04 giờ Việt Nam. */
 const NOW = new Date('2026-11-12T10:04:00+07:00');
+/** Stream của Tổng quan; khung dashboard còn mở stream cấp BTC (Story 4.2-b), `fakeEventSource` chỉ điều khiển stream này. */
+const OVERVIEW_LIVE_URL = /\/overview\/live$/;
 
 type Status = 'draft' | 'published' | 'hidden' | 'cancelled';
 
@@ -260,7 +262,7 @@ test.describe('Tổng quan tự cập nhật', () => {
   test('tín hiệu SSE → tải lại: Đơn 0đ mới lên đầu, "· n Đơn" tăng; IPN trả Đơn → badge và doanh thu đổi, không tải lại trang', async ({
     page,
   }) => {
-    const sse = await fakeEventSource(page);
+    const sse = await fakeEventSource(page, { url: OVERVIEW_LIVE_URL });
     const { state, calls } = await openApi(page);
     await page.goto(base);
     await expect(statValue(page)).toHaveText('450.000đ');
@@ -358,7 +360,7 @@ test.describe('Tổng quan tự cập nhật', () => {
   }) => {
     const toastsShown = await countOfflineToasts(page);
     await page.clock.install({ time: NOW });
-    const sse = await fakeEventSource(page);
+    const sse = await fakeEventSource(page, { url: OVERVIEW_LIVE_URL });
     const { state } = await openApi(page);
     await page.goto(base);
     await expect(statValue(page)).toHaveText('450.000đ');

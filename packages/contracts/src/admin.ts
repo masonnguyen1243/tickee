@@ -85,3 +85,13 @@ export type SuspendedPaymentServiceOrganization = z.infer<typeof SuspendedPaymen
 /** `GET /v1/admin/organizations/payment-service/suspended`: BTC ngắt lâu nhất trước (`since` tăng dần, rồi id). */
 export const SuspendedPaymentServiceOrganizationList = z.array(SuspendedPaymentServiceOrganization);
 export type SuspendedPaymentServiceOrganizationList = z.infer<typeof SuspendedPaymentServiceOrganizationList>;
+
+/** Đường API (sau `/v1`) của danh sách BTC đang bị ngắt dịch vụ thanh toán (GET). */
+export const ADMIN_SUSPENDED_PAYMENT_SERVICES_API_PATH = '/admin/organizations/payment-service/suspended';
+
+/**
+ * Đường API (sau `/v1`) Quản trị Tingee mở lại dịch vụ thanh toán của một BTC (POST → 204; BTC không bị ngắt → 409
+ * `PAYMENT_SERVICE_NOT_SUSPENDED`).
+ */
+export const adminPaymentServiceResumeApiPath = (organizationId: string): string =>
+  `/admin/organizations/${encodeURIComponent(organizationId)}/payment-service/resume`;

@@ -17,8 +17,9 @@ import { z } from 'zod';
  * - `event_orders_changed`: Owner, Admin → Đơn gần đây, số liệu Sự kiện (Story 3.11).
  * - `event_checkins_changed`: Owner, Admin, CTV được giao → số liệu check-in.
  * - `org_review_items_changed`: Owner, Admin → số mục Cần xử lý.
- * - `org_status_changed`: thành viên BTC → `notices`, vai trò. Tín hiệu cấp BTC (Story 4.2: cờ dịch vụ thanh toán bật,
- *   đổi lý do hoặc tắt): `id` = `organizationId`, không có `eventId`.
+ * - `org_status_changed`: thành viên BTC → `notices`, vai trò. Tín hiệu cấp BTC: `id` = `organizationId`, không có
+ *   `eventId`. Hiện chỉ cờ dịch vụ thanh toán phát (Story 4.2: bật, đổi lý do hoặc tắt); duyệt/thu hồi Closed Beta và
+ *   liên kết/hủy liên kết tài khoản nhận tiền chưa phát (xem `deferred-work.md`).
  */
 export const RealtimeTopic = {
   ORDER_CHANGED: 'order_changed',

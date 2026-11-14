@@ -5,20 +5,30 @@ import {
   ClosedBetaOrganizationList,
   ClosedBetaQueueQuery,
   ClosedBetaStatus,
+  ADMIN_SUSPENDED_PAYMENT_SERVICES_API_PATH,
+  adminPaymentServiceResumeApiPath,
   ClosedBetaTransitionInvalidDetails,
   SuspendedPaymentServiceOrganization,
   SuspendedPaymentServiceOrganizationList,
 } from '../src/admin.js';
 import { ErrorCode } from '../src/errors.js';
 import { safeReturnTo } from '../src/identity.js';
-import { PaymentServiceReason, PaymentServiceState, paymentServiceCheckApiPath } from '../src/organizer.js';
 import {
+  PaymentServiceCheckOutcome,
+  PaymentServiceCheckResult,
+  PaymentServiceReason,
+  PaymentServiceState,
+  paymentServiceCheckApiPath,
+} from '../src/organizer.js';
+import {
+  organizationLiveApiPath,
   PAYMENT_SERVICE_NOTICE_CODES,
   sortStatusNotices,
   STATUS_BANNER_LIMIT,
   STATUS_NOTICE_PRIORITY,
   StatusNoticeCode,
   StatusNoticeList,
+  statusNoticesApiPath,
 } from '../src/reporting.js';
 
 const ID = '019a3b2c-5678-7abc-8def-0123456789ab';
@@ -137,5 +147,34 @@ describe('dịch vụ thanh toán của BTC (Story 4.2)', () => {
     ]);
     expect(ErrorCode.PAYMENT_SERVICE_NOT_SUSPENDED).toBe('PAYMENT_SERVICE_NOT_SUSPENDED');
     expect(paymentServiceCheckApiPath(ID)).toBe(`/orgs/${ID}/payment-service/check`);
+  });
+
+  it('đường API của stream cấp BTC, notices và Quản trị (Story 4.2-b)', () => {
+    expect(organizationLiveApiPath(ID)).toBe(`/orgs/${ID}/live`);
+    expect(statusNoticesApiPath(ID)).toBe(`/orgs/${ID}/notices`);
+    expect(ADMIN_SUSPENDED_PAYMENT_SERVICES_API_PATH).toBe('/admin/organizations/payment-service/suspended');
+    expect(adminPaymentServiceResumeApiPath(ID)).toBe(`/admin/organizations/${ID}/payment-service/resume`);
+  });
+
+  it('kết quả "Kiểm tra lại": sáu outcome; retryAfterSeconds có đúng khi cooldown (1–30 giây)', () => {
+    expect(Object.values(PaymentServiceCheckOutcome).sort()).toEqual([
+      'cooldown',
+      'no_target',
+      'not_suspended',
+      'resumed',
+      'still_suspended',
+      'unknown',
+    ]);
+    const state = { status: 'suspended', reason: 'token', since: '2026-11-13T01:02:03.000Z', checkedAt: null };
+    const ok = (outcome: string, retryAfterSeconds: number | null) =>
+      PaymentServiceCheckResult.safeParse({ state, outcome, retryAfterSeconds }).success;
+    expect(ok('cooldown', 12)).toBe(true);
+    expect(ok('cooldown', 30)).toBe(true);
+    expect(ok('still_suspended', null)).toBe(true);
+    expect(ok('cooldown', null)).toBe(false);
+    expect(ok('cooldown', 0)).toBe(false);
+    expect(ok('cooldown', 31)).toBe(false);
+    expect(ok('unknown', 5)).toBe(false);
+    expect(ok('skipped', null)).toBe(false);
   });
 });

@@ -4,11 +4,13 @@ import {
   JobQueue,
   PAYMENT_SERVICE_CHECK_COOLDOWN_SECONDS,
   PAYMENT_SERVICE_PROBE_INTERVAL_MINUTES,
+  PaymentServiceCheckOutcome,
   PaymentServiceReason,
   PaymentServiceResumedPayload,
   PaymentServiceResumePath,
   PaymentServiceStatus,
   RealtimeTopic,
+  type PaymentServiceCheckResult,
   type PaymentServiceState,
   type SuspendedPaymentServiceOrganization,
 } from '@tickee/contracts';
@@ -432,14 +434,53 @@ export class PaymentServiceService {
   ) {}
 
   /**
-   * Dò rồi trả trạng thái mới. BTC đang `active`, hoặc lần dò trước chưa quá thời gian chờ → trả trạng thái hiện tại,
-   * không gọi Tingee.
+   * Dò rồi trả trạng thái mới kèm kết quả (Story 4.2-b). BTC đang `active` → `not_suspended`; lần dò trước chưa quá thời
+   * gian chờ → `cooldown` kèm số giây còn lại; cả hai không gọi Tingee. `reason_changed` của lần dò gộp vào
+   * `still_suspended`. Lần dò giành được lượt nhưng kết quả đã cũ (bên khác vừa mở lại, Owner vừa đổi key, lý do vừa
+   * đổi) cũng trả `skipped`: đọc trạng thái sau đó để chọn `not_suspended` (đã `active`) hay `cooldown` (đã có lần dò:
+   * lượt vừa giành mở thời gian chờ mới; ngay mốc 30 giây vẫn `cooldown`, tối thiểu 1 giây). `checked_at` NULL (vừa bị
+   * ngắt lại giữa lúc giành lượt và lúc đọc) → `unknown`.
    */
-  async check(ctx: AccessContext): Promise<PaymentServiceState> {
-    await this.prober.probe(ctx.organizationId, PaymentServiceResumePath.OWNER_CHECK, ctx.userId);
-    const state = await paymentServiceStateOf(this.db.orm, ctx);
-    if (!state) throw notAMember();
-    return paymentServiceStateDto(state);
+  async check(ctx: AccessContext): Promise<PaymentServiceCheckResult> {
+    const probed = await this.prober.probe(ctx.organizationId, PaymentServiceResumePath.OWNER_CHECK, ctx.userId);
+    const [row] = await this.db.orm
+      .select({
+        ...stateColumns,
+        // Giây còn phải chờ theo đồng hồ DB (cùng đồng hồ với lượt dò); làm tròn lên để không báo "0 giây".
+        cooldownLeft: sql<number | null>`ceil(extract(epoch from (${organizations.paymentServiceCheckedAt}
+          + make_interval(secs => ${PAYMENT_SERVICE_CHECK_COOLDOWN_SECONDS}) - now())))::int`,
+      })
+      .from(organizations)
+      .where(orgScope(ctx)({ organizationId: organizations.id }));
+    if (!row) throw notAMember();
+    const { cooldownLeft, ...state } = row;
+    const result = (outcome: PaymentServiceCheckOutcome, retryAfterSeconds: number | null = null) => ({
+      state: paymentServiceStateDto(state),
+      outcome,
+      retryAfterSeconds,
+    });
+    switch (probed) {
+      case 'resumed':
+        return result(PaymentServiceCheckOutcome.RESUMED);
+      case 'still_suspended':
+      case 'reason_changed':
+        return result(PaymentServiceCheckOutcome.STILL_SUSPENDED);
+      case 'unknown':
+        return result(PaymentServiceCheckOutcome.UNKNOWN);
+      case 'no_target':
+        return result(PaymentServiceCheckOutcome.NO_TARGET);
+      case 'skipped':
+        if (state.status !== PaymentServiceStatus.SUSPENDED) return result(PaymentServiceCheckOutcome.NOT_SUSPENDED);
+        // Đã có lần dò: lượt bị chặn vì thời gian chờ. Ngay mốc 30 giây (giành lượt thất bại, lúc đọc đã hết chờ) vẫn là
+        // `cooldown`, tối thiểu 1 giây.
+        if (state.checkedAt !== null) {
+          const seconds = Math.max(1, Math.min(cooldownLeft ?? 1, PAYMENT_SERVICE_CHECK_COOLDOWN_SECONDS));
+          return result(PaymentServiceCheckOutcome.COOLDOWN, seconds);
+        }
+        // `checked_at` NULL: vừa bị ngắt lại giữa lúc giành lượt và lúc đọc (lần ngắt mới xóa lần dò cũ), chưa kiểm tra
+        // được lần này.
+        return result(PaymentServiceCheckOutcome.UNKNOWN);
+    }
   }
 }
 

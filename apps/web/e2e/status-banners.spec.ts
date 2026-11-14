@@ -1,12 +1,15 @@
 import type { Page } from '@playwright/test';
 
 import { expect, test } from './fixtures';
-import { me, mockIdentityApi } from './identity-mock';
-import { mockOrganizerApi, organization, ORG_ID, statusNotice } from './organizer-mock';
+import { me, mockIdentityApi, type Call } from './identity-mock';
+import { fakeEventSource } from './live-mock';
+import { mockOrganizerApi, organization, ORG_ID, ORG_LIVE_URL, statusNotice } from './organizer-mock';
 
 /*
  * Dải `status-banner` đầu vùng nội dung dashboard (Story 2.5, UX-DR8, AD-34) với API giả: web chỉ ánh xạ `code` sang
  * nội dung, hiện tối đa 2 banner, còn lại "+N thông báo" mở `Sheet`; banner `dismissible` ẩn theo `code` + `version`.
+ * Story 4.2-b: bốn banner dịch vụ thanh toán theo vai (liên kết ngoài mở tab mới), tự cập nhật qua stream cấp BTC
+ * `…/live` (giả bằng `EventSource` điều khiển được) hoặc polling 10 giây khi không có SSE.
  */
 
 const CONSENTED = '2026-10-29T01:02:03.000Z';
@@ -163,4 +166,160 @@ test('chưa liên kết tài khoản nhận tiền: Admin chỉ thấy lời nh�
   await expect(banner).toContainText('Nhờ Owner liên kết tài khoản nhận tiền.');
   await expect(banner.getByRole('link')).toHaveCount(0);
   await expect(banner.getByRole('button')).toHaveCount(0);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Dịch vụ thanh toán bị ngắt (Story 4.2-b)
+// ---------------------------------------------------------------------------------------------------------------
+
+const PORTAL = 'https://baas.tingee.vn';
+const PAUSED = 'Mọi Sự kiện có phí đang Tạm ngừng bán.';
+const TOKEN = 'PAYMENT_SERVICE_SUSPENDED_TOKEN';
+const TOKEN_TITLE = 'Mọi Sự kiện có phí đang Tạm ngừng bán';
+const tokenNotice = () => statusNotice(TOKEN, { data: { tingeePortalUrl: PORTAL } });
+
+/** Câu Mason chốt 13/11: tiêu đề, mô tả + hành động của Owner, câu của Admin. */
+const SERVICE_BANNERS = [
+  {
+    code: TOKEN,
+    title: TOKEN_TITLE,
+    owner: 'Tingee báo đã hết Token (gói dịch vụ hết hạn).',
+    action: 'Mua thêm Token',
+    admin: 'Tingee báo đã hết Token. Nhờ Owner mua thêm Token.',
+  },
+  {
+    code: 'PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED',
+    title: 'Tingee đang tạm ngừng dịch vụ thanh toán của BTC',
+    owner: PAUSED,
+    action: 'Xem chi tiết',
+    admin: `${PAUSED} Nhờ Owner liên hệ Tingee.`,
+  },
+  {
+    code: 'PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID',
+    title: 'Key Tingee không còn dùng được',
+    owner: PAUSED,
+    action: 'Nhập lại key',
+    admin: `${PAUSED} Nhờ Owner cập nhật key Tingee.`,
+  },
+  {
+    code: 'PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING',
+    title: 'Key Tingee chưa được cấp quyền Cổng thanh toán',
+    owner: PAUSED,
+    action: 'Xem cách xử lý',
+    admin: `${PAUSED} Nhờ Owner cấp quyền Cổng thanh toán cho key Tingee.`,
+  },
+];
+
+const noticeOf = (code: string) => (code === TOKEN ? tokenNotice() : statusNotice(code));
+const noticeGets = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === `/orgs/${ORG_ID}/notices`);
+const heading = (page: Page) => page.getByRole('heading', { name: ORG_NAME, level: 1 });
+
+test('dịch vụ thanh toán bị ngắt, Owner: mỗi mã một banner danger không đóng được, mô tả + một hành động đúng câu', async ({
+  page,
+}) => {
+  let notices: Notice[] = [];
+  await openDashboard(page, () => notices);
+  for (const copy of SERVICE_BANNERS) {
+    notices = [noticeOf(copy.code)];
+    await page.reload();
+    await expect(heading(page)).toBeVisible();
+    await expect(banners(page)).toHaveCount(1);
+    const banner = banners(page).first();
+    await expect(banner, copy.code).toHaveAttribute('data-tone', 'danger');
+    await expect(banner, copy.code).toContainText(copy.title);
+    await expect(banner, copy.code).toContainText(copy.owner);
+    await expect(closeButtons(page)).toHaveCount(0);
+    await expect(banner.getByRole('link'), copy.code).toHaveCount(1);
+    const action = banner.getByRole('link', { name: copy.action });
+    if (copy.code === TOKEN) {
+      // Liên kết ngoài: portal Tingee từ `data.tingeePortalUrl`, tab mới, không lộ `window.opener`.
+      await expect(action).toHaveAttribute('href', PORTAL);
+      await expect(action).toHaveAttribute('target', '_blank');
+      await expect(action).toHaveAttribute('rel', 'noopener noreferrer');
+    } else {
+      await expect(action, copy.code).toHaveAttribute('href', `${base}/tai-khoan-nhan-tien`);
+      await expect(action, copy.code).not.toHaveAttribute('target', '_blank');
+    }
+  }
+});
+
+test('dịch vụ thanh toán bị ngắt, Admin: tiêu đề + câu nhờ Owner, không có hành động', async ({ page }) => {
+  let notices: Notice[] = [];
+  await openDashboard(page, () => notices, { role: 'admin' });
+  for (const copy of SERVICE_BANNERS) {
+    notices = [noticeOf(copy.code)];
+    await page.reload();
+    await expect(heading(page)).toBeVisible();
+    const banner = banners(page).first();
+    await expect(banner, copy.code).toContainText(copy.title);
+    await expect(banner, copy.code).toContainText(copy.admin);
+    await expect(banner.getByRole('link'), copy.code).toHaveCount(0);
+    await expect(banner.getByRole('button'), copy.code).toHaveCount(0);
+  }
+});
+
+test('"Mua thêm Token" mở portal Tingee ở tab mới, dashboard giữ nguyên; thiếu URL portal → banner không có hành động', async ({
+  page,
+}) => {
+  await page.context().route(
+    (url) => url.hostname === 'baas.tingee.vn',
+    (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<title>Tingee</title>' }),
+  );
+  let notices: Notice[] = [tokenNotice()];
+  await openDashboard(page, () => notices);
+  const popupPromise = page.waitForEvent('popup');
+  await banners(page).first().getByRole('link', { name: 'Mua thêm Token' }).click();
+  const popup = await popupPromise;
+  await popup.waitForLoadState();
+  expect(new URL(popup.url()).origin).toBe(PORTAL);
+  expect(await popup.evaluate(() => window.opener)).toBeNull();
+  await popup.close();
+  expect(new URL(page.url()).pathname).toBe(base);
+
+  // Api không gửi URL portal (hoặc URL không phải http/https): không có nút hỏng.
+  notices = [statusNotice(TOKEN, { data: { tingeePortalUrl: 'javascript:alert(1)' } })];
+  await page.reload();
+  await expect(banners(page).first()).toContainText(TOKEN_TITLE);
+  await expect(banners(page).first().getByRole('link')).toHaveCount(0);
+});
+
+test('stream cấp BTC: org_status_changed → banner hiện rồi biến mất, không tải lại trang; mã lạ vẫn bị bỏ', async ({ page }) => {
+  const sse = await fakeEventSource(page, { url: ORG_LIVE_URL });
+  let notices: Notice[] = [];
+  const calls = await openDashboard(page, () => notices);
+  await expect.poll(sse.count).toBe(1);
+  const info = await sse.info();
+  expect(info.withCredentials).toBe(true);
+  expect(info.url).toMatch(new RegExp(`/v1/orgs/${ORG_ID}/live$`));
+  await sse.open();
+  await expect(banners(page)).toHaveCount(0);
+
+  // Đánh dấu trang: tải lại trang thì dấu mất.
+  await page.evaluate(() => ((window as unknown as { __mark: boolean }).__mark = true));
+  notices = [statusNotice('MA_MOI_CHUA_BIET', { severity: 'danger' }), noticeOf('PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID')];
+  const before = noticeGets(calls).length;
+  await sse.message('org_status_changed');
+  await expect(banners(page)).toHaveCount(1, { timeout: 3_000 });
+  await expect(banners(page).first()).toContainText('Key Tingee không còn dùng được');
+  expect(noticeGets(calls).length).toBeGreaterThan(before);
+
+  notices = [];
+  await sse.message('org_status_changed');
+  await expect(banners(page)).toHaveCount(0, { timeout: 3_000 });
+  expect(await page.evaluate(() => (window as unknown as { __mark?: boolean }).__mark)).toBe(true);
+  expect(await sse.count()).toBe(1);
+});
+
+test('không có SSE (503) → dải banner polling 10 giây', async ({ page }) => {
+  test.setTimeout(45_000);
+  let notices: Notice[] = [];
+  const calls = await openDashboard(page, () => notices);
+  await expect
+    .poll(() => calls.filter((c) => c.method === 'GET' && c.path === `/orgs/${ORG_ID}/live`).length)
+    .toBeGreaterThanOrEqual(1);
+  await expect(banners(page)).toHaveCount(0);
+  const startedAt = Date.now();
+  notices = [tokenNotice()];
+  await expect(banners(page).first()).toContainText(TOKEN_TITLE, { timeout: 12_000 });
+  expect(Date.now() - startedAt).toBeLessThan(12_000);
 });

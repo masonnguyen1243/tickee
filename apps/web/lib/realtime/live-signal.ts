@@ -60,6 +60,18 @@ export function createSignalCoalescer(
   };
 }
 
+/**
+ * Việc của một lần tải lại do lời nhắc (Story 4.2-b): tải lại tài nguyên chính (`refetch`), rồi `onSignal` nếu có — vd.
+ * tài nguyên khác cùng dùng tín hiệu của stream này. Cả hai đi cùng nhịp gom của `createSignalCoalescer`; polling chỉ tải
+ * lại tài nguyên chính.
+ */
+export function signalReload(refetch: () => void, onSignal?: () => void): () => void {
+  return () => {
+    refetch();
+    onSignal?.();
+  };
+}
+
 /** Chu kỳ polling hiệu lực: SSE đang kết nối → không polling; chưa (hoặc mất) → chu kỳ trang chọn. */
 export function effectivePollInterval(connected: boolean, chosen: number | false): number | false {
   return connected ? false : chosen;

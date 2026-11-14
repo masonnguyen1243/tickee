@@ -426,7 +426,7 @@ export const PAYMENT_SERVICE_PROBE_INTERVAL_MINUTES = 5;
 export const PAYMENT_SERVICE_CHECK_COOLDOWN_SECONDS = 30;
 
 /**
- * Trạng thái dịch vụ thanh toán của BTC: trong tổng quan Tài khoản nhận tiền, và kết quả
+ * Trạng thái dịch vụ thanh toán của BTC: trong tổng quan Tài khoản nhận tiền, và `state` của kết quả
  * `POST /v1/orgs/:orgId/payment-service/check` (chỉ Owner). `reason`, `since` có đúng khi `suspended` (`since`: lúc bắt
  * đầu ngắt, giữ nguyên khi chỉ đổi lý do). `checkedAt`: lần dò gần nhất (job dò hoặc "Kiểm tra lại"); `null` khi chưa dò
  * lần nào.
@@ -439,7 +439,43 @@ export const PaymentServiceState = z.object({
 });
 export type PaymentServiceState = z.infer<typeof PaymentServiceState>;
 
-/** Đường API (sau `/v1`) của "Kiểm tra lại" dịch vụ thanh toán (POST, chỉ Owner): trả `PaymentServiceState`. */
+/**
+ * Kết quả một lần "Kiểm tra lại" (Story 4.2-b), để web chọn câu báo:
+ * - `resumed`: dịch vụ đã về, cờ vừa tắt;
+ * - `still_suspended`: Tingee vẫn ngắt (cùng lý do, hoặc lý do khác: đã cập nhật);
+ * - `unknown`: chưa kết luận được với Tingee (tạm lỗi, timeout, mã lạ, không giải mã được key) → giữ cờ;
+ * - `no_target`: BTC không có tài khoản nhận tiền mặc định (không có key để dò) → giữ cờ;
+ * - `cooldown`: lần dò trước chưa quá `PAYMENT_SERVICE_CHECK_COOLDOWN_SECONDS` → không gọi Tingee;
+ * - `not_suspended`: BTC không bị ngắt (kể cả đường khác vừa mở lại) → không gọi Tingee.
+ */
+export const PaymentServiceCheckOutcome = {
+  RESUMED: 'resumed',
+  STILL_SUSPENDED: 'still_suspended',
+  UNKNOWN: 'unknown',
+  NO_TARGET: 'no_target',
+  COOLDOWN: 'cooldown',
+  NOT_SUSPENDED: 'not_suspended',
+} as const;
+export type PaymentServiceCheckOutcome = (typeof PaymentServiceCheckOutcome)[keyof typeof PaymentServiceCheckOutcome];
+export const paymentServiceCheckOutcomeSchema = z.enum(PaymentServiceCheckOutcome);
+
+/**
+ * `POST /v1/orgs/:orgId/payment-service/check` (chỉ Owner): trạng thái sau lần kiểm tra, kết quả, và số giây còn phải chờ
+ * (`retryAfterSeconds`: có đúng khi `outcome = 'cooldown'`, từ 1 tới `PAYMENT_SERVICE_CHECK_COOLDOWN_SECONDS`).
+ */
+export const PaymentServiceCheckResult = z
+  .object({
+    state: PaymentServiceState,
+    outcome: paymentServiceCheckOutcomeSchema,
+    retryAfterSeconds: z.number().int().min(1).max(PAYMENT_SERVICE_CHECK_COOLDOWN_SECONDS).nullable(),
+  })
+  .refine((result) => (result.retryAfterSeconds !== null) === (result.outcome === PaymentServiceCheckOutcome.COOLDOWN), {
+    message: 'retryAfterSeconds có đúng khi outcome = cooldown',
+    path: ['retryAfterSeconds'],
+  });
+export type PaymentServiceCheckResult = z.infer<typeof PaymentServiceCheckResult>;
+
+/** Đường API (sau `/v1`) của "Kiểm tra lại" dịch vụ thanh toán (POST, chỉ Owner): trả `PaymentServiceCheckResult`. */
 export const paymentServiceCheckApiPath = (organizationId: string): string =>
   `/orgs/${encodeURIComponent(organizationId)}/payment-service/check`;
 

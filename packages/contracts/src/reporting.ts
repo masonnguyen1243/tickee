@@ -109,6 +109,18 @@ export type StatusNotice = z.infer<typeof StatusNotice>;
 export const StatusNoticeList = z.array(StatusNotice);
 export type StatusNoticeList = z.infer<typeof StatusNoticeList>;
 
+/** Đường API (sau `/v1`) của `StatusNoticeList` một BTC. */
+export const statusNoticesApiPath = (organizationId: string): string =>
+  `/orgs/${encodeURIComponent(organizationId)}/notices`;
+
+/**
+ * Đường SSE (sau `/v1`) cấp BTC (Story 4.2-b, AD-17; Owner và Admin: `org.read`): chỉ đẩy `org_status_changed` của BTC
+ * này và `resync`. Web tải lại `notices` (dải banner) và tổng quan Tài khoản nhận tiền. Hiện chỉ cờ dịch vụ thanh toán
+ * (bật, đổi lý do, tắt) phát tín hiệu này; Closed Beta và tài khoản nhận tiền chưa phát (xem `deferred-work.md`).
+ */
+export const organizationLiveApiPath = (organizationId: string): string =>
+  `/orgs/${encodeURIComponent(organizationId)}/live`;
+
 /** Hạng ưu tiên của một mã (0 = cao nhất). */
 export function statusNoticeRank(code: StatusNoticeCode): number {
   return STATUS_NOTICE_PRIORITY.indexOf(code);

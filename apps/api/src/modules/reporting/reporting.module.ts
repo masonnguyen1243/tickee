@@ -5,20 +5,21 @@ import { EventOverviewController } from './event-overview.controller.js';
 import { EventOverviewService } from './event-overview.service.js';
 import { NoticesController } from './notices.controller.js';
 import { NOTICES_SETTINGS, NoticesService, type NoticesSettings } from './notices.service.js';
+import { OrganizationLiveController } from './organization-live.controller.js';
 
 /** Cấu hình của `reporting` (env vai api): môi trường Tingee, cho link portal trong banner hết Token (Story 4.2). */
 export type ReportingConfig = Pick<ApiConfig, 'TINGEE_BASE_URL'>;
 
 /**
- * Báo cáo, thông báo trạng thái (AD-34) và Tổng quan Sự kiện — chỉ đọc qua read model của mô-đun khác (AD-33). Cần
- * `DbModule` và `RealtimeModule` (toàn cục) ở gốc DI.
+ * Báo cáo, thông báo trạng thái (AD-34) kèm stream cấp BTC, và Tổng quan Sự kiện — chỉ đọc qua read model của mô-đun
+ * khác (AD-33). Cần `DbModule` và `RealtimeModule` (toàn cục) ở gốc DI.
  */
 @Module({})
 export class ReportingModule {
   static forRoot(config: ReportingConfig): DynamicModule {
     return {
       module: ReportingModule,
-      controllers: [NoticesController, EventOverviewController],
+      controllers: [NoticesController, OrganizationLiveController, EventOverviewController],
       providers: [
         NoticesService,
         EventOverviewService,

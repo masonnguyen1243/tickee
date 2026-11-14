@@ -2,9 +2,8 @@
 
 import type { QueryClient } from '@tanstack/react-query';
 import type { PayoutAccountOverview } from '@tickee/contracts';
-import { ExternalLink } from 'lucide-react';
-import type { ReactNode } from 'react';
 
+import { TingeeLink } from '@/components/tickee/tingee-link';
 import { payoutAccountQueryKey } from '@/lib/organizer/api';
 import { statusNoticesQueryKey } from '@/lib/reporting/api';
 
@@ -45,21 +44,6 @@ export const accountLabel = (account: { bankName: string; accountLast4: string }
   `${account.bankName} •••• ${account.accountLast4}`;
 
 export const cardClass = 'flex flex-col gap-stack rounded-lg bg-card p-card-padding shadow-card';
-
-/** Link sang portal Tingee (tab mới). */
-export function TingeeLink({ href, children }: { href: string; children: ReactNode }) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-brand-text underline underline-offset-4"
-    >
-      {children}
-      <ExternalLink aria-hidden="true" className="size-4 shrink-0" />
-    </a>
-  );
-}
 
 /** Hướng dẫn cho BTC chưa có tài khoản Tingee: đăng ký merchant, liên kết ngân hàng, lấy API key. */
 export function TingeeGuide({ portalUrl }: { portalUrl: string }) {

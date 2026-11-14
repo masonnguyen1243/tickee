@@ -2,7 +2,15 @@ import type { Page, Request } from '@playwright/test';
 
 import { expect, test } from './fixtures';
 import { apiError, EMAIL, me, mockIdentityApi, type Call, type Handler } from './identity-mock';
-import { mockOrganizerApi, organization, ORG_ID, statusNotice } from './organizer-mock';
+import { fakeEventSource } from './live-mock';
+import {
+  mockOrganizerApi,
+  organization,
+  ORG_ID,
+  ORG_LIVE_URL,
+  PAYMENT_SERVICE_NOTICE,
+  statusNotice,
+} from './organizer-mock';
 
 /*
  * Trang Tài khoản nhận tiền (Story 2.6): BTC dùng tài khoản merchant Tingee của chính mình, liên kết một hay nhiều tài
@@ -16,6 +24,10 @@ import { mockOrganizerApi, organization, ORG_ID, statusNotice } from './organize
  * Story 2.13-b: "Đổi key Tingee" (BTC đã từng liên kết) như api: begin và xem trước chỉ kiểm lần xác nhận (không tiêu),
  * lưu tiêu lần xác nhận rồi thay credential và mọi tài khoản bằng tài khoản đã chọn (mặc định). Key NEXT có VCB (chọn
  * được) và VietinBank (mờ).
+ *
+ * Story 4.2-b: `paymentService` của tổng quan đọc từ `state.paymentService`; `notices` thêm banner của lý do ngắt;
+ * "Kiểm tra lại" (`POST …/payment-service/check`) trả lần lượt `checkReplies` (mặc định: vẫn ngắt / không ngắt), lưu key
+ * mới tắt cờ khi lý do là key (như api). Giờ hiển thị theo giờ Việt Nam: các ca này chạy trình duyệt múi giờ New York.
  */
 
 const CONSENTED = '2026-10-29T01:02:03.000Z';
@@ -37,6 +49,9 @@ type Option = {
   selectable: boolean;
 };
 type Credential = { id: string; clientIdMasked: string; connectedAt: string };
+type PaymentService = { status: string; reason: string | null; since: string | null; checkedAt: string | null };
+/** Một lần "Kiểm tra lại" của API giả: kết quả (và số giây chờ), hoặc lỗi HTTP. */
+type CheckReply = { outcome: string; retryAfterSeconds?: number } | { error: number };
 type Account = Omit<Option, 'selectable'> & { id: string; isDefault: boolean; linkedAt: string };
 
 const MB: Option = {
@@ -101,7 +116,25 @@ type State = {
   unlinkFailure: boolean;
   /** Lưu đổi key lỗi: key mới bị thu hồi trên Tingee sau bước xem trước (422). */
   replaceError: 'invalid' | null;
+  /** Dịch vụ thanh toán của BTC (Story 4.2). */
+  paymentService: PaymentService;
+  /** Các lần "Kiểm tra lại" kế tiếp. */
+  checkReplies: CheckReply[];
+  /** "Kiểm tra lại" chờ chừng này ms trước khi trả lời (kiểm spinner, chặn bấm lặp). */
+  checkDelayMs: number;
 };
+
+const ACTIVE_SERVICE: PaymentService = { status: 'active', reason: null, since: null, checkedAt: null };
+/** 13/11/2026 10:04 giờ Việt Nam. */
+const SUSPENDED_SINCE = '2026-11-13T03:04:00.000Z';
+/** 13/11/2026 10:20 giờ Việt Nam: lần "Kiểm tra lại" của API giả. */
+const CHECKED_AT = '2026-11-13T03:20:00.000Z';
+const suspended = (reason: string, checkedAt: string | null = null): PaymentService => ({
+  status: 'suspended',
+  reason,
+  since: SUSPENDED_SINCE,
+  checkedAt,
+});
 
 /** Mã xác nhận lại đúng ở API giả (TOTP hay mã email đều vậy). */
 const REAUTH_CODE = '123456';
@@ -141,6 +174,9 @@ async function openPage(
     selectError: null,
     unlinkFailure: false,
     replaceError: null,
+    paymentService: ACTIVE_SERVICE,
+    checkReplies: [],
+    checkDelayMs: 0,
     ...initial,
   };
   // Credential seed (`credentialOf(…, n)`) đã chiếm số `n`: credential tạo sau (kết nối, đổi key) luôn có id mới.
@@ -157,8 +193,19 @@ async function openPage(
     canReplaceKey: !state.everLinked,
     ipnUrl: state.credential ? IPN_URL : null,
     tingeePortalUrl: PORTAL,
-    paymentService: { status: 'active', reason: null, since: null, checkedAt: null },
+    paymentService: state.paymentService,
   });
+  /** Banner như `reporting.notices`: lý do ngắt (Token kèm portal), rồi chưa liên kết tài khoản nhận tiền. */
+  const noticesOf = () => {
+    const notices: ReturnType<typeof statusNotice>[] = [];
+    const { status, reason, since } = state.paymentService;
+    if (status === 'suspended' && reason) {
+      const data = reason === 'token' ? { tingeePortalUrl: PORTAL } : {};
+      notices.push(statusNotice(PAYMENT_SERVICE_NOTICE[reason]!, { data, version: `${since}:${reason}` }));
+    }
+    if (state.accounts.length === 0) notices.push(statusNotice('PAYOUT_ACCOUNT_NOT_LINKED'));
+    return notices;
+  };
   // Xác nhận lại như api (Story 2.13-a): mỗi token dùng một lần; `reauthHeaders` ghi header của mọi lần gọi thao tác.
   // `consume: false`: chỉ kiểm (bước đầu của đổi key); xóa `issued` để giả lập lần xác nhận quá 5 phút.
   const issued = new Set<string>();
@@ -218,10 +265,27 @@ async function openPage(
   const calls = await mockOrganizerApi(page, {
     [`GET /orgs/${ORG_ID}`]: () => organization({ role }),
     'GET /me/memberships': () => ({ status: 200, body: [{ organizationId: ORG_ID, name: ORG_NAME, role }] }),
-    [`GET /orgs/${ORG_ID}/notices`]: () => ({
-      status: 200,
-      body: state.accounts.length > 0 ? [] : [statusNotice('PAYOUT_ACCOUNT_NOT_LINKED')],
-    }),
+    [`GET /orgs/${ORG_ID}/notices`]: () => ({ status: 200, body: noticesOf() }),
+    // "Kiểm tra lại" (Story 4.2-b): `resumed` tắt cờ; các kết quả có gọi Tingee ghi lần kiểm tra.
+    [`POST /orgs/${ORG_ID}/payment-service/check`]: async () => {
+      if (state.checkDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, state.checkDelayMs));
+      const isSuspended = state.paymentService.status === 'suspended';
+      const reply = state.checkReplies.shift() ?? { outcome: isSuspended ? 'still_suspended' : 'not_suspended' };
+      if ('error' in reply) return apiError(reply.error, 'SERVICE_UNAVAILABLE');
+      if (reply.outcome === 'resumed') state.paymentService = { ...ACTIVE_SERVICE, checkedAt: CHECKED_AT };
+      else if (reply.outcome === 'not_suspended') state.paymentService = ACTIVE_SERVICE;
+      else if (isSuspended && reply.outcome !== 'cooldown') {
+        state.paymentService = { ...state.paymentService, checkedAt: CHECKED_AT };
+      }
+      return {
+        status: 200,
+        body: {
+          state: state.paymentService,
+          outcome: reply.outcome,
+          retryAfterSeconds: reply.outcome === 'cooldown' ? (reply.retryAfterSeconds ?? 30) : null,
+        },
+      };
+    },
     [`GET /orgs/${ORG_ID}/payout-account`]: () => ({ status: 200, body: overviewOf() }),
     [`POST /orgs/${ORG_ID}/payout-account/credential`]: (request) => {
       const { clientId, secretToken } = request.postDataJSON() as { clientId: string; secretToken: string };
@@ -292,6 +356,10 @@ async function openPage(
       state.clientId = body.clientId;
       state.accounts = [linkedAccount(option, linkedCount, true)];
       linkedCount += 1;
+      // Như api (`resumeAfterNewKey`): key mới hợp lệ tắt cờ khi BTC bị ngắt vì key.
+      if (['credential_invalid', 'gateway_permission_missing'].includes(state.paymentService.reason ?? '')) {
+        state.paymentService = ACTIVE_SERVICE;
+      }
       return { status: 200, body: overviewOf() };
     },
     ...accountRoutes,
@@ -1085,4 +1153,220 @@ test('đổi key Tingee: tài khoản đã chọn không còn trên Tingee lúc 
   // Không có gì được lưu: key và tài khoản cũ vẫn hiện hành.
   expect(state.clientId).toBe(MAIN.clientId);
   expect(state.accounts.map((a) => a.bankName)).toEqual(['MB Bank', 'ACB']);
+});
+
+test.describe('dịch vụ thanh toán bị ngắt (Story 4.2-b)', () => {
+  test.use({ timezoneId: 'America/New_York' });
+
+  const block = (page: Page) => page.locator('[data-slot="payment-service-block"]');
+  const checkButton = (page: Page) => block(page).getByRole('button', { name: 'Kiểm tra lại' });
+  const checks = (calls: Call[]) =>
+    calls.filter((c) => c.method === 'POST' && c.path === `/orgs/${ORG_ID}/payment-service/check`);
+  const LINKED = { ...CONNECTED, accounts: [linkedAccount(MB)] };
+  const PAUSED = 'Mọi Sự kiện có phí đang Tạm ngừng bán.';
+
+  const REASONS = [
+    {
+      reason: 'token',
+      text: 'Tingee báo đã hết Token (gói dịch vụ hết hạn).',
+      guide: 'Mua thêm Token trên portal Tingee rồi bấm Kiểm tra lại.',
+      link: { name: 'Mở portal Tingee', href: PORTAL },
+    },
+    {
+      reason: 'tingee_disabled',
+      text: 'Tingee đang tạm ngừng dịch vụ thanh toán của BTC.',
+      guide: 'Liên hệ Tingee để mở lại dịch vụ. Tickee tự kiểm tra mỗi 5 phút; bạn cũng có thể bấm Kiểm tra lại.',
+      link: null,
+    },
+    {
+      reason: 'credential_invalid',
+      text: 'Key Tingee không còn dùng được.',
+      guide: 'Key có thể đã bị thu hồi hoặc đổi trên Tingee. Đổi key Tingee để bán lại.',
+      link: null,
+    },
+    {
+      reason: 'gateway_permission_missing',
+      text: 'Key Tingee chưa được cấp quyền Cổng thanh toán.',
+      guide:
+        'Cấp quyền “Cổng thanh toán” cho key trên portal Tingee rồi bấm Kiểm tra lại. Tickee không tự kiểm tra được quyền này; nếu vẫn thiếu, lần bán vé kế tiếp sẽ tạm ngừng lại.',
+      link: { name: 'Mở trang API key trên Tingee', href: `${PORTAL}/api-credentials` },
+    },
+  ];
+
+  test('BTC hoạt động bình thường: không có khối "Dịch vụ thanh toán"', async ({ page }) => {
+    await openPage(page, { initial: LINKED });
+    await expect(page.locator('[data-slot="payout-account-card"]')).toBeVisible();
+    await expect(block(page)).toHaveCount(0);
+  });
+
+  test('khối theo lý do: badge danger, lý do, "Từ …", lần kiểm tra gần nhất (giờ Việt Nam), hướng dẫn; đặt trên nội dung trang', async ({
+    page,
+  }) => {
+    const { state } = await openPage(page, { initial: { ...LINKED, paymentService: suspended('token') } });
+    for (const copy of REASONS) {
+      state.paymentService = suspended(copy.reason, copy.reason === 'tingee_disabled' ? CHECKED_AT : null);
+      await page.reload();
+      const b = block(page);
+      await expect(b.getByRole('heading', { name: 'Dịch vụ thanh toán', level: 2 })).toBeVisible();
+      await expect(b.locator('[data-slot="status-badge"]')).toHaveText('Tạm ngừng bán');
+      await expect(b.locator('[data-slot="status-badge"]')).toHaveAttribute('data-tone', 'danger');
+      await expect(b.locator('[data-slot="payment-service-reason"]'), copy.reason).toHaveText(`${copy.text} ${PAUSED}`);
+      const times = b.locator('[data-slot="payment-service-times"]');
+      await expect(times).toContainText('Từ 10:04 13/11/2026');
+      await expect(times, copy.reason).toContainText(
+        copy.reason === 'tingee_disabled' ? 'Lần kiểm tra gần nhất: 10:20 13/11/2026' : 'Chưa kiểm tra',
+      );
+      const guide = b.locator('[data-slot="payment-service-guide"]');
+      await expect(guide, copy.reason).toContainText(copy.guide);
+      if (copy.link) {
+        const link = guide.getByRole('link', { name: copy.link.name });
+        await expect(link).toHaveAttribute('href', copy.link.href);
+        await expect(link).toHaveAttribute('target', '_blank');
+        await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+      } else {
+        await expect(guide.getByRole('link'), copy.reason).toHaveCount(0);
+      }
+      await expect(checkButton(page)).toBeVisible();
+      await expect(b.getByRole('button', { name: 'Đổi key Tingee' }), copy.reason).toHaveCount(
+        copy.reason === 'credential_invalid' ? 1 : 0,
+      );
+      // Banner của dải trên cùng vẫn hiện (khối là chỗ xử lý).
+      await expect(banners(page).first()).toHaveAttribute('data-tone', 'danger');
+    }
+    // Khối nằm trên nội dung trang (thẻ tài khoản nhận tiền).
+    const blockBox = await block(page).boundingBox();
+    const cardBox = await page.locator('[data-slot="payout-account-card"]').boundingBox();
+    expect(blockBox!.y + blockBox!.height).toBeLessThanOrEqual(cardBox!.y);
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+  });
+
+  test('"Kiểm tra lại": toast đúng câu cho từng outcome; lỗi mạng/5xx → toast lỗi, bấm lại được; not_suspended → khối biến mất', async ({
+    page,
+  }) => {
+    const { calls } = await openPage(page, {
+      initial: {
+        ...LINKED,
+        paymentService: suspended('tingee_disabled'),
+        checkReplies: [
+          { outcome: 'still_suspended' },
+          { outcome: 'cooldown', retryAfterSeconds: 12 },
+          { outcome: 'unknown' },
+          { outcome: 'no_target' },
+          { error: 503 },
+          { outcome: 'not_suspended' },
+        ],
+      },
+    });
+    await expect(block(page)).toContainText('Chưa kiểm tra');
+
+    await checkButton(page).click();
+    await expect(page.getByText('Tingee vẫn đang ngắt dịch vụ thanh toán.')).toBeVisible();
+    // Lần kiểm tra vừa rồi hiện ngay (giờ Việt Nam), không cần tải lại trang.
+    await expect(block(page)).toContainText('Lần kiểm tra gần nhất: 10:20 13/11/2026');
+
+    await checkButton(page).click();
+    await expect(page.getByText('Vừa kiểm tra xong. Thử lại sau 12 giây.')).toBeVisible();
+    await checkButton(page).click();
+    await expect(page.getByText('Chưa kiểm tra được với Tingee. Thử lại sau ít phút.')).toBeVisible();
+    await checkButton(page).click();
+    await expect(page.getByText('BTC chưa có tài khoản nhận tiền mặc định.')).toBeVisible();
+    await checkButton(page).click();
+    await expect(page.getByText('Lỗi giả lập')).toBeVisible();
+    await expect(block(page)).toBeVisible();
+    await expect(checkButton(page)).toBeEnabled();
+
+    // Đường khác vừa mở lại (Quản trị Tingee, job dò): khối và banner biến mất.
+    await checkButton(page).click();
+    await expect(page.getByText('Dịch vụ thanh toán đang hoạt động.')).toBeVisible();
+    await expect(block(page)).toHaveCount(0);
+    await expect(banners(page)).toHaveCount(0);
+    expect(checks(calls)).toHaveLength(6);
+  });
+
+  test('"Kiểm tra lại" → resumed: spinner, chặn bấm lặp; toast, khối và banner biến mất không cần tải lại trang', async ({
+    page,
+  }) => {
+    const { calls, state } = await openPage(page, {
+      initial: { ...LINKED, paymentService: suspended('token'), checkReplies: [{ outcome: 'resumed' }], checkDelayMs: 800 },
+    });
+    await expect(banners(page).first()).toContainText('Mọi Sự kiện có phí đang Tạm ngừng bán');
+    await checkButton(page).click();
+    await expect(checkButton(page)).toHaveAttribute('aria-busy', 'true');
+    await checkButton(page).click({ force: true });
+    await expect(page.getByText('Dịch vụ thanh toán đã hoạt động lại. Sự kiện có phí bán lại bình thường.')).toBeVisible();
+    await expect(block(page)).toHaveCount(0);
+    await expect(banners(page)).toHaveCount(0);
+    expect(checks(calls)).toHaveLength(1);
+    expect(state.paymentService.status).toBe('active');
+  });
+
+  test('credential_invalid: "Đổi key Tingee" trong khối → xác nhận lại → luồng đổi key có sẵn; lưu key mới → khối biến mất', async ({
+    page,
+  }) => {
+    const { reauthHeaders } = await openPage(page, {
+      initial: { ...LINKED, paymentService: suspended('credential_invalid') },
+      reauth: 'totp',
+    });
+    await block(page).getByRole('button', { name: 'Đổi key Tingee' }).click();
+    await expect(reauthDialog(page)).toBeVisible();
+    await reauthBoxes(page).first().fill(REAUTH_CODE);
+    await expect(reauthDialog(page)).toBeHidden();
+    await expect(replaceKeyForm(page)).toBeVisible();
+    // Luồng đổi key đang mở: khối không lặp lại nút.
+    await expect(block(page).getByRole('button', { name: 'Đổi key Tingee' })).toHaveCount(0);
+
+    await enterNewKey(page, NEXT);
+    const accounts = replaceKeyAccounts(page);
+    await accounts.getByRole('radio', { name: /Vietcombank/ }).check();
+    await accounts.getByRole('button', { name: 'Lưu', exact: true }).click();
+    await expect(page.getByText('Đã đổi key Tingee.')).toBeVisible();
+    await expect(block(page)).toHaveCount(0);
+    await expect(banners(page)).toHaveCount(0);
+    expect(reauthHeaders[0]).toBeNull();
+  });
+
+  test('cờ đổi khi đang mở trang: org_status_changed qua stream cấp BTC → khối và banner hiện rồi biến mất, không tải lại trang', async ({
+    page,
+  }) => {
+    const sse = await fakeEventSource(page, { url: ORG_LIVE_URL });
+    const { state } = await openPage(page, { initial: LINKED });
+    await expect(block(page)).toHaveCount(0);
+    await expect.poll(sse.count).toBe(1);
+    await sse.open();
+
+    state.paymentService = suspended('gateway_permission_missing');
+    await sse.message('org_status_changed');
+    await expect(block(page)).toContainText('Key Tingee chưa được cấp quyền Cổng thanh toán.', { timeout: 3_000 });
+    await expect(banners(page).first()).toContainText('Key Tingee chưa được cấp quyền Cổng thanh toán');
+
+    state.paymentService = ACTIVE_SERVICE;
+    await sse.message('org_status_changed');
+    await expect(block(page)).toHaveCount(0, { timeout: 3_000 });
+    await expect(banners(page)).toHaveCount(0);
+    expect(await sse.count()).toBe(1);
+  });
+
+  test('không có SSE: banner đổi ở lần polling 10 giây → khối cũng cập nhật', async ({ page }) => {
+    test.setTimeout(45_000);
+    const { state } = await openPage(page, { initial: LINKED });
+    await expect(block(page)).toHaveCount(0);
+    state.paymentService = suspended('tingee_disabled');
+    await expect(banners(page).first()).toContainText('Tingee đang tạm ngừng dịch vụ thanh toán của BTC', {
+      timeout: 12_000,
+    });
+    await expect(block(page)).toContainText('Tingee đang tạm ngừng dịch vụ thanh toán của BTC.', { timeout: 3_000 });
+  });
+
+  test('Admin: không có khối, không gọi "Kiểm tra lại"; banner chỉ có câu nhờ Owner', async ({ page }) => {
+    const { calls } = await openPage(page, {
+      role: 'admin',
+      initial: { ...LINKED, paymentService: suspended('credential_invalid') },
+    });
+    await expect(page.getByText('Chỉ Owner xem được mục này.')).toBeVisible();
+    await expect(block(page)).toHaveCount(0);
+    await expect(banners(page).first()).toContainText('Nhờ Owner cập nhật key Tingee.');
+    await expect(banners(page).first().getByRole('link')).toHaveCount(0);
+    expect(checks(calls)).toHaveLength(0);
+    expect(calls.filter((c) => c.path.startsWith(`/orgs/${ORG_ID}/payout-account`))).toHaveLength(0);
+  });
 });

@@ -1,4 +1,4 @@
-import { EventOverview, eventOverviewApiPath, StatusNotice } from '@tickee/contracts';
+import { EventOverview, eventOverviewApiPath, StatusNotice, statusNoticesApiPath } from '@tickee/contracts';
 import { z } from 'zod';
 
 import { apiRequest } from '@/lib/api/client';
@@ -21,7 +21,10 @@ export const StatusNoticesResponse = z
 
 /** `GET /v1/orgs/:orgId/notices`: đã lọc theo vai người xem và sắp theo ưu tiên ở api. */
 export const fetchStatusNotices = (orgId: string, signal?: AbortSignal) =>
-  apiRequest(`/orgs/${encodeURIComponent(orgId)}/notices`, { schema: StatusNoticesResponse, init: { signal } });
+  apiRequest(statusNoticesApiPath(orgId), { schema: StatusNoticesResponse, init: { signal } });
+
+/** Polling dải banner khi stream cấp BTC chưa kết nối (AD-17: 10 giây ở dashboard). */
+export const STATUS_NOTICES_POLL_MS = 10_000;
 
 /** Khóa TanStack Query: Tổng quan (doanh thu + Đơn gần đây) của một Sự kiện (Story 3.11). */
 export const eventOverviewQueryKey = (orgId: string, eventId: string) =>

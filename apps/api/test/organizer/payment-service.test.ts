@@ -6,8 +6,8 @@ import {
   ErrorResponse,
   EventAvailability,
   JobQueue,
+  PaymentServiceCheckResult,
   PaymentServiceReason,
-  PaymentServiceState,
   PaymentServiceStatus,
   PayoutAccountOverview,
   REAUTH_HEADER,
@@ -245,6 +245,10 @@ async function noticeCodes(cookie: string, orgId: string): Promise<string[]> {
 
 const check = (org: Org, cookie = org.owner.cookie) =>
   h.http.post(`/v1/orgs/${org.orgId}/payment-service/check`).set('cookie', cookie).send();
+
+/** "Kiểm tra lại" của Owner: 200 và `PaymentServiceCheckResult` (trạng thái, kết quả, số giây còn chờ). */
+const checkResult = async (org: Org): Promise<PaymentServiceCheckResult> =>
+  PaymentServiceCheckResult.parse((await check(org).expect(200)).body);
 
 /** Lần dò trước lùi về quá thời gian chờ 30 giây. */
 const ageLastCheck = (orgId: string) =>
@@ -510,8 +514,11 @@ describe('dò dịch vụ', () => {
     expect(h.logs.lines.find((l) => l.organizationId === org.orgId && l.error === 'SecretBoxError')).toBeDefined();
 
     await ageLastCheck(org.orgId);
-    const res = await check(org).expect(200);
-    expect(PaymentServiceState.parse(res.body)).toMatchObject({ status: 'suspended', reason: 'token' });
+    expect(await checkResult(org)).toMatchObject({
+      state: { status: 'suspended', reason: 'token' },
+      outcome: 'unknown',
+      retryAfterSeconds: null,
+    });
     expect(fake.calls(ACCOUNTS_PATH)).toEqual([]);
     expect(h.logs.text).not.toContain(broken);
   });
@@ -562,7 +569,7 @@ describe('dò dịch vụ', () => {
     expect(await paymentServiceOf(h, org.orgId)).toMatchObject({ status: 'suspended', checked_at: null });
     fake.merchant(MAIN.clientId).accountReplies = [{ code: '1033' }];
     const before = fake.calls(ACCOUNTS_PATH).length;
-    expect(PaymentServiceState.parse((await check(org).expect(200)).body)).toMatchObject({ status: 'suspended' });
+    expect(await checkResult(org)).toMatchObject({ state: { status: 'suspended' }, outcome: 'still_suspended' });
     expect(fake.calls(ACCOUNTS_PATH)).toHaveLength(before + 1);
   });
 
@@ -597,16 +604,16 @@ describe('dò dịch vụ', () => {
     const calls = fake.calls(ACCOUNTS_PATH).length;
 
     // Trong 30 giây: trả trạng thái hiện tại, không mở lại.
-    expect(PaymentServiceState.parse((await check(org).expect(200)).body)).toMatchObject({
-      status: 'suspended',
-      reason: 'gateway_permission_missing',
-      checkedAt: expect.any(String),
+    expect(await checkResult(org)).toMatchObject({
+      state: { status: 'suspended', reason: 'gateway_permission_missing', checkedAt: expect.any(String) },
+      outcome: 'cooldown',
+      retryAfterSeconds: expect.any(Number),
     });
     expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toEqual([]);
 
     await ageLastCheck(org.orgId);
-    const resumed = PaymentServiceState.parse((await check(org).expect(200)).body);
-    expect(resumed).toMatchObject({ status: 'active', reason: null, since: null });
+    const resumed = await checkResult(org);
+    expect(resumed).toMatchObject({ state: { status: 'active', reason: null, since: null }, outcome: 'resumed' });
     expect(fake.calls(ACCOUNTS_PATH)).toHaveLength(calls);
     expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toMatchObject([
       { actor_user_id: org.owner.userId, target_id: 'owner_check' },
@@ -655,8 +662,11 @@ describe('dò dịch vụ', () => {
   it('"Kiểm tra lại": BTC active → trả trạng thái, không gọi Tingee; Admin → 403; Owner gọi 2 lần trong 30 giây → lần 2 không gọi Tingee; dịch vụ về → active', async () => {
     const org = await newOrg('CLB Golf');
     const admin = await addAdmin(org);
-    const active = await check(org).expect(200);
-    expect(PaymentServiceState.parse(active.body)).toEqual({ status: 'active', reason: null, since: null, checkedAt: null });
+    expect(await checkResult(org)).toEqual({
+      state: { status: 'active', reason: null, since: null, checkedAt: null },
+      outcome: 'not_suspended',
+      retryAfterSeconds: null,
+    });
     const forbidden = await check(org, admin.cookie);
     expect(forbidden.status).toBe(403);
     expect(errorOf(forbidden).code).toBe('FORBIDDEN_ROLE');
@@ -666,23 +676,123 @@ describe('dò dịch vụ', () => {
     // Lần dò thấy 1133: dò bằng `get-va-paging` coi mọi mã key sai là `credential_invalid` (không phải
     // `gateway_permission_missing`, lý do mà job dò bỏ qua); đổi lý do do Owner bấm → audit ghi Owner.
     fake.merchant(MAIN.clientId).accountReplies = [{ code: '1133' }, { code: '1133' }];
-    const first = PaymentServiceState.parse((await check(org).expect(200)).body);
-    expect(first).toMatchObject({ status: 'suspended', reason: 'credential_invalid', checkedAt: expect.any(String) });
+    const first = await checkResult(org);
+    // Đổi lý do gộp vào `still_suspended`.
+    expect(first).toMatchObject({
+      state: { status: 'suspended', reason: 'credential_invalid', checkedAt: expect.any(String) },
+      outcome: 'still_suspended',
+      retryAfterSeconds: null,
+    });
     expect(await auditRows(org.orgId, 'organization.payment_service_reason_changed')).toMatchObject([
       { actor_user_id: org.owner.userId, target_id: 'credential_invalid' },
     ]);
-    const second = PaymentServiceState.parse((await check(org).expect(200)).body);
-    expect(second).toEqual(first);
+    const second = await checkResult(org);
+    expect(second.state).toEqual(first.state);
+    expect(second.outcome).toBe('cooldown');
+    expect(second.retryAfterSeconds).toBeGreaterThanOrEqual(25);
+    expect(second.retryAfterSeconds).toBeLessThanOrEqual(30);
     expect(fake.calls(ACCOUNTS_PATH)).toHaveLength(1);
 
     await ageLastCheck(org.orgId);
     fake.merchant(MAIN.clientId).accountReplies = [];
-    const resumed = PaymentServiceState.parse((await check(org).expect(200)).body);
-    expect(resumed).toMatchObject({ status: 'active', reason: null, since: null, checkedAt: expect.any(String) });
+    const resumed = await checkResult(org);
+    expect(resumed).toMatchObject({
+      state: { status: 'active', reason: null, since: null, checkedAt: expect.any(String) },
+      outcome: 'resumed',
+      retryAfterSeconds: null,
+    });
     expect(await auditRows(org.orgId, 'organization.payment_service_resumed')).toMatchObject([
       { actor_user_id: org.owner.userId, target_id: 'owner_check' },
     ]);
     expect(await resumedJobsOf(org.orgId)).toHaveLength(1);
+  });
+
+  it('"Kiểm tra lại" trả outcome theo từng nhánh (Story 4.2-b): still_suspended, cooldown kèm số giây còn chờ theo đồng hồ DB, unknown, no_target, resumed, rồi not_suspended', async () => {
+    const org = await newOrg('CLB Khúc côn cầu');
+    await suspendVia(org, '1033');
+
+    fake.merchant(MAIN.clientId).accountReplies = [{ code: '1033' }];
+    expect(await checkResult(org)).toEqual({
+      state: expect.objectContaining({ status: 'suspended', reason: 'token' }),
+      outcome: 'still_suspended',
+      retryAfterSeconds: null,
+    });
+
+    // Lần trước cách đây 18 giây → còn 12 giây (11 nếu lần chạy chậm); không gọi Tingee.
+    await h.db.orm.execute(
+      sql`UPDATE organizations SET payment_service_checked_at = now() - interval '18 seconds' WHERE id = ${org.orgId}`,
+    );
+    const calls = fake.calls(ACCOUNTS_PATH).length;
+    const cooling = await checkResult(org);
+    expect(cooling).toMatchObject({ state: { status: 'suspended' }, outcome: 'cooldown' });
+    expect([11, 12]).toContain(cooling.retryAfterSeconds);
+    expect(fake.calls(ACCOUNTS_PATH)).toHaveLength(calls);
+
+    await ageLastCheck(org.orgId);
+    fake.merchant(MAIN.clientId).accountReplies = [{ code: '500', httpStatus: 500 }];
+    expect(await checkResult(org)).toMatchObject({ state: { status: 'suspended' }, outcome: 'unknown', retryAfterSeconds: null });
+
+    await ageLastCheck(org.orgId);
+    await h.db.orm.execute(sql`UPDATE payout_accounts SET is_default = false WHERE organization_id = ${org.orgId}`);
+    expect(await checkResult(org)).toMatchObject({ state: { status: 'suspended' }, outcome: 'no_target', retryAfterSeconds: null });
+    await h.db.orm.execute(sql`UPDATE payout_accounts SET is_default = true WHERE organization_id = ${org.orgId}`);
+
+    await ageLastCheck(org.orgId);
+    fake.merchant(MAIN.clientId).accountReplies = [];
+    expect(await checkResult(org)).toMatchObject({ state: { status: 'active' }, outcome: 'resumed', retryAfterSeconds: null });
+    expect(await checkResult(org)).toMatchObject({ state: { status: 'active' }, outcome: 'not_suspended', retryAfterSeconds: null });
+  });
+
+  it('"Kiểm tra lại" khi lần dò trả skipped mà BTC vẫn ngắt: checked_at NULL (vừa bị ngắt lại) → unknown; đã có lần dò mà hết chờ ngay mốc 30 giây → cooldown 1 giây', async () => {
+    const org = await newOrg('CLB Bóng gậy');
+    const spy = vi.spyOn(prober, 'probe');
+    try {
+      spy.mockImplementationOnce(async () => {
+        await h.db.orm.execute(sql`
+          UPDATE organizations
+             SET payment_service_status = 'suspended', payment_service_reason = 'token', payment_service_since = now(),
+                 payment_service_checked_at = NULL
+           WHERE id = ${org.orgId}`);
+        return 'skipped';
+      });
+      expect(await checkResult(org)).toEqual({
+        state: expect.objectContaining({ status: 'suspended', checkedAt: null }),
+        outcome: 'unknown',
+        retryAfterSeconds: null,
+      });
+
+      // Giành lượt thất bại vì còn chờ, nhưng lúc đọc lại thì thời gian chờ vừa hết.
+      spy.mockImplementationOnce(async () => {
+        await h.db.orm.execute(
+          sql`UPDATE organizations SET payment_service_checked_at = now() - interval '31 seconds' WHERE id = ${org.orgId}`,
+        );
+        return 'skipped';
+      });
+      expect(await checkResult(org)).toEqual({
+        state: expect.objectContaining({ status: 'suspended', checkedAt: expect.any(String) }),
+        outcome: 'cooldown',
+        retryAfterSeconds: 1,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('"Kiểm tra lại": Quản trị mở lại trong lúc gọi Tingee (Tingee vẫn báo ngắt) → not_suspended với trạng thái active', async () => {
+    const org = await newOrg('CLB Đấu kiếm');
+    await suspendVia(org, '1033');
+    fake.merchant(MAIN.clientId).accountReplies = [{ code: '1033' }];
+    afterNextProbe = async () => {
+      await h.http
+        .post(`/v1/admin/organizations/${org.orgId}/payment-service/resume`)
+        .set('cookie', platformAdmin.cookie)
+        .expect(204);
+    };
+    expect(await checkResult(org)).toEqual({
+      state: expect.objectContaining({ status: 'active', reason: null }),
+      outcome: 'not_suspended',
+      retryAfterSeconds: null,
+    });
   });
 });
 

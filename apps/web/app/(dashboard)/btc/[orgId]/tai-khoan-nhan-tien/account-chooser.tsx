@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { EmptyState } from '@/components/tickee/empty-state';
 import { StatusBadge } from '@/components/tickee/status-badge';
 import { StatusBanner } from '@/components/tickee/status-banner';
+import { TingeeLink } from '@/components/tickee/tingee-link';
 import { Button } from '@/components/ui/button';
 import { handledElsewhere } from '@/lib/api/handled-elsewhere';
 import { messageOf } from '@/lib/api/message-of';
@@ -37,7 +38,6 @@ import {
   ListSkeleton,
   PROVIDER_DOWN,
   refreshOverview,
-  TingeeLink,
   UNAVAILABLE,
   VIETINBANK,
 } from './shared';

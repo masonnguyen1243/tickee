@@ -6,7 +6,13 @@ import { useEffect, useRef, useState } from 'react';
 import { apiBaseUrl } from '@/lib/api/client';
 import { isNetworkError } from '@/lib/api/errors';
 
-import { createSignalCoalescer, effectivePollInterval, reopenDelay, type SignalCoalescer } from './live-signal';
+import {
+  createSignalCoalescer,
+  effectivePollInterval,
+  reopenDelay,
+  signalReload,
+  type SignalCoalescer,
+} from './live-signal';
 
 /*
  * Một hook dùng chung cho mọi tài nguyên tự cập nhật (AD-17, Story 3.7; 3.9 và 3.11 dùng lại): REST là sự thật, SSE chỉ
@@ -26,6 +32,12 @@ export type LiveResourceOptions<T> = {
   livePath: string | ((data: T | undefined) => string);
   /** Chu kỳ polling (ms) khi SSE chưa kết nối, theo dữ liệu hiện có; `false` = không polling. */
   pollInterval: (data: T | undefined) => number | false;
+  /**
+   * Gọi cùng mỗi lần tải lại do lời nhắc (SSE mở, tín hiệu SSE, tab visible, có mạng lại), sau khi bắt đầu tải lại tài
+   * nguyên chính: tài nguyên khác dùng chung tín hiệu của stream này tải lại theo (vd. dải banner cấp BTC tải lại cả tổng
+   * quan Tài khoản nhận tiền, Story 4.2-b). Không gọi ở các lần polling. Đọc bản mới nhất mỗi lần (không cần ổn định).
+   */
+  onSignal?: () => void;
 };
 
 export type LiveResource<T> = {
@@ -39,13 +51,20 @@ export type LiveResource<T> = {
 /**
  * Tài nguyên REST tự cập nhật:
  * - Tải lại REST khi SSE mở, khi có tín hiệu SSE, khi tab chuyển sang visible và khi có mạng lại; các lời nhắc gom trong
- *   1 giây (tải ngay ở lời nhắc đầu, các lời nhắc tới trong 1 giây sau gộp thành một lần tải).
+ *   1 giây (tải ngay ở lời nhắc đầu, các lời nhắc tới trong 1 giây sau gộp thành một lần tải). Mỗi lần tải đó cũng gọi
+ *   `onSignal` (nếu có).
  * - SSE chỉ mở khi đã có dữ liệu (tài nguyên tồn tại, đúng quyền). Chưa kết nối (đang nối, lỗi, bị đóng) → polling theo
  *   `pollInterval`; kết nối rồi → không polling. Stream bị đóng hẳn (lỗi HTTP, máy chủ tắt) → tự mở lại sau 1, 2, 4…
  *   giây (tối đa 30); tab visible lại hoặc có mạng lại → mở lại ngay. Mất kết nối tạm thời thì trình duyệt tự nối lại.
  * - Không đọc `returnUrl` hay search params nào để suy ra trạng thái.
  */
-export function useLiveResource<T>({ queryKey, queryFn, livePath, pollInterval }: LiveResourceOptions<T>): LiveResource<T> {
+export function useLiveResource<T>({
+  queryKey,
+  queryFn,
+  livePath,
+  pollInterval,
+  onSignal,
+}: LiveResourceOptions<T>): LiveResource<T> {
   const [connected, setConnected] = useState(false);
   const [browserOnline, setBrowserOnline] = useState(true);
   const query = useQuery({
@@ -59,12 +78,19 @@ export function useLiveResource<T>({ queryKey, queryFn, livePath, pollInterval }
 
   const refetch = useRef(query.refetch);
   refetch.current = query.refetch;
+  const onSignalRef = useRef(onSignal);
+  onSignalRef.current = onSignal;
   const coalescer = useRef<SignalCoalescer | null>(null);
   /** Mở lại SSE ngay nếu đang đóng hẳn (đặt bởi effect SSE). */
   const reopenNow = useRef<() => void>(() => undefined);
 
   useEffect(() => {
-    const c = createSignalCoalescer(() => void refetch.current());
+    const c = createSignalCoalescer(
+      signalReload(
+        () => void refetch.current(),
+        () => onSignalRef.current?.(),
+      ),
+    );
     coalescer.current = c;
     return () => {
       c.dispose();
