@@ -37,7 +37,12 @@ export const queueKey = (status: ClosedBetaStatus) => `GET /admin/organizations?
 export type SuspendedOrganization = {
   id: string;
   name: string;
-  reason: 'token' | 'tingee_disabled' | 'credential_invalid' | 'gateway_permission_missing';
+  reason:
+    | 'token'
+    | 'tingee_disabled'
+    | 'credential_invalid'
+    | 'gateway_permission_missing'
+    | 'payout_account_not_allowed';
   since: string;
   checkedAt: string | null;
 };

@@ -97,8 +97,8 @@ const NEXT_PAYOUT: PayoutSpec = {
 };
 /** Mã Tingee đi nhánh "tạm ngừng bán" (key, merchant, VA). */
 const PAUSE_CODES = ['1007', '1033', '1034', '92', '97', '1009', '1133', '2023', '1023', '1045', '1024', '1072'];
-/** Lý do ngắt dịch vụ thanh toán mà mã bật (Story 4.2); nhóm VA không bật cờ. */
-const SERVICE_REASON: Readonly<Record<string, string | null>> = {
+/** Lý do ngắt dịch vụ thanh toán mà mã bật (Story 4.2; nhóm VA → `payout_account_not_allowed`, Story 4.2-d). */
+const SERVICE_REASON: Readonly<Record<string, string>> = {
   '1007': 'tingee_disabled',
   '1033': 'token',
   '1034': 'tingee_disabled',
@@ -106,11 +106,11 @@ const SERVICE_REASON: Readonly<Record<string, string | null>> = {
   '97': 'credential_invalid',
   '1009': 'credential_invalid',
   '1133': 'gateway_permission_missing',
-  '2023': null,
-  '1023': null,
-  '1045': null,
-  '1024': null,
-  '1072': null,
+  '2023': 'payout_account_not_allowed',
+  '1023': 'payout_account_not_allowed',
+  '1045': 'payout_account_not_allowed',
+  '1024': 'payout_account_not_allowed',
+  '1072': 'payout_account_not_allowed',
 };
 
 let fake: TingeeFake;
@@ -418,11 +418,8 @@ describe('tạo link khi gửi Đơn', () => {
     expect(placed.order.payment).toMatchObject({ checkoutUrl: null, linkError: 'sales_paused' });
     expect(await inventory(h, placed.tierId)).toEqual({ capacity: 5, sold: 0, held: 0 });
     await expectInventoryConsistent(placed.eventId);
-    // Story 4.2: mã ngắt dịch vụ của key hiện hành bật cờ của BTC; nhóm VA không bật.
-    const reason = SERVICE_REASON[code];
-    expect(await paymentServiceOf(h, org.orgId)).toMatchObject(
-      reason ? { status: 'suspended', reason } : { status: 'active', reason: null },
-    );
+    // Story 4.2: mã ngắt dịch vụ của key hiện hành bật cờ của BTC; nhóm VA của tài khoản mặc định cũng bật (4.2-d).
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject({ status: 'suspended', reason: SERVICE_REASON[code] });
     const warning = h.logs.lines.find((l) => l.orderCode === placed.order.code && l.tingeeCode === code);
     expect(warning).toMatchObject({ organizationId: org.orgId });
     expect(parseOrder((await retry(placed.buyer, placed.order.code).expect(200)).body).buyerStatus).toBe('expired');

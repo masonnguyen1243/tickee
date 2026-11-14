@@ -37,7 +37,12 @@ import {
 import type { DefaultPayoutChangeReason } from './payout-default-email.js';
 import { DefaultPayoutQueues, enqueueDefaultPayoutChanged } from './payout-default-jobs.js';
 import { lockOrganization } from './organization-lock.js';
-import { PaymentServiceQueues, paymentServiceStateDto, resumeAfterNewKey } from './payment-service.js';
+import {
+  PaymentServiceQueues,
+  paymentServiceStateDto,
+  resumeAfterDefaultChanged,
+  resumeAfterNewKey,
+} from './payment-service.js';
 import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
 
 /*
@@ -58,7 +63,10 @@ import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
  * mọi Admin.
  *
  * Dịch vụ thanh toán (Story 4.2): tổng quan kèm cờ `payment_service_*` của BTC; đổi key hợp lệ khi BTC đang bị ngắt vì
- * key (`credential_invalid`, `gateway_permission_missing`) thì tắt cờ trong cùng transaction thay key.
+ * key (`credential_invalid`, `gateway_permission_missing`) hay vì VA của tài khoản mặc định
+ * (`payout_account_not_allowed`) thì tắt cờ trong cùng transaction thay key. Đổi tài khoản mặc định (đặt tài khoản
+ * khác, hủy tài khoản mặc định) khi BTC đang bị ngắt vì `payout_account_not_allowed` thì tắt cờ trong cùng transaction
+ * (đường `default_changed`, Story 4.2-d).
  */
 
 const cred = tingeeCredentials;
@@ -319,14 +327,17 @@ export class PayoutAccountService {
 
   /**
    * Hủy liên kết một tài khoản nhận tiền: đặt `retired_at` (không xóa dòng, không gọi Tingee). Hủy tài khoản mặc định
-   * thì tài khoản liên kết sớm nhất còn lại thành mặc định, và email cảnh báo được enqueue (kể cả khi đó là tài khoản
-   * cuối cùng: "không còn tài khoản nhận tiền"). Cần lần xác nhận lại (`REAUTH_REQUIRED`). Id lạ, đã hủy hoặc của BTC
-   * khác → 404 (lần xác nhận không bị tiêu). Trả tổng quan mới.
+   * thì tài khoản liên kết sớm nhất còn lại thành mặc định, email cảnh báo được enqueue (kể cả khi đó là tài khoản cuối
+   * cùng: "không còn tài khoản nhận tiền"), và BTC đang bị ngắt vì VA của tài khoản đó (`payout_account_not_allowed`)
+   * được mở lại (đường `default_changed`). Cần lần xác nhận lại (`REAUTH_REQUIRED`). Id lạ, đã hủy hoặc của BTC khác →
+   * 404 (lần xác nhận không bị tiêu). Trả tổng quan mới.
    */
   async unlink(ctx: AccessContext, accountId: string, reauth: ReauthProof): Promise<PayoutAccountOverview> {
     if (!UUID.test(accountId)) throw accountNotFound();
     // pg-boss đã start và queue đã có (ngoài transaction): `boss.send` cần cả hai.
     await this.defaultPayoutQueues.ready();
+    // Tắt cờ dịch vụ thanh toán (nếu có) enqueue job "đã mở lại" bằng `tx` bên dưới.
+    await this.paymentServiceQueues.ready();
     return this.db.transaction(async (tx) => {
       await lockOrganization(tx, ctx);
       await consumeReauth(tx, { userId: ctx.userId, ...reauth });
@@ -353,19 +364,24 @@ export class PayoutAccountService {
           .limit(1);
         if (next) await this.makeDefault(tx, ctx, next.id);
         await this.notifyDefaultChanged(tx, ctx, target.id, next?.id ?? null);
+        // VA bị Tingee từ chối không còn là nơi nhận tiền; không còn tài khoản thì "Chưa liên kết" chặn bán thay cờ.
+        await resumeAfterDefaultChanged(this.boss, tx, ctx);
       }
       return this.overviewOf(tx, ctx);
     });
   }
 
   /**
-   * Đặt một tài khoản hiện hành làm mặc định (tài khoản mặc định cũ thôi là mặc định) và enqueue email cảnh báo. Cần
-   * lần xác nhận lại (`REAUTH_REQUIRED`), kể cả khi tài khoản đã là mặc định (khi đó không đổi gì, không gửi email). Id
-   * lạ, đã hủy hoặc của BTC khác → 404 (lần xác nhận không bị tiêu). Trả tổng quan mới.
+   * Đặt một tài khoản hiện hành làm mặc định (tài khoản mặc định cũ thôi là mặc định) và enqueue email cảnh báo; BTC
+   * đang bị ngắt vì VA của tài khoản mặc định cũ (`payout_account_not_allowed`) được mở lại (đường `default_changed`).
+   * Cần lần xác nhận lại (`REAUTH_REQUIRED`), kể cả khi tài khoản đã là mặc định (khi đó không đổi gì, không gửi email,
+   * cờ giữ). Id lạ, đã hủy hoặc của BTC khác → 404 (lần xác nhận không bị tiêu). Trả tổng quan mới.
    */
   async setDefault(ctx: AccessContext, accountId: string, reauth: ReauthProof): Promise<PayoutAccountOverview> {
     if (!UUID.test(accountId)) throw accountNotFound();
     await this.defaultPayoutQueues.ready();
+    // Tắt cờ dịch vụ thanh toán (nếu có) enqueue job "đã mở lại" bằng `tx` bên dưới.
+    await this.paymentServiceQueues.ready();
     return this.db.transaction(async (tx) => {
       await lockOrganization(tx, ctx);
       await consumeReauth(tx, { userId: ctx.userId, ...reauth });
@@ -382,6 +398,8 @@ export class PayoutAccountService {
         // Còn tài khoản thì luôn có đúng một mặc định; thiếu (dữ liệu lệch) thì không có "tài khoản cũ" để báo.
         const [old] = previous;
         if (old) await this.notifyDefaultChanged(tx, ctx, old.id, target.id);
+        // VA mới chưa được Tingee kiểm: còn bị từ chối thì lần tạo link kế bật cờ lại.
+        await resumeAfterDefaultChanged(this.boss, tx, ctx);
       }
       return this.overviewOf(tx, ctx);
     });
@@ -422,8 +440,9 @@ export class PayoutAccountService {
    * tiêu). Rồi trong một transaction: tiêu lần xác nhận, credential cũ `retired_at` (giữ ciphertext cho IPN/Đối soát bù
    * của Đơn cũ), mọi tài khoản hiện hành bị hủy liên kết (gỡ mềm), credential mới (Secret Token mã hóa) và tài khoản đã
    * chọn (mặc định) được chèn, kèm audit và email cảnh báo (tài khoản mặc định cũ, hoặc "chưa có", → tài khoản mới).
-   * BTC đang bị ngắt dịch vụ thanh toán vì key (`credential_invalid`, `gateway_permission_missing`) → tắt cờ trong cùng
-   * transaction (đường `new_key`, Story 4.2); lý do khác giữ cờ. `ipnKey` không đổi. Trả tổng quan mới.
+   * BTC đang bị ngắt dịch vụ thanh toán vì key (`credential_invalid`, `gateway_permission_missing`) hay vì VA của tài
+   * khoản mặc định (`payout_account_not_allowed`) → tắt cờ trong cùng transaction (đường `new_key`, Story 4.2); lý do
+   * khác giữ cờ. `ipnKey` không đổi. Trả tổng quan mới.
    */
   async replaceKey(
     ctx: AccessContext,
@@ -536,9 +555,9 @@ export class PayoutAccountService {
         // BTC đã hủy hết tài khoản trước khi đổi key: không có tài khoản mặc định cũ ("chưa có tài khoản nhận tiền").
         const previousDefault = current.find((row) => row.isDefault)?.id ?? null;
         await this.notifyDefaultChanged(tx, ctx, previousDefault, account.id, 'tingee_key_replaced');
-        // `credential_invalid`: Tingee vừa nhận key mới (`listAccounts` ở trên). `gateway_permission_missing`:
-        // `listAccounts` không thấy được quyền "Cổng thanh toán", nên tin Owner; lần tạo link kế kiểm lại (thiếu quyền thì
-        // bật cờ lại). Lý do khác key mới không chữa được.
+        // `credential_invalid`: Tingee vừa nhận key mới (`listAccounts` ở trên). `gateway_permission_missing`,
+        // `payout_account_not_allowed`: `listAccounts` không thấy được quyền "Cổng thanh toán" hay VA được cho phép,
+        // nên tin Owner; lần tạo link kế kiểm lại (còn lỗi thì bật cờ lại). Lý do khác key mới không chữa được.
         await resumeAfterNewKey(this.boss, tx, ctx);
         return this.overviewOf(tx, ctx);
       });

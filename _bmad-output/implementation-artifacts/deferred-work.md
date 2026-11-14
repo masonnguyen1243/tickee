@@ -395,6 +395,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
   summary: Story 4.2. BTC chưa được báo khi `create-link` bị Tingee từ chối vì cấu hình sai: key thiếu quyền "Cổng thanh toán" (`1133`), VA chưa được cho phép trên portal Gateway (`2023`), VA lỗi (`1023`/`1045`/`1024`/`1072`). Banner Owner của `payment_service_status` phải kèm câu nhắc cấp quyền hoặc cho phép VA tương ứng.
   evidence: Mason chốt 10/11 khi lập spec 3.4: 3.4 chỉ log cảnh báo (`organizationId`, mã Đơn, mã Tingee); Người mua thấy "Sự kiện tạm ngừng bán". Mục này đóng phần còn lại của deferred 2.6 ("Story 3.4 cần báo `TINGEE_CREDENTIAL_INVALID` kèm câu nhắc cấp quyền").
 - Đã xử lý một phần (13/11/2026): Story 4.2-a (`spec-4-2-a-co-tam-ngung-ban-va-tu-mo-lai.md`). `create-link` bằng key hiện hành trả `1133` bật cờ `payment_service_status` lý do riêng `gateway_permission_missing` (`notices` trả `PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING`; job dò bỏ qua lý do này, Owner "Kiểm tra lại" tắt cờ không cần Tingee); `92`/`97`/`1009` bật lý do `credential_invalid` (`PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID`). Câu nhắc cấp quyền và "Nhập lại key" ở 4.2-b. Nhóm VA (`2023`, `1023`/`1045`/`1024`/`1072`) vẫn không bật cờ nên BTC chưa được báo: xem mục mới của 4.2-a.
+- Đã xử lý (14/11/2026): phần nhóm VA đóng ở Story 4.2-d (`spec-4-2-d-tam-ngung-ban-khi-tingee-tu-choi-va.md`): lý do `payout_account_not_allowed`, banner "Tài khoản nhận tiền chưa dùng được với Cổng thanh toán" và hướng dẫn cho phép VA hoặc đổi tài khoản mặc định.
 
 ## Deferred from: code review of spec-epic-2-e2-5-refactor-api.md (2026-11-11)
 
@@ -655,6 +656,7 @@ Spec 4.2 đầy đủ khoảng 5.500 token. Mason chọn tách ba ngày 13/11/20
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-2-a-co-tam-ngung-ban-va-tu-mo-lai.md`
   summary: `create-link` bị từ chối vì VA (`2023` VA chưa được cho phép trên Cổng thanh toán, `1023`/`1045`/`1024`/`1072` VA lỗi) vẫn chỉ hết hạn Đơn (`sales_paused`), không bật cờ dịch vụ thanh toán, nên BTC không có banner và mọi Người mua sau vẫn thử rồi hết hạn. Cần quyết: thêm lý do riêng (vd. `payout_account_not_allowed`, tắt khi Owner đổi tài khoản mặc định) hay chỉ báo BTC bằng banner/email không chặn bán.
   evidence: Spec 4.2-a (Always: "`PAYMENT_ACCOUNT_NOT_ALLOWED` … không bật cờ"). `apps/api/src/modules/ordering/payment-link.ts` (`serviceReason` `null` với nhóm VA), `apps/api/src/modules/tingee/errors.ts` (`paymentServiceReasonOf`).
+- Đã xử lý (14/11/2026): Story 4.2-d (`spec-4-2-d-tam-ngung-ban-khi-tingee-tu-choi-va.md`, Mason chốt thêm lý do riêng). Mọi mã `PAYMENT_ACCOUNT_NOT_ALLOWED` của `create-link` (`createLinkServiceReasonOf`) bật cờ lý do `payout_account_not_allowed` (migration `0024`) trong transaction hết hạn Đơn, chỉ khi tài khoản vừa gọi Tingee vẫn là mặc định hiện hành và credential vẫn hiện hành (không thì `stale_account`/`stale_credential`, cờ không đổi). Lần dò (`get-va-paging`) vẫn coi nhóm VA là "không biết"; job dò bỏ qua lý do này, "Kiểm tra lại" của Owner tắt cờ không gọi Tingee (`owner_check`), đổi hoặc hủy tài khoản mặc định tắt cờ cùng transaction (đường mới `default_changed`), lưu key mới tắt cờ (`new_key`). `notices` trả `PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED` (bậc 4); web có banner, khối "Dịch vụ thanh toán" (kèm "Mở portal Tingee") và nhãn tab Quản trị.
 
 ## Deferred from: code review of spec-4-2-a-co-tam-ngung-ban-va-tu-mo-lai.md (2026-11-13)
 
@@ -684,3 +686,9 @@ Spec 4.2 đầy đủ khoảng 5.500 token. Mason chọn tách ba ngày 13/11/20
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-2-b-giao-dien-tam-ngung-ban.md`
   summary: Story 4.7, bổ sung mục HTTP/2. Từ 4.2-b, shell dashboard giữ một SSE cấp BTC (`GET /v1/orgs/:orgId/live`) trên mọi trang dashboard, Tổng quan Sự kiện giữ thêm một stream: ba tab dashboard qua HTTP/1.1 đã gần trần 6 kết nối/origin và làm treo REST. Edge phục vụ API bằng HTTP/2, hoặc gộp tín hiệu trang vào một stream.
   evidence: Review 4.2-b #6 (ECH, BH, low). `components/tickee/status-banner-stack.tsx`, `su-kien/[eventId]/event-overview.tsx`.
+
+## Deferred from: code review of spec-4-2-d-tam-ngung-ban-khi-tingee-tu-choi-va.md (2026-11-14)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-2-d-tam-ngung-ban-khi-tingee-tu-choi-va.md`
+  summary: Kiểm VA mặc định trước khi tắt cờ `payout_account_not_allowed`. Hiện "Kiểm tra lại" và đổi tài khoản mặc định tắt cờ mà không hỏi Tingee; nếu `get-va-paging` (`listAccounts`, chỉ trả VA `active`) không còn liệt kê VA bị từ chối thì có thể kiểm VA mặc định còn trong danh sách trước khi mở lại, tránh mất một Đơn của Người mua mỗi lần mở lại sai.
+  evidence: Review 4.2-d #7 (BH, maybe-false; nếu đúng thì medium). Ca thật ở dev (Đơn `TKTDHEKF6W`): VA mặc định của BTC "test" được liên kết qua `listAccounts` mà `create-link` vẫn bị từ chối nhóm VA, nên nhiều khả năng `get-va-paging` không thấy lỗi này; fake 2023 chỉ mô phỏng. Cần UAT Tingee thật (E3-3): VA trả 2023 hoặc 1023/1045/1024/1072 ở `create-link` có còn trong `get-va-paging` `status: active` không. Phần đã khóa của 4.2-d cấm gọi Tingee ở hai đường này, nên đổi cần Mason chốt.

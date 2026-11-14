@@ -14,7 +14,7 @@ import {
   type PaymentServiceState,
   type SuspendedPaymentServiceOrganization,
 } from '@tickee/contracts';
-import { and, asc, eq, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 import {
@@ -38,14 +38,15 @@ import {
 import { realtime } from '../../platform/realtime/index.js';
 import { TINGEE_CLIENT, type MerchantServiceStatus, type TingeeClient } from '../tingee/index.js';
 import { defaultPayoutTargetOf, type PayoutTarget } from './payout-targets.js';
-import { organizations, tingeeCredentials } from './schema.js';
+import { organizations, payoutAccounts, tingeeCredentials } from './schema.js';
 
 /*
  * Dịch vụ thanh toán của BTC (FR-15, FR-20, AD-32, Story 4.2-a): `organizer` sở hữu cờ `organizations.payment_service_*`.
  *
  * - Bật (`suspendPaymentService`, trong `tx` hết hạn Đơn của `ordering.PaymentLinks`): `create-link` bằng key hiện hành bị
  *   Tingee từ chối với mã ngắt dịch vụ. CAS `active → suspended`; đã `suspended` thì chỉ đổi lý do (giữ `since`).
- *   Credential đã bị thay trước lúc ghi → không bật (key cũ, như Đối soát bù của 4.1).
+ *   Credential đã bị thay trước lúc ghi → không bật (key cũ, như Đối soát bù của 4.1); lý do
+ *   `payout_account_not_allowed` mà tài khoản đã gọi không còn là mặc định hiện hành lúc ghi → không bật.
  * - Tắt (`resumePaymentService`, một hàm cho mọi đường: dò, "Kiểm tra lại", Quản trị Tingee, lưu key mới): CAS
  *   `suspended → active`, audit đường mở lại, `org_status_changed`, và job "đã mở lại" (`payment.service-resumed`) cùng
  *   `tx`: `payment` nhận job rồi Đối soát bù mọi Đơn còn mở của BTC. Bên thua CAS không làm gì.
@@ -54,10 +55,13 @@ import { organizations, tingeeCredentials } from './schema.js';
  *   transaction (adapter có timeout): hoạt động → tắt cờ; vẫn ngắt → cập nhật lý do; không biết, hay BTC không có tài
  *   khoản mặc định → giữ cờ, chỉ log. Dò không bao giờ bật cờ. Job cron mỗi `PAYMENT_SERVICE_PROBE_INTERVAL_MINUTES` phút
  *   (vai worker) dò tuần tự các BTC `suspended`; Owner bấm "Kiểm tra lại" dò một BTC.
- * - Lý do `gateway_permission_missing` (1133: key đúng nhưng chưa được cấp quyền "Cổng thanh toán"; quyết định 13/11/2026
- *   sau review lượt 1): `get-va-paging` không thấy được thiếu quyền này, nên job dò bỏ qua BTC có lý do này (không gọi
- *   Tingee), và "Kiểm tra lại" của Owner tắt cờ không cần Tingee xác nhận (vẫn sau lượt chờ 30 giây; còn thiếu quyền thì
- *   lần tạo link kế bật lại). Lưu key mới hợp lệ tắt cờ cho cả lý do này và `credential_invalid`.
+ * - Lý do Owner tự xác nhận (`OWNER_CONFIRMED_REASONS`): `gateway_permission_missing` (1133: key đúng nhưng chưa
+ *   được cấp quyền "Cổng thanh toán"; quyết định 13/11/2026 sau review lượt 1) và `payout_account_not_allowed` (nhóm
+ *   VA của `create-link`; quyết định 14/11/2026, Story 4.2-d). `get-va-paging` không thấy được hai lỗi cấu hình này,
+ *   nên job dò bỏ qua BTC có các lý do này (không gọi Tingee), và "Kiểm tra lại" của Owner tắt cờ không cần Tingee xác
+ *   nhận (vẫn sau lượt chờ 30 giây; còn lỗi thì lần tạo link kế bật lại). Lưu key mới hợp lệ tắt cờ cho cả hai lý do
+ *   này và `credential_invalid` (`resumeAfterNewKey`); đổi hoặc hủy tài khoản mặc định tắt cờ
+ *   `payout_account_not_allowed` (`resumeAfterDefaultChanged`, đường `default_changed`).
  *
  * Mỗi lần đổi cờ có audit (`organization.payment_service_*`, actor `null` khi do hệ thống) và `org_status_changed` trong
  * cùng `tx`. Không bao giờ log credential.
@@ -141,8 +145,16 @@ export class PaymentServiceQueues extends QueueProducer {
 // Bật, đổi lý do, tắt cờ
 // ---------------------------------------------------------------------------------------------------------------
 
-/** Kết quả bật cờ: vừa bật, đổi lý do, đã ở đúng trạng thái đó, hoặc credential không còn hiện hành (không đổi gì). */
-export type PaymentServiceSuspension = 'suspended' | 'reason_changed' | 'unchanged' | 'stale_credential';
+/**
+ * Kết quả bật cờ: vừa bật, đổi lý do, đã ở đúng trạng thái đó, credential không còn hiện hành, hoặc (lý do
+ * `payout_account_not_allowed`) tài khoản đã gọi Tingee không còn là mặc định hiện hành; hai kết quả sau không đổi gì.
+ */
+export type PaymentServiceSuspension =
+  | 'suspended'
+  | 'reason_changed'
+  | 'unchanged'
+  | 'stale_credential'
+  | 'stale_account';
 
 /** Kết quả nội bộ của `applySuspension`: thêm `not_suspended` (chỉ đổi lý do mà BTC đã `active`: không đổi gì). */
 type SuspensionResult = PaymentServiceSuspension | 'not_suspended';
@@ -152,16 +164,22 @@ export interface SuspensionInput {
   reason: PaymentServiceReason;
   /** Credential của lời gọi bị Tingee từ chối: chỉ bật cờ khi nó vẫn là credential hiện hành của BTC lúc ghi. */
   credentialId: string;
+  /**
+   * Tài khoản nhận tiền (VA) của lời gọi bị Tingee từ chối. Lý do `payout_account_not_allowed`: chỉ bật cờ khi tài
+   * khoản này vẫn là mặc định hiện hành của BTC lúc ghi (Owner vừa đổi mặc định thì VA cũ không còn liên quan).
+   */
+  payoutAccountId: string;
   /** Người gây ra lần ghi (Owner bấm "Kiểm tra lại"); mặc định `null` (hệ thống: tạo link, job dò). */
   actorUserId?: string | null;
 }
 
 /**
- * Ghi lý do ngắt trong `tx`. Khóa dòng BTC trước (`FOR NO KEY UPDATE`: chặn ghi cờ và đổi key song song, không chặn
- * INSERT Đơn hay Sự kiện tham chiếu BTC), rồi kiểm credential bằng một câu mới (READ COMMITTED: đổi key vừa commit thì
- * thấy credential đã gỡ). `activate`: BTC `active` thì bật (lần ngắt mới: xóa `checked_at` của lần trước để thời gian chờ
- * cũ không nuốt lần "Kiểm tra lại" đầu); không thì chỉ đổi lý do của BTC đang `suspended` (`active` → `not_suspended`:
- * dò không bao giờ bật cờ).
+ * Ghi lý do ngắt trong `tx`. Khóa dòng BTC trước (`FOR NO KEY UPDATE`: chặn ghi cờ, đổi key và đổi tài khoản mặc định
+ * song song, không chặn INSERT Đơn hay Sự kiện tham chiếu BTC), rồi kiểm credential bằng một câu mới (READ COMMITTED:
+ * đổi key vừa commit thì thấy credential đã gỡ); lý do `payout_account_not_allowed` kiểm thêm tài khoản đã gọi vẫn là
+ * mặc định hiện hành (đổi hay hủy mặc định vừa commit → `stale_account`). `activate`: BTC `active` thì bật (lần ngắt
+ * mới: xóa `checked_at` của lần trước để thời gian chờ cũ không nuốt lần "Kiểm tra lại" đầu); không thì chỉ đổi lý do
+ * của BTC đang `suspended` (`active` → `not_suspended`: dò không bao giờ bật cờ).
  */
 async function applySuspension(tx: Tx, input: SuspensionInput, activate: boolean): Promise<SuspensionResult> {
   const id = input.organizationId;
@@ -182,6 +200,20 @@ async function applySuspension(tx: Tx, input: SuspensionInput, activate: boolean
       ),
     );
   if (!current) return 'stale_credential';
+  if (input.reason === PaymentServiceReason.PAYOUT_ACCOUNT_NOT_ALLOWED) {
+    const [account] = await tx
+      .select({ id: payoutAccounts.id })
+      .from(payoutAccounts)
+      .where(
+        and(
+          eq(payoutAccounts.id, input.payoutAccountId),
+          eq(payoutAccounts.organizationId, id),
+          eq(payoutAccounts.isDefault, true),
+          isNull(payoutAccounts.retiredAt),
+        ),
+      );
+    if (!account) return 'stale_account';
+  }
 
   let result: 'suspended' | 'reason_changed';
   if (org.status === PaymentServiceStatus.ACTIVE) {
@@ -221,9 +253,11 @@ async function applySuspension(tx: Tx, input: SuspensionInput, activate: boolean
 
 /**
  * Bật cờ trong `tx` của người gọi (`ordering.PaymentLinks`: cùng transaction hết hạn Đơn) khi `create-link` bằng
- * credential `input.credentialId` bị Tingee từ chối với lý do ngắt `input.reason`. CAS `active → suspended` (`since` =
- * `now()`); đã `suspended` thì chỉ đổi lý do (giữ `since`), cùng lý do thì không làm gì. Credential không còn hiện hành
- * (Owner vừa đổi key) → `stale_credential`, không đổi gì. Có đổi thì audit (actor `null`) và `org_status_changed`.
+ * credential `input.credentialId` và tài khoản `input.payoutAccountId` bị Tingee từ chối với lý do ngắt `input.reason`.
+ * CAS `active → suspended` (`since` = `now()`); đã `suspended` thì chỉ đổi lý do (giữ `since`), cùng lý do thì không
+ * làm gì. Credential không còn hiện hành (Owner vừa đổi key) → `stale_credential`; lý do `payout_account_not_allowed`
+ * mà tài khoản không còn là mặc định hiện hành (Owner vừa đổi hay hủy mặc định) → `stale_account`; cả hai không đổi
+ * gì. Có đổi thì audit (actor `null`) và `org_status_changed`.
  */
 export async function suspendPaymentService(tx: Tx, input: SuspensionInput): Promise<PaymentServiceSuspension> {
   const result = await applySuspension(tx, input, true);
@@ -290,9 +324,9 @@ export function paymentServiceSettings(config: { TINGEE_CREDENTIAL_KEYS: string 
 /**
  * Kết quả một lần dò:
  * - `skipped`: không đổi gì — BTC không `suspended`, lần dò trước chưa quá `PAYMENT_SERVICE_CHECK_COOLDOWN_SECONDS`, job
- *   dò gặp lý do `gateway_permission_missing` (không gọi Tingee), hoặc trong lúc gọi Tingee bên khác vừa tắt cờ hay Owner
- *   vừa đổi key;
- * - `resumed`: Tingee nhận key hiện hành (hoặc Owner "Kiểm tra lại" trên lý do `gateway_permission_missing`) → đã tắt cờ;
+ *   dò gặp lý do Owner tự xác nhận (`OWNER_CONFIRMED_REASONS`, không gọi Tingee), hoặc trong lúc gọi Tingee bên khác
+ *   vừa tắt cờ, Owner vừa đổi key, hay lý do vừa đổi (Tingee nhận key nhưng lý do mới không phải lý do đã dò);
+ * - `resumed`: Tingee nhận key hiện hành (hoặc Owner "Kiểm tra lại" trên lý do Owner tự xác nhận) → đã tắt cờ;
  * - `still_suspended` / `reason_changed`: Tingee vẫn ngắt (BTC vẫn `suspended` cùng lý do / lý do khác, đã cập nhật);
  * - `unknown`: không kết luận được (Tingee tạm lỗi, timeout, mã khác, không giải mã được credential) → giữ cờ;
  * - `no_target`: BTC không có tài khoản nhận tiền mặc định (không có key để dò) → giữ cờ.
@@ -309,13 +343,19 @@ export type PaymentServiceProbeOutcome =
 export type PaymentServiceProbePath = typeof PaymentServiceResumePath.PROBE | typeof PaymentServiceResumePath.OWNER_CHECK;
 
 /**
- * Lý do khác `gateway_permission_missing`: job dò chỉ dò các BTC này (`get-va-paging` không thấy được thiếu quyền "Cổng
- * thanh toán").
+ * Lý do Owner tự xác nhận đã xử lý: `get-va-paging` không thấy được key thiếu quyền "Cổng thanh toán"
+ * (`gateway_permission_missing`) hay VA chưa được cho phép trên Cổng thanh toán (`payout_account_not_allowed`). Job dò
+ * bỏ qua; "Kiểm tra lại" của Owner tắt cờ không gọi Tingee (lần tạo link kế kiểm lại).
  */
-const notGatewayPermissionMissing = ne(
-  organizations.paymentServiceReason,
+const OWNER_CONFIRMED_REASONS: readonly PaymentServiceReason[] = [
   PaymentServiceReason.GATEWAY_PERMISSION_MISSING,
-);
+  PaymentServiceReason.PAYOUT_ACCOUNT_NOT_ALLOWED,
+];
+
+const isOwnerConfirmed = (reason: PaymentServiceReason): boolean => OWNER_CONFIRMED_REASONS.includes(reason);
+
+/** Lý do mà job dò dò được (khác `OWNER_CONFIRMED_REASONS`). */
+const probeableReason = notInArray(organizations.paymentServiceReason, [...OWNER_CONFIRMED_REASONS]);
 
 /** Dò dịch vụ thanh toán của một BTC (job cron và "Kiểm tra lại" dùng chung). */
 @Injectable()
@@ -342,17 +382,25 @@ export class PaymentServiceProber {
   ): Promise<PaymentServiceProbeOutcome> {
     const claimed = await this.claim(organizationId, path);
     if (!claimed) return 'skipped';
+    // BTC `suspended` lúc giành lượt (CHECK của DB: luôn có lý do). Mọi lần tắt cờ dưới đây CAS kèm lý do này.
+    const claimedReason = claimed.reason;
     const context = { organizationId, path };
 
-    // `get-va-paging` không thấy thiếu quyền "Cổng thanh toán": Owner báo đã cấp quyền → tắt cờ, không gọi Tingee (job dò
-    // không giành được lượt cho lý do này). CAS kèm lý do: lý do đổi sau lúc giành lượt thì không mở lại.
-    if (claimed.reason === PaymentServiceReason.GATEWAY_PERMISSION_MISSING) {
+    // `get-va-paging` không thấy thiếu quyền "Cổng thanh toán" hay VA chưa được cho phép: Owner báo đã xử lý → tắt
+    // cờ, không gọi Tingee (job dò không giành được lượt cho các lý do này). CAS kèm lý do: lý do đổi sau lúc giành
+    // lượt thì không mở lại.
+    if (claimedReason !== null && isOwnerConfirmed(claimedReason)) {
       await this.queues.ready();
-      const expectedReason = PaymentServiceReason.GATEWAY_PERMISSION_MISSING;
+      const expectedReason = claimedReason;
       const resumed = await this.db.transaction((tx) =>
         resumePaymentService(this.boss, tx, { organizationId, path, actorUserId, expectedReason }),
       );
-      if (resumed) this.logger.log(context, 'Owner báo đã cấp quyền Cổng thanh toán; đã mở lại, không gọi Tingee');
+      if (resumed) {
+        this.logger.log(
+          { ...context, reason: expectedReason },
+          'Owner báo đã xử lý lỗi cấu hình; đã mở lại, không gọi Tingee',
+        );
+      }
       return resumed ? 'resumed' : 'skipped';
     }
 
@@ -373,16 +421,25 @@ export class PaymentServiceProber {
     switch (status.status) {
       case 'active': {
         await this.queues.ready();
+        // CAS kèm lý do lúc giành lượt: create-link trong lúc dò vừa đổi lý do (vd. sang `payout_account_not_allowed`,
+        // `get-va-paging` không thấy được VA bị từ chối) thì kết quả dò không áp cho lý do mới.
+        const expectedReason = claimedReason ?? undefined;
         const resumed = await this.db.transaction((tx) =>
-          resumePaymentService(this.boss, tx, { organizationId, path, actorUserId }),
+          resumePaymentService(this.boss, tx, { organizationId, path, actorUserId, expectedReason }),
         );
         if (resumed) this.logger.log(context, 'Dò dịch vụ thanh toán: Tingee nhận key; đã mở lại');
         return resumed ? 'resumed' : 'skipped';
       }
       case 'suspended': {
-        const input = { organizationId, reason: status.reason, credentialId: target.credentialId, actorUserId };
+        const input = {
+          organizationId,
+          reason: status.reason,
+          credentialId: target.credentialId,
+          payoutAccountId: target.payoutAccountId,
+          actorUserId,
+        };
         const result = await this.db.transaction((tx) => applySuspension(tx, input, false));
-        if (result === 'not_suspended' || result === 'stale_credential') {
+        if (result === 'not_suspended' || result === 'stale_credential' || result === 'stale_account') {
           // Trong lúc gọi Tingee, bên khác vừa mở lại hoặc Owner vừa đổi key: kết quả này đã cũ, không đổi gì.
           this.logger.log({ ...context, reason: status.reason, result }, 'Dò dịch vụ thanh toán: kết quả đã cũ; bỏ qua');
           return 'skipped';
@@ -398,8 +455,8 @@ export class PaymentServiceProber {
 
   /**
    * Giành lượt dò: CAS ghi `payment_service_checked_at = now()` khi BTC `suspended` và lần dò trước đã quá thời gian chờ;
-   * job dò không giành lượt cho lý do `gateway_permission_missing`. Hai lần dò cùng lúc (job, Owner bấm liên tục) → chỉ một
-   * bên làm. Trả lý do lúc giành; không giành được → `null`.
+   * job dò không giành lượt cho lý do Owner tự xác nhận (`OWNER_CONFIRMED_REASONS`). Hai lần dò cùng lúc (job, Owner
+   * bấm liên tục) → chỉ một bên làm. Trả lý do lúc giành; không giành được → `null`.
    */
   private async claim(
     organizationId: string,
@@ -417,7 +474,7 @@ export class PaymentServiceProber {
             isNull(checkedAt),
             lte(checkedAt, sql`now() - make_interval(secs => ${PAYMENT_SERVICE_CHECK_COOLDOWN_SECONDS})`),
           ),
-          path === PaymentServiceResumePath.PROBE ? notGatewayPermissionMissing : undefined,
+          path === PaymentServiceResumePath.PROBE ? probeableReason : undefined,
         ),
       )
       .returning({ reason: organizations.paymentServiceReason });
@@ -485,14 +542,14 @@ export class PaymentServiceService {
 }
 
 /**
- * Id các BTC đang `suspended` mà job dò dò được (trừ lý do `gateway_permission_missing`), BTC dò lâu nhất (chưa dò lần
- * nào) trước. Không qua `orgScope`: chỉ job nền của worker.
+ * Id các BTC đang `suspended` mà job dò dò được (trừ lý do Owner tự xác nhận, `OWNER_CONFIRMED_REASONS`), BTC dò lâu
+ * nhất (chưa dò lần nào) trước. Không qua `orgScope`: chỉ job nền của worker.
  */
 export async function suspendedOrganizationIds(db: DbExecutor): Promise<string[]> {
   const rows = await db
     .select({ id: organizations.id })
     .from(organizations)
-    .where(and(eq(organizations.paymentServiceStatus, PaymentServiceStatus.SUSPENDED), notGatewayPermissionMissing))
+    .where(and(eq(organizations.paymentServiceStatus, PaymentServiceStatus.SUSPENDED), probeableReason))
     .orderBy(
       sql`${organizations.paymentServiceCheckedAt} ASC NULLS FIRST`,
       asc(organizations.paymentServiceSince),
@@ -615,8 +672,9 @@ export async function resumePaymentServiceByPlatformAdmin(
 
 /**
  * Đổi key Tingee (`replaceKey`, 2.13-b) trong `tx` của nó: BTC đang `suspended` vì key (`credential_invalid`,
- * `gateway_permission_missing`) → tắt cờ (đường `new_key`, actor là Owner); lý do khác (merchant bị ngắt, hết Token: key
- * mới không chữa được) → giữ cờ. Trả `true` khi đã tắt.
+ * `gateway_permission_missing`) hay vì VA của tài khoản mặc định (`payout_account_not_allowed`: key mới kèm tài khoản
+ * mặc định mới) → tắt cờ (đường `new_key`, actor là Owner); lý do khác (merchant bị ngắt, hết Token: key mới không
+ * chữa được) → giữ cờ. Trả `true` khi đã tắt.
  */
 export async function resumeAfterNewKey(boss: PgBoss, tx: Tx, ctx: AccessContext): Promise<boolean> {
   const [org] = await tx
@@ -629,6 +687,7 @@ export async function resumeAfterNewKey(boss: PgBoss, tx: Tx, ctx: AccessContext
         inArray(organizations.paymentServiceReason, [
           PaymentServiceReason.CREDENTIAL_INVALID,
           PaymentServiceReason.GATEWAY_PERMISSION_MISSING,
+          PaymentServiceReason.PAYOUT_ACCOUNT_NOT_ALLOWED,
         ]),
       ),
     );
@@ -637,5 +696,21 @@ export async function resumeAfterNewKey(boss: PgBoss, tx: Tx, ctx: AccessContext
     organizationId: ctx.organizationId,
     path: PaymentServiceResumePath.NEW_KEY,
     actorUserId: ctx.userId,
+  });
+}
+
+/**
+ * Đổi tài khoản nhận tiền mặc định (`setDefault` sang tài khoản khác, `unlink` tài khoản mặc định, còn hay hết tài
+ * khoản; Story 4.2-d) trong `tx` của nó: BTC đang `suspended` vì VA của tài khoản mặc định cũ
+ * (`payout_account_not_allowed`) → tắt cờ (đường `default_changed`, actor là Owner; CAS kèm lý do: lý do khác không bị
+ * đường này tắt). Không gọi Tingee: VA mới còn bị từ chối thì lần tạo link kế bật lại. Người gọi đã
+ * `PaymentServiceQueues.ready()` trước transaction và đã khóa dòng BTC. Trả `true` khi đã tắt.
+ */
+export async function resumeAfterDefaultChanged(boss: PgBoss, tx: Tx, ctx: AccessContext): Promise<boolean> {
+  return resumePaymentService(boss, tx, {
+    organizationId: ctx.organizationId,
+    path: PaymentServiceResumePath.DEFAULT_CHANGED,
+    actorUserId: ctx.userId,
+    expectedReason: PaymentServiceReason.PAYOUT_ACCOUNT_NOT_ALLOWED,
   });
 }

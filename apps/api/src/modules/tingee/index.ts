@@ -22,6 +22,7 @@ export {
   type TingeeCredential,
 } from './tingee.client.js';
 export {
+  createLinkServiceReasonOf,
   domainErrorOf,
   paymentServiceReasonOf,
   TINGEE_ERROR_CODES,

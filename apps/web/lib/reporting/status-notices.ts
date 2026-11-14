@@ -29,14 +29,14 @@ export type StatusNoticeContent = { title: string; description?: string; action?
 export type StatusNoticeContentByRole = Readonly<Record<Role, StatusNoticeContent>>;
 
 const NOT_LINKED_TITLE = 'Chưa liên kết tài khoản nhận tiền';
-/** Hậu quả chung của bốn mã dịch vụ thanh toán bị ngắt (Story 4.2). */
+/** Hậu quả chung của năm mã dịch vụ thanh toán bị ngắt (Story 4.2). */
 const PAID_EVENTS_PAUSED = 'Mọi Sự kiện có phí đang Tạm ngừng bán.';
 const PAYOUT_ACCOUNT: OrganizationSection = 'payout-account';
 
 /**
- * Bốn mã dịch vụ thanh toán bị ngắt (Story 4.2-b, câu Mason chốt 13/11/2026): tiêu đề giữ của 4.2-a, mô tả nêu hậu quả
- * hoặc nguyên nhân. Owner có một hành động ("Mua thêm Token" mở portal Tingee ở tab mới; còn lại tới trang Tài khoản nhận
- * tiền, nơi có khối "Dịch vụ thanh toán"); Admin chỉ được nhắc nhờ Owner.
+ * Năm mã dịch vụ thanh toán bị ngắt (Story 4.2-b, câu Mason chốt 13/11/2026; mã VA chốt 14/11/2026, Story 4.2-d): tiêu
+ * đề giữ của 4.2-a, mô tả nêu hậu quả hoặc nguyên nhân. Owner có một hành động ("Mua thêm Token" mở portal Tingee ở tab
+ * mới; còn lại tới trang Tài khoản nhận tiền, nơi có khối "Dịch vụ thanh toán"); Admin chỉ được nhắc nhờ Owner.
  */
 const PAYMENT_SERVICE_CONTENT = {
   PAYMENT_SERVICE_SUSPENDED_TOKEN: {
@@ -81,6 +81,17 @@ const PAYMENT_SERVICE_CONTENT = {
     admin: {
       title: 'Key Tingee chưa được cấp quyền Cổng thanh toán',
       description: `${PAID_EVENTS_PAUSED} Nhờ Owner cấp quyền Cổng thanh toán cho key Tingee.`,
+    },
+  },
+  PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED: {
+    owner: {
+      title: 'Tài khoản nhận tiền chưa dùng được với Cổng thanh toán',
+      description: PAID_EVENTS_PAUSED,
+      action: { label: 'Xem cách xử lý', section: PAYOUT_ACCOUNT },
+    },
+    admin: {
+      title: 'Tài khoản nhận tiền chưa dùng được với Cổng thanh toán',
+      description: `${PAID_EVENTS_PAUSED} Nhờ Owner cho phép tài khoản trên Cổng thanh toán Tingee hoặc chọn tài khoản nhận tiền khác.`,
     },
   },
 } satisfies Partial<Record<StatusNoticeCode, StatusNoticeContentByRole>>;

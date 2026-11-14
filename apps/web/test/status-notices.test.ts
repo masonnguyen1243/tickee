@@ -56,6 +56,13 @@ describe('dịch vụ thanh toán bị ngắt (Story 4.2-b): câu theo vai, mộ
         action: 'Xem cách xử lý',
         admin: `${PAUSED} Nhờ Owner cấp quyền Cổng thanh toán cho key Tingee.`,
       },
+      // Story 4.2-d (Mason chốt 14/11/2026).
+      PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED: {
+        title: 'Tài khoản nhận tiền chưa dùng được với Cổng thanh toán',
+        owner: PAUSED,
+        action: 'Xem cách xử lý',
+        admin: `${PAUSED} Nhờ Owner cho phép tài khoản trên Cổng thanh toán Tingee hoặc chọn tài khoản nhận tiền khác.`,
+      },
     } as const;
     for (const [code, copy] of Object.entries(table) as [keyof typeof table, (typeof table)[keyof typeof table]][]) {
       const owner = statusNoticeContent(code, 'owner');
@@ -80,6 +87,7 @@ describe('dịch vụ thanh toán bị ngắt (Story 4.2-b): câu theo vai, mộ
       'PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED',
       'PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID',
       'PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING',
+      'PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED',
       'PAYOUT_ACCOUNT_NOT_LINKED',
     ] as const) {
       const link = statusNoticeLink(statusNoticeContent(code, 'owner').action!, notice(), ORG);

@@ -4,6 +4,7 @@ import { ErrorCode, PaymentServiceReason } from '@tickee/contracts';
 import { z } from 'zod';
 import { AppError } from '../../platform/http/index.js';
 import {
+  createLinkServiceReasonOf,
   DOMAIN_ERROR_MESSAGES,
   domainErrorOf,
   paymentServiceReasonOf,
@@ -102,7 +103,8 @@ export type CreateLinkAmbiguousReason = 'timeout' | 'network' | 'http_status' | 
  * - `rejected`: Tingee trả JSON (HTTP 200) có `code` (chuỗi hoặc số) khác `'00'`: chắc chắn chưa có link. `code` là lỗi
  *   miền theo bảng mã (`TINGEE_CREDENTIAL_INVALID`, `MERCHANT_SUSPENDED`, `PAYMENT_ACCOUNT_NOT_ALLOWED`, mã lạ →
  *   `PAYMENT_PROVIDER_UNAVAILABLE`), `tingeeCode` là mã gốc (chỉ để log), `serviceReason` là lý do ngắt dịch vụ thanh
- *   toán của BTC theo mã (`paymentServiceReasonOf`, Story 4.2), `null` khi mã không phải ngắt dịch vụ (vd. nhóm VA).
+ *   toán của BTC theo mã (`createLinkServiceReasonOf`, Story 4.2; nhóm VA → `payout_account_not_allowed`, Story 4.2-d),
+ *   `null` khi mã không phải ngắt dịch vụ (mã lạ, lệch giờ).
  * - `ambiguous`: timeout, lỗi mạng, HTTP ≠ 200, JSON hỏng, `code` thiếu/không phải chuỗi hay số, hoặc `'00'` mà `data`
  *   không phải URL http/https: có thể Tingee đã tạo link. Không được gọi lại cùng `orderId`. `code` luôn là
  *   `PAYMENT_PROVIDER_UNAVAILABLE`; `httpStatus` và `tingeeCode` (mã gốc trong body, nếu đọc được) chỉ để log;
@@ -123,7 +125,7 @@ export class CreateLinkError extends AppError {
     cause: unknown,
   ) {
     super(code, DOMAIN_ERROR_MESSAGES[code], { cause });
-    this.serviceReason = outcome === 'rejected' && tingeeCode !== null ? paymentServiceReasonOf(tingeeCode) : null;
+    this.serviceReason = outcome === 'rejected' && tingeeCode !== null ? createLinkServiceReasonOf(tingeeCode) : null;
   }
 
   /** Tingee từ chối (HTTP 200) bằng mã `tingeeCode` (khác `'00'`). */

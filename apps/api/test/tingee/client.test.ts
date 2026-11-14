@@ -5,6 +5,7 @@ import { ErrorCode } from '@tickee/contracts';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CreateLinkError,
+  createLinkServiceReasonOf,
   domainErrorOf,
   HttpTingeeClient,
   parseTingeeTimestamp,
@@ -342,7 +343,12 @@ describe('HttpTingeeClient.createPaymentLink (Story 3.4)', () => {
     const notAllowed = await linkErrorOf(
       client.createPaymentLink(A, input({ vaAccountNumber: String(inactive.vaAccountNumber) })),
     );
-    expect(notAllowed).toMatchObject({ outcome: 'rejected', code: 'PAYMENT_ACCOUNT_NOT_ALLOWED', tingeeCode: '2023' });
+    expect(notAllowed).toMatchObject({
+      outcome: 'rejected',
+      code: 'PAYMENT_ACCOUNT_NOT_ALLOWED',
+      tingeeCode: '2023',
+      serviceReason: 'payout_account_not_allowed',
+    });
   });
 
   it('merchant bị khóa / thiếu quyền (behavior của fake) → rejected', async () => {
@@ -539,15 +545,26 @@ describe('dịch vụ thanh toán của BTC (Story 4.2, hợp đồng tạm)', (
     fake.merchant(A.clientId).accountReplies = [];
   });
 
-  it('lý do theo mã (Mason chốt 13/11): 1033 → token; 1007, 1034 → tingee_disabled; 1133 → gateway_permission_missing; 92/97/1009 → credential_invalid; còn lại null', () => {
+  it('lý do theo mã (Mason chốt 13/11, 14/11): 1033 → token; 1007, 1034 → tingee_disabled; 1133 → gateway_permission_missing; 92/97/1009 → credential_invalid; nhóm VA chỉ ở create-link → payout_account_not_allowed; còn lại null', () => {
     expect(paymentServiceReasonOf('1033')).toBe('token');
     expect(paymentServiceReasonOf('1007')).toBe('tingee_disabled');
     expect(paymentServiceReasonOf('1034')).toBe('tingee_disabled');
     expect(paymentServiceReasonOf('1133')).toBe('gateway_permission_missing');
     for (const code of ['92', '97', '1009']) expect(paymentServiceReasonOf(code), code).toBe('credential_invalid');
-    // Nhóm VA (PAYMENT_ACCOUNT_NOT_ALLOWED), mã lạ, lệch giờ, '00': không phải ngắt dịch vụ.
+    // Nhóm VA (PAYMENT_ACCOUNT_NOT_ALLOWED), mã lạ, lệch giờ, '00': không phải ngắt dịch vụ theo key (dò: không biết).
     for (const code of ['2023', '1023', '1045', '1024', '1072', '1006', '90', '91', '500', '00']) {
       expect(paymentServiceReasonOf(code), code).toBeNull();
+    }
+    // `create-link` (Story 4.2-d, Mason chốt 14/11): mọi mã nhóm VA → payout_account_not_allowed; mã khác như trên.
+    for (const code of ['2023', '1023', '1045', '1024', '1072']) {
+      expect(createLinkServiceReasonOf(code), code).toBe('payout_account_not_allowed');
+      expect(CreateLinkError.rejected(code), code).toMatchObject({
+        code: 'PAYMENT_ACCOUNT_NOT_ALLOWED',
+        serviceReason: 'payout_account_not_allowed',
+      });
+    }
+    for (const code of ['1033', '1007', '1034', '1133', '92', '97', '1009', '1006', '90', '91', '500', '00']) {
+      expect(createLinkServiceReasonOf(code), code).toBe(paymentServiceReasonOf(code));
     }
     expect(CreateLinkError.rejected('1033').serviceReason).toBe('token');
     expect(CreateLinkError.rejected('1034')).toMatchObject({ code: 'MERCHANT_SUSPENDED', serviceReason: 'tingee_disabled' });
@@ -556,7 +573,6 @@ describe('dịch vụ thanh toán của BTC (Story 4.2, hợp đồng tạm)', (
       code: 'TINGEE_CREDENTIAL_INVALID',
       serviceReason: 'gateway_permission_missing',
     });
-    expect(CreateLinkError.rejected('2023').serviceReason).toBeNull();
     // Mơ hồ (kể cả mã ngắt trong body của HTTP lỗi): không biết Tingee đã nhận request chưa → không phải ngắt dịch vụ.
     expect(CreateLinkError.ambiguous('http_status', { httpStatus: 500, tingeeCode: '1033' }).serviceReason).toBeNull();
   });
@@ -588,10 +604,10 @@ describe('dịch vụ thanh toán của BTC (Story 4.2, hợp đồng tạm)', (
     expect(await client.getMerchantServiceStatus(FORBIDDEN)).toEqual({ status: 'suspended', reason: 'credential_invalid' });
   });
 
-  it('lỗi khác → unknown, không ném: HTTP 500, mã lạ, VA (2023), lỗi mạng, JSON hỏng, 00 kèm HTTP lỗi, treo (timeout riêng 5 giây)', async () => {
+  it('lỗi khác → unknown, không ném: HTTP 500, mã lạ, nhóm VA (2023…; Story 4.2-d: chỉ create-link bật cờ), lỗi mạng, JSON hỏng, 00 kèm HTTP lỗi, treo (timeout riêng 5 giây)', async () => {
     expect(TINGEE_SERVICE_STATUS_TIMEOUT_MS).toBe(5_000);
     expect(await client.getMerchantServiceStatus(BROKEN)).toEqual({ status: 'unknown' });
-    for (const code of ['1006', '2023']) {
+    for (const code of ['1006', '2023', '1023', '1045', '1024', '1072']) {
       fake.merchant(A.clientId).accountReplies = [{ code }];
       expect(await client.getMerchantServiceStatus(A), code).toEqual({ status: 'unknown' });
     }

@@ -284,10 +284,18 @@ test.describe('tab "Tạm ngừng bán" (Story 4.2-b)', () => {
   test('bảng BTC đang ngắt theo thứ tự api (ngắt lâu nhất trước): tên, nhãn lý do, từ lúc, lần kiểm tra gần nhất', async ({
     page,
   }) => {
-    const { calls } = await openAdmin(page, { suspended: suspendedSeed() });
+    // Story 4.2-d: BTC bị ngắt vì Tingee từ chối VA của tài khoản nhận tiền mặc định.
+    const vaRejected: SuspendedOrganization = {
+      id: '019a3b2c-0203-7abc-8def-0123456789ab',
+      name: 'Hội Chạy Bộ Thủ Đức',
+      reason: 'payout_account_not_allowed',
+      since: '2026-11-14T02:00:00.000Z',
+      checkedAt: null,
+    };
+    const { calls } = await openAdmin(page, { suspended: [...suspendedSeed(), vaRejected] });
     await tab(page, 'Tạm ngừng bán').click();
     await expect(tab(page, 'Tạm ngừng bán')).toHaveAttribute('aria-selected', 'true');
-    await expect(suspendedRows(page)).toHaveCount(2);
+    await expect(suspendedRows(page)).toHaveCount(3);
     await expect(suspendedRows(page).nth(0)).toContainText('CLB Bơi Lội Phú Nhuận');
     await expect(suspendedRows(page).nth(0)).toContainText('Hết Token');
     await expect(suspendedRows(page).nth(0)).toContainText('08:30 12/11/2026');
@@ -296,6 +304,9 @@ test.describe('tab "Tạm ngừng bán" (Story 4.2-b)', () => {
     await expect(suspendedRows(page).nth(1)).toContainText('Key thiếu quyền Cổng thanh toán');
     await expect(suspendedRows(page).nth(1)).toContainText('10:04 13/11/2026');
     await expect(suspendedRows(page).nth(1)).toContainText('Chưa kiểm tra');
+    await expect(suspendedRows(page).nth(2)).toContainText('Hội Chạy Bộ Thủ Đức');
+    await expect(suspendedRows(page).nth(2)).toContainText('Tài khoản chưa dùng được Cổng thanh toán');
+    await expect(suspendedRows(page).nth(2)).toContainText('09:00 14/11/2026');
     await expect(suspendedRow(page, 'CLB Bơi Lội Phú Nhuận').getByRole('button', { name: 'Mở lại CLB Bơi Lội Phú Nhuận' })).toBeVisible();
     // Tab Closed Beta không tải danh sách Tạm ngừng bán cho tới khi được mở.
     expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([queueKey('pending'), SUSPENDED_KEY]);
