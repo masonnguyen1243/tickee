@@ -1,5 +1,6 @@
 import { EVENT_SLUG_PATTERN, EventStatus, toEventIso, type PublicEvent } from '@tickee/contracts';
-import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import type { DbExecutor, Tx } from '../../platform/db/index.js';
 import { organizationNameOf } from '../organizer/index.js';
 import { notFound, UUID } from './event.service.js';
@@ -121,6 +122,21 @@ export async function lockEventByIdForShare(tx: Tx, eventId: string): Promise<Pu
   const [row] = await tx.select(refColumns).from(events).where(eq(events.id, eventId)).for('share');
   if (!row) throw notFound();
   return row;
+}
+
+/**
+ * Mọi Sự kiện đã mở bán (không còn nháp) của một BTC, mới tạo trước: bản theo lô cho trạng thái bán trên dashboard BTC
+ * (`ordering`, Story 4.2-c). Một truy vấn, qua `orgScope`.
+ */
+export function saleEventsOfOrganization(
+  db: DbExecutor,
+  scope: Pick<AccessContext, 'organizationId'>,
+): Promise<PublicEventRef[]> {
+  return db
+    .select(refColumns)
+    .from(events)
+    .where(and(orgScope(scope)(events), ne(events.status, 'draft')))
+    .orderBy(desc(events.createdAt), desc(events.id));
 }
 
 /** `PublicEventRef` kèm `ended`: đồng hồ DB đã quá `effective_end_at` lúc đọc (AD-14). */

@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import type { EventSaleReason } from '@tickee/contracts';
 
 import { expect, test } from './fixtures';
 import { apiError, me, mockIdentityApi, unauthenticated, type Call, type Handler } from './identity-mock';
@@ -9,7 +10,8 @@ import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
  * nhận) và "Kết thúc" qua `Dialog`. API giả có trạng thái, luật trạng thái như server. Story 3.10: lưu lệnh đổi giờ hoặc
  * địa điểm của Sự kiện đã mở bán, chưa kết thúc → đếm Người mua (`GET …/buyer-count`) rồi `Dialog` "Email sẽ được gửi tới
  * {n} Người mua." trước khi `PATCH`. E3-2: bấm "Kết thúc" → đếm Đơn đang chờ thanh toán (`GET …/pending-payment-count`)
- * rồi mới mở `Dialog` nêu đủ hậu quả (và số Đơn đó khi > 0).
+ * rồi mới mở `Dialog` nêu đủ hậu quả (và số Đơn đó khi > 0). Story 4.2-c: `GET …/event-sale-status` có trạng thái, suy
+ * `reason` từ trạng thái Sự kiện của API giả (badge Tổng quan lấy nhãn từ đây).
  */
 
 test.use({ timezoneId: 'America/New_York' });
@@ -21,6 +23,7 @@ const SLUG = 'giai-chay-ha-noi-2026-c4d5';
 const base = `/btc/${ORG_ID}/su-kien/${EVENT_ID}`;
 const settings = `${base}?tab=cai-dat`;
 const eventPath = `/orgs/${ORG_ID}/events/${EVENT_ID}`;
+const SALE_STATUS_PATH = `/orgs/${ORG_ID}/event-sale-status`;
 
 /** ISO 8601 theo giờ Việt Nam (`+07:00`, không mili giây) như api trả. */
 const vnIso = (ms: number) => `${new Date(ms + 7 * 3_600_000).toISOString().slice(0, 19)}+07:00`;
@@ -60,6 +63,10 @@ type State = {
   forceNotStarted?: boolean;
   /** Lưu (PATCH) trả lỗi: 400 VALIDATION_FAILED tại `endsAt` hoặc 500. */
   failPatch?: 'validation' | 'server';
+  /** Chặn phản hồi `GET …/event-sale-status` tới khi promise xong (Story 4.2-c). */
+  holdSale?: Promise<void>;
+  /** `reason` api trả thay cho lý do suy từ trạng thái (vd. `paused`, máy khách không tự tính được). */
+  saleReason?: EventSaleReason | null;
 };
 
 const NOT_STARTED_MESSAGE = 'Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.';
@@ -115,6 +122,15 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
       return { status: 200, body: [{ id, slug, name, status, startsAt, endsAt, effectiveEndAt }] };
     },
     [`GET ${eventPath}`]: () => ({ status: 200, body: eventOf(state) }),
+    // Trạng thái bán như api (Story 4.2-c): nháp không có trong danh sách; hủy > kết thúc > Ẩn; còn lại đang bán.
+    [`GET ${SALE_STATUS_PATH}`]: async () => {
+      if (state.holdSale) await state.holdSale;
+      if (state.status === 'draft') return { status: 200, body: { events: [] } };
+      const derived: EventSaleReason | null =
+        state.status === 'cancelled' ? 'cancelled' : ended() ? 'ended' : state.status === 'hidden' ? 'hidden' : null;
+      const reason = state.saleReason !== undefined ? state.saleReason : derived;
+      return { status: 200, body: { events: [{ eventId: EVENT_ID, reason, partial: false }] } };
+    },
     [`PATCH ${eventPath}`]: async (request) => {
       if (state.holdPatch) await state.holdPatch;
       if (state.failPatch === 'validation') {
@@ -182,6 +198,7 @@ const patches = (calls: Call[]) => calls.filter((c) => c.method === 'PATCH' && c
 const buyerCounts = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === `${eventPath}/buyer-count`);
 const pendingCounts = (calls: Call[]) =>
   calls.filter((c) => c.method === 'GET' && c.path === `${eventPath}/pending-payment-count`);
+const saleGets = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === SALE_STATUS_PATH);
 const field = (page: Page, label: string) => page.getByLabel(label, { exact: true });
 const saveButton = (page: Page) => page.getByRole('button', { name: 'Lưu thay đổi' });
 
@@ -279,6 +296,32 @@ test('badge "Ẩn" ở Tổng quan sau khi ẩn', async ({ page }) => {
   await expect(statusSection(page).getByRole('button', { name: 'Hiện lại' })).toBeVisible();
   await page.getByRole('tab', { name: 'Tổng quan' }).click();
   await expect(page.locator('[data-slot="event-overview"] [data-slot="status-badge"]')).toHaveText('Ẩn');
+});
+
+test('trạng thái bán (Story 4.2-c): Ẩn ở Cài đặt bỏ dòng cũ khỏi cache → Tổng quan hiện "Ẩn" ngay khi đang tải lại, rồi nhãn của api', async ({
+  page,
+}) => {
+  const { calls, state } = await openApi(page);
+  await page.goto(base);
+  const badge = page.locator('[data-slot="event-overview"] [data-slot="status-badge"]');
+  await expect(badge).toHaveText('Đang mở bán');
+  await expect.poll(() => saleGets(calls).length).toBeGreaterThanOrEqual(1);
+
+  await page.getByRole('tab', { name: 'Cài đặt' }).click();
+  // Lần tải lại trạng thái bán sau khi Ẩn bị giữ: badge không được hiện dòng cũ ("Đang mở bán") trong lúc chờ.
+  let release = () => {};
+  state.holdSale = new Promise<void>((resolve) => (release = resolve));
+  const before = saleGets(calls).length;
+  await statusSection(page).getByRole('button', { name: 'Ẩn Sự kiện' }).click();
+  await expect(statusSection(page).getByRole('button', { name: 'Hiện lại' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Tổng quan' }).click();
+  await expect.poll(() => saleGets(calls).length).toBe(before + 1);
+  await expect(badge).toHaveText('Ẩn');
+
+  // Lần tải lại trả lý do máy khách không tự tính được: badge đổi theo dữ liệu api, không còn là nhãn dự phòng.
+  state.saleReason = 'paused';
+  release();
+  await expect(badge).toHaveText('Tạm ngừng bán');
 });
 
 test('Kết thúc qua Dialog nêu hậu quả: "Hủy" không gọi api; xác nhận → "Đã kết thúc lúc …", hết nút Kết thúc, badge "Đã kết thúc"', async ({

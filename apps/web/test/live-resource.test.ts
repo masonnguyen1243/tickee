@@ -7,6 +7,7 @@ import {
   effectivePollInterval,
   reopenDelay,
   SIGNAL_WINDOW_MS,
+  signalReload,
 } from '@/lib/realtime/live-signal';
 
 /*
@@ -88,6 +89,34 @@ describe('createSignalCoalescer', () => {
     c.signal();
     vi.advanceTimersByTime(50);
     expect(run).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('signalReload (onSignal, Story 4.2-b)', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('mỗi lần tải do lời nhắc: tải lại tài nguyên chính rồi gọi onSignal, cùng nhịp gom 1 giây', () => {
+    const calls: string[] = [];
+    const c = createSignalCoalescer(
+      signalReload(
+        () => calls.push('refetch'),
+        () => calls.push('onSignal'),
+      ),
+    );
+    c.signal();
+    expect(calls).toEqual(['refetch', 'onSignal']);
+    c.signal();
+    c.signal();
+    expect(calls).toHaveLength(2);
+    vi.advanceTimersByTime(1_000);
+    expect(calls).toEqual(['refetch', 'onSignal', 'refetch', 'onSignal']);
+  });
+
+  it('không có onSignal → chỉ tải lại tài nguyên chính', () => {
+    const refetch = vi.fn();
+    signalReload(refetch)();
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 });
 

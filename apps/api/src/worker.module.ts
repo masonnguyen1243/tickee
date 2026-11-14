@@ -16,7 +16,8 @@ import { createLoggerModule } from './platform/logging/index.js';
  * Gốc DI của vai `worker`: không mở HTTP, chạy pg-boss, các job định kỳ, job gửi email (lời mời Admin, email Vé,
  * email tiền về muộn và email đổi giờ/địa điểm cho Người mua), job revalidate trang Sự kiện công khai (gọi
  * `<WEB_ORIGIN>/api/revalidate`), job hết hạn Giữ chỗ của Đơn và job Đối soát bù (Story 4.1: tra Tingee khi IPN trễ
- * hoặc mất, đi cùng đường xử lý với IPN qua `IpnProcessor` và `OrderPayments`; cờ `TINGEE_ORDER_STATUS_QUERY`). Có sẵn
+ * hoặc mất, đi cùng đường xử lý với IPN qua `IpnProcessor` và `OrderPayments`; cờ `TINGEE_ORDER_STATUS_QUERY`), job
+ * cron dò dịch vụ thanh toán của BTC bị ngắt và job "đã mở lại" (Story 4.2: Đối soát bù mọi Đơn còn mở của BTC). Có sẵn
  * adapter Tingee và Vé (khóa QR).
  */
 @Module({})
@@ -36,7 +37,10 @@ export class WorkerModule {
         PaymentJobsModule.forRoot(config),
         // Job của mô-đun miền (chỉ vai `worker` đăng ký lịch và handler).
         IdentityJanitorModule,
-        OrganizerJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN }),
+        OrganizerJobsModule.forRoot({
+          WEB_ORIGIN: config.WEB_ORIGIN,
+          TINGEE_CREDENTIAL_KEYS: config.TINGEE_CREDENTIAL_KEYS,
+        }),
         EventJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN, REVALIDATE_SECRET: config.REVALIDATE_SECRET }),
         OrderingJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN }),
       ],

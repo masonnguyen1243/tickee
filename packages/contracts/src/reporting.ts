@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { ORDER_CODE_PATTERN, orderStatusSchema } from './order.js';
-import { roleSchema } from './organizer.js';
+import { roleSchema, type PaymentServiceReason } from './organizer.js';
 import { reviewItemTypeSchema } from './payment.js';
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -15,6 +15,27 @@ import { reviewItemTypeSchema } from './payment.js';
 export const StatusNoticeCode = {
   /** Quản trị Tingee đã thu hồi Closed Beta: Hạng vé có phí Tạm ngừng bán (danger, chặn bán, không đóng được). */
   CLOSED_BETA_REVOKED: 'CLOSED_BETA_REVOKED',
+  /**
+   * Dịch vụ thanh toán của BTC bị ngắt vì hết Token (`payment_service_reason` `token`, Story 4.2): mọi Hạng vé có phí
+   * Tạm ngừng bán (danger, chặn bán, không đóng được). `data.tingeePortalUrl`: portal Tingee để mua thêm Token.
+   */
+  PAYMENT_SERVICE_SUSPENDED_TOKEN: 'PAYMENT_SERVICE_SUSPENDED_TOKEN',
+  /**
+   * Key Tingee hiện hành của BTC không còn dùng được (`credential_invalid`, Story 4.2): mọi Hạng vé có phí Tạm ngừng bán
+   * tới khi Owner lưu key mới hợp lệ hoặc dò thấy key dùng lại được (danger, chặn bán, không đóng được).
+   */
+  PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID: 'PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID',
+  /**
+   * Key Tingee của BTC chưa được cấp quyền "Cổng thanh toán" (`gateway_permission_missing`, 1133, Story 4.2): mọi Hạng
+   * vé có phí Tạm ngừng bán tới khi Owner cấp quyền rồi bấm "Kiểm tra lại", hoặc lưu key mới hợp lệ (danger, chặn bán,
+   * không đóng được).
+   */
+  PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING: 'PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING',
+  /**
+   * Tingee đang khóa merchant của BTC (`tingee_disabled`, Story 4.2): mọi Hạng vé có phí Tạm ngừng bán (danger, chặn bán,
+   * không đóng được).
+   */
+  PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED: 'PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED',
   /** BTC chưa được duyệt Closed Beta (warning, không đóng được). */
   CLOSED_BETA_PENDING: 'CLOSED_BETA_PENDING',
   /**
@@ -34,9 +55,22 @@ export const statusNoticeCodeSchema = z.enum(StatusNoticeCode);
  */
 export const STATUS_NOTICE_PRIORITY: readonly StatusNoticeCode[] = [
   StatusNoticeCode.CLOSED_BETA_REVOKED,
+  // Bậc 4: một BTC chỉ có tối đa một trong bốn mã (mỗi lý do ngắt một mã).
+  StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_TOKEN,
+  StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID,
+  StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING,
+  StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED,
   StatusNoticeCode.PAYOUT_ACCOUNT_NOT_LINKED,
   StatusNoticeCode.CLOSED_BETA_PENDING,
 ];
+
+/** Mã thông báo của từng lý do ngắt dịch vụ thanh toán (Story 4.2). */
+export const PAYMENT_SERVICE_NOTICE_CODES: Readonly<Record<PaymentServiceReason, StatusNoticeCode>> = {
+  token: StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_TOKEN,
+  credential_invalid: StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID,
+  gateway_permission_missing: StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING,
+  tingee_disabled: StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED,
+};
 
 /** Mức độ, trùng tone của `status-banner`. */
 export const StatusNoticeSeverity = {
@@ -74,6 +108,18 @@ export type StatusNotice = z.infer<typeof StatusNotice>;
 /** `GET /v1/orgs/:orgId/notices`: đã lọc theo vai của người gọi, sắp theo `STATUS_NOTICE_PRIORITY`. */
 export const StatusNoticeList = z.array(StatusNotice);
 export type StatusNoticeList = z.infer<typeof StatusNoticeList>;
+
+/** Đường API (sau `/v1`) của `StatusNoticeList` một BTC. */
+export const statusNoticesApiPath = (organizationId: string): string =>
+  `/orgs/${encodeURIComponent(organizationId)}/notices`;
+
+/**
+ * Đường SSE (sau `/v1`) cấp BTC (Story 4.2-b, AD-17; Owner và Admin: `org.read`): chỉ đẩy `org_status_changed` của BTC
+ * này và `resync`. Web tải lại `notices` (dải banner) và tổng quan Tài khoản nhận tiền. Hiện chỉ cờ dịch vụ thanh toán
+ * (bật, đổi lý do, tắt) phát tín hiệu này; Closed Beta và tài khoản nhận tiền chưa phát (xem `deferred-work.md`).
+ */
+export const organizationLiveApiPath = (organizationId: string): string =>
+  `/orgs/${encodeURIComponent(organizationId)}/live`;
 
 /** Hạng ưu tiên của một mã (0 = cao nhất). */
 export function statusNoticeRank(code: StatusNoticeCode): number {

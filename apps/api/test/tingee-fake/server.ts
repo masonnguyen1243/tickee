@@ -39,6 +39,11 @@ import { parseTingeeTimestamp, sign, tingeeTimestamp, verifySignature } from '..
  * /v1/payment-gateway/get-order` (`{ requestId, orderId }`, ký như mọi API) trả `00` với `data` dùng đúng tên trường của
  * IPN, hoặc `2004` khi merchant gọi không có link này. `orderReplies` cài trước phản hồi của các lần tra kế tiếp. Test
  * dùng `fake.markPaid` / `fake.markExpired` để đổi trạng thái link mà không gửi IPN.
+ *
+ * Dò dịch vụ thanh toán (Story 4.2, hợp đồng tạm: `get-va-paging` bằng key hiện hành): `accountReplies` cài trước phản hồi
+ * của các lần gọi `get-va-paging` kế tiếp (sau khi qua kiểm key, giờ và chữ ký), vd. `1033` (hết Token), `1007`/`1034`
+ * (merchant bị khóa), `97` (key không còn dùng được), HTTP 500 hay treo; hết thì trả danh sách tài khoản như Tingee. Mã
+ * ngắt của `create-link` cài bằng `linkReplies`.
  */
 
 /** `create-link` của Cổng thanh toán (`developers.tingee.vn/docs/payment-gateway/create-payment-link`). */
@@ -46,6 +51,9 @@ export const CREATE_LINK_PATH = '/v1/payment-gateway/create-link';
 
 /** Tra đơn Gateway theo `orderId` (hợp đồng tạm của Story 4.1, cùng giá trị với `TINGEE_GET_ORDER_PATH` của adapter). */
 export const GET_ORDER_PATH = '/v1/payment-gateway/get-order';
+
+/** Danh sách tài khoản (VA) của merchant; cũng là lời gọi dò dịch vụ thanh toán (hợp đồng tạm của Story 4.2). */
+export const ACCOUNTS_PATH = '/v1/get-va-paging';
 
 /** Mã "không tìm thấy đơn" của tra đơn Gateway (hợp đồng tạm). */
 export const ORDER_NOT_FOUND_CODE = '2004';
@@ -87,6 +95,11 @@ export interface FakeMerchant {
   linkDelayMs?: number;
   /** Phản hồi của các lần tra đơn Gateway kế tiếp (`GET_ORDER_PATH`), lấy lần lượt; hết thì trả trạng thái link. */
   orderReplies?: FakeLinkReply[];
+  /**
+   * Phản hồi của các lần gọi `get-va-paging` kế tiếp (`ACCOUNTS_PATH`: đọc danh sách tài khoản và dò dịch vụ của Story
+   * 4.2), lấy lần lượt; hết thì trả danh sách tài khoản.
+   */
+  accountReplies?: FakeLinkReply[];
   /**
    * "Đường dẫn IPN" của merchant (như ô cùng tên trên portal Tingee: một URL cho mỗi merchant). Trang thanh toán giả
    * điền sẵn URL này, và lưu đè bằng URL vừa gửi IPN thành công (api trả ACK: 2xx + `code: '00'`).
@@ -469,7 +482,7 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
 
   function route(path: string, body: Record<string, unknown>, merchant: FakeMerchant): Reply {
     switch (path) {
-      case '/v1/get-va-paging': {
+      case ACCOUNTS_PATH: {
         // Key của merchant: `merchantId` chỉ dành cho key Master Merchant. Tingee không nhận chuỗi rỗng.
         if ('merchantId' in body) return fail('400', 'merchantId chỉ dùng với key Master Merchant');
         if (Object.values(body).some((v) => v === '')) return fail('400', 'Không truyền chuỗi rỗng');
@@ -696,6 +709,7 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
       else if (merchant.behavior === 'hang') reply = 'hang';
       else if (path === CREATE_LINK_PATH) reply = await createLinkReply(body, merchant);
       else if (path === GET_ORDER_PATH) reply = orderReply(body, merchant);
+      else if (path === ACCOUNTS_PATH) reply = accountsReply(body, merchant);
       else reply = route(path, body, merchant);
 
       options.log?.(`${req.method} ${path} → ${reply === 'hang' ? 'treo' : reply.code}`);
@@ -732,6 +746,14 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
     if (scripted === 'hang') return 'hang';
     if (scripted) return { httpStatus: scripted.httpStatus, code: scripted.code, message: 'Kịch bản test', data: scripted.data };
     return route(GET_ORDER_PATH, body, merchant);
+  }
+
+  /** `get-va-paging` sau khi qua kiểm key, giờ và chữ ký: phản hồi cài trước (nếu có), không thì danh sách tài khoản. */
+  function accountsReply(body: Record<string, unknown>, merchant: FakeMerchant): Reply | 'hang' {
+    const scripted = merchant.accountReplies?.shift();
+    if (scripted === 'hang') return 'hang';
+    if (scripted) return { httpStatus: scripted.httpStatus, code: scripted.code, message: 'Kịch bản test', data: scripted.data };
+    return route(ACCOUNTS_PATH, body, merchant);
   }
 
   /** Link `orderId` mà fake đã tạo; chưa tạo → lỗi (lỗi của test). */

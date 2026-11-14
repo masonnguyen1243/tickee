@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { Logger } from '@nestjs/common';
-import { ErrorCode } from '@tickee/contracts';
+import { ErrorCode, PaymentServiceReason } from '@tickee/contracts';
 import { z } from 'zod';
 import { AppError } from '../../platform/http/index.js';
 import {
   DOMAIN_ERROR_MESSAGES,
   domainErrorOf,
+  paymentServiceReasonOf,
   TINGEE_ERROR_CODES,
   TINGEE_ORDER_NOT_FOUND_CODE,
   type TingeeDomainError,
@@ -35,6 +36,24 @@ export const TINGEE_GET_ORDER_PATH = '/v1/payment-gateway/get-order';
 
 /** Timeout của lời gọi tra đơn Gateway: worker tra tuần tự, một Đơn chậm không được giữ cả lô. */
 export const TINGEE_ORDER_STATUS_TIMEOUT_MS = 5_000;
+
+/** `get-va-paging`: danh sách tài khoản (VA) của BTC; cũng là lời gọi dò dịch vụ (hợp đồng tạm của Story 4.2). */
+export const TINGEE_ACCOUNTS_PATH = '/v1/get-va-paging';
+
+/**
+ * Timeout của lời gọi dò dịch vụ thanh toán (Story 4.2): Owner bấm "Kiểm tra lại" chờ kết quả, job dò tuần tự qua các BTC.
+ */
+export const TINGEE_SERVICE_STATUS_TIMEOUT_MS = 5_000;
+
+/**
+ * Kết quả dò dịch vụ thanh toán của BTC bằng key hiện hành (Story 4.2, AD-32): `active` (Tingee nhận key, dịch vụ hoạt
+ * động), `suspended` kèm lý do theo mã Tingee (`paymentServiceReasonOf`), hoặc `unknown` (Tingee tạm lỗi, timeout, lỗi
+ * mạng, phản hồi không đọc được, mã khác): không kết luận được, bên gọi giữ nguyên cờ.
+ */
+export type MerchantServiceStatus =
+  | { status: 'active' }
+  | { status: 'suspended'; reason: PaymentServiceReason }
+  | { status: 'unknown' };
 
 /**
  * API key của một BTC trên Tingee (`organizer` giải mã ngay trước khi gọi). Không bao giờ log, không giữ lâu hơn lời gọi.
@@ -82,13 +101,17 @@ export type CreateLinkAmbiguousReason = 'timeout' | 'network' | 'http_status' | 
  * Lỗi của `createPaymentLink`, phân hai loại (Story 3.4; chỉ `tingee` biết mã Tingee):
  * - `rejected`: Tingee trả JSON (HTTP 200) có `code` (chuỗi hoặc số) khác `'00'`: chắc chắn chưa có link. `code` là lỗi
  *   miền theo bảng mã (`TINGEE_CREDENTIAL_INVALID`, `MERCHANT_SUSPENDED`, `PAYMENT_ACCOUNT_NOT_ALLOWED`, mã lạ →
- *   `PAYMENT_PROVIDER_UNAVAILABLE`), `tingeeCode` là mã gốc (chỉ để log).
+ *   `PAYMENT_PROVIDER_UNAVAILABLE`), `tingeeCode` là mã gốc (chỉ để log), `serviceReason` là lý do ngắt dịch vụ thanh
+ *   toán của BTC theo mã (`paymentServiceReasonOf`, Story 4.2), `null` khi mã không phải ngắt dịch vụ (vd. nhóm VA).
  * - `ambiguous`: timeout, lỗi mạng, HTTP ≠ 200, JSON hỏng, `code` thiếu/không phải chuỗi hay số, hoặc `'00'` mà `data`
  *   không phải URL http/https: có thể Tingee đã tạo link. Không được gọi lại cùng `orderId`. `code` luôn là
- *   `PAYMENT_PROVIDER_UNAVAILABLE`; `httpStatus` và `tingeeCode` (mã gốc trong body, nếu đọc được) chỉ để log.
+ *   `PAYMENT_PROVIDER_UNAVAILABLE`; `httpStatus` và `tingeeCode` (mã gốc trong body, nếu đọc được) chỉ để log;
+ *   `serviceReason` luôn `null`.
  */
 export class CreateLinkError extends AppError {
   override readonly name = 'CreateLinkError';
+  /** Lý do ngắt dịch vụ thanh toán của BTC theo mã Tingee (chỉ khi `rejected`); `null`: không phải ngắt dịch vụ. */
+  readonly serviceReason: PaymentServiceReason | null;
 
   private constructor(
     readonly outcome: 'rejected' | 'ambiguous',
@@ -100,6 +123,7 @@ export class CreateLinkError extends AppError {
     cause: unknown,
   ) {
     super(code, DOMAIN_ERROR_MESSAGES[code], { cause });
+    this.serviceReason = outcome === 'rejected' && tingeeCode !== null ? paymentServiceReasonOf(tingeeCode) : null;
   }
 
   /** Tingee từ chối (HTTP 200) bằng mã `tingeeCode` (khác `'00'`). */
@@ -147,6 +171,16 @@ export interface TingeeClient {
    * `PAYMENT_PROVIDER_UNAVAILABLE`…). Chỉ đọc, gọi lại bao nhiêu lần cũng được.
    */
   getGatewayOrder(credential: TingeeCredential, orderId: string): Promise<unknown | null>;
+  /**
+   * Dò dịch vụ thanh toán của BTC bằng key `credential` (Story 4.2, AD-32). Hợp đồng tạm (quyết định 13/11/2026): Tingee
+   * chưa có API trạng thái dịch vụ gọi bằng key merchant, nên gọi `get-va-paging` (`TINGEE_ACCOUNTS_PATH`, 1 dòng):
+   * `'00'` → `active`; 1033 → `token`; 1007/1034 → `tingee_disabled`; mọi mã `TINGEE_CREDENTIAL_INVALID` (kể cả 1133:
+   * `get-va-paging` không thuộc nhóm "Cổng thanh toán", nên 1133 ở đây nghĩa là key không còn dùng được) →
+   * `credential_invalid`;
+   * còn lại (timeout `TINGEE_SERVICE_STATUS_TIMEOUT_MS`, lỗi mạng, HTTP lỗi với mã lạ, phản hồi không đọc được, mã khác)
+   * → `unknown`. Không bao giờ ném. Có API thật thì chỉ sửa hàm này và Tingee fake.
+   */
+  getMerchantServiceStatus(credential: TingeeCredential): Promise<MerchantServiceStatus>;
 }
 
 export interface TingeeClientOptions {
@@ -157,6 +191,8 @@ export interface TingeeClientOptions {
   paymentLinkTimeoutMs?: number;
   /** Timeout của tra đơn Gateway; mặc định `TINGEE_ORDER_STATUS_TIMEOUT_MS`. */
   orderStatusTimeoutMs?: number;
+  /** Timeout của lời gọi dò dịch vụ thanh toán; mặc định `TINGEE_SERVICE_STATUS_TIMEOUT_MS`. */
+  serviceStatusTimeoutMs?: number;
   now?: () => Date;
 }
 
@@ -211,17 +247,19 @@ export class HttpTingeeClient implements TingeeClient {
   private readonly timeoutMs: number;
   private readonly paymentLinkTimeoutMs: number;
   private readonly orderStatusTimeoutMs: number;
+  private readonly serviceStatusTimeoutMs: number;
   private readonly now: () => Date;
 
   constructor(private readonly options: TingeeClientOptions) {
     this.timeoutMs = options.timeoutMs ?? TINGEE_TIMEOUT_MS;
     this.paymentLinkTimeoutMs = options.paymentLinkTimeoutMs ?? TINGEE_PAYMENT_LINK_TIMEOUT_MS;
     this.orderStatusTimeoutMs = options.orderStatusTimeoutMs ?? TINGEE_ORDER_STATUS_TIMEOUT_MS;
+    this.serviceStatusTimeoutMs = options.serviceStatusTimeoutMs ?? TINGEE_SERVICE_STATUS_TIMEOUT_MS;
     this.now = options.now ?? (() => new Date());
   }
 
   async listAccounts(credential: TingeeCredential): Promise<TingeeAccount[]> {
-    const path = '/v1/get-va-paging';
+    const path = TINGEE_ACCOUNTS_PATH;
     // Gọi một lần, không phân trang; không lọc qua body (lọc ở dưới), không truyền chuỗi rỗng, không gửi `merchantId`.
     const data = await this.post(credential, path, { skipCount: 0, maxResultCount: TINGEE_ACCOUNT_PAGE_SIZE });
     const page = Page.safeParse(data);
@@ -299,6 +337,38 @@ export class HttpTingeeClient implements TingeeClient {
     ]);
     if (envelope.code === TINGEE_ORDER_NOT_FOUND_CODE) return null;
     return this.dataOf(path, envelope);
+  }
+
+  /**
+   * Hợp đồng tạm (Story 4.2): `get-va-paging` một dòng bằng key hiện hành. Chỉ log đường dẫn, mã Tingee và loại lỗi; không
+   * bao giờ log credential, `message` hay `data`.
+   */
+  async getMerchantServiceStatus(credential: TingeeCredential): Promise<MerchantServiceStatus> {
+    const path = TINGEE_ACCOUNTS_PATH;
+    const sent = await this.send(credential, path, { skipCount: 0, maxResultCount: 1 }, this.serviceStatusTimeoutMs);
+    if (sent.kind === 'failed') {
+      this.logger.warn({ path, reason: sent.reason, httpStatus: sent.httpStatus }, 'Dò dịch vụ: không gọi được Tingee');
+      return { status: 'unknown' };
+    }
+    const { envelope, httpStatus } = sent;
+    if (!envelope) {
+      this.logger.warn({ path, httpStatus }, 'Dò dịch vụ: phản hồi Tingee không đúng dạng');
+      return { status: 'unknown' };
+    }
+    const ok = httpStatus >= 200 && httpStatus < 300;
+    if (envelope.code === '00') {
+      if (ok) return { status: 'active' };
+      this.logger.warn({ path, httpStatus }, 'Dò dịch vụ: Tingee trả 00 kèm HTTP lỗi');
+      return { status: 'unknown' };
+    }
+    // Mã ngắt dịch vụ vẫn là kết luận dù Tingee kèm HTTP 4xx (như lỗi miền của `reply`). Ánh xạ 1133 →
+    // `gateway_permission_missing` chỉ dành cho `create-link`.
+    const reason =
+      domainErrorOf(envelope.code) === ErrorCode.TINGEE_CREDENTIAL_INVALID
+        ? PaymentServiceReason.CREDENTIAL_INVALID
+        : paymentServiceReasonOf(envelope.code);
+    this.logger.warn({ path, httpStatus, tingeeCode: envelope.code, serviceReason: reason }, 'Dò dịch vụ: Tingee từ chối');
+    return reason ? { status: 'suspended', reason } : { status: 'unknown' };
   }
 
   /** Gửi một request ký bằng credential của BTC; trả `data` khi `code === '00'`, không thì ném lỗi miền. */

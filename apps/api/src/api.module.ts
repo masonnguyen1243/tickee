@@ -42,7 +42,7 @@ export class ApiModule {
         IdentityModule.forRoot(config),
         // Sau IdentityModule: PermissionGuard chạy sau SessionGuard, TotpGuard, ConsentGuard và PlatformAdminGuard.
         OrganizerModule.forRoot(config),
-        ReportingModule,
+        ReportingModule.forRoot(config),
         // Sự kiện (Story 2.7): route BTC dùng `PermissionGuard` toàn cục của OrganizerModule.
         EventModule,
         // Vé và Mã QR vé (Story 3.3, toàn cục): `ordering.markPaid` phát Vé, trang Đơn trả Vé kèm QR.

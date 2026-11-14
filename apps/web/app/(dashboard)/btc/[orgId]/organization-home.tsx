@@ -8,6 +8,7 @@ import {
   OrganizationSection,
   organizationSectionPath,
   Role,
+  type EventSaleStatus,
   type EventSummary,
 } from '@tickee/contracts';
 import { CalendarDays, Plus, ShieldCheck, X } from 'lucide-react';
@@ -24,8 +25,9 @@ import { handledElsewhere } from '@/lib/api/handled-elsewhere';
 import { messageOf } from '@/lib/api/message-of';
 import { fetchMe, ME_QUERY_KEY } from '@/lib/auth/api';
 import { eventsQueryKey, fetchEvents } from '@/lib/event/api';
+import { useEventSaleStatus } from '@/lib/event/sale-status';
 
-import { eventBadge } from './su-kien/event-status';
+import { eventSaleBadge } from './su-kien/event-status';
 
 /** Khóa `localStorage` ghi nhớ Owner đã đóng thẻ gợi ý bật 2FA, theo từng tài khoản trên trình duyệt này. */
 const hintDismissedKey = (userId: string) => `tickee:goi-y-2fa:da-dong:${userId}`;
@@ -90,9 +92,12 @@ function TwoFactorHint() {
   );
 }
 
-/** `event-card` (DESIGN.md): chạm cả hàng mở tab Tổng quan của Sự kiện. Chưa có ảnh (Story 2.7-b): ô 56px nền thay thế. */
-function EventCard({ orgId, event }: { orgId: string; event: EventSummary }) {
-  const badge = eventBadge(event);
+/**
+ * `event-card` (DESIGN.md): chạm cả hàng mở tab Tổng quan của Sự kiện. Chưa có ảnh (Story 2.7-b): ô 56px nền thay thế.
+ * Nhãn trạng thái bán lấy từ `sale` của api (Story 4.2-c), chưa có thì tính ở máy khách.
+ */
+function EventCard({ orgId, event, sale }: { orgId: string; event: EventSummary; sale: EventSaleStatus | undefined }) {
+  const badge = eventSaleBadge(event, sale);
   return (
     <li>
       <Link
@@ -134,13 +139,14 @@ function EventListSection() {
     queryKey: eventsQueryKey(organization.id),
     queryFn: ({ signal }) => fetchEvents(organization.id, signal),
   });
+  const saleStatus = useEventSaleStatus(organization.id);
 
   let body: ReactNode;
   if (events.data && events.data.length > 0) {
     body = (
       <ul className="flex flex-col gap-stack" aria-labelledby="org-events">
         {events.data.map((event) => (
-          <EventCard key={event.id} orgId={organization.id} event={event} />
+          <EventCard key={event.id} orgId={organization.id} event={event} sale={saleStatus?.get(event.id)} />
         ))}
       </ul>
     );

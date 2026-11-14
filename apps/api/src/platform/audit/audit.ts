@@ -36,6 +36,24 @@ export type AuditAction =
   /** Quản trị Tingee thu hồi Closed Beta của BTC. */
   | 'organization.closed_beta_revoked'
   /**
+   * Dịch vụ thanh toán của BTC bị ngắt (Story 4.2, AD-32; actor: hệ thống): `create-link` bằng key hiện hành bị Tingee
+   * từ chối vì hết Token, merchant bị khóa, key không còn dùng được hoặc key chưa được cấp quyền "Cổng thanh toán". Đối
+   * tượng: lý do (`{ type: 'payment_service_reason', id: 'token' | 'tingee_disabled' | 'credential_invalid' |
+   * 'gateway_permission_missing' }`; BTC ở `organization_id`).
+   */
+  | 'organization.payment_service_suspended'
+  /**
+   * BTC đang bị ngắt và Tingee báo lý do khác ở một lần dò (actor: Owner khi bấm "Kiểm tra lại", `null` với job dò).
+   * Đối tượng: lý do mới (như `organization.payment_service_suspended`); mốc bắt đầu ngắt giữ nguyên.
+   */
+  | 'organization.payment_service_reason_changed'
+  /**
+   * Dịch vụ thanh toán của BTC mở lại (Story 4.2). Đối tượng: đường mở lại (`{ type: 'payment_service_resume', id:
+   * 'probe' | 'owner_check' | 'platform_admin' | 'new_key' }`; BTC ở `organization_id`); actor: Owner bấm "Kiểm tra lại"
+   * hoặc lưu key mới, Quản trị Tingee mở lại, `null` với job dò.
+   */
+  | 'organization.payment_service_resumed'
+  /**
    * Owner kết nối API key Tingee của BTC (Tingee đã chấp nhận key): credential mới thành hiện hành; credential cũ (nếu
    * có, "Dùng key khác") chuyển `retired_at`. Không ghi Client ID hay Secret Token.
    */

@@ -96,6 +96,9 @@ describe('khu /v1/admin/* — ai được vào', () => {
         'GET /v1/admin/organizations',
         'POST /v1/admin/organizations/:id/closed-beta/approve',
         'POST /v1/admin/organizations/:id/closed-beta/revoke',
+        // Story 4.2-a: dịch vụ thanh toán của BTC.
+        'GET /v1/admin/organizations/payment-service/suspended',
+        'POST /v1/admin/organizations/:id/payment-service/resume',
       ]),
     );
     const misconfigured = adminRoutes

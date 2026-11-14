@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { paymentServiceReasonSchema } from './organizer.js';
+
 // ---------------------------------------------------------------------------------------------------------------
 // Quản trị Tingee: duyệt BTC vào Closed Beta (FR-37, AD-26, Story 2.5)
 // ---------------------------------------------------------------------------------------------------------------
@@ -62,3 +64,34 @@ export type ClosedBetaOrganizationList = z.infer<typeof ClosedBetaOrganizationLi
 /** `details` của lỗi `CLOSED_BETA_TRANSITION_INVALID`: trạng thái hiện tại của BTC. */
 export const ClosedBetaTransitionInvalidDetails = z.object({ closedBetaStatus: closedBetaStatusSchema });
 export type ClosedBetaTransitionInvalidDetails = z.infer<typeof ClosedBetaTransitionInvalidDetails>;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Quản trị Tingee: BTC đang bị ngắt dịch vụ thanh toán (AD-32, Story 4.2)
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Một BTC đang `suspended` (`GET /v1/admin/organizations/payment-service/suspended`): id, tên, lý do, lúc bắt đầu ngắt,
+ * lần dò gần nhất (`null` khi chưa dò lần nào). Không có kênh liên hệ hay PII.
+ */
+export const SuspendedPaymentServiceOrganization = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  reason: paymentServiceReasonSchema,
+  since: z.iso.datetime(),
+  checkedAt: z.iso.datetime().nullable(),
+});
+export type SuspendedPaymentServiceOrganization = z.infer<typeof SuspendedPaymentServiceOrganization>;
+
+/** `GET /v1/admin/organizations/payment-service/suspended`: BTC ngắt lâu nhất trước (`since` tăng dần, rồi id). */
+export const SuspendedPaymentServiceOrganizationList = z.array(SuspendedPaymentServiceOrganization);
+export type SuspendedPaymentServiceOrganizationList = z.infer<typeof SuspendedPaymentServiceOrganizationList>;
+
+/** Đường API (sau `/v1`) của danh sách BTC đang bị ngắt dịch vụ thanh toán (GET). */
+export const ADMIN_SUSPENDED_PAYMENT_SERVICES_API_PATH = '/admin/organizations/payment-service/suspended';
+
+/**
+ * Đường API (sau `/v1`) Quản trị Tingee mở lại dịch vụ thanh toán của một BTC (POST → 204; BTC không bị ngắt → 409
+ * `PAYMENT_SERVICE_NOT_SUSPENDED`).
+ */
+export const adminPaymentServiceResumeApiPath = (organizationId: string): string =>
+  `/admin/organizations/${encodeURIComponent(organizationId)}/payment-service/resume`;

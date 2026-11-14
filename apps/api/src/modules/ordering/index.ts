@@ -33,10 +33,13 @@ export { type OrderingConfig } from './order-rate-limit.js';
 export { OrderingModule } from './ordering.module.js';
 export { ORDER_HOLD } from './orders.service.js';
 export {
+  enqueueReconciliation,
   orderForReconciliation,
   RECONCILE_AFTER_EXPIRY_MS,
   RECONCILE_MAX_FAILURES,
   RECONCILE_ORDER_QUEUE,
+  RECONCILE_RESUMED_EXPIRED_WINDOW_MS,
+  reconcilableOrderIdsOf,
   ReconcileOrderPayload,
   scheduleNextReconciliation,
   scheduleReconciliationRetry,
