@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 
 import { ConfirmDialog } from '@/components/tickee/confirm-dialog';
 import { StatusBadge } from '@/components/tickee/status-badge';
+import { TingeeLink } from '@/components/tickee/tingee-link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -26,7 +27,6 @@ import {
   CHANGE_KEY,
   PORTAL_UNSELECT_HINT,
   refreshOverview,
-  TingeeLink,
 } from './shared';
 
 function AccountRow({

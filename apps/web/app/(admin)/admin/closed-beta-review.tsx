@@ -8,8 +8,9 @@ import {
   ErrorCode,
   formatVnDate,
   type ClosedBetaOrganization,
+  type SuspendedPaymentServiceOrganization,
 } from '@tickee/contracts';
-import { Building2, ShieldCheck, ShieldX } from 'lucide-react';
+import { Building2, CircleCheck, ShieldCheck, ShieldX } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -23,15 +24,20 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  ADMIN_QUERY_KEY,
   changeClosedBeta,
-  CLOSED_BETA_QUEUE_QUERY_KEY,
   closedBetaQueueQueryKey,
   fetchClosedBetaQueue,
+  fetchSuspendedPaymentServices,
+  resumePaymentService,
+  SUSPENDED_PAYMENT_SERVICES_QUERY_KEY,
 } from '@/lib/admin/api';
 import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
 import { LOGIN_PATH, TOTP_ENROLL_PATH, withReturnTo } from '@/lib/auth/return-to';
 import { isTotpRequired } from '@/lib/auth/totp';
+
+import { ResumeDialog, SUSPENDED_EMPTY, SUSPENDED_EMPTY_DESCRIPTION, SuspendedTable } from './suspended-payment-services';
 
 const TABS: readonly { status: ClosedBetaStatus; label: string; empty: string; emptyDescription: string }[] = [
   {
@@ -54,8 +60,12 @@ const TABS: readonly { status: ClosedBetaStatus; label: string; empty: string; e
   },
 ];
 
-const isClosedBetaStatus = (value: string): value is ClosedBetaStatus =>
-  (Object.values(ClosedBetaStatus) as string[]).includes(value);
+/** Tab thứ tư (Story 4.2-b): BTC đang bị ngắt dịch vụ thanh toán. */
+const PAYMENT_SERVICE_TAB = 'payment-service';
+type AdminTab = ClosedBetaStatus | typeof PAYMENT_SERVICE_TAB;
+
+const isAdminTab = (value: string): value is AdminTab =>
+  value === PAYMENT_SERVICE_TAB || (Object.values(ClosedBetaStatus) as string[]).includes(value);
 
 /** Lỗi làm cả trang đổi trạng thái (không phải lỗi của một thao tác): mất cờ, chưa bật 2FA, hết phiên. */
 const isGateError = (error: unknown) =>
@@ -63,9 +73,14 @@ const isGateError = (error: unknown) =>
   hasErrorCode(error, ErrorCode.TWO_FACTOR_NOT_ENABLED) ||
   hasErrorCode(error, ErrorCode.UNAUTHENTICATED);
 
-/** Trạng thái của BTC đã đổi ở nơi khác (Quản trị Tingee khác) hoặc BTC không còn: tải lại danh sách. */
+/**
+ * Trạng thái của BTC đã đổi ở nơi khác (Quản trị Tingee khác, hay dịch vụ thanh toán đã về qua đường khác) hoặc BTC không
+ * còn: tải lại danh sách.
+ */
 const isStale = (error: unknown) =>
-  hasErrorCode(error, ErrorCode.CLOSED_BETA_TRANSITION_INVALID) || hasErrorCode(error, ErrorCode.NOT_FOUND);
+  hasErrorCode(error, ErrorCode.CLOSED_BETA_TRANSITION_INVALID) ||
+  hasErrorCode(error, ErrorCode.PAYMENT_SERVICE_NOT_SUSPENDED) ||
+  hasErrorCode(error, ErrorCode.NOT_FOUND);
 
 function Loading() {
   return (
@@ -187,31 +202,44 @@ function RevokeDialog({
 
 /**
  * Màn "Duyệt Closed Beta" (FR-37, UX-DR44): tab Chờ duyệt / Đã duyệt / Đã thu hồi; "Duyệt" ở Chờ duyệt và Đã thu hồi
- * (duyệt lại), "Thu hồi" ở Đã duyệt qua `Dialog` nêu hậu quả. Chưa đăng nhập → đăng nhập rồi quay về `/admin`; không
+ * (duyệt lại), "Thu hồi" ở Đã duyệt qua `Dialog` nêu hậu quả. Tab "Tạm ngừng bán" (Story 4.2-b): BTC đang bị ngắt dịch vụ
+ * thanh toán (ngắt lâu nhất trước), "Mở lại" qua `Dialog`. Chưa đăng nhập → đăng nhập rồi quay về `/admin`; không
  * có quyền → `empty-state`; có quyền mà chưa bật 2FA → `empty-state` + "Bật xác thực hai lớp" (xong quay về `/admin`);
- * chưa qua lớp hai → `Providers` mở dialog "Xác thực hai lớp", xong thì tự tải lại. Mỗi thao tác đặt xử lý kết quả
- * trên `useMutation` để `Providers` gửi lại được sau khi qua lớp hai.
+ * chưa qua lớp hai → `Providers` mở dialog "Xác thực hai lớp", xong thì tự tải lại. Cổng quyền đọc theo danh sách của tab
+ * đang mở; thao tác của mọi tab dùng chung cách xử lý lỗi. Mỗi thao tác đặt xử lý kết quả trên `useMutation` để
+ * `Providers` gửi lại được sau khi qua lớp hai.
  */
 export function ClosedBetaReview() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<ClosedBetaStatus>(ClosedBetaStatus.PENDING);
+  const [tab, setTab] = useState<AdminTab>(ClosedBetaStatus.PENDING);
   const [revoking, setRevoking] = useState<ClosedBetaOrganization | null>(null);
+  const [resuming, setResuming] = useState<SuspendedPaymentServiceOrganization | null>(null);
 
+  const closedBetaTab = tab === PAYMENT_SERVICE_TAB ? null : tab;
   const queue = useQuery({
-    queryKey: closedBetaQueueQueryKey(tab),
-    queryFn: ({ signal }) => fetchClosedBetaQueue(tab, signal),
+    queryKey: closedBetaQueueQueryKey(closedBetaTab ?? ClosedBetaStatus.PENDING),
+    queryFn: ({ signal }) => fetchClosedBetaQueue(closedBetaTab ?? ClosedBetaStatus.PENDING, signal),
+    enabled: closedBetaTab !== null,
   });
+  const suspended = useQuery({
+    queryKey: SUSPENDED_PAYMENT_SERVICES_QUERY_KEY,
+    queryFn: ({ signal }) => fetchSuspendedPaymentServices(signal),
+    enabled: tab === PAYMENT_SERVICE_TAB,
+  });
+  /** Danh sách của tab đang mở: quyết định cổng quyền (không quyền, chưa bật 2FA, hết phiên). */
+  const active = tab === PAYMENT_SERVICE_TAB ? suspended : queue;
 
-  const unauthenticated = hasErrorCode(queue.error, ErrorCode.UNAUTHENTICATED);
+  const unauthenticated = hasErrorCode(active.error, ErrorCode.UNAUTHENTICATED);
   useEffect(() => {
     if (!unauthenticated) return;
     // Bỏ cache để quay lại sau đăng nhập thì tải mới, không giữ lỗi 401 cũ.
-    queryClient.removeQueries({ queryKey: CLOSED_BETA_QUEUE_QUERY_KEY });
+    queryClient.removeQueries({ queryKey: ADMIN_QUERY_KEY });
     router.replace(withReturnTo(LOGIN_PATH, ADMIN_PATH));
   }, [unauthenticated, queryClient, router]);
 
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: CLOSED_BETA_QUEUE_QUERY_KEY });
+  /** Tải lại danh sách của tab đang mở (các tab khác đọc lại khi được mở). */
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ADMIN_QUERY_KEY });
 
   /** Lỗi chung của một thao tác; trả `true` nếu đã xử lý (không cần hiện lỗi tại chỗ). */
   const handleActionError = (error: unknown): boolean => {
@@ -260,7 +288,23 @@ export function ClosedBetaReview() {
       ? revoke.error
       : null;
 
-  if (hasErrorCode(queue.error, ErrorCode.FORBIDDEN_ROLE)) {
+  const resume = useMutation({
+    mutationFn: (organization: SuspendedPaymentServiceOrganization) => resumePaymentService(organization.id),
+    onSuccess: (_data, organization) => {
+      setResuming(null);
+      toast.success(`Đã mở lại dịch vụ thanh toán cho ${organization.name}.`);
+      refresh();
+    },
+    onError: (error) => {
+      if (handleActionError(error) && !isTotpRequired(error)) setResuming(null);
+    },
+  });
+  const resumeFailure =
+    resume.error && !isTotpRequired(resume.error) && !isGateError(resume.error) && !isStale(resume.error)
+      ? resume.error
+      : null;
+
+  if (hasErrorCode(active.error, ErrorCode.FORBIDDEN_ROLE)) {
     return (
       <EmptyState
         icon={ShieldX}
@@ -269,7 +313,7 @@ export function ClosedBetaReview() {
       />
     );
   }
-  if (hasErrorCode(queue.error, ErrorCode.TWO_FACTOR_NOT_ENABLED)) {
+  if (hasErrorCode(active.error, ErrorCode.TWO_FACTOR_NOT_ENABLED)) {
     return (
       <EmptyState
         icon={ShieldCheck}
@@ -284,10 +328,45 @@ export function ClosedBetaReview() {
     );
   }
   // 401 chuyển sang đăng nhập ở effect trên; CONSENT_REQUIRED do `Providers` chuyển sang màn đồng ý.
-  if (unauthenticated || hasErrorCode(queue.error, ErrorCode.CONSENT_REQUIRED)) return <Loading />;
+  if (unauthenticated || hasErrorCode(active.error, ErrorCode.CONSENT_REQUIRED)) return <Loading />;
 
   let body;
-  if (queue.data) {
+  if (tab === PAYMENT_SERVICE_TAB) {
+    if (suspended.data) {
+      body =
+        suspended.data.length === 0 ? (
+          <EmptyState
+            icon={CircleCheck}
+            title={SUSPENDED_EMPTY}
+            description={SUSPENDED_EMPTY_DESCRIPTION}
+            className="rounded-lg bg-card px-card-padding shadow-card"
+          />
+        ) : (
+          <SuspendedTable
+            organizations={suspended.data}
+            onResume={(organization) => {
+              resume.reset();
+              setResuming(organization);
+            }}
+          />
+        );
+    } else if (suspended.isError) {
+      body = (
+        <StatusBanner
+          tone="danger"
+          title="Chưa tải được danh sách BTC"
+          description={messageOf(suspended.error)}
+          action={
+            <Button type="button" variant="link" size="sm" onClick={() => void suspended.refetch()}>
+              Thử lại
+            </Button>
+          }
+        />
+      );
+    } else {
+      body = <Loading />;
+    }
+  } else if (queue.data) {
     const current = TABS.find((t) => t.status === tab)!;
     body =
       queue.data.length === 0 ? (
@@ -328,19 +407,21 @@ export function ClosedBetaReview() {
   return (
     <div className="flex flex-col gap-section pt-2">
       <PageHeading eyebrow="Quản trị Tingee" title="Duyệt Closed Beta" />
-      <Tabs value={tab} onValueChange={(value) => isClosedBetaStatus(value) && setTab(value)}>
-        <TabsList aria-label="Trạng thái Closed Beta">
+      <Tabs value={tab} onValueChange={(value) => isAdminTab(value) && setTab(value)}>
+        <TabsList aria-label="Danh sách BTC">
           {TABS.map((t) => (
             <TabsTrigger key={t.status} value={t.status}>
               {t.label}
             </TabsTrigger>
           ))}
+          <TabsTrigger value={PAYMENT_SERVICE_TAB}>Tạm ngừng bán</TabsTrigger>
         </TabsList>
         {TABS.map((t) => (
           <TabsContent key={t.status} value={t.status}>
             {t.status === tab ? body : null}
           </TabsContent>
         ))}
+        <TabsContent value={PAYMENT_SERVICE_TAB}>{tab === PAYMENT_SERVICE_TAB ? body : null}</TabsContent>
       </Tabs>
       <RevokeDialog
         organization={revoking}
@@ -350,6 +431,16 @@ export function ClosedBetaReview() {
         onClose={() => {
           revoke.reset();
           setRevoking(null);
+        }}
+      />
+      <ResumeDialog
+        organization={resuming}
+        pending={resume.isPending}
+        failure={resumeFailure}
+        onConfirm={(organization) => !resume.isPending && resume.mutate(organization)}
+        onClose={() => {
+          resume.reset();
+          setResuming(null);
         }}
       />
     </div>

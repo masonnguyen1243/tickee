@@ -368,6 +368,117 @@ export const PayoutAccount = z.object({
 });
 export type PayoutAccount = z.infer<typeof PayoutAccount>;
 
+// ---------------------------------------------------------------------------------------------------------------
+// Dịch vụ thanh toán của BTC (FR-15, FR-20, AD-32, Story 4.2): Tingee ngắt dịch vụ → mọi Hạng vé > 0đ "Tạm ngừng bán"
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Trạng thái dịch vụ thanh toán của BTC (cột `organizations.payment_service_status`, do `organizer` sở hữu). `suspended`:
+ * Tingee từ chối tạo link bằng key hiện hành vì một trong bốn lý do (`PaymentServiceReason`: hết Token, merchant bị khóa,
+ * key không còn dùng được, key chưa được cấp quyền "Cổng thanh toán"), mọi Hạng vé > 0đ "Tạm ngừng bán"
+ * (`ordering.sellability`); Hạng vé 0đ vẫn bán. Không chặn mở bán (`publishReadiness`). Closed Beta là trục riêng.
+ */
+export const PaymentServiceStatus = {
+  ACTIVE: 'active',
+  SUSPENDED: 'suspended',
+} as const;
+export type PaymentServiceStatus = (typeof PaymentServiceStatus)[keyof typeof PaymentServiceStatus];
+export const paymentServiceStatusSchema = z.enum(PaymentServiceStatus);
+
+/**
+ * Lý do ngắt (có đúng khi `suspended`), theo mã Tingee (quyết định 13/11/2026; chỉ mô-đun `tingee` biết mã):
+ * - `token`: gói dịch vụ đã hết hạn (1033), hết Token;
+ * - `tingee_disabled`: merchant bị Tingee khóa (1007, 1034);
+ * - `credential_invalid`: key hiện hành của BTC không còn dùng được (92, 97, 1009; lần dò bằng `get-va-paging` coi cả 1133
+ *   là lý do này);
+ * - `gateway_permission_missing`: key đúng nhưng chưa được cấp quyền "Cổng thanh toán" (1133; quyết định 13/11/2026 sau
+ *   review lượt 1). Dò bằng `get-va-paging` không thấy được thiếu quyền này nên job dò bỏ qua; Owner "Kiểm tra lại" tắt
+ *   cờ không cần Tingee xác nhận.
+ */
+export const PaymentServiceReason = {
+  TOKEN: 'token',
+  TINGEE_DISABLED: 'tingee_disabled',
+  CREDENTIAL_INVALID: 'credential_invalid',
+  GATEWAY_PERMISSION_MISSING: 'gateway_permission_missing',
+} as const;
+export type PaymentServiceReason = (typeof PaymentServiceReason)[keyof typeof PaymentServiceReason];
+export const paymentServiceReasonSchema = z.enum(PaymentServiceReason);
+
+/**
+ * Đường tắt cờ (ghi vào audit): job dò định kỳ, Owner bấm "Kiểm tra lại", Quản trị Tingee mở lại, Owner lưu key mới
+ * hợp lệ (chỉ khi lý do `credential_invalid` hoặc `gateway_permission_missing`).
+ */
+export const PaymentServiceResumePath = {
+  PROBE: 'probe',
+  OWNER_CHECK: 'owner_check',
+  PLATFORM_ADMIN: 'platform_admin',
+  NEW_KEY: 'new_key',
+} as const;
+export type PaymentServiceResumePath = (typeof PaymentServiceResumePath)[keyof typeof PaymentServiceResumePath];
+
+/** Job dò của vai worker chạy mỗi chừng này phút, tuần tự qua các BTC `suspended`. */
+export const PAYMENT_SERVICE_PROBE_INTERVAL_MINUTES = 5;
+
+/**
+ * Lần dò trước (job dò hoặc "Kiểm tra lại") chưa quá chừng này giây thì "Kiểm tra lại" trả trạng thái hiện tại, không gọi
+ * Tingee.
+ */
+export const PAYMENT_SERVICE_CHECK_COOLDOWN_SECONDS = 30;
+
+/**
+ * Trạng thái dịch vụ thanh toán của BTC: trong tổng quan Tài khoản nhận tiền, và `state` của kết quả
+ * `POST /v1/orgs/:orgId/payment-service/check` (chỉ Owner). `reason`, `since` có đúng khi `suspended` (`since`: lúc bắt
+ * đầu ngắt, giữ nguyên khi chỉ đổi lý do). `checkedAt`: lần dò gần nhất (job dò hoặc "Kiểm tra lại"); `null` khi chưa dò
+ * lần nào.
+ */
+export const PaymentServiceState = z.object({
+  status: paymentServiceStatusSchema,
+  reason: paymentServiceReasonSchema.nullable(),
+  since: z.iso.datetime().nullable(),
+  checkedAt: z.iso.datetime().nullable(),
+});
+export type PaymentServiceState = z.infer<typeof PaymentServiceState>;
+
+/**
+ * Kết quả một lần "Kiểm tra lại" (Story 4.2-b), để web chọn câu báo:
+ * - `resumed`: dịch vụ đã về, cờ vừa tắt;
+ * - `still_suspended`: Tingee vẫn ngắt (cùng lý do, hoặc lý do khác: đã cập nhật);
+ * - `unknown`: chưa kết luận được với Tingee (tạm lỗi, timeout, mã lạ, không giải mã được key) → giữ cờ;
+ * - `no_target`: BTC không có tài khoản nhận tiền mặc định (không có key để dò) → giữ cờ;
+ * - `cooldown`: lần dò trước chưa quá `PAYMENT_SERVICE_CHECK_COOLDOWN_SECONDS` → không gọi Tingee;
+ * - `not_suspended`: BTC không bị ngắt (kể cả đường khác vừa mở lại) → không gọi Tingee.
+ */
+export const PaymentServiceCheckOutcome = {
+  RESUMED: 'resumed',
+  STILL_SUSPENDED: 'still_suspended',
+  UNKNOWN: 'unknown',
+  NO_TARGET: 'no_target',
+  COOLDOWN: 'cooldown',
+  NOT_SUSPENDED: 'not_suspended',
+} as const;
+export type PaymentServiceCheckOutcome = (typeof PaymentServiceCheckOutcome)[keyof typeof PaymentServiceCheckOutcome];
+export const paymentServiceCheckOutcomeSchema = z.enum(PaymentServiceCheckOutcome);
+
+/**
+ * `POST /v1/orgs/:orgId/payment-service/check` (chỉ Owner): trạng thái sau lần kiểm tra, kết quả, và số giây còn phải chờ
+ * (`retryAfterSeconds`: có đúng khi `outcome = 'cooldown'`, từ 1 tới `PAYMENT_SERVICE_CHECK_COOLDOWN_SECONDS`).
+ */
+export const PaymentServiceCheckResult = z
+  .object({
+    state: PaymentServiceState,
+    outcome: paymentServiceCheckOutcomeSchema,
+    retryAfterSeconds: z.number().int().min(1).max(PAYMENT_SERVICE_CHECK_COOLDOWN_SECONDS).nullable(),
+  })
+  .refine((result) => (result.retryAfterSeconds !== null) === (result.outcome === PaymentServiceCheckOutcome.COOLDOWN), {
+    message: 'retryAfterSeconds có đúng khi outcome = cooldown',
+    path: ['retryAfterSeconds'],
+  });
+export type PaymentServiceCheckResult = z.infer<typeof PaymentServiceCheckResult>;
+
+/** Đường API (sau `/v1`) của "Kiểm tra lại" dịch vụ thanh toán (POST, chỉ Owner): trả `PaymentServiceCheckResult`. */
+export const paymentServiceCheckApiPath = (organizationId: string): string =>
+  `/orgs/${encodeURIComponent(organizationId)}/payment-service/check`;
+
 /**
  * `GET /v1/orgs/:orgId/payout-account` (chỉ Owner, không gọi Tingee); cũng là kết quả của hủy liên kết và đặt mặc định.
  * Chưa kết nối → `credential` `null`; đã kết nối chưa chọn (hoặc đã hủy hết) → `accounts` rỗng; đã liên kết → cả hai.
@@ -385,5 +496,7 @@ export const PayoutAccountOverview = z.object({
   ipnUrl: z.string().nullable(),
   /** Portal Tingee ứng với môi trường Tingee mà api đang gọi (UAT hoặc thật). */
   tingeePortalUrl: z.string(),
+  /** Dịch vụ thanh toán của BTC (Story 4.2): `suspended` thì mọi Hạng vé > 0đ "Tạm ngừng bán". */
+  paymentService: PaymentServiceState,
 });
 export type PayoutAccountOverview = z.infer<typeof PayoutAccountOverview>;

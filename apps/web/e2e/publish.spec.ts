@@ -1,8 +1,17 @@
 import type { Page } from '@playwright/test';
+import type { EventSaleReason } from '@tickee/contracts';
 
 import { expect, test } from './fixtures';
 import { apiError, me, mockIdentityApi, type Call, type Handler } from './identity-mock';
-import { ALWAYS_CONDITIONS, mockOrganizerApi, organization, ORG_ID, readiness, statusNotice } from './organizer-mock';
+import {
+  ALWAYS_CONDITIONS,
+  mockOrganizerApi,
+  organization,
+  ORG_ID,
+  readiness,
+  saleStatus,
+  statusNotice,
+} from './organizer-mock';
 
 /*
  * Wizard bước 4 "Xem trước & mở bán" (Story 2.10): danh sách điều kiện chưa đạt kèm link sửa nhanh, nút "Mở bán" tắt có
@@ -18,6 +27,7 @@ const EVENT_ID = '019a3b2c-0700-7abc-8def-0123456789ab';
 const SLUG = 'giai-chay-ha-noi-2026-a2b3';
 const base = `/btc/${ORG_ID}/su-kien/${EVENT_ID}`;
 const eventPath = `/orgs/${ORG_ID}/events/${EVENT_ID}`;
+const SALE_STATUS_PATH = `/orgs/${ORG_ID}/event-sale-status`;
 const PAID_CONDITIONS = [...ALWAYS_CONDITIONS, 'CLOSED_BETA_APPROVED', 'PAYOUT_ACCOUNT_LINKED', 'PAID_PRICE_MINIMUM'];
 
 type State = {
@@ -40,6 +50,8 @@ type State = {
   role: 'owner' | 'admin';
   /** `GET /orgs/:id/notices`. */
   notices: unknown[];
+  /** `reason` của `GET /orgs/:id/event-sale-status` khi Sự kiện đã mở bán (Story 4.2-c); nháp không có trong danh sách. */
+  saleReason: EventSaleReason | null;
 };
 
 const eventOf = (state: State) => ({
@@ -75,6 +87,7 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
     forcedUnmet: [],
     role: 'admin',
     notices: [],
+    saleReason: null,
     ...initial,
   };
   const handlers: Record<string, Handler> = {
@@ -86,6 +99,10 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
       return { status: 200, body: [{ id, slug, name, status, startsAt, endsAt, effectiveEndAt }] };
     },
     [`GET ${eventPath}`]: () => ({ status: 200, body: eventOf(state) }),
+    [`GET ${SALE_STATUS_PATH}`]: () => ({
+      status: 200,
+      body: { events: state.status === 'draft' ? [] : [saleStatus(EVENT_ID, state.saleReason)] },
+    }),
     [`PATCH ${eventPath}`]: (request) => {
       const body = request.postDataJSON() as { name: string; refundPolicy: string | null };
       state.name = body.name;
@@ -120,6 +137,7 @@ const panel = (page: Page) => page.locator('[data-slot="publish-panel"]');
 const publishButton = (page: Page) => panel(page).getByRole('button', { name: 'Mở bán' });
 const unmetRows = (page: Page) => panel(page).locator('[data-slot="publish-unmet"] > li');
 const publishCalls = (calls: Call[]) => calls.filter((c) => c.method === 'POST' && c.path === `${eventPath}/publish`);
+const saleGets = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === SALE_STATUS_PATH);
 const horizontalOverflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
@@ -191,6 +209,30 @@ test('đủ điều kiện: "Mở bán" có spinner và không gửi lặp; xong
   await page.goto(`/btc/${ORG_ID}`);
   await expect(page.getByText('Đang mở bán', { exact: true })).toBeVisible();
   await expect(page.getByText('Nháp', { exact: true })).toHaveCount(0);
+});
+
+test('mở bán làm mới trạng thái bán (Story 4.2-c): điều hướng trong app sang Tổng quan đọc lại api, badge theo api', async ({
+  page,
+}) => {
+  // Mở bán xong, api báo "Tạm ngừng bán" (vd. BTC bị ngắt dịch vụ thanh toán): máy khách không tự tính được nhãn này.
+  const { calls } = await openApi(page, { saleReason: 'paused' });
+  await page.goto(`${base}/thiet-lap?buoc=4`);
+  await expect(panel(page).getByText('Đã đủ điều kiện mở bán.')).toBeVisible();
+  // Nạp cache trạng thái bán khi Sự kiện còn nháp (không có trong danh sách), rồi quay lại — đều trong app.
+  const eventsTab = page.locator('[data-slot="bottom-tab-bar"]').getByRole('link', { name: 'Sự kiện' });
+  await eventsTab.click();
+  await expect(page.locator('[data-slot="event-card"] [data-slot="status-badge"]')).toHaveText('Nháp');
+  await expect.poll(() => saleGets(calls).length).toBeGreaterThanOrEqual(1);
+  await page.goBack();
+  await expect(panel(page).getByText('Đã đủ điều kiện mở bán.')).toBeVisible();
+  const before = saleGets(calls).length;
+
+  await publishButton(page).click();
+  await expect(panel(page).getByRole('heading', { name: 'Đang mở bán' })).toBeVisible();
+  await eventsTab.click();
+  await page.locator('[data-slot="event-card"]').click();
+  await expect(page.locator('[data-slot="event-overview"] [data-slot="status-badge"]')).toHaveText('Tạm ngừng bán');
+  expect(saleGets(calls).length).toBeGreaterThan(before);
 });
 
 test('web thấy đủ nhưng server đã đổi (Closed Beta bị thu hồi) → 409 EVENT_NOT_READY: báo lỗi, tải lại danh sách điều kiện', async ({

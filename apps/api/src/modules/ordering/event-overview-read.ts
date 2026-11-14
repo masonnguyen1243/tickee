@@ -1,12 +1,13 @@
 import { OrderStatus } from '@tickee/contracts';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNotNull, sql } from 'drizzle-orm';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import type { DbExecutor } from '../../platform/db/index.js';
 import { orderItems, orders } from './schema.js';
 
 /*
- * Read model của Đơn cho Tổng quan Sự kiện (Story 3.11, AD-33): `reporting` đọc qua các hàm này (xuất từ `index.ts`),
- * không join bảng `orders`/`order_items`. Như `paidBuyerCount`: hàm query thay cho view `ordering_read_*`, nên đổi cột
+ * Read model của Đơn cho màn BTC của Sự kiện: Tổng quan Sự kiện (Story 3.11, AD-33; `reporting` đọc qua các hàm này,
+ * xuất từ `index.ts`, không join bảng `orders`/`order_items`) và số Đơn đang chờ thanh toán của `Dialog` "Kết thúc"
+ * (E3-2, `flows`). Như `paidBuyerCount`: hàm query thay cho view `ordering_read_*`, nên đổi cột
  * chỉ sửa ở đây. Mọi hàm lọc cả `organization_id` (`orgScope`) lẫn `event_id`; người gọi đã kiểm Sự kiện thuộc BTC.
  * Chỉ đọc bản chụp trên Đơn (tên Người mua, tổng tiền), không bao giờ trả email hay SĐT.
  */
@@ -82,4 +83,25 @@ export async function recentOrdersOf(
     .groupBy(orderItems.orderId);
   const ticketsOf = new Map(counts.map((c) => [c.orderId, c.tickets]));
   return rows.map((r) => ({ ...r, ticketCount: ticketsOf.get(r.id) ?? 0 }));
+}
+
+/**
+ * Số Đơn đang chờ thanh toán của Sự kiện (E3-2, `Dialog` "Kết thúc"): Đơn `pending` đã có link thanh toán và còn hạn
+ * (`expires_at` > `now()` của DB). Người mua của các Đơn này có thể đang ở trang thanh toán Tingee. Đơn chưa có link,
+ * link đã quá `expires_at` hay Đơn đã rời `pending` không tính.
+ */
+export async function pendingPaymentCountOf(db: DbExecutor, scope: EventOrdersScope, eventId: string): Promise<number> {
+  const [row] = await db
+    .select({ orders: sql<number>`count(*)::int`.mapWith(Number) })
+    .from(orders)
+    .where(
+      and(
+        orgScope(scope)(orders),
+        eq(orders.eventId, eventId),
+        eq(orders.status, OrderStatus.PENDING),
+        isNotNull(orders.paymentLink),
+        gt(orders.expiresAt, sql`now()`),
+      ),
+    );
+  return row?.orders ?? 0;
 }

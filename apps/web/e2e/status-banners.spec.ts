@@ -1,12 +1,16 @@
 import type { Page } from '@playwright/test';
 
 import { expect, test } from './fixtures';
-import { me, mockIdentityApi } from './identity-mock';
-import { mockOrganizerApi, organization, ORG_ID, statusNotice } from './organizer-mock';
+import { apiError, me, mockIdentityApi, type Call, type Handler } from './identity-mock';
+import { fakeEventSource } from './live-mock';
+import { mockOrganizerApi, organization, ORG_ID, ORG_LIVE_URL, saleStatus, statusNotice } from './organizer-mock';
 
 /*
  * Dải `status-banner` đầu vùng nội dung dashboard (Story 2.5, UX-DR8, AD-34) với API giả: web chỉ ánh xạ `code` sang
  * nội dung, hiện tối đa 2 banner, còn lại "+N thông báo" mở `Sheet`; banner `dismissible` ẩn theo `code` + `version`.
+ * Story 4.2-b: bốn banner dịch vụ thanh toán theo vai (liên kết ngoài mở tab mới), tự cập nhật qua stream cấp BTC
+ * `…/live` (giả bằng `EventSource` điều khiển được) hoặc polling 10 giây khi không có SSE. Story 4.2-c: nhãn trạng thái
+ * bán của thẻ Sự kiện (`GET …/event-sale-status`) đổi theo cùng tín hiệu, dự phòng bằng nhãn tính ở máy khách.
  */
 
 const CONSENTED = '2026-10-29T01:02:03.000Z';
@@ -18,13 +22,21 @@ const REVOKED_TITLE = 'Closed Beta đã bị thu hồi';
 
 type Notice = ReturnType<typeof statusNotice>;
 
-/** Mở dashboard; `notices` đọc lại ở mỗi lần gọi để test đổi được giữa hai lần tải trang. */
-async function openDashboard(page: Page, notices: () => Notice[], { role = 'owner' } = {}) {
+/**
+ * Mở dashboard; `notices` đọc lại ở mỗi lần gọi để test đổi được giữa hai lần tải trang. `handlers` thêm (vd. danh sách
+ * Sự kiện và trạng thái bán của Story 4.2-c).
+ */
+async function openDashboard(
+  page: Page,
+  notices: () => Notice[],
+  { role = 'owner', handlers = {} }: { role?: string; handlers?: Record<string, Handler> } = {},
+) {
   await mockIdentityApi(page, { 'GET /identity/me': () => me(CONSENTED) });
   const calls = await mockOrganizerApi(page, {
     [`GET /orgs/${ORG_ID}`]: () => organization({ role }),
     'GET /me/memberships': () => ({ status: 200, body: [{ organizationId: ORG_ID, name: ORG_NAME, role }] }),
     [`GET /orgs/${ORG_ID}/notices`]: () => ({ status: 200, body: notices() }),
+    ...handlers,
   });
   await page.goto(base);
   await expect(page.getByRole('heading', { name: ORG_NAME, level: 1 })).toBeVisible();
@@ -164,3 +176,344 @@ test('chưa liên kết tài khoản nhận tiền: Admin chỉ thấy lời nh�
   await expect(banner.getByRole('link')).toHaveCount(0);
   await expect(banner.getByRole('button')).toHaveCount(0);
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// Dịch vụ thanh toán bị ngắt (Story 4.2-b)
+// ---------------------------------------------------------------------------------------------------------------
+
+const PORTAL = 'https://baas.tingee.vn';
+const PAUSED = 'Mọi Sự kiện có phí đang Tạm ngừng bán.';
+const TOKEN = 'PAYMENT_SERVICE_SUSPENDED_TOKEN';
+const TOKEN_TITLE = 'Mọi Sự kiện có phí đang Tạm ngừng bán';
+const tokenNotice = () => statusNotice(TOKEN, { data: { tingeePortalUrl: PORTAL } });
+
+/** Câu Mason chốt 13/11: tiêu đề, mô tả + hành động của Owner, câu của Admin. */
+const SERVICE_BANNERS = [
+  {
+    code: TOKEN,
+    title: TOKEN_TITLE,
+    owner: 'Tingee báo đã hết Token (gói dịch vụ hết hạn).',
+    action: 'Mua thêm Token',
+    admin: 'Tingee báo đã hết Token. Nhờ Owner mua thêm Token.',
+  },
+  {
+    code: 'PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED',
+    title: 'Tingee đang tạm ngừng dịch vụ thanh toán của BTC',
+    owner: PAUSED,
+    action: 'Xem chi tiết',
+    admin: `${PAUSED} Nhờ Owner liên hệ Tingee.`,
+  },
+  {
+    code: 'PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID',
+    title: 'Key Tingee không còn dùng được',
+    owner: PAUSED,
+    action: 'Nhập lại key',
+    admin: `${PAUSED} Nhờ Owner cập nhật key Tingee.`,
+  },
+  {
+    code: 'PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING',
+    title: 'Key Tingee chưa được cấp quyền Cổng thanh toán',
+    owner: PAUSED,
+    action: 'Xem cách xử lý',
+    admin: `${PAUSED} Nhờ Owner cấp quyền Cổng thanh toán cho key Tingee.`,
+  },
+];
+
+const noticeOf = (code: string) => (code === TOKEN ? tokenNotice() : statusNotice(code));
+const noticeGets = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === `/orgs/${ORG_ID}/notices`);
+const heading = (page: Page) => page.getByRole('heading', { name: ORG_NAME, level: 1 });
+
+test('dịch vụ thanh toán bị ngắt, Owner: mỗi mã một banner danger không đóng được, mô tả + một hành động đúng câu', async ({
+  page,
+}) => {
+  let notices: Notice[] = [];
+  await openDashboard(page, () => notices);
+  for (const copy of SERVICE_BANNERS) {
+    notices = [noticeOf(copy.code)];
+    await page.reload();
+    await expect(heading(page)).toBeVisible();
+    await expect(banners(page)).toHaveCount(1);
+    const banner = banners(page).first();
+    await expect(banner, copy.code).toHaveAttribute('data-tone', 'danger');
+    await expect(banner, copy.code).toContainText(copy.title);
+    await expect(banner, copy.code).toContainText(copy.owner);
+    await expect(closeButtons(page)).toHaveCount(0);
+    await expect(banner.getByRole('link'), copy.code).toHaveCount(1);
+    const action = banner.getByRole('link', { name: copy.action });
+    if (copy.code === TOKEN) {
+      // Liên kết ngoài: portal Tingee từ `data.tingeePortalUrl`, tab mới, không lộ `window.opener`.
+      await expect(action).toHaveAttribute('href', PORTAL);
+      await expect(action).toHaveAttribute('target', '_blank');
+      await expect(action).toHaveAttribute('rel', 'noopener noreferrer');
+    } else {
+      await expect(action, copy.code).toHaveAttribute('href', `${base}/tai-khoan-nhan-tien`);
+      await expect(action, copy.code).not.toHaveAttribute('target', '_blank');
+    }
+  }
+});
+
+test('dịch vụ thanh toán bị ngắt, Admin: tiêu đề + câu nhờ Owner, không có hành động', async ({ page }) => {
+  let notices: Notice[] = [];
+  await openDashboard(page, () => notices, { role: 'admin' });
+  for (const copy of SERVICE_BANNERS) {
+    notices = [noticeOf(copy.code)];
+    await page.reload();
+    await expect(heading(page)).toBeVisible();
+    const banner = banners(page).first();
+    await expect(banner, copy.code).toContainText(copy.title);
+    await expect(banner, copy.code).toContainText(copy.admin);
+    await expect(banner.getByRole('link'), copy.code).toHaveCount(0);
+    await expect(banner.getByRole('button'), copy.code).toHaveCount(0);
+  }
+});
+
+test('"Mua thêm Token" mở portal Tingee ở tab mới, dashboard giữ nguyên; thiếu URL portal → banner không có hành động', async ({
+  page,
+}) => {
+  await page.context().route(
+    (url) => url.hostname === 'baas.tingee.vn',
+    (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<title>Tingee</title>' }),
+  );
+  let notices: Notice[] = [tokenNotice()];
+  await openDashboard(page, () => notices);
+  const popupPromise = page.waitForEvent('popup');
+  await banners(page).first().getByRole('link', { name: 'Mua thêm Token' }).click();
+  const popup = await popupPromise;
+  await popup.waitForLoadState();
+  expect(new URL(popup.url()).origin).toBe(PORTAL);
+  expect(await popup.evaluate(() => window.opener)).toBeNull();
+  await popup.close();
+  expect(new URL(page.url()).pathname).toBe(base);
+
+  // Api không gửi URL portal (hoặc URL không phải http/https): không có nút hỏng.
+  notices = [statusNotice(TOKEN, { data: { tingeePortalUrl: 'javascript:alert(1)' } })];
+  await page.reload();
+  await expect(banners(page).first()).toContainText(TOKEN_TITLE);
+  await expect(banners(page).first().getByRole('link')).toHaveCount(0);
+});
+
+test('stream cấp BTC: org_status_changed → banner hiện rồi biến mất, không tải lại trang; mã lạ vẫn bị bỏ', async ({ page }) => {
+  const sse = await fakeEventSource(page, { url: ORG_LIVE_URL });
+  let notices: Notice[] = [];
+  const calls = await openDashboard(page, () => notices);
+  await expect.poll(sse.count).toBe(1);
+  const info = await sse.info();
+  expect(info.withCredentials).toBe(true);
+  expect(info.url).toMatch(new RegExp(`/v1/orgs/${ORG_ID}/live$`));
+  await sse.open();
+  await expect(banners(page)).toHaveCount(0);
+
+  // Đánh dấu trang: tải lại trang thì dấu mất.
+  await page.evaluate(() => ((window as unknown as { __mark: boolean }).__mark = true));
+  notices = [statusNotice('MA_MOI_CHUA_BIET', { severity: 'danger' }), noticeOf('PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID')];
+  const before = noticeGets(calls).length;
+  await sse.message('org_status_changed');
+  await expect(banners(page)).toHaveCount(1, { timeout: 3_000 });
+  await expect(banners(page).first()).toContainText('Key Tingee không còn dùng được');
+  expect(noticeGets(calls).length).toBeGreaterThan(before);
+
+  notices = [];
+  await sse.message('org_status_changed');
+  await expect(banners(page)).toHaveCount(0, { timeout: 3_000 });
+  expect(await page.evaluate(() => (window as unknown as { __mark?: boolean }).__mark)).toBe(true);
+  expect(await sse.count()).toBe(1);
+});
+
+test('không có SSE (503) → dải banner polling 10 giây', async ({ page }) => {
+  test.setTimeout(45_000);
+  let notices: Notice[] = [];
+  const calls = await openDashboard(page, () => notices);
+  await expect
+    .poll(() => calls.filter((c) => c.method === 'GET' && c.path === `/orgs/${ORG_ID}/live`).length)
+    .toBeGreaterThanOrEqual(1);
+  await expect(banners(page)).toHaveCount(0);
+  const startedAt = Date.now();
+  notices = [tokenNotice()];
+  await expect(banners(page).first()).toContainText(TOKEN_TITLE, { timeout: 12_000 });
+  expect(Date.now() - startedAt).toBeLessThan(12_000);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Nhãn trạng thái bán của thẻ Sự kiện (Story 4.2-c, retro Epic 2 C5)
+// ---------------------------------------------------------------------------------------------------------------
+
+const PAID_ID = '019a3b2c-0801-7abc-8def-0123456789ab';
+const MIXED_ID = '019a3b2c-0802-7abc-8def-0123456789ab';
+const FREE_ID = '019a3b2c-0803-7abc-8def-0123456789ab';
+const SALE_STATUS_PATH = `/orgs/${ORG_ID}/event-sale-status`;
+const FUTURE_END = '2099-11-16T23:59:59+07:00';
+const PAST_END = '2026-01-01T23:59:59+07:00';
+
+/** `EventSummary` của `GET /orgs/:id/events`. */
+const eventSummary = (
+  id: string,
+  name: string,
+  { status = 'published', effectiveEndAt = FUTURE_END }: { status?: string; effectiveEndAt?: string } = {},
+) => ({
+  id,
+  slug: `su-kien-${id.slice(9, 13)}`,
+  name,
+  status,
+  startsAt: '2099-11-16T07:00:00+07:00',
+  endsAt: '2099-11-16T17:00:00+07:00',
+  effectiveEndAt,
+});
+
+const THREE_EVENTS = [
+  eventSummary(PAID_ID, 'Giải cờ nhanh có phí'),
+  eventSummary(MIXED_ID, 'Giải cờ chớp có vé 0đ'),
+  eventSummary(FREE_ID, 'Giao lưu cờ miễn phí'),
+];
+const ON_SALE = () => [saleStatus(PAID_ID), saleStatus(MIXED_ID), saleStatus(FREE_ID)];
+/** BTC bị ngắt dịch vụ thanh toán: Sự kiện chỉ có phí ngừng hẳn, Sự kiện có cả Hạng vé 0đ ngừng một phần. */
+const SUSPENDED = () => [saleStatus(PAID_ID, 'paused'), saleStatus(MIXED_ID, 'paused', true), saleStatus(FREE_ID)];
+
+const cardBadge = (page: Page, name: string) =>
+  page.locator('[data-slot="event-card"]', { hasText: name }).locator('[data-slot="status-badge"]');
+const saleGets = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === SALE_STATUS_PATH);
+
+/** Handler danh sách Sự kiện và trạng thái bán; cả hai đọc lại ở mỗi lần gọi. */
+const saleHandlers = (
+  events: () => unknown[],
+  sale: () => ReturnType<typeof saleStatus>[] | 'error',
+): Record<string, Handler> => ({
+  [`GET /orgs/${ORG_ID}/events`]: () => ({ status: 200, body: events() }),
+  [`GET ${SALE_STATUS_PATH}`]: () => {
+    const value = sale();
+    return value === 'error' ? apiError(500, 'INTERNAL_ERROR') : { status: 200, body: { events: value } };
+  },
+});
+
+test('thẻ Sự kiện: nhãn lấy từ trạng thái bán của api, kể cả khi máy khách tự tính khác', async ({ page }) => {
+  const LOCKED_ID = '019a3b2c-0804-7abc-8def-0123456789ab';
+  const ENDED_ID = '019a3b2c-0805-7abc-8def-0123456789ab';
+  const HIDDEN_ID = '019a3b2c-0806-7abc-8def-0123456789ab';
+  const CANCELLED_ID = '019a3b2c-0807-7abc-8def-0123456789ab';
+  const DRAFT_ID = '019a3b2c-0808-7abc-8def-0123456789ab';
+  const events = [
+    ...THREE_EVENTS,
+    eventSummary(LOCKED_ID, 'Giải bị khóa'),
+    // Máy khách thấy còn tương lai (đồng hồ chậm), máy chủ đã quá mốc.
+    eventSummary(ENDED_ID, 'Giải đã hết giờ'),
+    eventSummary(HIDDEN_ID, 'Giải đang ẩn', { status: 'hidden' }),
+    eventSummary(CANCELLED_ID, 'Giải đã hủy', { status: 'cancelled' }),
+    eventSummary(DRAFT_ID, 'Giải còn nháp', { status: 'draft' }),
+  ];
+  const sale = [
+    ...SUSPENDED(),
+    saleStatus(LOCKED_ID, 'locked'),
+    saleStatus(ENDED_ID, 'ended'),
+    saleStatus(HIDDEN_ID, 'hidden'),
+    saleStatus(CANCELLED_ID, 'cancelled'),
+  ];
+  await openDashboard(page, () => [], { handlers: saleHandlers(() => events, () => sale) });
+
+  const expected: [string, string, string][] = [
+    ['Giải cờ nhanh có phí', 'Tạm ngừng bán', 'warning'],
+    ['Giải cờ chớp có vé 0đ', 'Tạm ngừng bán một phần', 'warning'],
+    ['Giao lưu cờ miễn phí', 'Đang mở bán', 'success'],
+    ['Giải bị khóa', 'Bị khóa', 'danger'],
+    ['Giải đã hết giờ', 'Đã kết thúc', 'neutral'],
+    ['Giải đang ẩn', 'Ẩn', 'warning'],
+    ['Giải đã hủy', 'Đã hủy', 'danger'],
+    // Nháp không có trong danh sách của api: "Nháp" không cần api.
+    ['Giải còn nháp', 'Nháp', 'neutral'],
+  ];
+  for (const [name, label, tone] of expected) {
+    await expect(cardBadge(page, name), name).toHaveText(label);
+    await expect(cardBadge(page, name), name).toHaveAttribute('data-tone', tone);
+  }
+});
+
+test('thẻ Sự kiện: api trạng thái bán lỗi (500 hay mất mạng) → nhãn tính như cũ, không báo lỗi', async ({ page }) => {
+  const ENDED_ID = '019a3b2c-0805-7abc-8def-0123456789ab';
+  const HIDDEN_ID = '019a3b2c-0806-7abc-8def-0123456789ab';
+  const events = [
+    ...THREE_EVENTS,
+    eventSummary(ENDED_ID, 'Giải đã hết giờ', { effectiveEndAt: PAST_END }),
+    eventSummary(HIDDEN_ID, 'Giải đang ẩn', { status: 'hidden' }),
+  ];
+  const calls = await openDashboard(page, () => [], { handlers: saleHandlers(() => events, () => 'error') });
+  const fallback = async () => {
+    await expect(cardBadge(page, 'Giải cờ nhanh có phí')).toHaveText('Đang mở bán');
+    await expect(cardBadge(page, 'Giải cờ chớp có vé 0đ')).toHaveText('Đang mở bán');
+    await expect(cardBadge(page, 'Giải đã hết giờ')).toHaveText('Đã kết thúc');
+    await expect(cardBadge(page, 'Giải đang ẩn')).toHaveText('Ẩn');
+    await expect(page.locator('[data-slot="event-card"]')).toHaveCount(5);
+    await expect(page.locator('main [data-slot="status-banner"]')).toHaveCount(0);
+    await expect(page.locator('[data-slot="event-card"] [role="status"]')).toHaveCount(0);
+  };
+  await expect.poll(() => saleGets(calls).length).toBeGreaterThanOrEqual(1);
+  await fallback();
+
+  // Mất mạng: lời gọi trạng thái bán bị hủy ở tầng mạng.
+  await page.route(
+    (url) => url.pathname.endsWith('/event-sale-status'),
+    (route) => route.abort('internetdisconnected'),
+  );
+  await page.reload();
+  await expect(heading(page)).toBeVisible();
+  await fallback();
+});
+
+test('stream cấp BTC: org_status_changed → thẻ Sự kiện có phí đổi sang "Tạm ngừng bán" rồi về "Đang mở bán", không tải lại trang', async ({
+  page,
+}) => {
+  const sse = await fakeEventSource(page, { url: ORG_LIVE_URL });
+  let notices: Notice[] = [];
+  let sale = ON_SALE();
+  const calls = await openDashboard(page, () => notices, { handlers: saleHandlers(() => THREE_EVENTS, () => sale) });
+  await expect.poll(sse.count).toBe(1);
+  await sse.open();
+  for (const name of ['Giải cờ nhanh có phí', 'Giải cờ chớp có vé 0đ', 'Giao lưu cờ miễn phí']) {
+    await expect(cardBadge(page, name)).toHaveText('Đang mở bán');
+  }
+
+  // Đánh dấu trang: tải lại trang thì dấu mất.
+  await page.evaluate(() => ((window as unknown as { __mark: boolean }).__mark = true));
+  const before = saleGets(calls).length;
+  notices = [tokenNotice()];
+  sale = SUSPENDED();
+  await sse.message('org_status_changed');
+  await expect(cardBadge(page, 'Giải cờ nhanh có phí')).toHaveText('Tạm ngừng bán', { timeout: 3_000 });
+  await expect(cardBadge(page, 'Giải cờ nhanh có phí')).toHaveAttribute('data-tone', 'warning');
+  await expect(cardBadge(page, 'Giải cờ chớp có vé 0đ')).toHaveText('Tạm ngừng bán một phần');
+  await expect(cardBadge(page, 'Giao lưu cờ miễn phí')).toHaveText('Đang mở bán');
+  await expect(banners(page).first()).toContainText(TOKEN_TITLE);
+  expect(saleGets(calls).length).toBeGreaterThan(before);
+
+  // Dịch vụ mở lại.
+  notices = [];
+  sale = ON_SALE();
+  await sse.message('org_status_changed');
+  await expect(cardBadge(page, 'Giải cờ nhanh có phí')).toHaveText('Đang mở bán', { timeout: 3_000 });
+  await expect(cardBadge(page, 'Giải cờ chớp có vé 0đ')).toHaveText('Đang mở bán');
+  await expect(banners(page)).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { __mark?: boolean }).__mark)).toBe(true);
+});
+
+for (const [label, notice, title] of [
+  ['hết Token', tokenNotice, TOKEN_TITLE],
+  ['Closed Beta bị thu hồi', () => statusNotice('CLOSED_BETA_REVOKED'), REVOKED_TITLE],
+  ['chưa liên kết tài khoản nhận tiền', () => statusNotice('PAYOUT_ACCOUNT_NOT_LINKED'), NOT_LINKED_TITLE],
+] as const) {
+  test(`không có SSE (503): banner "${label}" xuất hiện ở lần polling → thẻ Sự kiện tải lại nhãn "Tạm ngừng bán"`, async ({
+    page,
+  }) => {
+    test.setTimeout(45_000);
+    let notices: Notice[] = [];
+    let sale = ON_SALE();
+    const calls = await openDashboard(page, () => notices, { handlers: saleHandlers(() => THREE_EVENTS, () => sale) });
+    await expect(cardBadge(page, 'Giải cờ nhanh có phí')).toHaveText('Đang mở bán');
+    await expect
+      .poll(() => calls.filter((c) => c.method === 'GET' && c.path === `/orgs/${ORG_ID}/live`).length)
+      .toBeGreaterThanOrEqual(1);
+    const before = saleGets(calls).length;
+    notices = [notice()];
+    sale = SUSPENDED();
+    await expect(banners(page).first()).toContainText(title, { timeout: 12_000 });
+    await expect(cardBadge(page, 'Giải cờ nhanh có phí')).toHaveText('Tạm ngừng bán', { timeout: 3_000 });
+    await expect(cardBadge(page, 'Giải cờ chớp có vé 0đ')).toHaveText('Tạm ngừng bán một phần');
+    expect(saleGets(calls).length).toBeGreaterThan(before);
+  });
+}

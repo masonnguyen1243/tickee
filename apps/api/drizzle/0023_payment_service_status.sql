@@ -1,0 +1,7 @@
+ALTER TABLE "organizations" ADD COLUMN "payment_service_status" text DEFAULT 'active' NOT NULL;--> statement-breakpoint
+ALTER TABLE "organizations" ADD COLUMN "payment_service_reason" text;--> statement-breakpoint
+ALTER TABLE "organizations" ADD COLUMN "payment_service_since" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "organizations" ADD COLUMN "payment_service_checked_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "organizations_payment_service_suspended_idx" ON "organizations" USING btree ("payment_service_since") WHERE "organizations"."payment_service_status" = 'suspended';--> statement-breakpoint
+ALTER TABLE "organizations" ADD CONSTRAINT "organizations_payment_service_status_check" CHECK ("organizations"."payment_service_status" IN ('active', 'suspended'));--> statement-breakpoint
+ALTER TABLE "organizations" ADD CONSTRAINT "organizations_payment_service_reason_check" CHECK (("organizations"."payment_service_status" = 'active' AND "organizations"."payment_service_reason" IS NULL AND "organizations"."payment_service_since" IS NULL) OR ("organizations"."payment_service_status" = 'suspended' AND "organizations"."payment_service_reason" IN ('token', 'tingee_disabled', 'credential_invalid', 'gateway_permission_missing') AND "organizations"."payment_service_since" IS NOT NULL));

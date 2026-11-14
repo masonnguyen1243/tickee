@@ -52,6 +52,7 @@ import {
   updateOrderLimit,
   updateTicketType,
 } from '@/lib/event/api';
+import { refreshEventSaleStatus } from '@/lib/event/sale-status';
 
 /*
  * Trình sửa Hạng vé (Story 2.8) dùng chung cho wizard bước 2 và tab "Hạng vé": danh sách Hạng vé (tên, giá, số suất,
@@ -195,6 +196,8 @@ function TicketTypeForm({
         return editing ? list.map((t) => (t.id === saved.id ? saved : t)) : [...list, saved];
       });
       void queryClient.invalidateQueries({ queryKey: ticketTypesQueryKey(orgId, eventId) });
+      // Giá và giờ bán đổi trạng thái bán của Sự kiện đã mở bán (badge dashboard, Story 4.2-c).
+      void refreshEventSaleStatus(queryClient, orgId);
       toast.success(editing ? `Đã lưu ${saved.name}.` : `Đã thêm ${saved.name}.`);
       onDone();
     },
@@ -383,6 +386,7 @@ function DeleteDialog({
         list?.filter((x) => x.id !== t.id),
       );
       void queryClient.invalidateQueries({ queryKey: ticketTypesQueryKey(orgId, eventId) });
+      void refreshEventSaleStatus(queryClient, orgId);
       toast.success(`Đã xóa ${t.name}.`);
       removed.current = true;
       onClose();

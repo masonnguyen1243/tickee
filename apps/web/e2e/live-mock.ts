@@ -9,9 +9,14 @@ import type { Page } from '@playwright/test';
  * `EventSource` giả điều khiển được (`page.route` không giữ được một stream mở rồi đẩy tin sau): mỗi lần trang mở stream
  * là một phần tử của `window.__sse`; test gọi `open()` (kết nối xong), `message(data)` (một tin `data:` trên chính kết
  * nối đó), `drop()` (mất kết nối tạm thời: trình duyệt sẽ tự nối lại, `readyState` CONNECTING).
+ *
+ * `url`: chỉ điều khiển (và đếm) các stream có URL khớp. Dashboard luôn mở stream cấp BTC của khung (Story 4.2-b) bên
+ * cạnh stream của trang, nên spec dashboard chọn đúng stream của mình. Gọi nhiều lần trên cùng `page` (mỗi lần một `url`)
+ * vẫn chỉ cài một `EventSource` giả.
  */
-export async function fakeEventSource(page: Page) {
+export async function fakeEventSource(page: Page, { url }: { url?: RegExp } = {}) {
   await page.addInitScript(() => {
+    if ((window as unknown as { __sse?: unknown[] }).__sse) return;
     class FakeEventSource extends EventTarget {
       static readonly CONNECTING = 0;
       static readonly OPEN = 1;
@@ -46,9 +51,11 @@ export async function fakeEventSource(page: Page) {
     (window as unknown as { __sse: unknown[] }).__sse = [];
     Object.defineProperty(window, 'EventSource', { configurable: true, writable: true, value: FakeEventSource });
   });
-  const last = 'window.__sse[window.__sse.length - 1]';
+  const pattern = url ? JSON.stringify({ source: url.source, flags: url.flags }) : 'null';
+  const streams = `((p) => (p ? window.__sse.filter((s) => new RegExp(p.source, p.flags).test(s.url)) : window.__sse))(${pattern})`;
+  const last = `${streams}.at(-1)`;
   return {
-    count: () => page.evaluate<number>('window.__sse.length'),
+    count: () => page.evaluate<number>(`${streams}.length`),
     info: () =>
       page.evaluate<{ url: string; withCredentials: boolean; readyState: number }>(
         `({ url: ${last}.url, withCredentials: ${last}.withCredentials, readyState: ${last}.readyState })`,
@@ -59,7 +66,7 @@ export async function fakeEventSource(page: Page) {
     /** Mọi stream trang đã mở (cũ trước): đường dẫn và `readyState` (2 = đã đóng). */
     all: () =>
       page.evaluate<{ url: string; readyState: number }[]>(
-        'window.__sse.map((s) => ({ url: s.url, readyState: s.readyState }))',
+        `${streams}.map((s) => ({ url: s.url, readyState: s.readyState }))`,
       ),
   };
 }

@@ -12,9 +12,10 @@ import { PageHeading } from '@/components/tickee/page-heading';
 import { StatusBadge } from '@/components/tickee/status-badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useEventSaleStatus } from '@/lib/event/sale-status';
 
 import { EventGate } from '../event-gate';
-import { eventBadge } from '../event-status';
+import { eventSaleBadge } from '../event-status';
 import { PublicEventLink } from '../public-event-link';
 import { PurchaseFormEditor } from '../purchase-form-editor';
 import { TicketTypesEditor } from '../ticket-types-editor';
@@ -46,9 +47,13 @@ function Overview({ orgId, event }: { orgId: string; event: EventDetail }) {
   );
 }
 
-/** Thẻ "Thông tin" của tab Tổng quan. */
+/**
+ * Thẻ "Thông tin" của tab Tổng quan. Badge trạng thái bán dùng chung query với thẻ Sự kiện ở trang chủ BTC (Story 4.2-c);
+ * nháp không cần api.
+ */
 function EventInfo({ orgId, event }: { orgId: string; event: EventDetail }) {
-  const badge = eventBadge(event);
+  const saleStatus = useEventSaleStatus(orgId, event.status !== 'draft');
+  const badge = eventSaleBadge(event, saleStatus?.get(event.id));
   return (
     <section
       aria-label="Tóm tắt Sự kiện"

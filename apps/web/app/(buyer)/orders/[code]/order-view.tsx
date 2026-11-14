@@ -34,6 +34,7 @@ import {
 import {
   CANCELLED_BY_ORGANIZER,
   EVENT_CANCELLED,
+  EVENT_ENDED_UNPAID,
   HOLD_EXPIRED,
   SALES_PAUSED,
   UNDER_REVIEW,
@@ -45,8 +46,19 @@ import { BuyerSkeleton } from '../../buyer-gate';
 import { OrderPayment } from './order-payment';
 import { OrderSuccess } from './order-success';
 
-/** Đơn đã hết hạn vì dịch vụ thanh toán của BTC tạm ngừng (Tingee từ chối tạo link). */
+/**
+ * Đơn đã hết hạn `sales_paused`: dịch vụ thanh toán của BTC tạm ngừng (Tingee từ chối tạo link), hoặc chốt link của E3-2
+ * chặn (Sự kiện Kết thúc, Ẩn, bị khóa, đã hủy, hoặc BTC mất điều kiện bán Vé có phí).
+ */
 const salesPaused = (order: BuyerOrderView) => order.payment?.linkError === PaymentLinkError.SALES_PAUSED;
+
+/**
+ * Đơn chưa trả (`awaiting_payment`/`confirming`/`expired`) của Sự kiện đã kết thúc (E3-2, `event.ended` theo đồng hồ DB):
+ * Trang Đơn thôi mời trả (máy chủ cũng thôi trả checkout URL), thay màn thanh toán / Hết hạn bằng câu đã kết thúc kèm
+ * liên hệ BTC.
+ */
+const unpaidAfterEnd = (order: BuyerOrderView) =>
+  order.event.ended && (isWaiting(order.buyerStatus) || order.buyerStatus === BuyerOrderStatus.EXPIRED);
 
 /**
  * Khối trạng thái của mọi `buyerStatus` không có màn riêng (màn thanh toán và Thành công có màn riêng). Mỗi trạng thái
@@ -54,6 +66,15 @@ const salesPaused = (order: BuyerOrderView) => order.payment?.linkError === Paym
  * web) → câu an toàn + liên hệ BTC, không bao giờ trống hay kẹt.
  */
 function StatusBlock({ order }: { order: BuyerOrderView }) {
+  if (unpaidAfterEnd(order)) {
+    // Sự kiện đã kết thúc: không màn thanh toán, không "Thử lại", không "Mua lại"; tiền vẫn về thì BTC hoàn tay.
+    return (
+      <div data-slot="order-event-ended" className="flex flex-col gap-stack">
+        <StatusBanner tone="warning" title={EVENT_ENDED_UNPAID} />
+        <OrganizerContact organizer={order.organizer} />
+      </div>
+    );
+  }
   switch (order.buyerStatus) {
     case BuyerOrderStatus.AWAITING_PAYMENT:
     case BuyerOrderStatus.CONFIRMING:
@@ -61,7 +82,9 @@ function StatusBlock({ order }: { order: BuyerOrderView }) {
       return <StatusBanner tone="neutral" title="Đang giữ chỗ cho Đơn của bạn." />;
     case BuyerOrderStatus.EXPIRED:
       if (salesPaused(order)) {
-        // Dịch vụ thanh toán của BTC đang tạm ngừng (Tingee từ chối tạo link): Đơn đã hết hạn, chỗ đã trả lại.
+        // Dịch vụ thanh toán của BTC đang tạm ngừng (Tingee từ chối tạo link) hoặc chốt link E3-2 chặn (Sự kiện Ẩn, bị
+        // khóa, đã hủy, BTC mất điều kiện bán Vé có phí; Kết thúc thì khối đã kết thúc ở trên thắng): Đơn đã hết hạn, chỗ
+        // đã trả lại.
         return (
           <div data-slot="order-sales-paused" className="flex flex-col gap-stack">
             <StatusBanner tone="warning" title={SALES_PAUSED} />
@@ -120,8 +143,10 @@ function StatusBlock({ order }: { order: BuyerOrderView }) {
 /**
  * Câu cho vùng `aria-live` luôn gắn của Trang Đơn: Đơn chờ thì rỗng (màn thanh toán có vùng riêng cho "Đang xác nhận…");
  * Đơn rời màn chờ thì đổi chữ nên trình đọc màn hình đọc trạng thái mới (banner vừa gắn kèm sẵn chữ thì không được đọc).
+ * Đơn chưa trả của Sự kiện đã kết thúc: cùng câu với khối trạng thái.
  */
 function statusAnnouncement(order: BuyerOrderView): string {
+  if (unpaidAfterEnd(order)) return EVENT_ENDED_UNPAID;
   switch (order.buyerStatus) {
     case BuyerOrderStatus.AWAITING_PAYMENT:
     case BuyerOrderStatus.CONFIRMING:
@@ -207,8 +232,9 @@ function useLongWait(waiting: boolean): boolean {
  * (SSE `…/live` + tải lại khi visible, có mạng lại; polling 2 giây khi chưa có SSE mà Đơn đang chờ tiền). Hiển thị theo
  * `buyerStatus`, không bao giờ theo tham số trên URL: chờ tiền → màn thanh toán (Story 3.4) rồi tóm tắt Đơn; `paid` →
  * Thành công với từng Vé (Sự kiện đã kết thúc: màn "Sự kiện đã kết thúc", không Vé); trạng thái khác → khối trạng
- * thái (kèm liên hệ BTC khi cần) rồi tóm tắt. Mã sai, Đơn của người khác hay không có → thông báo riêng (`404
- * ORDER_NOT_FOUND`).
+ * thái (kèm liên hệ BTC khi cần) rồi tóm tắt. Đơn chưa trả (chờ tiền hay hết hạn) mà Sự kiện đã kết thúc (E3-2) → khối
+ * "Sự kiện đã kết thúc. Đơn này không thanh toán được nữa." kèm liên hệ BTC thay màn thanh toán. Mã sai, Đơn của người
+ * khác hay không có → thông báo riêng (`404 ORDER_NOT_FOUND`).
  */
 export function OrderView({ code }: { code: string }) {
   const { query: order, offline } = useLiveResource({
@@ -251,7 +277,7 @@ export function OrderView({ code }: { code: string }) {
 
   const data = order.data;
   if (data.buyerStatus === BuyerOrderStatus.PAID) return <OrderSuccess order={data} celebrate={celebrate} />;
-  const payment = waiting ? data.payment : null;
+  const payment = waiting && !unpaidAfterEnd(data) ? data.payment : null;
   // Cùng một gốc và cùng vùng `aria-live` (con đầu, `sr-only` nên không chiếm chỗ trong flex) cho mọi trạng thái chưa
   // trả: Đơn đổi trạng thái thì vùng này vẫn gắn, chỉ đổi chữ, nên được đọc.
   return (

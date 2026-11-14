@@ -95,6 +95,7 @@ describe('tài khoản nhận tiền: BTC dùng key Tingee của mình (Story 2.
       'canReplaceKey',
       'credential',
       'ipnUrl',
+      'paymentService',
       'tingeePortalUrl',
     ]);
     const account = {
@@ -118,6 +119,7 @@ describe('tài khoản nhận tiền: BTC dùng key Tingee của mình (Story 2.
       ipnUrl: null,
       tingeePortalUrl: 'https://baas.tingee.vn',
       canReplaceKey: false,
+      paymentService: { status: 'active', reason: null, since: null, checkedAt: null },
     };
     expect(PayoutAccountOverview.parse(overview)).toEqual(overview);
     // Dạng một tài khoản cũ (`account`) không còn hợp lệ.

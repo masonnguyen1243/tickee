@@ -2,10 +2,17 @@ import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import type { INestApplicationContext } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { ErrorResponse, JobQueue, PAYMENT_LINK_GRACE_SECONDS, type BuyerOrderView } from '@tickee/contracts';
+import {
+  ErrorResponse,
+  EventPendingPaymentCount,
+  JobQueue,
+  PAYMENT_LINK_GRACE_SECONDS,
+  Role,
+  type BuyerOrderView,
+} from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExpireOrderPayload, expireOrder } from '../../src/modules/ordering/order-jobs.js';
 import {
   HttpTingeeClient,
@@ -17,18 +24,31 @@ import {
 } from '../../src/modules/tingee/index.js';
 import { BOSS } from '../../src/platform/jobs/index.js';
 import { WorkerModule } from '../../src/worker.module.js';
+import { signUpPlatformAdmin } from '../admin/platform-admin.js';
 import { TEST_WEB_ORIGIN, workerConfig } from '../helpers.js';
 import { createHarness, signUp, type Harness } from '../identity/harness.js';
-import { CREATE_LINK_PATH, fakeAccount, startTingeeFake, type TingeeFake } from '../tingee-fake/server.js';
+import { expectInvariants, postIpn } from '../payment/ipn-fixtures.js';
+import {
+  CREATE_LINK_PATH,
+  fakeAccount,
+  fakeIpnPayload,
+  signIpn,
+  startTingeeFake,
+  type TingeeFake,
+} from '../tingee-fake/server.js';
 import {
   eventOnSale,
+  eventsPath,
   inventory,
+  ipnKeyOf,
   linkPayoutAccount,
   orderBody,
   paidReadyOrg,
   parseOrder,
+  paymentServiceOf,
   postOrder,
   resetOrderRateLimit,
+  resetPaymentService,
   type Org,
   type PayoutSpec,
   type User,
@@ -38,7 +58,27 @@ import {
  * Story 3.4: tạo link thanh toán Gateway sau TX1 và thử lại cho cùng Đơn, trên Postgres thật và Tingee fake (server HTTP
  * thật, ký và kiểm chữ ký theo credential của từng BTC; timeout `create-link` thật 5 giây). Mọi dòng của I/O Matrix trừ
  * gọi song song (payment-link-concurrency.test.ts). Sau mỗi nhánh: tồn kho đúng (`held` = Vé của các Đơn `pending`).
+ * E3-2: chốt link theo `sellability` (Kết thúc, Ẩn, khóa, hủy, mất điều kiện có phí), `checkoutUrl` sau Kết thúc và
+ * `GET …/pending-payment-count`.
  */
+
+/**
+ * Chốt link (`paymentLinkBlock`, E3-2) ném lỗi như DB lỗi ở lần gọi kế tiếp khi bật `next`; mặc định chạy hàm thật.
+ */
+const gateFault = vi.hoisted(() => ({ next: false }));
+vi.mock('../../src/modules/ordering/sellability.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/modules/ordering/sellability.js')>();
+  return {
+    ...actual,
+    paymentLinkBlock: (...args: Parameters<typeof actual.paymentLinkBlock>) => {
+      if (gateFault.next) {
+        gateFault.next = false;
+        return Promise.reject(Object.assign(new Error('giả lập DB lỗi'), { name: 'DatabaseError' }));
+      }
+      return actual.paymentLinkBlock(...args);
+    },
+  };
+});
 
 const QUEUE = JobQueue.ORDERING_EXPIRE_ORDER;
 const MAIN: TingeeCredential = { clientId: 'tg-link-main-7c1d', secretToken: 'tg-link-main-secret-Qw8Er7Ty6' };
@@ -57,6 +97,21 @@ const NEXT_PAYOUT: PayoutSpec = {
 };
 /** Mã Tingee đi nhánh "tạm ngừng bán" (key, merchant, VA). */
 const PAUSE_CODES = ['1007', '1033', '1034', '92', '97', '1009', '1133', '2023', '1023', '1045', '1024', '1072'];
+/** Lý do ngắt dịch vụ thanh toán mà mã bật (Story 4.2); nhóm VA không bật cờ. */
+const SERVICE_REASON: Readonly<Record<string, string | null>> = {
+  '1007': 'tingee_disabled',
+  '1033': 'token',
+  '1034': 'tingee_disabled',
+  '92': 'credential_invalid',
+  '97': 'credential_invalid',
+  '1009': 'credential_invalid',
+  '1133': 'gateway_permission_missing',
+  '2023': null,
+  '1023': null,
+  '1045': null,
+  '1024': null,
+  '1072': null,
+};
 
 let fake: TingeeFake;
 let h: Harness;
@@ -86,6 +141,7 @@ beforeAll(async () => {
       }
     },
     getGatewayOrder: (credential, orderId) => http.getGatewayOrder(credential, orderId),
+    getMerchantServiceStatus: (credential) => http.getMerchantServiceStatus(credential),
   };
   h = await createHarness({ TINGEE_BASE_URL: fake.url }, { overrides: [{ provide: TINGEE_CLIENT, useValue: client }] });
   boss = h.app.get<PgBoss>(BOSS);
@@ -98,7 +154,10 @@ beforeEach(async () => {
     fake.merchant(clientId).linkDelayMs = 0;
   }
   afterNextLink = null;
+  gateFault.next = false;
   await resetOrderRateLimit(h);
+  // Mã ngắt dịch vụ của test trước đã bật cờ của BTC dùng chung (Story 4.2).
+  await resetPaymentService(h, org.orgId);
 });
 afterAll(async () => {
   await h.close();
@@ -351,7 +410,7 @@ describe('tạo link khi gửi Đơn', () => {
     expect(h.logs.text).not.toContain(broken);
   });
 
-  it.each(PAUSE_CODES)('Tingee trả %s → 201 expired, sales_paused, nhả chỗ; không thử lại', async (code) => {
+  it.each(PAUSE_CODES)('Tingee trả %s → 201 expired, sales_paused, nhả chỗ; không thử lại; cờ dịch vụ theo mã', async (code) => {
     fake.merchant(MAIN.clientId).linkReplies = [{ code }];
     const placed = await place(2);
     expect(placed.status).toBe(201);
@@ -359,6 +418,11 @@ describe('tạo link khi gửi Đơn', () => {
     expect(placed.order.payment).toMatchObject({ checkoutUrl: null, linkError: 'sales_paused' });
     expect(await inventory(h, placed.tierId)).toEqual({ capacity: 5, sold: 0, held: 0 });
     await expectInventoryConsistent(placed.eventId);
+    // Story 4.2: mã ngắt dịch vụ của key hiện hành bật cờ của BTC; nhóm VA không bật.
+    const reason = SERVICE_REASON[code];
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject(
+      reason ? { status: 'suspended', reason } : { status: 'active', reason: null },
+    );
     const warning = h.logs.lines.find((l) => l.orderCode === placed.order.code && l.tingeeCode === code);
     expect(warning).toMatchObject({ organizationId: org.orgId });
     expect(parseOrder((await retry(placed.buyer, placed.order.code).expect(200)).body).buyerStatus).toBe('expired');
@@ -391,7 +455,7 @@ describe('tạo link khi gửi Đơn', () => {
     await expectInventoryConsistent(sale.event.id);
   });
 
-  it('BTC vừa hủy liên kết hết tài khoản trước lần thử lại → expired, sales_paused, không gọi Tingee', async () => {
+  it('BTC vừa hủy liên kết hết tài khoản trước lần thử lại → expired, sales_paused, không gọi Tingee (chốt sellability)', async () => {
     const own = await paidReadyOrg(h, { name: 'CLB Cầu lông', credential: MAIN, payout: MAIN_PAYOUT });
     fake.merchant(MAIN.clientId).linkReplies = [{ code: '1006' }];
     const placed = await place(1, own);
@@ -406,6 +470,24 @@ describe('tạo link khi gửi Đơn', () => {
       linkError: 'sales_paused',
       recipient: { organizationName: 'CLB Cầu lông', accountName: null, bankName: null },
     });
+    expect(linkCalls()).toHaveLength(1);
+    expect(await inventory(h, placed.tierId)).toMatchObject({ held: 0 });
+    await expectInventoryConsistent(placed.eventId);
+    // E3-2: BTC không còn tài khoản nhận tiền nào = mất điều kiện bán Vé có phí, chốt `sellability` chặn trước khi đọc
+    // nơi nhận tiền.
+    const warning = h.logs.lines.find((l) => l.orderCode === placed.order.code && l.reason === 'paused');
+    expect(warning).toMatchObject({ organizationId: own.orgId });
+  });
+
+  it('BTC còn tài khoản nhưng không có tài khoản mặc định trước lần thử lại → expired, sales_paused, không gọi Tingee', async () => {
+    const own = await paidReadyOrg(h, { name: 'CLB Bóng chuyền', credential: MAIN, payout: MAIN_PAYOUT });
+    fake.merchant(MAIN.clientId).linkReplies = [{ code: '1006' }];
+    const placed = await place(1, own);
+    expect(placed.order).toMatchObject({ buyerStatus: 'awaiting_payment', payment: { linkError: 'provider_error' } });
+    // Còn liên kết (`sellability` vẫn cho bán) nhưng không còn tài khoản mặc định: chặn ở bước đọc nơi nhận tiền.
+    await h.db.orm.execute(sql`UPDATE payout_accounts SET is_default = false WHERE organization_id = ${own.orgId}`);
+    const order = parseOrder((await retry(placed.buyer, placed.order.code).expect(200)).body);
+    expect(order).toMatchObject({ buyerStatus: 'expired', payment: { checkoutUrl: null, linkError: 'sales_paused' } });
     expect(linkCalls()).toHaveLength(1);
     expect(await inventory(h, placed.tierId)).toMatchObject({ held: 0 });
     await expectInventoryConsistent(placed.eventId);
@@ -435,10 +517,10 @@ describe('tạo link khi gửi Đơn', () => {
 
 describe('job (a) hết hạn Đơn trong lúc chờ Tingee', () => {
   it.each([
-    ['1007 (tạm ngừng)', { code: '1007' }],
-    ['HTTP 500 (mơ hồ)', { code: '500', httpStatus: 500 }],
-    ['1006 (từ chối thường)', { code: '1006' }],
-  ])('%s tới sau khi job (a) đã hết hạn Đơn → giữ expired, nhả chỗ đúng một lần, không ghi đè lý do', async (_name, reply) => {
+    ['1007 (tạm ngừng)', { code: '1007' }, { status: 'suspended', reason: 'tingee_disabled' }],
+    ['HTTP 500 (mơ hồ)', { code: '500', httpStatus: 500 }, { status: 'active', reason: null }],
+    ['1006 (từ chối thường)', { code: '1006' }, { status: 'active', reason: null }],
+  ])('%s tới sau khi job (a) đã hết hạn Đơn → giữ expired, nhả chỗ đúng một lần, không ghi đè lý do', async (_name, reply, flag) => {
     const sale = await eventOnSale(org, [{ name: 'Đơn nam', price: 300_000, capacity: 5 }]);
     const tierId = sale.tiers[0]!.id;
     // Một Đơn chờ khác trên cùng Hạng vé: `held` phải còn đúng phần của Đơn này.
@@ -459,6 +541,8 @@ describe('job (a) hết hạn Đơn trong lúc chờ Tingee', () => {
     expect(await linkRow(order.code)).toMatchObject({ status: 'expired', payment_link: null, payment_link_error: null });
     expect(await inventory(h, tierId)).toEqual({ capacity: 5, sold: 0, held: 1 });
     await expectInventoryConsistent(sale.event.id);
+    // Story 4.2: Tingee đã báo ngắt dịch vụ thì cờ vẫn bật dù Đơn đã hết hạn trước; mã khác không bật.
+    expect(await paymentServiceOf(h, org.orgId)).toMatchObject(flag);
   });
 });
 
@@ -537,6 +621,230 @@ describe('POST /v1/me/orders/:code/payment-link', () => {
     // Lượt vẫn còn (chưa giành): Đơn chờ, chưa có link.
     expect(await linkRow(placed.order.code)).toMatchObject({ status: 'pending', payment_link_attempt_at: null });
     await expectInventoryConsistent(placed.eventId);
+  });
+});
+
+describe('chốt link theo sellability (E3-2)', () => {
+  /** Đơn 2 Vé chưa có link (Tingee từ chối thường lần đầu): `pending`, `provider_error`, còn lượt; một lời gọi Tingee. */
+  async function placeWithoutLink(owner: Org = org): Promise<Placed> {
+    fake.merchant(MAIN.clientId).linkReplies = [{ code: '1006' }];
+    const placed = await place(2, owner);
+    expect(placed.order).toMatchObject({
+      buyerStatus: 'awaiting_payment',
+      payment: { checkoutUrl: null, linkError: 'provider_error' },
+    });
+    expect(linkCalls()).toHaveLength(1);
+    return placed;
+  }
+
+  /** BTC bấm "Kết thúc" thật (`POST …/end`): lệnh này chỉ nhận Sự kiện đã bắt đầu, nên dời giờ bắt đầu về trước. */
+  async function endEvent(eventId: string, owner: Org = org): Promise<void> {
+    await h.db.pool.query("UPDATE events SET starts_at = now() - interval '1 hour' WHERE id = $1", [eventId]);
+    await h.http.post(`${eventsPath(owner, eventId)}/end`).set('cookie', owner.owner.cookie).expect(200);
+  }
+
+  /**
+   * Đơn bị chốt chặn: 200 `expired`, `sales_paused`, không thêm lời gọi Tingee nào, lượt không trả, chỗ đã nhả (bất biến
+   * tồn kho đúng), log cảnh báo kèm BTC, mã Đơn và lý do.
+   */
+  async function expectBlocked(placed: Placed, body: unknown, saleReason: string, owner: Org = org): Promise<void> {
+    const order = parseOrder(body);
+    expect(order).toMatchObject({
+      code: placed.order.code,
+      buyerStatus: 'expired',
+      payment: { checkoutUrl: null, linkError: 'sales_paused' },
+    });
+    expect(linkCalls()).toHaveLength(1);
+    const row = await linkRow(placed.order.code);
+    expect(row).toMatchObject({ status: 'expired', payment_link: null, payment_link_error: 'sales_paused' });
+    expect(row.payment_link_attempt_at).not.toBeNull();
+    expect(await inventory(h, placed.tierId)).toEqual({ capacity: 5, sold: 0, held: 0 });
+    await expectInvariants(h, placed.eventId);
+    const warning = h.logs.lines.find((l) => l.orderCode === placed.order.code && l.reason === saleReason);
+    expect(warning).toMatchObject({ organizationId: owner.orgId, level: 40 });
+  }
+
+  it('"Thử lại" sau Kết thúc → 200 expired, sales_paused, nhả chỗ; không request nào tới Tingee', async () => {
+    const placed = await placeWithoutLink();
+    await endEvent(placed.eventId);
+    const res = await retry(placed.buyer, placed.order.code).expect(200);
+    await expectBlocked(placed, res.body, 'ended');
+    // Đơn đã hết hạn: thử lại lần nữa không gọi Tingee, không đổi gì.
+    expect(parseOrder((await retry(placed.buyer, placed.order.code).expect(200)).body).buyerStatus).toBe('expired');
+    expect(linkCalls()).toHaveLength(1);
+  });
+
+  it('gửi lại cùng khóa sau Kết thúc → 200 cùng Đơn, expired, sales_paused; không gọi Tingee', async () => {
+    const placed = await placeWithoutLink();
+    await endEvent(placed.eventId);
+    const body = orderBody([{ ticketTypeId: placed.tierId, quantity: 2 }]);
+    const res = await postOrder(h, placed.buyer, placed.slug, body, placed.key).expect(200);
+    await expectBlocked(placed, res.body, 'ended');
+  });
+
+  it.each([
+    ['Ẩn (POST …/hide)', 'hidden', null],
+    ['Sự kiện bị khóa', 'locked', sql`locked_at = now()`],
+    ['Sự kiện hủy', 'cancelled', sql`status = 'cancelled'`],
+  ])('"Thử lại" sau %s → 200 expired, sales_paused, nhả chỗ; không gọi Tingee', async (_name, saleReason, set) => {
+    const placed = await placeWithoutLink();
+    if (set) await h.db.orm.execute(sql`UPDATE events SET ${set} WHERE id = ${placed.eventId}`);
+    else await h.http.post(`${eventsPath(org, placed.eventId)}/hide`).set('cookie', org.owner.cookie).expect(200);
+    const res = await retry(placed.buyer, placed.order.code).expect(200);
+    await expectBlocked(placed, res.body, saleReason);
+  });
+
+  it('"Thử lại" sau khi Closed Beta bị thu hồi (mất điều kiện bán Vé có phí) → 200 expired, sales_paused; không gọi Tingee', async () => {
+    const own = await paidReadyOrg(h, { name: 'CLB Quần vợt', credential: MAIN, payout: MAIN_PAYOUT });
+    const placed = await placeWithoutLink(own);
+    const platformAdmin = await signUpPlatformAdmin(h);
+    await h.http
+      .post(`/v1/admin/organizations/${own.orgId}/closed-beta/revoke`)
+      .set('cookie', platformAdmin.cookie)
+      .expect(204);
+    const res = await retry(placed.buyer, placed.order.code).expect(200);
+    await expectBlocked(placed, res.body, 'paused', own);
+  });
+
+  it('chốt link lỗi (DB) khi "Thử lại" → 200 Đơn vẫn chờ, provider_error, trả lượt, không gọi Tingee; thử lại sau tạo được link', async () => {
+    const placed = await placeWithoutLink();
+    gateFault.next = true;
+    const order = parseOrder((await retry(placed.buyer, placed.order.code).expect(200)).body);
+    expect(order).toMatchObject({
+      buyerStatus: 'awaiting_payment',
+      payment: { checkoutUrl: null, linkError: 'provider_error' },
+    });
+    expect(linkCalls()).toHaveLength(1);
+    expect(await linkRow(placed.order.code)).toMatchObject({
+      status: 'pending',
+      payment_link: null,
+      payment_link_attempt_at: null,
+      payment_link_error: 'provider_error',
+    });
+    expect(await inventory(h, placed.tierId)).toEqual({ capacity: 5, sold: 0, held: 2 });
+    await expectInvariants(h, placed.eventId);
+    const error = h.logs.lines.find((l) => l.orderCode === placed.order.code && l.error === 'DatabaseError');
+    expect(error).toMatchObject({ organizationId: org.orgId, level: 50 });
+
+    // Lượt đã trả: lần thử kế tiếp qua chốt và gọi Tingee.
+    const next = parseOrder((await retry(placed.buyer, placed.order.code).expect(200)).body);
+    expect(next.payment?.checkoutUrl).toContain(`/checkout/${placed.order.code}`);
+    expect(linkCalls()).toHaveLength(2);
+  });
+
+  it('"Thử lại" khi Sự kiện còn bán mà Hạng vé vừa qua giờ đóng bán → gọi Tingee như cũ (Đơn đã giữ chỗ)', async () => {
+    const placed = await placeWithoutLink();
+    await h.db.orm.execute(
+      sql`UPDATE ticket_types SET sale_ends_at = now() - interval '1 second' WHERE id = ${placed.tierId}`,
+    );
+    const order = parseOrder((await retry(placed.buyer, placed.order.code).expect(200)).body);
+    expect(order).toMatchObject({ buyerStatus: 'awaiting_payment', payment: { linkError: null } });
+    expect(order.payment?.checkoutUrl).toContain(`/checkout/${placed.order.code}`);
+    expect(linkCalls()).toHaveLength(2);
+    expect(await inventory(h, placed.tierId)).toEqual({ capacity: 5, sold: 0, held: 2 });
+    await expectInvariants(h, placed.eventId);
+  });
+
+  it('Trang Đơn sau Kết thúc: Đơn pending có link → checkoutUrl null (link vẫn trong DB, giữ chỗ); thử lại không gọi Tingee', async () => {
+    const placed = await place(2);
+    expect(placed.order.payment?.checkoutUrl).not.toBeNull();
+    await endEvent(placed.eventId);
+    const get = () => h.http.get(`/v1/me/orders/${placed.order.code}`).set('cookie', placed.buyer.cookie).expect(200);
+    const order = parseOrder((await get()).body);
+    expect(order).toMatchObject({
+      buyerStatus: 'awaiting_payment',
+      event: { ended: true },
+      payment: { checkoutUrl: null, linkError: null },
+    });
+    // Không đổi Đơn: link tự hết hạn theo job (c); tiền về sau Kết thúc đi nhánh `orphan` `event_ended`.
+    expect(await linkRow(placed.order.code)).toMatchObject({
+      status: 'pending',
+      payment_link: placed.order.payment!.checkoutUrl,
+    });
+    expect(await inventory(h, placed.tierId)).toMatchObject({ held: 2 });
+    const retried = parseOrder((await retry(placed.buyer, placed.order.code).expect(200)).body);
+    expect(retried.payment?.checkoutUrl).toBeNull();
+    const replay = await postOrder(
+      h,
+      placed.buyer,
+      placed.slug,
+      orderBody([{ ticketTypeId: placed.tierId, quantity: 2 }]),
+      placed.key,
+    ).expect(200);
+    expect(parseOrder(replay.body).payment?.checkoutUrl).toBeNull();
+    expect(linkCalls()).toHaveLength(1);
+    // Hết hạn sau đó: vẫn không có URL.
+    await h.db.orm.execute(sql`UPDATE orders SET expires_at = now() - interval '1 second' WHERE code = ${placed.order.code}`);
+    expect(parseOrder((await get()).body)).toMatchObject({ buyerStatus: 'confirming', payment: { checkoutUrl: null } });
+    await expectInvariants(h, placed.eventId);
+  });
+
+  it('Trang Đơn khi Ẩn: Đơn pending có link → checkoutUrl vẫn có (AC 3.6: tiền về cho Đơn pending vẫn phát Vé)', async () => {
+    const placed = await place(2);
+    await h.http.post(`${eventsPath(org, placed.eventId)}/hide`).set('cookie', org.owner.cookie).expect(200);
+    const order = parseOrder(
+      (await h.http.get(`/v1/me/orders/${placed.order.code}`).set('cookie', placed.buyer.cookie).expect(200)).body,
+    );
+    expect(order).toMatchObject({ buyerStatus: 'awaiting_payment', event: { ended: false } });
+    expect(order.payment?.checkoutUrl).toBe(placed.order.payment!.checkoutUrl);
+    expect(linkCalls()).toHaveLength(1);
+  });
+});
+
+describe('GET …/events/:eventId/pending-payment-count (E3-2)', () => {
+  const countOf = (eventId: string, user: User = org.owner, orgId = org.orgId) =>
+    h.http.get(`/v1/orgs/${orgId}/events/${eventId}/pending-payment-count`).set('cookie', user.cookie);
+
+  it('đếm Đơn pending có link còn hạn: 2 tính; chưa có link, link quá expires_at, paid, Sự kiện khác cùng BTC không tính; Owner và Admin', async () => {
+    const sale = await eventOnSale(org, [{ name: 'Đơn nam', price: 300_000, capacity: 10 }]);
+    expect(EventPendingPaymentCount.parse((await countOf(sale.event.id).expect(200)).body)).toEqual({ orders: 0 });
+    const buy = async (target = sale) => {
+      const body = orderBody([{ ticketTypeId: target.tiers[0]!.id, quantity: 1 }]);
+      const res = await postOrder(h, await signUp(h), target.event.slug, body);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      return parseOrder(res.body);
+    };
+    await buy();
+    await buy();
+    fake.merchant(MAIN.clientId).linkReplies = [{ code: '1006' }];
+    expect((await buy()).payment?.checkoutUrl).toBeNull();
+    const late = await buy();
+    await h.db.orm.execute(sql`UPDATE orders SET expires_at = now() - interval '1 second' WHERE code = ${late.code}`);
+    const paid = await buy();
+    const ipnKey = await ipnKeyOf(h, org.orgId);
+    await postIpn(h, ipnKey, signIpn(MAIN.secretToken, fakeIpnPayload(paid.code, paid.totalAmount))).expect(200);
+    expect((await linkRow(paid.code)).status).toBe('paid');
+    await expectInvariants(h, sale.event.id);
+    // Sự kiện khác của cùng BTC: Đơn chờ có link còn hạn ở đó không tính vào Sự kiện này.
+    const otherSale = await eventOnSale(org, [{ name: 'Đơn nữ', price: 300_000, capacity: 10 }]);
+    expect((await buy(otherSale)).payment?.checkoutUrl).not.toBeNull();
+
+    expect((await countOf(sale.event.id).expect(200)).body).toEqual({ orders: 2 });
+    expect((await countOf(otherSale.event.id).expect(200)).body).toEqual({ orders: 1 });
+    const admin = await signUp(h);
+    await h.db.orm.execute(
+      sql`INSERT INTO members (organization_id, user_id, role) VALUES (${org.orgId}, ${admin.userId}, ${Role.ADMIN})`,
+    );
+    expect((await countOf(sale.event.id, admin).expect(200)).body).toEqual({ orders: 2 });
+    // Không phải thành viên của chính BTC này (như CTV) → 403 NOT_A_MEMBER.
+    const outsider = await signUp(h);
+    expect(errorOf((await countOf(sale.event.id, outsider).expect(403)).body).code).toBe('NOT_A_MEMBER');
+  });
+
+  // BTC chỉ có hai vai Owner và Admin (`Role`, `members_role_check`); CTV không phải thành viên BTC: người không phải
+  // thành viên (như CTV) → 403 NOT_A_MEMBER.
+  it('Sự kiện lạ, sai dạng hoặc của BTC khác → 404 EVENT_NOT_FOUND; không phải thành viên → 403; chưa đăng nhập → 401', async () => {
+    const other = await paidReadyOrg(h, { name: 'BTC khác', credential: NEXT, payout: NEXT_PAYOUT });
+    const theirs = await eventOnSale(other, [{ name: 'Vé', price: 300_000, capacity: 5 }]);
+    for (const id of [randomUUID(), 'khong-phai-uuid', theirs.event.id]) {
+      const res = await countOf(id).expect(404);
+      expect(errorOf(res.body).code).toBe('EVENT_NOT_FOUND');
+    }
+    const stranger = await signUp(h);
+    const res = await countOf(theirs.event.id, stranger, other.orgId).expect(403);
+    expect(errorOf(res.body).code).toBe('NOT_A_MEMBER');
+    expect(errorOf((await countOf(theirs.event.id, org.owner, other.orgId).expect(403)).body).code).toBe('NOT_A_MEMBER');
+    await h.http.get(`/v1/orgs/${other.orgId}/events/${theirs.event.id}/pending-payment-count`).expect(401);
   });
 });
 

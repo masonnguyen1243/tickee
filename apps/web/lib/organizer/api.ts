@@ -6,6 +6,8 @@ import {
   MembershipList,
   Organization,
   OrganizationInvitation,
+  paymentServiceCheckApiPath,
+  PaymentServiceCheckResult,
   PayoutAccount,
   PayoutAccountOptions,
   PayoutAccountOverview,
@@ -86,6 +88,13 @@ export const acceptInvitation = (token: string) =>
 
 export const fetchPayoutAccount = (orgId: string, signal?: AbortSignal) =>
   apiRequest(`${orgPath(orgId)}/payout-account`, { schema: PayoutAccountOverview, init: { signal } });
+
+/**
+ * "Kiểm tra lại" dịch vụ thanh toán (Story 4.2-b, chỉ Owner): api dò Tingee bằng key hiện hành (trừ khi BTC không bị ngắt
+ * hoặc lần trước chưa quá 30 giây) rồi trả trạng thái mới và kết quả để chọn câu báo.
+ */
+export const checkPaymentService = (orgId: string) =>
+  apiRequest(paymentServiceCheckApiPath(orgId), { schema: PaymentServiceCheckResult, init: { method: 'POST' } });
 
 /** Kết nối API key Tingee của BTC: key đúng thì api lưu credential và trả danh sách tài khoản. */
 export const connectTingee = (orgId: string, body: ConnectTingeeRequest) =>

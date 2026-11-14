@@ -125,6 +125,8 @@ export const REJECTING_TINGEE: TingeeClient = {
   listAccounts: () => Promise.resolve([]),
   createPaymentLink: () => Promise.reject(CreateLinkError.rejected('1006')),
   getGatewayOrder: () => Promise.resolve(null),
+  // Không có lần ngắt nào (mã 1006 không bật cờ dịch vụ thanh toán): lỡ dò thì không kết luận được.
+  getMerchantServiceStatus: () => Promise.resolve({ status: 'unknown' }),
 };
 
 /** Override của harness cho test của 3.2/3.3 (`REJECTING_TINGEE`). */
@@ -243,4 +245,32 @@ export const parseOrder = (body: unknown) => BuyerOrderView.parse(body);
 /** Xóa bộ đếm tạo Đơn: mọi request test đi từ cùng một IP. */
 export async function resetOrderRateLimit(h: Harness): Promise<void> {
   await h.db.orm.execute(sql`DELETE FROM order_create_attempts`);
+}
+
+/**
+ * Đặt lại cờ dịch vụ thanh toán của BTC về `active` (Story 4.2): `create-link` bị Tingee từ chối bằng mã ngắt dịch vụ
+ * bật cờ của BTC, nên test dùng chung một BTC cho nhiều nhánh đặt lại cờ trước mỗi test.
+ */
+export async function resetPaymentService(h: Harness, orgId: string): Promise<void> {
+  await h.db.orm.execute(sql`
+    UPDATE organizations
+       SET payment_service_status = 'active', payment_service_reason = NULL, payment_service_since = NULL,
+           payment_service_checked_at = NULL
+     WHERE id = ${orgId}`);
+}
+
+/** Cờ dịch vụ thanh toán của BTC (đọc thẳng DB). */
+export async function paymentServiceOf(h: Harness, orgId: string) {
+  const { rows } = await h.db.pool.query<{
+    status: string;
+    reason: string | null;
+    since: Date | null;
+    checked_at: Date | null;
+  }>(
+    `SELECT payment_service_status AS status, payment_service_reason AS reason, payment_service_since AS since,
+            payment_service_checked_at AS checked_at
+       FROM organizations WHERE id = $1`,
+    [orgId],
+  );
+  return rows[0]!;
 }

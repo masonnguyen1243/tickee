@@ -83,3 +83,31 @@ export const EventAvailability = z.object({
   tiers: z.array(TierAvailability),
 });
 export type EventAvailability = z.infer<typeof EventAvailability>;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Trạng thái bán trên dashboard BTC (Story 4.2-c, retro Epic 2 C5)
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Trạng thái bán cấp Sự kiện của một Sự kiện đã mở bán. `reason` = `eventReason` của cùng luật bán với trang công khai,
+ * tạo Đơn và chốt link (AD-21), tính theo đồng hồ DB; `null` = đang mở bán. `partial`: `reason` là `paused` mà còn ít
+ * nhất một Hạng vé `on_sale` (vd. Hạng vé 0đ vẫn bán khi dịch vụ thanh toán của BTC bị ngắt), khớp câu "một phần" của
+ * trang công khai; Hạng vé còn lại hết vé, chưa mở hay đã đóng thì `false`, lý do khác luôn `false`.
+ */
+export const EventSaleStatus = z.object({
+  eventId: z.uuid(),
+  reason: eventSaleReasonSchema.nullable(),
+  partial: z.boolean(),
+});
+export type EventSaleStatus = z.infer<typeof EventSaleStatus>;
+
+/**
+ * `GET /v1/orgs/:orgId/event-sale-status` (Owner và Admin, `events.manage`): trạng thái bán của mọi Sự kiện không còn nháp
+ * của BTC. Sự kiện nháp không có trong danh sách (web tự hiện "Nháp").
+ */
+export const EventSaleStatusList = z.object({ events: z.array(EventSaleStatus) });
+export type EventSaleStatusList = z.infer<typeof EventSaleStatusList>;
+
+/** Đường API (sau `/v1`) của `EventSaleStatusList` một BTC. */
+export const eventSaleStatusApiPath = (organizationId: string): string =>
+  `/orgs/${encodeURIComponent(organizationId)}/event-sale-status`;

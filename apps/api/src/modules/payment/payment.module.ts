@@ -4,6 +4,7 @@ import { parseCredentialKeys, SecretBox } from '../../platform/crypto/index.js';
 import { OrderPaymentsModule } from '../ordering/index.js';
 import { IPN_SETTINGS, TingeeIpnController, type IpnSettings } from './ipn.controller.js';
 import { IpnProcessor } from './ipn-processor.js';
+import { PaymentServiceResumedWorker } from './payment-service-resumed-worker.js';
 import {
   RECONCILIATION_SETTINGS,
   reconciliationSettings,
@@ -26,7 +27,8 @@ export class PaymentProcessingModule {}
 export type PaymentJobsConfig = ReconciliationConfig;
 
 /**
- * Job nền của `payment` cho vai worker: Đối soát bù (Story 4.1, `ReconciliationWorker` trên lõi xử lý IPN). Cần
+ * Job nền của `payment` cho vai worker: Đối soát bù (Story 4.1, `ReconciliationWorker` trên lõi xử lý IPN) và job "đã mở
+ * lại" dịch vụ thanh toán của BTC (Story 4.2, `PaymentServiceResumedWorker`: enqueue job tra cho mọi Đơn còn mở). Cần
  * `DbModule`, `JobsModule`, `TingeeModule` và `TicketingModule` (toàn cục) ở gốc DI.
  */
 @Module({})
@@ -45,6 +47,7 @@ export class PaymentJobsModule {
             }),
         },
         ReconciliationWorker,
+        PaymentServiceResumedWorker,
       ],
     };
   }

@@ -148,6 +148,17 @@ export type EventBuyerCount = z.infer<typeof EventBuyerCount>;
 export const eventBuyerCountApiPath = (organizationId: string, eventId: string): string =>
   `/orgs/${encodeURIComponent(organizationId)}/events/${encodeURIComponent(eventId)}/buyer-count`;
 
+/**
+ * `GET /v1/orgs/:orgId/events/:eventId/pending-payment-count` (E3-2): số Đơn đang chờ thanh toán của Sự kiện, tức Đơn
+ * `pending` đã có link thanh toán và còn hạn (`expires_at` > đồng hồ DB). Web hỏi trước khi mở `Dialog` "Kết thúc".
+ */
+export const EventPendingPaymentCount = z.object({ orders: z.number().int().nonnegative() });
+export type EventPendingPaymentCount = z.infer<typeof EventPendingPaymentCount>;
+
+/** Đường API (sau `/v1`) của `EventPendingPaymentCount`. */
+export const eventPendingPaymentCountApiPath = (organizationId: string, eventId: string): string =>
+  `/orgs/${encodeURIComponent(organizationId)}/events/${encodeURIComponent(eventId)}/pending-payment-count`;
+
 // `PublicEvent` (`GET /v1/events/:slug`) nằm ở `sellability.ts`: nó dùng schema Hạng vé, mà `ticket-type.ts` lại import
 // file này.
 

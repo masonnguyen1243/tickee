@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import type { EventSaleReason } from '@tickee/contracts';
 
 import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
 
@@ -6,10 +7,13 @@ import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
  * API BTC giả bằng `page.route`: `/v1/orgs`, `/v1/orgs/**`, `/v1/org-invitations/**` và `/v1/me/memberships`
  * (xem `identity-mock.ts`). Mặc định `GET /me/memberships`, `GET /orgs/:id/notices` (dashboard luôn tải dải banner) và
  * `GET /orgs/:id/events` (trang đích luôn tải danh sách Sự kiện), `GET /orgs/:id/events/:eventId/ticket-types` → `[]`,
+ * `GET /orgs/:id/event-sale-status` (thẻ Sự kiện và badge Tổng quan, Story 4.2-c) → `{ events: [] }` (mọi nhãn tính ở
+ * máy khách như trước),
  * `GET /orgs/:id/events/:eventId/form` → `{ questions: [] }`, `GET /orgs/:id/events/:eventId/publish-readiness` → bốn
  * điều kiện luôn có, đều đạt (`readyConditions`), `GET /orgs/:id/events/:eventId/overview` → chưa có Đơn
- * (`emptyOverview`), SSE `GET /orgs/:id/events/:eventId/overview/live` → 503 (không realtime: polling 10 giây); lời gọi
- * không có handler → 500.
+ * (`emptyOverview`), SSE `GET /orgs/:id/events/:eventId/overview/live` → 503 (không realtime: polling 10 giây), SSE cấp
+ * BTC `GET /orgs/:id/live` (khung dashboard luôn mở, Story 4.2-b) → 503 (dải banner polling 10 giây); lời gọi không có
+ * handler → 500.
  */
 
 export const ORG_ID = '019a3b2c-5678-7abc-8def-0123456789ab';
@@ -23,6 +27,11 @@ const EVENT_FORM_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/form$/;
 const READINESS_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/publish-readiness$/;
 const OVERVIEW_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/overview$/;
 const OVERVIEW_LIVE_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/overview\/live$/;
+const ORG_LIVE_KEY = /^GET \/orgs\/[^/]+\/live$/;
+const SALE_STATUS_KEY = /^GET \/orgs\/[^/]+\/event-sale-status$/;
+
+/** Đường SSE cấp BTC (Story 4.2-b), để `fakeEventSource` chọn đúng stream giữa stream của khung và stream của trang. */
+export const ORG_LIVE_URL = /\/v1\/orgs\/[^/]+\/live$/;
 
 /** `EventOverview` của Sự kiện chưa có Đơn nào (Story 3.11). */
 export const emptyOverview = () => ({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: [] });
@@ -50,14 +59,37 @@ function defaultHandler(key: string): Handler | undefined {
   // Tab Tổng quan của Sự kiện đã rời nháp luôn tải số liệu và mở SSE (Story 3.11): mặc định chưa có Đơn, không realtime.
   if (OVERVIEW_KEY.test(key)) return () => ({ status: 200, body: emptyOverview() });
   if (OVERVIEW_LIVE_KEY.test(key)) return () => apiError(503, 'SERVICE_UNAVAILABLE');
+  // Dải banner của khung dashboard mở SSE cấp BTC (Story 4.2-b): mặc định không realtime.
+  if (ORG_LIVE_KEY.test(key)) return () => apiError(503, 'SERVICE_UNAVAILABLE');
+  // Nhãn trạng thái bán của thẻ Sự kiện và badge Tổng quan (Story 4.2-c): mặc định không có Sự kiện nào → nhãn dự phòng.
+  if (SALE_STATUS_KEY.test(key)) return () => ({ status: 200, body: { events: [] } });
   return undefined;
 }
+
+/** Một dòng của `GET /orgs/:id/event-sale-status` (Story 4.2-c). */
+export const saleStatus = (eventId: string, reason: EventSaleReason | null = null, partial = false) => ({
+  eventId,
+  reason,
+  partial,
+});
 
 /** Mức độ và chặn bán mặc định của từng mã, giống api (`reporting.notices`). */
 const NOTICE_DEFAULTS: Record<string, { severity: string; blocking: boolean }> = {
   CLOSED_BETA_REVOKED: { severity: 'danger', blocking: true },
   CLOSED_BETA_PENDING: { severity: 'warning', blocking: false },
   PAYOUT_ACCOUNT_NOT_LINKED: { severity: 'danger', blocking: true },
+  PAYMENT_SERVICE_SUSPENDED_TOKEN: { severity: 'danger', blocking: true },
+  PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID: { severity: 'danger', blocking: true },
+  PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING: { severity: 'danger', blocking: true },
+  PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED: { severity: 'danger', blocking: true },
+};
+
+/** Mã notice theo lý do ngắt dịch vụ thanh toán (như `PAYMENT_SERVICE_NOTICE_CODES` của contracts). */
+export const PAYMENT_SERVICE_NOTICE: Record<string, string> = {
+  token: 'PAYMENT_SERVICE_SUSPENDED_TOKEN',
+  credential_invalid: 'PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID',
+  gateway_permission_missing: 'PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING',
+  tingee_disabled: 'PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED',
 };
 
 /** Một thông báo trạng thái (`StatusNotice`) cho `GET /orgs/:id/notices`. */

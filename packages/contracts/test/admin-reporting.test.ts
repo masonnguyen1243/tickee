@@ -5,16 +5,30 @@ import {
   ClosedBetaOrganizationList,
   ClosedBetaQueueQuery,
   ClosedBetaStatus,
+  ADMIN_SUSPENDED_PAYMENT_SERVICES_API_PATH,
+  adminPaymentServiceResumeApiPath,
   ClosedBetaTransitionInvalidDetails,
+  SuspendedPaymentServiceOrganization,
+  SuspendedPaymentServiceOrganizationList,
 } from '../src/admin.js';
 import { ErrorCode } from '../src/errors.js';
 import { safeReturnTo } from '../src/identity.js';
 import {
+  PaymentServiceCheckOutcome,
+  PaymentServiceCheckResult,
+  PaymentServiceReason,
+  PaymentServiceState,
+  paymentServiceCheckApiPath,
+} from '../src/organizer.js';
+import {
+  organizationLiveApiPath,
+  PAYMENT_SERVICE_NOTICE_CODES,
   sortStatusNotices,
   STATUS_BANNER_LIMIT,
   STATUS_NOTICE_PRIORITY,
   StatusNoticeCode,
   StatusNoticeList,
+  statusNoticesApiPath,
 } from '../src/reporting.js';
 
 const ID = '019a3b2c-5678-7abc-8def-0123456789ab';
@@ -95,5 +109,72 @@ describe('thông báo trạng thái (AD-34)', () => {
 
   it('dashboard hiện tối đa 2 banner', () => {
     expect(STATUS_BANNER_LIMIT).toBe(2);
+  });
+});
+
+describe('dịch vụ thanh toán của BTC (Story 4.2)', () => {
+  it('bốn mã notice ở bậc 4: sau Closed Beta bị thu hồi, trước chưa liên kết tài khoản nhận tiền; mỗi lý do một mã', () => {
+    const rank = (code: StatusNoticeCode) => STATUS_NOTICE_PRIORITY.indexOf(code);
+    const codes = Object.values(PaymentServiceReason).map((reason) => PAYMENT_SERVICE_NOTICE_CODES[reason]);
+    expect(new Set(codes).size).toBe(4);
+    for (const code of codes) {
+      expect(rank(code)).toBeGreaterThan(rank('CLOSED_BETA_REVOKED'));
+      expect(rank(code)).toBeLessThan(rank('PAYOUT_ACCOUNT_NOT_LINKED'));
+    }
+    expect(PAYMENT_SERVICE_NOTICE_CODES).toEqual({
+      token: 'PAYMENT_SERVICE_SUSPENDED_TOKEN',
+      credential_invalid: 'PAYMENT_SERVICE_SUSPENDED_CREDENTIAL_INVALID',
+      gateway_permission_missing: 'PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING',
+      tingee_disabled: 'PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED',
+    });
+  });
+
+  it('trạng thái: lý do và mốc có thể null; lý do lạ bị từ chối; danh sách Quản trị chỉ có id, tên, lý do, mốc', () => {
+    const state = { status: 'suspended', reason: 'token', since: '2026-11-13T01:02:03.000Z', checkedAt: null };
+    expect(PaymentServiceState.parse(state)).toEqual(state);
+    expect(PaymentServiceState.safeParse({ ...state, reason: 'khac' }).success).toBe(false);
+    expect(PaymentServiceState.parse({ status: 'active', reason: null, since: null, checkedAt: null }).status).toBe(
+      'active',
+    );
+    const row = { id: ID, name: 'CLB Cờ Vua', reason: 'tingee_disabled', since: state.since, checkedAt: null };
+    expect(SuspendedPaymentServiceOrganizationList.parse([row])).toEqual([row]);
+    expect(Object.keys(SuspendedPaymentServiceOrganization.shape).sort()).toEqual([
+      'checkedAt',
+      'id',
+      'name',
+      'reason',
+      'since',
+    ]);
+    expect(ErrorCode.PAYMENT_SERVICE_NOT_SUSPENDED).toBe('PAYMENT_SERVICE_NOT_SUSPENDED');
+    expect(paymentServiceCheckApiPath(ID)).toBe(`/orgs/${ID}/payment-service/check`);
+  });
+
+  it('đường API của stream cấp BTC, notices và Quản trị (Story 4.2-b)', () => {
+    expect(organizationLiveApiPath(ID)).toBe(`/orgs/${ID}/live`);
+    expect(statusNoticesApiPath(ID)).toBe(`/orgs/${ID}/notices`);
+    expect(ADMIN_SUSPENDED_PAYMENT_SERVICES_API_PATH).toBe('/admin/organizations/payment-service/suspended');
+    expect(adminPaymentServiceResumeApiPath(ID)).toBe(`/admin/organizations/${ID}/payment-service/resume`);
+  });
+
+  it('kết quả "Kiểm tra lại": sáu outcome; retryAfterSeconds có đúng khi cooldown (1–30 giây)', () => {
+    expect(Object.values(PaymentServiceCheckOutcome).sort()).toEqual([
+      'cooldown',
+      'no_target',
+      'not_suspended',
+      'resumed',
+      'still_suspended',
+      'unknown',
+    ]);
+    const state = { status: 'suspended', reason: 'token', since: '2026-11-13T01:02:03.000Z', checkedAt: null };
+    const ok = (outcome: string, retryAfterSeconds: number | null) =>
+      PaymentServiceCheckResult.safeParse({ state, outcome, retryAfterSeconds }).success;
+    expect(ok('cooldown', 12)).toBe(true);
+    expect(ok('cooldown', 30)).toBe(true);
+    expect(ok('still_suspended', null)).toBe(true);
+    expect(ok('cooldown', null)).toBe(false);
+    expect(ok('cooldown', 0)).toBe(false);
+    expect(ok('cooldown', 31)).toBe(false);
+    expect(ok('unknown', 5)).toBe(false);
+    expect(ok('skipped', null)).toBe(false);
   });
 });

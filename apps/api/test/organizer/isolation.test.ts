@@ -6,6 +6,7 @@ import { ErrorResponse, Permission, REAUTH_HEADER } from '@tickee/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RequirePermission } from '../../src/platform/access/index.js';
 import { createHarness, reauthToken, signUp, type Harness } from '../identity/harness.js';
+import { listen, openSse } from '../platform/sse-client.js';
 import { discoverRoutes, ORG_ROUTE, type DiscoveredRoute } from './routes.js';
 import { EventsTestController, OwnerOnlyTestController } from './test-controllers.js';
 
@@ -13,6 +14,13 @@ import { EventsTestController, OwnerOnlyTestController } from './test-controller
  * Bộ test cách ly (AD-27): tự tìm mọi route có `@RequirePermission` rồi gọi chéo BTC bằng cookie Owner BTC A trên
  * id BTC B. Route của story sau tự rơi vào đây mà không phải sửa test.
  */
+
+/**
+ * Route SSE (quy ước đường `…/live`, AD-17): trên chính BTC của người gọi, route mở được mà không cần id nào khác (vd.
+ * stream cấp BTC, Story 4.2-b) sống mãi, supertest chờ hết body sẽ treo. Test đối chứng bỏ qua mọi route `…/live`; ca riêng
+ * mở bằng client SSE thật rồi đóng. Gọi chéo BTC vẫn chạy ở cả hai (guard trả 403 JSON trước khi mở stream).
+ */
+const isStreamRoute = (route: DiscoveredRoute) => route.method === 'GET' && route.path.endsWith('/live');
 
 let h: Harness;
 let routes: DiscoveredRoute[];
@@ -67,6 +75,8 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/credential/replacement/begin');
     expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/credential/replacement/preview');
     expect(guarded).toContain('POST /v1/orgs/:orgId/payout-account/credential/replacement');
+    // Story 4.2-a: "Kiểm tra lại" dịch vụ thanh toán (chỉ Owner).
+    expect(guarded).toContain('POST /v1/orgs/:orgId/payment-service/check');
     // Story 2.7: Sự kiện (Owner và Admin).
     expect(guarded).toContain('POST /v1/orgs/:orgId/events');
     expect(guarded).toContain('GET /v1/orgs/:orgId/events');
@@ -93,12 +103,25 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/end');
     // Story 3.10: PATCH Sự kiện chuyển sang flows (cùng đường dẫn) và số Người mua.
     expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/buyer-count');
+    // E3-2: số Đơn đang chờ thanh toán trước `Dialog` "Kết thúc" (flows, `events.manage`).
+    expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/pending-payment-count');
     // Story 3.11: Tổng quan Sự kiện của `reporting` (REST và SSE, `orders.view`).
     expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/overview');
     expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/overview/live');
+    // Story 4.2-b: stream cấp BTC của `reporting` (Owner và Admin, như `notices`).
+    expect(guarded).toContain('GET /v1/orgs/:orgId/live');
+    // Story 4.2-c: trạng thái bán trên dashboard của `ordering` (ngoài tiền tố `…/events/`, như danh sách Sự kiện).
+    expect(guarded).toContain('GET /v1/orgs/:orgId/event-sale-status');
     const permissionOf = (path: string) => routes.find((r) => r.method === 'GET' && r.path === path)?.permission;
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/overview')).toBe(Permission.ORDERS_VIEW);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/overview/live')).toBe(Permission.ORDERS_VIEW);
+    expect(permissionOf('/v1/orgs/:orgId/events/:eventId/pending-payment-count')).toBe(Permission.EVENTS_MANAGE);
+    expect(permissionOf('/v1/orgs/:orgId/live')).toBe(Permission.ORG_READ);
+    expect(permissionOf('/v1/orgs/:orgId/notices')).toBe(Permission.ORG_READ);
+    expect(permissionOf('/v1/orgs/:orgId/event-sale-status')).toBe(Permission.EVENTS_MANAGE);
+    expect(routes.find((r) => r.method === 'POST' && r.path === '/v1/orgs/:orgId/payment-service/check')?.permission).toBe(
+      Permission.PAYOUT_ACCOUNT_MANAGE,
+    );
     expect(guarded).toContain('GET /v1/orgs/:orgId/test-owner-only');
     expect(guarded).toContain('POST /v1/orgs/:orgId/test-owner-only/items/:itemId');
   });
@@ -119,12 +142,42 @@ describe('cách ly BTC', () => {
   });
 
   it('đối chứng: cùng route trên BTC A không trả NOT_A_MEMBER', async () => {
-    for (const route of routes.filter((r) => r.permission)) {
+    for (const route of routes.filter((r) => r.permission && !isStreamRoute(r))) {
       const res = await call(route, orgA, ownerA.cookie);
       // Body `{}` và id ngẫu nhiên ra 4xx (400/404…), không bao giờ 500.
       expect(res.status, label(route)).toBeLessThan(500);
       const code = res.status === 403 ? ErrorResponse.parse(res.body).error.code : null;
       expect(code, label(route)).not.toBe('NOT_A_MEMBER');
+    }
+  });
+
+  it('đối chứng route SSE (`…/live`): trên BTC A mở được stream hoặc trả 4xx JSON, không NOT_A_MEMBER; trên BTC B → 403 NOT_A_MEMBER', async () => {
+    const streams = routes.filter((r) => r.permission && isStreamRoute(r));
+    expect(streams.map((r) => `${r.method} ${r.path}`)).toEqual(
+      expect.arrayContaining(['GET /v1/orgs/:orgId/live', 'GET /v1/orgs/:orgId/events/:eventId/overview/live']),
+    );
+    const http = await listen(h.app);
+    try {
+      for (const route of streams) {
+        const own = await openSse(http.baseUrl, fill(route.path, orgA), { cookie: ownerA.cookie });
+        if (own.status === 200) {
+          own.close();
+          expect(own.headers['content-type'], label(route)).toBe('text/event-stream; charset=utf-8');
+        } else {
+          // Id ngẫu nhiên (vd. Sự kiện) → 4xx JSON trước khi mở stream.
+          await own.ended;
+          expect(own.status, label(route)).toBeLessThan(500);
+          expect(ErrorResponse.parse(JSON.parse(own.text())).error.code, label(route)).not.toBe('NOT_A_MEMBER');
+        }
+        // Stream cấp BTC không cần id nào khác: luôn mở được trên BTC của mình.
+        if (route.path === '/v1/orgs/:orgId/live') expect(own.status, label(route)).toBe(200);
+        const cross = await openSse(http.baseUrl, fill(route.path, orgB), { cookie: ownerA.cookie });
+        await cross.ended;
+        expect(cross.status, label(route)).toBe(403);
+        expect(ErrorResponse.parse(JSON.parse(cross.text())).error.code, label(route)).toBe('NOT_A_MEMBER');
+      }
+    } finally {
+      await http.close();
     }
   });
 
@@ -156,7 +209,7 @@ describe('cách ly BTC', () => {
 
   it('route Sự kiện trên BTC A: body {} → 400, id ngẫu nhiên → 404 EVENT_NOT_FOUND', async () => {
     const eventRoutes = routes.filter((r) => r.permission && r.path.startsWith('/v1/orgs/:orgId/events'));
-    expect(eventRoutes).toHaveLength(22);
+    expect(eventRoutes).toHaveLength(23);
     for (const route of eventRoutes) {
       const res = await call(route, orgA, ownerA.cookie);
       // Body được kiểm trước khi chạm DB; danh sách Sự kiện của BTC trả 200; còn lại Sự kiện ngẫu nhiên → 404.

@@ -16,6 +16,13 @@ import {
 import { buildAdminInvitationEmail } from './invitation-email.js';
 import { generateInvitationToken, hashInvitationToken } from './invitation-token.js';
 import { OwnershipTransferWorker } from './ownership-transfer-jobs.js';
+import {
+  PAYMENT_SERVICE_SETTINGS,
+  PaymentServiceProbeWorker,
+  PaymentServiceProber,
+  PaymentServiceQueues,
+  paymentServiceSettings,
+} from './payment-service.js';
 import { DefaultPayoutWorker } from './payout-default-jobs.js';
 import { organizationInvitations, organizations } from './schema.js';
 
@@ -123,6 +130,8 @@ export const ORGANIZER_JOBS_CONFIG = Symbol('ORGANIZER_JOBS_CONFIG');
 
 export interface OrganizerJobsConfig {
   WEB_ORIGIN: string;
+  /** Giải mã key Tingee của BTC cho job dò dịch vụ thanh toán (Story 4.2). */
+  TINGEE_CREDENTIAL_KEYS: string;
 }
 
 /** Vai `worker`: tạo queue và đăng ký handler gửi email mời Admin. */
@@ -159,7 +168,8 @@ export class AdminInvitationWorker implements OnApplicationBootstrap {
 
 /**
  * Job nền của `organizer` cho vai `worker` (gửi email mời Admin, email cảnh báo đổi tài khoản nhận tiền mặc định,
- * email báo chuyển quyền Owner). Cần `DbModule`, `JobsModule` và `EmailModule` (toàn cục) ở gốc DI.
+ * email báo chuyển quyền Owner, job cron dò dịch vụ thanh toán của BTC bị ngắt — Story 4.2). Cần `DbModule`,
+ * `JobsModule`, `EmailModule` và `TingeeModule` (toàn cục) ở gốc DI.
  */
 @Module({})
 export class OrganizerJobsModule {
@@ -171,6 +181,10 @@ export class OrganizerJobsModule {
         AdminInvitationWorker,
         DefaultPayoutWorker,
         OwnershipTransferWorker,
+        { provide: PAYMENT_SERVICE_SETTINGS, useFactory: () => paymentServiceSettings(config) },
+        PaymentServiceQueues,
+        PaymentServiceProber,
+        PaymentServiceProbeWorker,
       ],
     };
   }

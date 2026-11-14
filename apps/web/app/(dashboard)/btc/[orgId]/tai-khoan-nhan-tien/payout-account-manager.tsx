@@ -23,6 +23,7 @@ import {
 
 import { AccountChooser } from './account-chooser';
 import { LinkedView } from './linked-view';
+import { PaymentServiceBlock } from './payment-service-block';
 import { ReplaceKeyFlow } from './replace-key-flow';
 import { PageSkeleton, refreshOverview, TingeeGuide } from './shared';
 import { ConnectForm } from './tingee-key-form';
@@ -41,6 +42,10 @@ import { ConnectForm } from './tingee-key-form';
  * xong thì form nhập key mới mở (giữ lần xác nhận) → danh sách tài khoản của key mới → chọn một tài khoản → "Lưu". Tới
  * lúc lưu, key và tài khoản cũ vẫn hiện hành (api không lưu gì ở bước xem trước); Secret Token chỉ nằm trong state của
  * luồng này. Lưu quá 5 phút sau khi xác nhận thì dialog hiện lại và lần lưu tự chạy tiếp.
+ *
+ * Dịch vụ thanh toán bị ngắt (Story 4.2-b): khối "Dịch vụ thanh toán" nằm trên nội dung trang, có "Kiểm tra lại"; lý do
+ * `credential_invalid` kèm "Đổi key Tingee" mở đúng luồng đổi key ở trên. Tổng quan tải lại theo tín hiệu của stream cấp
+ * BTC (dải banner của khung dashboard), nên khối hiện/biến mất mà không cần tải lại trang.
  */
 
 export function PayoutAccountManager() {
@@ -190,6 +195,15 @@ export function PayoutAccountManager() {
           Vé có phí.
         </p>
       </div>
+      {overview.data ? (
+        <PaymentServiceBlock
+          orgId={orgId}
+          state={overview.data.paymentService}
+          portalUrl={overview.data.tingeePortalUrl}
+          onChangeKey={changingKey ? undefined : changeKey}
+          changeKeyPending={beginChangeKey.isPending}
+        />
+      ) : null}
       {body}
     </div>
   );

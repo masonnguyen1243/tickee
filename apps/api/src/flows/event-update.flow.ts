@@ -1,4 +1,10 @@
-import { notifiesBuyers, timeOrVenueChanged, type EventBuyerCount, type EventDetail } from '@tickee/contracts';
+import {
+  notifiesBuyers,
+  timeOrVenueChanged,
+  type EventBuyerCount,
+  type EventDetail,
+  type EventPendingPaymentCount,
+} from '@tickee/contracts';
 import type { PgBoss } from 'pg-boss';
 import {
   applyEventEdit,
@@ -6,7 +12,7 @@ import {
   eventDetailOf,
   type EventDraftValues,
 } from '../modules/event/index.js';
-import { enqueueEventChangeEmail, paidBuyerCount } from '../modules/ordering/index.js';
+import { enqueueEventChangeEmail, paidBuyerCount, pendingPaymentCountOf } from '../modules/ordering/index.js';
 import type { AccessContext } from '../platform/access/index.js';
 import { dbNow, type Database } from '../platform/db/index.js';
 
@@ -52,4 +58,18 @@ export async function updateEvent(
 export async function eventBuyerCount(db: Database, ctx: AccessContext, eventId: string): Promise<EventBuyerCount> {
   await assertEventOfOrganization(db.orm, ctx, eventId);
   return { buyers: await paidBuyerCount(db.orm, eventId) };
+}
+
+/**
+ * `GET /v1/orgs/:orgId/events/:eventId/pending-payment-count` (E3-2): số Đơn đang chờ thanh toán (`pending`, có link,
+ * còn hạn theo đồng hồ DB) của Sự kiện, cho `Dialog` "Kết thúc". Sự kiện lạ, sai dạng hoặc của BTC khác → `404
+ * EVENT_NOT_FOUND`. Đặt cạnh `eventBuyerCount`: kiểm Sự kiện của `event`, đếm Đơn của `ordering`.
+ */
+export async function eventPendingPaymentCount(
+  db: Database,
+  ctx: AccessContext,
+  eventId: string,
+): Promise<EventPendingPaymentCount> {
+  await assertEventOfOrganization(db.orm, ctx, eventId);
+  return { orders: await pendingPaymentCountOf(db.orm, ctx, eventId) };
 }

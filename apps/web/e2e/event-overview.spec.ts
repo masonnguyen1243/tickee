@@ -1,15 +1,17 @@
 import type { Page } from '@playwright/test';
+import type { EventSaleReason } from '@tickee/contracts';
 
 import { expect, test } from './fixtures';
 import { apiError, me, mockIdentityApi, unauthenticated, type Call, type Reply } from './identity-mock';
 import { fakeEventSource, setVisibility } from './live-mock';
-import { emptyOverview, mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
+import { emptyOverview, mockOrganizerApi, organization, ORG_ID, saleStatus } from './organizer-mock';
 
 /*
  * Story 3.11: tab Tổng quan của Sự kiện đã rời nháp có `stat-card` doanh thu và `recent-orders-block` (5 Đơn gần đây) nằm
  * trên thẻ "Thông tin", tự cập nhật qua `useLiveResource` (SSE `…/overview/live` giả bằng `EventSource` điều khiển được,
  * hoặc 503 → polling 10 giây). Giờ luôn theo giờ Việt Nam: trình duyệt chạy múi giờ New York. Ca full-stack (stream thật,
- * IPN → tín hiệu, lọc theo Sự kiện) ở test tích hợp api `test/reporting/event-overview.test.ts`.
+ * IPN → tín hiệu, lọc theo Sự kiện) ở test tích hợp api `test/reporting/event-overview.test.ts`. Story 4.2-c: badge của
+ * thẻ "Thông tin" lấy từ `GET …/event-sale-status`, dự phòng bằng nhãn tính ở máy khách.
  */
 
 test.use({ timezoneId: 'America/New_York' });
@@ -21,6 +23,8 @@ const eventPath = `/orgs/${ORG_ID}/events/${EVENT_ID}`;
 const overviewPath = `${eventPath}/overview`;
 /** "Bây giờ" của các ca cần nhãn giờ cố định: 12/11/2026 10:04 giờ Việt Nam. */
 const NOW = new Date('2026-11-12T10:04:00+07:00');
+/** Stream của Tổng quan; khung dashboard còn mở stream cấp BTC (Story 4.2-b), `fakeEventSource` chỉ điều khiển stream này. */
+const OVERVIEW_LIVE_URL = /\/overview\/live$/;
 
 type Status = 'draft' | 'published' | 'hidden' | 'cancelled';
 
@@ -85,6 +89,13 @@ const ORDERS: RecentOrder[] = [
 ];
 const OVERVIEW = { revenue: { amount: 450_000, paidOrders: 1 }, recentOrders: ORDERS };
 
+const SALE_STATUS_PATH = `/orgs/${ORG_ID}/event-sale-status`;
+/** `GET …/event-sale-status` trả đúng một dòng cho Sự kiện của spec này. */
+const saleReply = (reason: EventSaleReason | null, partial = false): Reply => ({
+  status: 200,
+  body: { events: [saleStatus(EVENT_ID, reason, partial)] },
+});
+
 type State = {
   status: Status;
   overview: unknown;
@@ -94,6 +105,8 @@ type State = {
   /** Số lần tải Tổng quan kế tiếp trả `reply` (đếm lùi). */
   fail: number;
   failReply: Reply;
+  /** Trả lời của `GET /orgs/:id/event-sale-status` (Story 4.2-c); mặc định danh sách rỗng (nhãn dự phòng). */
+  sale?: Reply;
 };
 
 /** Owner đã đăng nhập; Sự kiện `state.status`; `GET …/overview` trả `state.overview`; SSE `…/overview/live` mặc định 503. */
@@ -104,6 +117,7 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ stat
     [`GET /orgs/${ORG_ID}`]: () => organization(),
     'GET /me/memberships': () => ({ status: 200, body: [{ organizationId: ORG_ID, name: 'CLB Cầu lông', role: 'owner' }] }),
     [`GET ${eventPath}`]: () => ({ status: 200, body: eventOf(state.status) }),
+    [`GET ${SALE_STATUS_PATH}`]: () => state.sale ?? { status: 200, body: { events: [] } },
     [`GET ${overviewPath}`]: () => {
       if (state.expireOnOverview || state.signedOut) {
         state.signedOut = true;
@@ -260,7 +274,7 @@ test.describe('Tổng quan tự cập nhật', () => {
   test('tín hiệu SSE → tải lại: Đơn 0đ mới lên đầu, "· n Đơn" tăng; IPN trả Đơn → badge và doanh thu đổi, không tải lại trang', async ({
     page,
   }) => {
-    const sse = await fakeEventSource(page);
+    const sse = await fakeEventSource(page, { url: OVERVIEW_LIVE_URL });
     const { state, calls } = await openApi(page);
     await page.goto(base);
     await expect(statValue(page)).toHaveText('450.000đ');
@@ -358,7 +372,7 @@ test.describe('Tổng quan tự cập nhật', () => {
   }) => {
     const toastsShown = await countOfflineToasts(page);
     await page.clock.install({ time: NOW });
-    const sse = await fakeEventSource(page);
+    const sse = await fakeEventSource(page, { url: OVERVIEW_LIVE_URL });
     const { state } = await openApi(page);
     await page.goto(base);
     await expect(statValue(page)).toHaveText('450.000đ');
@@ -403,5 +417,69 @@ test.describe('Tổng quan tự cập nhật', () => {
     await openApi(page, { expireOnOverview: true });
     await page.goto(base);
     await page.waitForURL(`**/dang-nhap?returnTo=${encodeURIComponent(base)}`);
+  });
+});
+
+test.describe('Badge trạng thái bán của thẻ "Thông tin" (Story 4.2-c)', () => {
+  const badge = (page: Page) => page.locator('[data-slot="event-overview"] [data-slot="status-badge"]');
+  const saleGets = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === SALE_STATUS_PATH);
+
+  test('lấy từ api: "Tạm ngừng bán" khi BTC bị ngắt, "Tạm ngừng bán một phần" khi còn Hạng vé 0đ, Bị khóa, Đã kết thúc theo máy chủ', async ({
+    page,
+  }) => {
+    const { state } = await openApi(page, { sale: saleReply('paused') });
+    await page.goto(base);
+    await expect(badge(page)).toHaveText('Tạm ngừng bán');
+    await expect(badge(page)).toHaveAttribute('data-tone', 'warning');
+
+    const cases: [Reply, string, string][] = [
+      [saleReply('paused', true), 'Tạm ngừng bán một phần', 'warning'],
+      [saleReply('locked'), 'Bị khóa', 'danger'],
+      // `effectiveEndAt` của Sự kiện còn ở 2099 theo máy khách; máy chủ báo đã kết thúc.
+      [saleReply('ended'), 'Đã kết thúc', 'neutral'],
+      [saleReply(null), 'Đang mở bán', 'success'],
+    ];
+    for (const [reply, label, tone] of cases) {
+      state.sale = reply;
+      await page.reload();
+      await expect(badge(page), label).toHaveText(label);
+      await expect(badge(page), label).toHaveAttribute('data-tone', tone);
+    }
+  });
+
+  test('api trạng thái bán lỗi → nhãn tính như cũ, không báo lỗi; Sự kiện không có trong danh sách cũng vậy', async ({
+    page,
+  }) => {
+    const { state, calls } = await openApi(page, { sale: apiError(500, 'INTERNAL_ERROR') });
+    await page.goto(base);
+    await expect.poll(() => saleGets(calls).length).toBeGreaterThanOrEqual(1);
+    await expect(badge(page)).toHaveText('Đang mở bán');
+    await expect(badge(page)).toHaveAttribute('data-tone', 'success');
+    await expect(statValue(page)).toHaveText('450.000đ');
+    await expect(page.locator('main [data-slot="status-banner"]')).toHaveCount(0);
+
+    state.status = 'hidden';
+    state.sale = { status: 200, body: { events: [] } };
+    await page.reload();
+    await expect.poll(() => saleGets(calls).length).toBeGreaterThanOrEqual(2);
+    await expect(badge(page)).toHaveText('Ẩn');
+  });
+
+  test('Sự kiện nháp: "Nháp", không gọi api trạng thái bán', async ({ page }) => {
+    const { calls } = await openApi(page, { status: 'draft', sale: saleReply('paused') });
+    // Mọi lời gọi trạng thái bán làm test đỏ ngay khi nó xảy ra, không cần chờ một khoảng thời gian.
+    let called = false;
+    await page.route(
+      (url) => url.pathname.endsWith('/event-sale-status'),
+      (route) => {
+        called = true;
+        return route.abort('failed');
+      },
+    );
+    await page.goto(base);
+    await expect(badge(page)).toHaveText('Nháp');
+    await expect(page.getByRole('link', { name: 'Tiếp tục thiết lập' })).toBeVisible();
+    expect(called).toBe(false);
+    expect(saleGets(calls)).toHaveLength(0);
   });
 });

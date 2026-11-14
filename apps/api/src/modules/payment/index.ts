@@ -37,4 +37,5 @@ export {
   type ReconciliationSettings,
   type ReconciliationStopReason,
 } from './reconciliation-worker.js';
+export { PaymentServiceResumedWorker, type ResumedReconciliation } from './payment-service-resumed-worker.js';
 export { openReviewsOf, type OpenReview } from './review-read.js';

@@ -29,7 +29,7 @@
 # - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-13-2026 12:11
+last_updated: 11-14-2026 09:06
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -75,7 +75,7 @@ development_status:
 
   epic-4: in-progress
   4-1-đối-soát-bù-khi-ipn-trễ-hoặc-mất: done
-  4-2-tự-tạm-ngừng-bán-và-tự-mở-lại-khi-dịch-vụ-thanh-toán-của-btc: backlog
+  4-2-tự-tạm-ngừng-bán-và-tự-mở-lại-khi-dịch-vụ-thanh-toán-của-btc: done
   4-3-hàng-cần-xử-lý-của-btc: backlog
   4-4-duyệt-tay-từ-chối-và-đánh-dấu-đã-hoàn-tay: backlog
   4-5-token-và-cảnh-báo-token: backlog
@@ -321,8 +321,9 @@ action_items:
       BTC Kết thúc/Ẩn/bị khóa; kiểm sellability trong PaymentLinks.ensure trước claim;
       Dialog Kết thúc báo số Đơn đang chờ thanh toán, gồm câu chữ C2 của E2-6 (B1)"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
+    note: "Xong qua _bmad-output/implementation-artifacts/spec-epic-3-e3-2-ket-thuc-va-link-dang-song.md"
   - id: "epic-3-retro-e3-3-uat-tingee-that"
     epic: 3
     action: "E3-3 (trước khi bán Vé có phí thật): UAT Tingee thật, create-link từ

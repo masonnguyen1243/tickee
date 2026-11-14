@@ -45,7 +45,9 @@ export const PAYMENT_LINK_GRACE_SECONDS = 300;
  * Lý do chưa có link thanh toán của Đơn có phí (`BuyerOrderView.payment.linkError`):
  * - `provider_error`: Tingee từ chối bằng mã thường; Đơn vẫn `pending`, thử lại được cho cùng Đơn trong hạn Giữ chỗ.
  * - `sales_paused`: dịch vụ thanh toán của BTC đang tạm ngừng (merchant bị khóa, key không còn dùng được, tài khoản
- *   nhận tiền chưa được cho phép trên Cổng thanh toán) hoặc BTC không còn tài khoản nhận tiền mặc định; Đơn `expired`.
+ *   nhận tiền chưa được cho phép trên Cổng thanh toán), BTC không còn tài khoản nhận tiền mặc định, hoặc chốt link của
+ *   E3-2 chặn trước khi gọi Tingee (Sự kiện đã Kết thúc, Ẩn, bị khóa, đã hủy, hoặc BTC mất điều kiện bán Vé có phí);
+ *   Đơn `expired`.
  * - `timeout`: kết quả mơ hồ (timeout, lỗi mạng, phản hồi lạ); Đơn `expired`, không thử lại cùng Đơn.
  */
 export const PaymentLinkError = {
@@ -305,8 +307,9 @@ export type PaymentRecipient = z.infer<typeof PaymentRecipient>;
 
 /**
  * Phần thanh toán của Đơn có phí (Story 3.4). `checkoutUrl`: trang thanh toán của Tingee (chỉ http/https), chỉ có khi
- * Đơn `pending` và đã có link; web mở bằng redirect toàn trang. `linkError`: lý do lần tạo link gần nhất thất bại
- * (`PaymentLinkError`), `null` khi chưa thất bại hoặc đã có link.
+ * Đơn `pending`, đã có link và Sự kiện chưa kết thúc (`event.ended = false`; E3-2: sau "Kết thúc" máy chủ thôi mời trả);
+ * web mở bằng redirect toàn trang. `linkError`: lý do lần tạo link gần nhất thất bại (`PaymentLinkError`), `null` khi
+ * chưa thất bại hoặc đã có link.
  */
 export const BuyerOrderPayment = z.object({
   checkoutUrl: z.url({ protocol: /^https?$/ }).nullable(),

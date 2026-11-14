@@ -8,12 +8,15 @@ import {
   domainErrorOf,
   HttpTingeeClient,
   parseTingeeTimestamp,
+  paymentServiceReasonOf,
   TINGEE_ACCOUNT_PAGE_SIZE,
+  TINGEE_ACCOUNTS_PATH,
   TINGEE_CREATE_LINK_PATH,
   TINGEE_GET_ORDER_PATH,
   TINGEE_ORDER_NOT_FOUND_CODE,
   TINGEE_ORDER_STATUS_TIMEOUT_MS,
   TINGEE_PAYMENT_LINK_TIMEOUT_MS,
+  TINGEE_SERVICE_STATUS_TIMEOUT_MS,
   TINGEE_TIMEOUT_MS,
   tingeePortalUrl,
   type PaymentLinkInput,
@@ -21,6 +24,7 @@ import {
 } from '../../src/modules/tingee/index.js';
 import { AppError } from '../../src/platform/http/index.js';
 import {
+  ACCOUNTS_PATH,
   CREATE_LINK_PATH,
   fakeAccount,
   GET_ORDER_PATH,
@@ -527,6 +531,88 @@ describe('HttpTingeeClient.getGatewayOrder (Story 4.1, hợp đồng tạm)', ()
     });
     fake.merchant(A.clientId).orderReplies = [{ code: '1006' }];
     expect((await errorOf(client.getGatewayOrder(A, orderId))).code).toBe(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE);
+  });
+});
+
+describe('dịch vụ thanh toán của BTC (Story 4.2, hợp đồng tạm)', () => {
+  beforeEach(() => {
+    fake.merchant(A.clientId).accountReplies = [];
+  });
+
+  it('lý do theo mã (Mason chốt 13/11): 1033 → token; 1007, 1034 → tingee_disabled; 1133 → gateway_permission_missing; 92/97/1009 → credential_invalid; còn lại null', () => {
+    expect(paymentServiceReasonOf('1033')).toBe('token');
+    expect(paymentServiceReasonOf('1007')).toBe('tingee_disabled');
+    expect(paymentServiceReasonOf('1034')).toBe('tingee_disabled');
+    expect(paymentServiceReasonOf('1133')).toBe('gateway_permission_missing');
+    for (const code of ['92', '97', '1009']) expect(paymentServiceReasonOf(code), code).toBe('credential_invalid');
+    // Nhóm VA (PAYMENT_ACCOUNT_NOT_ALLOWED), mã lạ, lệch giờ, '00': không phải ngắt dịch vụ.
+    for (const code of ['2023', '1023', '1045', '1024', '1072', '1006', '90', '91', '500', '00']) {
+      expect(paymentServiceReasonOf(code), code).toBeNull();
+    }
+    expect(CreateLinkError.rejected('1033').serviceReason).toBe('token');
+    expect(CreateLinkError.rejected('1034')).toMatchObject({ code: 'MERCHANT_SUSPENDED', serviceReason: 'tingee_disabled' });
+    expect(CreateLinkError.rejected('97')).toMatchObject({ code: 'TINGEE_CREDENTIAL_INVALID', serviceReason: 'credential_invalid' });
+    expect(CreateLinkError.rejected('1133')).toMatchObject({
+      code: 'TINGEE_CREDENTIAL_INVALID',
+      serviceReason: 'gateway_permission_missing',
+    });
+    expect(CreateLinkError.rejected('2023').serviceReason).toBeNull();
+    // Mơ hồ (kể cả mã ngắt trong body của HTTP lỗi): không biết Tingee đã nhận request chưa → không phải ngắt dịch vụ.
+    expect(CreateLinkError.ambiguous('http_status', { httpStatus: 500, tingeeCode: '1033' }).serviceReason).toBeNull();
+  });
+
+  it('dò bằng get-va-paging một dòng, ký bằng key của BTC, không merchantId; 00 → active', async () => {
+    expect(TINGEE_ACCOUNTS_PATH).toBe(ACCOUNTS_PATH);
+    expect(await client.getMerchantServiceStatus(A)).toEqual({ status: 'active' });
+    const [req] = fake.calls(ACCOUNTS_PATH);
+    expect(req).toMatchObject({ clientId: A.clientId, signatureValid: true });
+    expect(req!.body).toEqual({ skipCount: 0, maxResultCount: 1 });
+  });
+
+  it('mã ngắt (cả khi kèm HTTP 4xx) → suspended kèm lý do; mọi mã key sai (kể cả 1133: ánh xạ riêng chỉ cho create-link) → credential_invalid', async () => {
+    const cases: [string, number | undefined, string][] = [
+      ['1033', undefined, 'token'],
+      ['1007', undefined, 'tingee_disabled'],
+      ['1034', 403, 'tingee_disabled'],
+      ['1133', 401, 'credential_invalid'],
+    ];
+    for (const [code, httpStatus, reason] of cases) {
+      fake.merchant(A.clientId).accountReplies = [{ code, httpStatus }];
+      expect(await client.getMerchantServiceStatus(A), code).toEqual({ status: 'suspended', reason });
+    }
+    expect(await client.getMerchantServiceStatus({ clientId: A.clientId, secretToken: 'sai-secret' })).toEqual({
+      status: 'suspended',
+      reason: 'credential_invalid',
+    });
+    expect(await client.getMerchantServiceStatus(SUSPENDED)).toEqual({ status: 'suspended', reason: 'tingee_disabled' });
+    expect(await client.getMerchantServiceStatus(FORBIDDEN)).toEqual({ status: 'suspended', reason: 'credential_invalid' });
+  });
+
+  it('lỗi khác → unknown, không ném: HTTP 500, mã lạ, VA (2023), lỗi mạng, JSON hỏng, 00 kèm HTTP lỗi, treo (timeout riêng 5 giây)', async () => {
+    expect(TINGEE_SERVICE_STATUS_TIMEOUT_MS).toBe(5_000);
+    expect(await client.getMerchantServiceStatus(BROKEN)).toEqual({ status: 'unknown' });
+    for (const code of ['1006', '2023']) {
+      fake.merchant(A.clientId).accountReplies = [{ code }];
+      expect(await client.getMerchantServiceStatus(A), code).toEqual({ status: 'unknown' });
+    }
+    fake.merchant(A.clientId).accountReplies = [{ code: '00', httpStatus: 500 }];
+    expect(await client.getMerchantServiceStatus(A)).toEqual({ status: 'unknown' });
+    expect(await new HttpTingeeClient({ baseUrl: 'http://127.0.0.1:1' }).getMerchantServiceStatus(A)).toEqual({
+      status: 'unknown',
+    });
+    await withServerOnce(200, '<html>lỗi</html>', async (c) => {
+      expect(await c.getMerchantServiceStatus(A)).toEqual({ status: 'unknown' });
+    });
+
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    await new HttpTingeeClient({ baseUrl: fake.url }).getMerchantServiceStatus(A);
+    expect(timeout).toHaveBeenCalledWith(5_000);
+    timeout.mockRestore();
+    const quick = new HttpTingeeClient({ baseUrl: fake.url, timeoutMs: 60_000, serviceStatusTimeoutMs: 300 });
+    fake.merchant(A.clientId).accountReplies = ['hang'];
+    const started = Date.now();
+    expect(await quick.getMerchantServiceStatus(A)).toEqual({ status: 'unknown' });
+    expect(Date.now() - started).toBeLessThan(3_000);
   });
 });
 

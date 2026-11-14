@@ -32,6 +32,7 @@ import {
   fetchPublishReadiness,
   publishEvent,
 } from '@/lib/event/api';
+import { refreshEventSaleStatus } from '@/lib/event/sale-status';
 import { fetchStatusNotices, statusNoticesQueryKey } from '@/lib/reporting/api';
 import { statusNoticeContent } from '@/lib/reporting/status-notices';
 
@@ -163,6 +164,7 @@ export function PublishPanel({ orgId, event, onGoToStep }: PublishPanelProps) {
       queryClient.setQueryData(eventQueryKey(orgId, saved.id), saved);
       void queryClient.invalidateQueries({ queryKey: eventQueryKey(orgId, saved.id) });
       void queryClient.invalidateQueries({ queryKey: eventsQueryKey(orgId) });
+      void refreshEventSaleStatus(queryClient, orgId, saved.id);
       toast.success('Đã mở bán Sự kiện.');
     },
     onError: (error) => {
@@ -177,6 +179,7 @@ export function PublishPanel({ orgId, event, onGoToStep }: PublishPanelProps) {
         setFocusPublished(true);
         void queryClient.invalidateQueries({ queryKey: eventQueryKey(orgId, event.id) });
         void queryClient.invalidateQueries({ queryKey: eventsQueryKey(orgId) });
+        void refreshEventSaleStatus(queryClient, orgId);
       }
     },
   });
