@@ -8,6 +8,7 @@ import {
   reviewQueuePath,
   ReviewItemType,
   type ReviewItemDetail,
+  type ReviewQueue,
   type ReviewQueueItem,
 } from '@tickee/contracts';
 import { CircleCheck, SearchX } from 'lucide-react';
@@ -37,21 +38,26 @@ import {
   REVIEW_QUEUE_POLL_MS,
   reviewItemQueryKey,
   reviewQueueQueryKey,
+  reviewQueueQueryPrefix,
 } from '@/lib/reporting/api';
 import { orderStatusBadge, REVIEW_TYPE_LABEL, ticketCountLabel, updatedAtLabel } from '@/lib/reporting/overview';
 import {
   amountSegments,
   EMPTY_VALUE,
   eventFilterLabel,
+  nextFocusItemId,
   paymentMethodLabel,
   REVIEW_QUEUE_EMPTY,
   REVIEW_QUEUE_OFFLINE_TOAST,
   REVIEW_QUEUE_OFFLINE_TOAST_ID,
   reviewLogLabel,
+  reviewLogNote,
   reviewReasonLine,
   reviewTypeBadge,
   UNMATCHED_ORDER_LABEL,
 } from '@/lib/reporting/review-queue';
+
+import { ReviewActions } from './review-actions';
 
 const { label: PAGE_TITLE } = navSection('review-queue');
 
@@ -116,6 +122,7 @@ function ReviewTable({ items, onOpen }: { items: ReviewQueueItem[]; onOpen: Open
                   type="button"
                   aria-haspopup="dialog"
                   data-slot="needs-action-open"
+                  data-review-item-id={item.id}
                   className={
                     item.order
                       ? 'cursor-pointer text-left font-mono text-code underline-offset-4 hover:underline'
@@ -150,6 +157,7 @@ function ReviewList({ items, onOpen }: { items: ReviewQueueItem[]; onOpen: OpenI
             type="button"
             aria-haspopup="dialog"
             data-slot="needs-action-row"
+            data-review-item-id={item.id}
             onClick={(event) => onOpen(item, event.currentTarget)}
             className="flex w-full cursor-pointer flex-col items-start gap-1 py-stack text-left"
           >
@@ -202,7 +210,7 @@ function SheetSection({ title, slot, children }: { title: string; slot: string; 
   );
 }
 
-/** Ba phần của `Sheet`: Giao dịch, Đơn liên quan, Nhật ký (dựng từ dữ liệu sẵn có; Story 4.4 thêm dòng thao tác). */
+/** Ba phần của `Sheet`: Giao dịch, Đơn liên quan, Nhật ký (dữ liệu sẵn có và dòng thao tác kèm người làm, Story 4.4). */
 function ItemDetail({ detail }: { detail: ReviewItemDetail }) {
   const { transaction, order } = detail;
   const orderBadge = order ? orderStatusBadge(order.status) : null;
@@ -263,32 +271,46 @@ function ItemDetail({ detail }: { detail: ReviewItemDetail }) {
       </SheetSection>
       <SheetSection title="Nhật ký" slot="review-log">
         <ol className="flex flex-col gap-1.5">
-          {detail.log.map((entry, i) => (
-            <li key={i} data-slot="review-log-entry" className="flex flex-wrap gap-x-3">
-              <time dateTime={entry.at} className="text-muted-foreground tabular-nums">
-                {formatVnDateTime(entry.at)}
-              </time>
-              <span>{reviewLogLabel(entry, detail.type)}</span>
-            </li>
-          ))}
+          {detail.log.map((entry, i) => {
+            const note = reviewLogNote(entry);
+            return (
+              <li key={i} data-slot="review-log-entry" className="flex min-w-0 flex-wrap gap-x-3">
+                <time dateTime={entry.at} className="text-muted-foreground tabular-nums">
+                  {formatVnDateTime(entry.at)}
+                </time>
+                <span className="min-w-0 wrap-break-word">{reviewLogLabel(entry, detail.type)}</span>
+                {note ? (
+                  <span data-slot="review-log-note" className="w-full min-w-0 text-meta wrap-break-word text-muted-foreground">
+                    {note}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
         </ol>
       </SheetSection>
     </div>
   );
 }
 
-/** `Sheet` chi tiết của mục `item`: tải `GET …/review-items/:itemId` khi mở (mọi trạng thái của mục). */
+/**
+ * `Sheet` chi tiết của mục `item`: tải `GET …/review-items/:itemId` khi mở (mọi trạng thái của mục), footer thao tác
+ * (Story 4.4) dưới chi tiết.
+ */
 function ItemSheet({
   orgId,
   item,
   open,
   onOpenChange,
+  onLeft,
   returnFocus,
 }: {
   orgId: string;
   item: ReviewQueueItem | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Mục vừa rời hàng sau một thao tác của chính người xem. */
+  onLeft: (itemId: string) => void;
   returnFocus: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -316,7 +338,13 @@ function ItemSheet({
 
   let body: ReactNode;
   if (detail.data) {
-    body = <ItemDetail detail={detail.data} />;
+    const current = detail.data;
+    body = (
+      <>
+        <ItemDetail detail={current} />
+        <ReviewActions key={current.id} orgId={orgId} detail={current} onLeft={() => onLeft(current.id)} />
+      </>
+    );
   } else if (detail.isError && !handledElsewhere(detail.error)) {
     const notFound = hasErrorCode(detail.error, ErrorCode.REVIEW_ITEM_NOT_FOUND);
     body = (
@@ -404,7 +432,8 @@ function useBrowserOnline(): boolean {
  * kèm chip "Bỏ lọc". Tự cập nhật theo tín hiệu `org_review_items_changed` của stream cấp BTC mà khung dashboard giữ
  * (`StatusBannerStack` invalidate khóa của trang này); stream chưa kết nối thì polling 10 giây. Mất mạng → một toast
  * mỗi lần mất mạng, hàng giữ dữ liệu cũ kèm "Cập nhật lúc HH:MM". Tải lần đầu lỗi → banner kèm "Thử lại"; Sự kiện lọc
- * không tồn tại → `empty-state` kèm "Xem mọi mục"; `401` → đăng nhập. Chỉ đọc: thao tác xử lý là Story 4.4.
+ * không tồn tại → `empty-state` kèm "Xem mọi mục"; `401` → đăng nhập. Thao tác xử lý mục (Story 4.4) ở footer của
+ * `Sheet` (`ReviewActions`): mục rời hàng thì `Sheet` đóng, focus về hàng kế tiếp, hết hàng thì về tiêu đề trang.
  */
 export function ReviewQueueView({ orgId, eventId }: { orgId: string; eventId: string | null }) {
   const organization = useCurrentOrganization();
@@ -421,10 +450,47 @@ export function ReviewQueueView({ orgId, eventId }: { orgId: string; eventId: st
   const [selected, setSelected] = useState<ReviewQueueItem | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  /** Nơi nhận focus khi `Sheet` đóng: hàng đã mở `Sheet`, hoặc (mục vừa rời hàng) hàng kế tiếp / tiêu đề trang. */
+  const focusOnClose = useRef<{ kind: 'opener' } | { kind: 'item'; id: string } | { kind: 'title' }>({ kind: 'opener' });
   const openItem: OpenItem = (item, element) => {
     opener.current = element;
+    focusOnClose.current = { kind: 'opener' };
     setSelected(item);
     setSheetOpen(true);
+  };
+
+  /**
+   * Mục `itemId` rời hàng sau thao tác của chính người xem (4.3 triage #22): gỡ ngay khỏi mọi hàng đã tải (không chờ tải
+   * lại), đóng `Sheet`, focus về hàng kế tiếp (không có thì hàng trước), hết hàng thì về tiêu đề trang.
+   */
+  const leaveItem = (itemId: string) => {
+    const next = nextFocusItemId(query.data?.items.map((i) => i.id) ?? [], itemId);
+    focusOnClose.current = next ? { kind: 'item', id: next } : { kind: 'title' };
+    queryClient.setQueriesData<ReviewQueue>({ queryKey: [...reviewQueueQueryPrefix(orgId), 'list'] }, (old) =>
+      old ? { ...old, items: old.items.filter((i) => i.id !== itemId) } : old,
+    );
+    setSheetOpen(false);
+  };
+
+  /** Focus vào hàng của mục `itemId` đang hiện (bảng từ `md`, thẻ dưới `md`); không thấy → `false`. */
+  const focusRow = (itemId: string): boolean => {
+    const rows = document.querySelectorAll<HTMLElement>(`[data-review-item-id="${CSS.escape(itemId)}"]`);
+    const visible = Array.from(rows).find((el) => el.getClientRects().length > 0);
+    visible?.focus();
+    return visible !== undefined;
+  };
+
+  const returnFocus = () => {
+    const target = focusOnClose.current;
+    focusOnClose.current = { kind: 'opener' };
+    if (target.kind === 'item' && focusRow(target.id)) return;
+    // Hàng đã mở `Sheet` không còn (thành viên khác vừa xử lý mục, hàng tải lại) → tiêu đề trang.
+    if (target.kind === 'opener' && opener.current?.isConnected) {
+      opener.current.focus();
+      return;
+    }
+    titleRef.current?.focus();
   };
 
   const unauthenticated = hasErrorCode(query.error, ErrorCode.UNAUTHENTICATED);
@@ -512,7 +578,7 @@ export function ReviewQueueView({ orgId, eventId }: { orgId: string; eventId: st
 
   return (
     <div className="flex min-w-0 flex-col gap-section pt-2">
-      <PageHeading eyebrow={organization.name} title={PAGE_TITLE} />
+      <PageHeading eyebrow={organization.name} title={PAGE_TITLE} titleRef={titleRef} />
       {eventId && data?.event ? <EventFilterChip orgId={orgId} name={data.event.name} /> : null}
       <div className="flex min-w-0 flex-col">
         {/* Vùng live luôn có trong DOM (rỗng thì không chiếm chỗ): nhãn hiện ra được đọc cho trình đọc màn hình. */}
@@ -530,7 +596,8 @@ export function ReviewQueueView({ orgId, eventId }: { orgId: string; eventId: st
         item={selected}
         open={sheetOpen}
         onOpenChange={setSheetOpen}
-        returnFocus={() => opener.current?.focus()}
+        onLeft={leaveItem}
+        returnFocus={returnFocus}
       />
     </div>
   );

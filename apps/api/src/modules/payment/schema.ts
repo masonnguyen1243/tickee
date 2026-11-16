@@ -1,4 +1,10 @@
-import { REVIEW_ITEM_REASONS, REVIEW_ITEM_RESOLUTIONS, REVIEW_ITEM_STATUSES, REVIEW_ITEM_TYPES } from '@tickee/contracts';
+import {
+  DISMISS_REASON_MAX,
+  REVIEW_ITEM_REASONS,
+  REVIEW_ITEM_RESOLUTIONS,
+  REVIEW_ITEM_STATUSES,
+  REVIEW_ITEM_TYPES,
+} from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import { bigint, check, index, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, id, timestamptz } from '../../platform/db/index.js';
@@ -81,11 +87,13 @@ export const paymentEvents = pgTable(
  * - `reason`: chỉ loại `orphan`, và bắt buộc với loại đó (`REVIEW_ITEM_REASONS`).
  * - `resolution`: có đúng khi `status = 'resolved'`; `event_cancelled`/`duplicate_payment`/`unmatched` chỉ
  *   `refunded`/`dismissed` (không phát Vé).
+ * - `dismiss_reason` (Story 4.4): lý do "Bỏ qua" (đã trim, 1–`DISMISS_REASON_MAX` ký tự), có đúng khi `resolution =
+ *   'dismissed'`. Không bao giờ vào audit hay log.
  * - Unique một phần `(order_id, type) WHERE status = 'open' AND type IN ('amount_mismatch', 'orphan')`: hai loại này đưa
  *   Đơn vào `review`, nên khoản tiền sau cho cùng Đơn đã là `duplicate_payment`. `event_cancelled` và
  *   `duplicate_payment` không unique theo Đơn: mỗi khoản tiền một mục, BTC hoàn đủ từng khoản.
  *
- * `tickee_app` chỉ UPDATE được `status`, `resolution` (`UPDATE_PROTECTED_COLUMNS`).
+ * `tickee_app` chỉ UPDATE được `status`, `resolution`, `dismiss_reason` (`UPDATE_PROTECTED_COLUMNS`).
  */
 export const reviewItems = pgTable(
   'review_items',
@@ -102,6 +110,7 @@ export const reviewItems = pgTable(
     reason: text('reason', { enum: REVIEW_ITEM_REASONS }),
     status: text('status', { enum: REVIEW_ITEM_STATUSES }).notNull().default('open'),
     resolution: text('resolution', { enum: REVIEW_ITEM_RESOLUTIONS }),
+    dismissReason: text('dismiss_reason'),
     createdAt: createdAt(),
   },
   (t) => [
@@ -124,6 +133,10 @@ export const reviewItems = pgTable(
     check(
       'review_items_resolution_check',
       sql`(${t.status} = 'resolved') = (${t.resolution} IS NOT NULL) AND (${t.resolution} IS NULL OR ${t.resolution} IN ('approved', 'rejected', 'refunded', 'dismissed'))`,
+    ),
+    check(
+      'review_items_dismiss_reason_check',
+      sql`(${t.resolution} IS NOT DISTINCT FROM 'dismissed') = (${t.dismissReason} IS NOT NULL) AND (${t.dismissReason} IS NULL OR char_length(${t.dismissReason}) BETWEEN 1 AND ${sql.raw(String(DISMISS_REASON_MAX))})`,
     ),
     check(
       'review_items_refund_only_check',

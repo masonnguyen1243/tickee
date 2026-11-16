@@ -7,12 +7,13 @@ import {
   type Membership,
   type Organization,
 } from '@tickee/contracts';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { z } from 'zod';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import { audit } from '../../platform/audit/index.js';
 import { DATABASE, type Database, type DbExecutor } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
+import { userContacts } from '../identity/index.js';
 import { members, organizations } from './schema.js';
 
 /** Read model cho mô-đun khác (vd. trang Sự kiện công khai): tên BTC trong `scope`; `null` nếu BTC không còn. */
@@ -41,6 +42,30 @@ export async function organizerContactOf(
     .from(organizations)
     .where(orgScope(scope)({ organizationId: organizations.id }));
   return row ?? null;
+}
+
+/**
+ * Read model cho nhật ký thao tác (Story 4.4, `reporting`): tên hiển thị của các thành viên *hiện tại* của BTC trong
+ * `scope` theo lô id tài khoản, chỉ tên (không email). Tài khoản không có tên (đăng nhập OTP) → chuỗi rỗng; id không
+ * phải thành viên BTC này (kể cả thành viên đã bị xóa) không có trong kết quả — bên gọi hiện tên chung. Danh sách rỗng →
+ * không chạm DB.
+ */
+export async function memberNamesOf(
+  db: DbExecutor,
+  scope: Pick<AccessContext, 'organizationId'>,
+  userIds: readonly string[],
+): Promise<Map<string, string>> {
+  const ids = [...new Set(userIds)];
+  if (ids.length === 0) return new Map();
+  const rows = await db
+    .select({ userId: members.userId })
+    .from(members)
+    .where(and(orgScope(scope)(members), inArray(members.userId, ids)));
+  const contacts = await userContacts(
+    db,
+    rows.map((r) => r.userId),
+  );
+  return new Map(rows.map((r) => [r.userId, contacts.get(r.userId)?.name ?? '']));
 }
 
 /** Body `POST /v1/orgs` sau khi qua schema (tên đã trim, liên hệ trống → `null`). */

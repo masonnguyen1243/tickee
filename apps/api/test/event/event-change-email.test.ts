@@ -402,12 +402,12 @@ describe('job gốc và job con (gọi thẳng)', () => {
     expect(await sendEventChangeEmail(sender(), payload, stranger.userId)).toBe('skipped');
     expect(await sendEventChangeEmail(sender(), { eventId: randomUUID(), version: 1 }, buyer.userId)).toBe('skipped');
 
-    await h.db.pool.query("UPDATE orders SET status = 'cancelled' WHERE event_id = $1 AND user_id = $2", [
+    await h.db.pool.query("UPDATE orders SET status = 'cancelled', cancel_reason = 'rejected' WHERE event_id = $1 AND user_id = $2", [
       sale.event.id,
       buyer.userId,
     ]);
     expect(await sendEventChangeEmail(sender(), payload, buyer.userId)).toBe('skipped');
-    await h.db.pool.query("UPDATE orders SET status = 'paid' WHERE event_id = $1 AND user_id = $2", [
+    await h.db.pool.query("UPDATE orders SET status = 'paid', cancel_reason = NULL WHERE event_id = $1 AND user_id = $2", [
       sale.event.id,
       buyer.userId,
     ]);

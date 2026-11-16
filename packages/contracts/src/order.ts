@@ -253,6 +253,20 @@ export type OrderStatus = (typeof OrderStatus)[keyof typeof OrderStatus];
 export const ORDER_STATUSES = Object.values(OrderStatus) as [OrderStatus, ...OrderStatus[]];
 export const orderStatusSchema = z.enum(OrderStatus);
 
+/**
+ * Lý do Đơn bị hủy (`orders.cancel_reason`), có đúng khi Đơn `cancelled`/`refunded` (giữ nguyên khi `cancelled` →
+ * `refunded`): `rejected` — BTC "Từ chối" khoản tiền trên mục Cần xử lý (Story 4.4, `review` → `cancelled`);
+ * `event_cancelled` — Sự kiện bị hủy (Story 7.1). Trang Đơn và Vé của tôi hiện cả hai bằng `buyerStatus` sẵn có
+ * (`cancelled_by_organizer` / `event_cancelled`).
+ */
+export const OrderCancelReason = {
+  REJECTED: 'rejected',
+  EVENT_CANCELLED: 'event_cancelled',
+} as const;
+export type OrderCancelReason = (typeof OrderCancelReason)[keyof typeof OrderCancelReason];
+export const ORDER_CANCEL_REASONS = Object.values(OrderCancelReason) as [OrderCancelReason, ...OrderCancelReason[]];
+export const orderCancelReasonSchema = z.enum(OrderCancelReason);
+
 /** Một dòng của Đơn (bản chụp lúc đặt): tên Hạng vé, giá một Vé, số Vé, thành tiền. */
 export const BuyerOrderItem = z.object({
   ticketTypeId: z.uuid(),

@@ -261,7 +261,7 @@ describe('GET /v1/me/tickets', () => {
       h.db.pool.query(`UPDATE orders SET ${assignment} WHERE id = $1`, [orderId]);
     await set(confirming.orderId, "expires_at = now() - interval '1 second'");
     await set(review.orderId, "status = 'review'");
-    await set(rejected.orderId, "status = 'cancelled'");
+    await set(rejected.orderId, "status = 'cancelled', cancel_reason = 'rejected'");
     await set(eventCancelled.orderId, "status = 'review'");
     await h.db.pool.query("UPDATE events SET status = 'cancelled' WHERE id = $1", [eventCancelled.eventId]);
     await set(expiredRecent.orderId, "status = 'expired', expires_at = now() - interval '29 minutes'");

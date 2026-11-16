@@ -377,6 +377,9 @@ describe('GET …/review-items/:itemId: chi tiết', () => {
         { kind: 'payment_received', at: paidAt },
         { kind: 'item_opened', at: detail.createdAt },
       ],
+      // Story 4.4: Đơn `review` → "Duyệt tay phát Vé", "Từ chối"; Sự kiện còn bán → không tắt.
+      actions: ['approve', 'reject'],
+      approveBlockedReason: null,
     });
   });
 

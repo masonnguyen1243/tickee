@@ -3,7 +3,8 @@ import { escapeHtml, type EmailMessage } from '../../platform/email/index.js';
 
 /*
  * Mẫu email cho Người mua (tiếng Việt): email Vé (mỗi Vé một link chia sẻ) và email báo tiền về muộn mà Hạng vé đã hết
- * (`orphan` `sold_out`) của Story 3.8; email báo Sự kiện đổi giờ hoặc địa điểm của Story 3.10. Bản text và bản HTML; mọi
+ * (`orphan` `sold_out`) của Story 3.8; email báo Sự kiện đổi giờ hoặc địa điểm của Story 3.10; email báo BTC đã hủy Đơn
+ * (`order_rejected`) của Story 4.4. Bản text và bản HTML; mọi
  * chuỗi đưa vào HTML qua `escapeHtml`. Không đính Mã QR vé: QR nằm sau link chia sẻ. Link chứa token nên chỉ nằm trong
  * nội dung email, không bao giờ vào log.
  */
@@ -130,6 +131,37 @@ export function buildOrphanSoldOutEmail({ eventName, orderCode, organizer }: Orp
     html: page(`      <p style="${P_STYLE}">${escapeHtml(ORPHAN_SOLD_OUT_MESSAGE)}</p>
       <p style="${P_STYLE}">${details.map(escapeHtml).join('<br>')}</p>
       <p style="${P_STYLE}">${contact.map(escapeHtml).join('<br>')}</p>`),
+  };
+}
+
+export interface OrderRejectedEmailInput {
+  eventName: string;
+  orderCode: string;
+  organizer: OrganizerContactLine;
+  /** Trang Đơn của web (`{WEB_ORIGIN}/orders/:code`, cần đăng nhập). */
+  orderLink: string;
+}
+
+/** Câu báo chính của email `order_rejected`. */
+export const ORDER_REJECTED_MESSAGE = 'BTC đã hủy Đơn này. Liên hệ BTC để được hoàn tiền nếu bạn đã chuyển.';
+
+/**
+ * Email báo Người mua khi BTC "Từ chối" khoản tiền của Đơn trên mục Cần xử lý (Story 4.4, Đơn `cancelled` `rejected`):
+ * câu báo hủy kèm liên hệ hoàn tiền, tên Sự kiện, mã Đơn, kênh liên hệ BTC và link Trang Đơn.
+ */
+export function buildOrderRejectedEmail({ eventName, orderCode, organizer, orderLink }: OrderRejectedEmailInput): Omit<
+  EmailMessage,
+  'to'
+> {
+  const contact = organizerContactLines(organizer);
+  const details = [`Sự kiện: ${eventName}`, `Mã Đơn: ${orderCode}`];
+  return {
+    subject: `Đơn ${orderCode} đã bị BTC hủy`,
+    text: [ORDER_REJECTED_MESSAGE, '', ...details, '', ...contact, '', `Xem Đơn của bạn: ${orderLink}`].join('\n'),
+    html: page(`      <p style="${P_STYLE}">${escapeHtml(ORDER_REJECTED_MESSAGE)}</p>
+      <p style="${P_STYLE}">${details.map(escapeHtml).join('<br>')}</p>
+      <p style="${P_STYLE}">${contact.map(escapeHtml).join('<br>')}</p>
+      <p style="${MUTED_STYLE}">Xem Đơn của bạn: <a href="${escapeHtml(orderLink)}" style="color:#1C1917">${escapeHtml(orderLink)}</a></p>`),
   };
 }
 

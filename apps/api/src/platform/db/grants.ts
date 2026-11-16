@@ -28,7 +28,7 @@ export const APPEND_ONLY_TABLES = [
 export const UPDATE_PROTECTED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   'public.users': ['platform_admin'],
   // Bản chụp bất biến của Đơn lúc đặt (Story 3.2): chỉ `status`, `payment_link`, `expires_at`, `updated_at` (và cột thêm
-  // sau) ghi được.
+  // sau, vd. `cancel_reason` của Story 4.4) ghi được.
   'public.orders': [
     'id',
     'code',
@@ -60,8 +60,8 @@ export const UPDATE_PROTECTED_COLUMNS: Readonly<Record<string, readonly string[]
     'order_code',
     'issued_at',
   ],
-  // Mục Cần xử lý (Story 3.6): khoản tiền, Đơn, BTC, loại và lý do cố định từ lúc tạo. Ghi được: `status`, `resolution`
-  // (và cột thêm sau).
+  // Mục Cần xử lý (Story 3.6): khoản tiền, Đơn, BTC, loại và lý do cố định từ lúc tạo. Ghi được: `status`, `resolution`,
+  // `dismiss_reason` (Story 4.4, và cột thêm sau).
   'public.review_items': ['id', 'organization_id', 'order_id', 'payment_event_id', 'type', 'reason', 'created_at'],
 };
 

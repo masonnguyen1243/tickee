@@ -15,7 +15,7 @@ import { paymentEvents, reviewItems } from './schema.js';
  * các trường của khoản tiền mà màn BTC cần, không bao giờ `bill_id`, `merchant_id`, `request_id`.
  */
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Phạm vi BTC của người xem. */
 export type ReviewScope = Pick<AccessContext, 'organizationId'>;
@@ -98,6 +98,8 @@ export interface ReviewItemDetailRow {
   reason: ReviewItemReason | null;
   status: ReviewItemStatus;
   resolution: ReviewItemResolution | null;
+  /** Lý do "Bỏ qua" (Story 4.4); có đúng khi `resolution = 'dismissed'`. */
+  dismissReason: string | null;
   createdAt: Date;
   /** `payment_events.paid_amount`. */
   receivedAmount: number | null;
@@ -130,6 +132,7 @@ export async function reviewItemDetailOf(
       reason: reviewItems.reason,
       status: reviewItems.status,
       resolution: reviewItems.resolution,
+      dismissReason: reviewItems.dismissReason,
       createdAt: reviewItems.createdAt,
       receivedAmount: paymentEvents.paidAmount,
       transactionCode: paymentEvents.providerTransactionCode,

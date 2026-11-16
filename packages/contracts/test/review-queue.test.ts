@@ -8,6 +8,7 @@ import {
   ReviewQueueItem,
   ReviewQueueQuery,
   ReviewQueueSummary,
+  reviewItemActionApiPath,
   reviewItemApiPath,
   reviewItemsApiPath,
   reviewItemsSummaryApiPath,
@@ -58,6 +59,8 @@ const detail = (patch: Record<string, unknown> = {}) => ({
     { kind: 'payment_received', at: '2026-11-16T01:12:00.000Z' },
     { kind: 'item_opened', at: '2026-11-16T01:12:05.000Z' },
   ],
+  actions: ['approve', 'reject'],
+  approveBlockedReason: null,
   ...patch,
 });
 
@@ -146,6 +149,29 @@ describe('ReviewItemDetail', () => {
   it('mã lỗi REVIEW_ITEM_NOT_FOUND', () => {
     expect(ErrorCode.REVIEW_ITEM_NOT_FOUND).toBe('REVIEW_ITEM_NOT_FOUND');
   });
+
+  it('Story 4.4: thao tác được phép và lý do tắt "Duyệt tay"; mục đã xử lý → không thao tác', () => {
+    const blocked = ReviewItemDetail.parse(detail({ approveBlockedReason: 'event_ended' }));
+    expect(blocked).toMatchObject({ actions: ['approve', 'reject'], approveBlockedReason: 'event_ended' });
+    expect(ReviewItemDetail.parse(detail({ status: 'resolved', resolution: 'approved', actions: [] })).actions).toEqual([]);
+    expect(ReviewItemDetail.safeParse(detail({ actions: ['match'] })).success).toBe(false);
+    expect(ReviewItemDetail.safeParse(detail({ approveBlockedReason: 'sold_out' })).success).toBe(false);
+    expect(ReviewItemDetail.safeParse(detail({ actions: undefined })).success).toBe(false);
+  });
+
+  it('Story 4.4: dòng thao tác của nhật ký kèm tên người làm, dòng "Bỏ qua" kèm lý do', () => {
+    const log = [
+      { kind: 'payment_received', at: '2026-11-16T01:12:00.000Z' },
+      { kind: 'item_opened', at: '2026-11-16T01:12:05.000Z' },
+      { kind: 'approve_sold_out', at: '2026-11-16T02:00:00.000Z', actorName: 'Lê Minh' },
+      { kind: 'rejected', at: '2026-11-16T02:01:00.000Z', actorName: '' },
+      { kind: 'refunded', at: '2026-11-16T02:02:00.000Z', actorName: 'Lê Minh' },
+    ];
+    expect(ReviewItemDetail.parse(detail({ log })).log).toEqual(log);
+    const dismissed = [{ kind: 'dismissed', at: '2026-11-16T02:02:00.000Z', actorName: 'An', note: 'Khách chuyển nhầm' }];
+    expect(ReviewItemDetail.parse(detail({ log: dismissed })).log).toEqual(dismissed);
+    expect(ReviewItemDetail.parse(detail({ log: [{ kind: 'approved', at: '2026-11-16T02:00:00Z' }] })).log).toHaveLength(1);
+  });
 });
 
 describe('đường API và trang web', () => {
@@ -156,6 +182,13 @@ describe('đường API và trang web', () => {
     expect(reviewItemApiPath(ORG, ITEM)).toBe(`/orgs/${ORG}/review-items/${ITEM}`);
     expect(reviewItemApiPath('a/b', 'c?d')).toBe('/orgs/a%2Fb/review-items/c%3Fd');
     expect(reviewItemsApiPath(ORG, 'a&b')).toBe(`/orgs/${ORG}/review-items?eventId=a%26b`);
+  });
+
+  it('Story 4.4: POST thao tác dưới đường của mục', () => {
+    for (const action of ['approve', 'reject', 'refund', 'dismiss'] as const) {
+      expect(reviewItemActionApiPath(ORG, ITEM, action)).toBe(`/orgs/${ORG}/review-items/${ITEM}/${action}`);
+    }
+    expect(reviewItemActionApiPath('a/b', 'c?d', 'approve')).toBe('/orgs/a%2Fb/review-items/c%3Fd/approve');
   });
 
   it('trang web: /btc/{id}/can-xu-ly, lọc bằng ?suKien=', () => {

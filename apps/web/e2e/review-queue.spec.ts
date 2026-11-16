@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Page, Request } from '@playwright/test';
 
 import { expect, test } from './fixtures';
 import { apiError, me, mockIdentityApi, type Call, type Handler, type Reply } from './identity-mock';
@@ -10,6 +10,10 @@ import { mockOrganizerApi, organization, ORG_ID, ORG_LIVE_URL } from './organize
  * Sự kiện (`?suKien=`, chip "Bỏ lọc"), `Sheet` chi tiết (Enter mở, Esc đóng), hàng trống, lỗi, mất mạng; badge số ở
  * sidebar và tab bar cập nhật qua stream cấp BTC duy nhất của khung (giả bằng `EventSource` điều khiển được). Giờ luôn
  * theo giờ Việt Nam: trình duyệt chạy múi giờ New York. Ca full-stack (IPN → mục → tín hiệu) ở test api.
+ *
+ * Story 4.4-a: footer thao tác của `Sheet` (Duyệt tay, Từ chối, Đã hoàn tay, Bỏ qua) trên API giả có trạng thái: nút theo
+ * `actions` của chi tiết, `Dialog` (Hủy không gọi API), `Idempotency-Key`, toast, lỗi hết chỗ, thua cuộc đua, focus khi
+ * mục rời hàng, 320px.
  */
 
 test.use({ timezoneId: 'America/New_York' });
@@ -72,8 +76,26 @@ const ITEMS: Item[] = [
   },
 ];
 
-/** `ReviewItemDetail` của một mục trong `ITEMS`. */
-function detailOf(item: Item) {
+type LogEntry = { kind: string; at: string; actorName?: string; note?: string };
+
+/** `ReviewItemDetail` (phần test đổi được). */
+type Detail = {
+  id: string;
+  type: string;
+  status: string;
+  resolution: string | null;
+  order: ({ code: string; status: string; ticketCount: number } & Record<string, unknown>) | null;
+  transaction: { receivedAmount: number | null } & Record<string, unknown>;
+  log: LogEntry[];
+  actions: string[];
+  approveBlockedReason: string | null;
+} & Record<string, unknown>;
+
+/** Mục chỉ kết thúc bằng hoàn tay hoặc bỏ qua (không phát Vé). */
+const REFUND_ONLY = ['event_cancelled', 'duplicate_payment', 'unmatched'];
+
+/** `ReviewItemDetail` của một mục trong `ITEMS`; `actions` như api tính cho mục `open` (Đơn `review` hoặc mục chỉ hoàn). */
+function detailOf(item: Item, patch: Partial<Detail> = {}): Detail {
   const orphan = item.type === 'orphan';
   const unmatched = item.type === 'unmatched';
   return {
@@ -106,12 +128,41 @@ function detailOf(item: Item) {
       { kind: 'payment_received', at: '2026-11-16T08:11:30+07:00' },
       { kind: 'item_opened', at: item.createdAt },
     ],
+    actions: REFUND_ONLY.includes(item.type) ? ['refund', 'dismiss'] : ['approve', 'reject'],
+    approveBlockedReason: null,
+    ...patch,
   };
 }
+
+/** Tên thành viên làm thao tác trên API giả. */
+const ACTOR = 'Lê Minh';
+const ACTION_AT = '2026-11-16T09:00:00+07:00';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Một lần `POST …/review-items/:itemId/{action}`: thao tác, mục, header `Idempotency-Key`, thân. */
+type ActionCall = { action: string; itemId: string; key: string | null; body: unknown };
+
+/** `ReviewActionResult` của mục sau thao tác. */
+const resultOf = (detail: Detail, action: string) => ({
+  itemId: detail.id,
+  action,
+  status: detail.status,
+  resolution: detail.resolution,
+  orderCode: detail.order?.code ?? null,
+  orderStatus: detail.order?.status ?? null,
+  ticketCount: detail.order?.ticketCount ?? 0,
+  amount: detail.transaction.receivedAmount,
+});
 
 type State = {
   items: Item[];
   openCount: number;
+  /** Chi tiết hiện tại của từng mục (thao tác giả đổi tại chỗ). */
+  details: Record<string, Detail>;
+  /** Mọi lần POST thao tác, theo thứ tự. */
+  actions: ActionCall[];
+  /** Trả lời thay cho thao tác (vd. 409, 500); `undefined` → API giả xử lý như api thật. */
+  actionReply?: (call: ActionCall, state: State) => Reply | undefined | Promise<Reply | undefined>;
   /** Trả lời của `GET …/review-items` thay cho hàng (vd. lỗi). */
   listReply?: Reply;
   /** Số lần tải hàng kế tiếp trả 500 (đếm lùi). */
@@ -126,7 +177,14 @@ async function openApi(
   initial: Partial<State> = {},
   { role = 'owner', handlers = {} }: { role?: string; handlers?: Record<string, Handler> } = {},
 ): Promise<{ state: State; calls: Call[] }> {
-  const state: State = { items: ITEMS, openCount: ITEMS.length, failList: 0, ...initial };
+  const state: State = {
+    items: ITEMS,
+    openCount: ITEMS.length,
+    failList: 0,
+    details: Object.fromEntries(ITEMS.map((item) => [item.id, detailOf(item)])),
+    actions: [],
+    ...initial,
+  };
   await mockIdentityApi(page, { 'GET /identity/me': () => me(CONSENTED) });
   const calls = await mockOrganizerApi(page, {
     [`GET /orgs/${ORG_ID}`]: () => organization({ role, name: ORG_NAME }),
@@ -145,10 +203,65 @@ async function openApi(
       if (!event) return apiError(404, 'EVENT_NOT_FOUND');
       return { status: 200, body: { event, items: state.items.filter((i) => i.event?.id === eventId) } };
     },
-    ...Object.fromEntries(ITEMS.map((item) => [`GET ${REVIEW_PATH}/${item.id}`, () => ({ status: 200, body: detailOf(item) })])),
+    ...Object.fromEntries(
+      ITEMS.map((item) => [`GET ${REVIEW_PATH}/${item.id}`, () => ({ status: 200, body: state.details[item.id] })]),
+    ),
+    ...Object.fromEntries(
+      ITEMS.flatMap((item) =>
+        ['approve', 'reject', 'refund', 'dismiss'].map((action) => [
+          `POST ${REVIEW_PATH}/${item.id}/${action}`,
+          (request: Request) => act(state, { action, itemId: item.id, key: request.headers()['idempotency-key'] ?? null, body: request.postDataJSON() as unknown }),
+        ]),
+      ),
+    ),
     ...handlers,
   });
   return { state, calls };
+}
+
+/** Mục rời hàng (đã xử lý): bỏ khỏi hàng, giảm badge. */
+function leave(state: State, itemId: string): void {
+  state.items = state.items.filter((i) => i.id !== itemId);
+  state.openCount = Math.max(0, state.openCount - 1);
+}
+
+/** Thao tác như api: chỉ khi có trong `actions`; mục đã ở kết quả của thao tác → 200 trạng thái hiện tại; còn lại 409. */
+async function act(state: State, call: ActionCall): Promise<Reply> {
+  state.actions.push(call);
+  const override = await state.actionReply?.(call, state);
+  if (override) return override;
+  const detail = state.details[call.itemId]!;
+  if (!detail.actions.includes(call.action)) return apiError(409, 'REVIEW_ACTION_NOT_ALLOWED');
+  const log = (kind: string, extra: Partial<LogEntry> = {}) => detail.log.push({ kind, at: ACTION_AT, actorName: ACTOR, ...extra });
+  const resolve = (resolution: string) => {
+    detail.status = 'resolved';
+    detail.resolution = resolution;
+    detail.actions = [];
+    detail.approveBlockedReason = null;
+    leave(state, call.itemId);
+  };
+  switch (call.action) {
+    case 'approve':
+      detail.order!.status = 'paid';
+      resolve('approved');
+      log('approved');
+      break;
+    case 'reject':
+      detail.order!.status = 'cancelled';
+      detail.actions = ['refund'];
+      log('rejected');
+      break;
+    case 'refund':
+      if (detail.order?.status === 'cancelled') detail.order.status = 'refunded';
+      resolve('refunded');
+      log('refunded');
+      break;
+    case 'dismiss':
+      resolve('dismissed');
+      log('dismissed', { note: (call.body as { reason: string }).reason });
+      break;
+  }
+  return { status: 200, body: resultOf(detail, call.action) };
 }
 
 const heading = (page: Page) => page.getByRole('heading', { name: 'Cần xử lý', level: 1 });
@@ -329,8 +442,9 @@ test.describe('Sheet chi tiết', () => {
     await expect(order).toContainText('Lúc tạo07:58 16/11/2026');
     const log = dialog.locator('[data-slot="review-log-entry"]');
     await expect(log).toHaveText(['08:11 16/11/2026Nhận tiền', '08:12 16/11/2026Mở mục · Lệch số tiền']);
-    // Chỉ đọc: chưa có nút thao tác (Story 4.4).
-    await expect(dialog.getByRole('button', { name: /Duyệt|Từ chối|Đã hoàn tay|Bỏ qua/ })).toHaveCount(0);
+    // Story 4.4: footer thao tác theo `actions` của máy chủ (Đơn `review`: Duyệt tay, Từ chối).
+    const footer = dialog.locator('[data-slot="review-actions"]');
+    await expect(footer.getByRole('button')).toHaveText(['Duyệt tay phát Vé', 'Từ chối']);
 
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
@@ -513,5 +627,350 @@ test.describe('badge "Cần xử lý"', () => {
     state.openCount = 2;
     await expect(tabBadge(page)).toHaveText('2', { timeout: 12_000 });
     expect(Date.now() - startedAt).toBeLessThan(12_000);
+  });
+});
+
+/** Toast đang hiện có chữ `text`. */
+const toastOf = (page: Page, text: string) => page.locator('[data-sonner-toast]', { hasText: text });
+const footerOf = (page: Page) => sheet(page).locator('[data-slot="review-actions"]');
+const logOf = (page: Page) => sheet(page).locator('[data-slot="review-log-entry"]');
+
+test.describe('thao tác trên mục (Story 4.4-a)', () => {
+  test('Duyệt tay phát Vé: spinner chặn bấm lặp; POST approve kèm Idempotency-Key (uuid), không thân; toast; Sheet đóng, hàng rời, focus về hàng kế tiếp', async ({
+    page,
+  }) => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { state } = await openApi(page, {
+      actionReply: async () => {
+        await gate;
+        return undefined;
+      },
+    });
+    await page.goto(queuePath);
+    await cards(page).nth(0).click();
+    const dialog = page.getByRole('dialog', { name: 'Lệch số tiền' });
+    const approve = dialog.getByRole('button', { name: 'Duyệt tay phát Vé' });
+    await expect(dialog.getByRole('button', { name: 'Từ chối' })).toBeEnabled();
+    await expect(dialog.getByRole('button', { name: /Đã hoàn tay|Bỏ qua/ })).toHaveCount(0);
+
+    await approve.click();
+    await expect(approve).toHaveAttribute('aria-busy', 'true');
+    await expect(dialog.getByRole('button', { name: 'Từ chối' })).toBeDisabled();
+    await approve.click();
+    release();
+
+    await expect(toastOf(page, 'Đã phát 2 Vé cho Đơn TK5R8W1CAB.')).toBeVisible();
+    await expect(dialog).toBeHidden();
+    await expect(cards(page)).toHaveCount(3);
+    await expect(cards(page).nth(0)).toContainText('Không khớp Đơn nào');
+    await expect(cards(page).nth(0)).toBeFocused();
+    await expect(tabBadge(page)).toHaveText('3');
+    expect(state.actions).toEqual([{ action: 'approve', itemId: itemId(1), key: expect.stringMatching(UUID), body: null }]);
+  });
+
+  test('Sự kiện không còn cho duyệt: nút tắt kèm lý do cạnh nút, không gọi API; "Từ chối" vẫn bấm được', async ({ page }) => {
+    const blocked = detailOf(ITEMS[0]!, { approveBlockedReason: 'event_ended' });
+    const { state } = await openApi(page, { details: { [itemId(1)]: blocked } });
+    await page.goto(queuePath);
+    await cards(page).nth(0).click();
+    const approve = footerOf(page).getByRole('button', { name: 'Duyệt tay phát Vé' });
+    await expect(approve).toBeDisabled();
+    await expect(footerOf(page).locator('[data-slot="review-approve-blocked"]')).toHaveText('Sự kiện đã kết thúc');
+    await expect(approve).toHaveAccessibleDescription('Sự kiện đã kết thúc');
+    await expect(footerOf(page).getByRole('button', { name: 'Từ chối' })).toBeEnabled();
+    expect(state.actions).toEqual([]);
+  });
+
+  test('API từ chối duyệt vì Sự kiện (409 EVENT_LOCKED) → báo tại chỗ, chi tiết tải lại: nút tắt kèm "Sự kiện đang bị khóa"', async ({
+    page,
+  }) => {
+    const { state } = await openApi(page, {
+      actionReply: (call, s) => {
+        s.details[call.itemId]!.approveBlockedReason = 'event_locked';
+        return apiError(409, 'EVENT_LOCKED');
+      },
+    });
+    await page.goto(queuePath);
+    await cards(page).nth(0).click();
+    await footerOf(page).getByRole('button', { name: 'Duyệt tay phát Vé' }).click();
+    await expect(footerOf(page).locator('[data-slot="review-action-error"]')).toContainText('Sự kiện đang bị khóa.');
+    await expect(footerOf(page).locator('[data-slot="review-approve-blocked"]')).toHaveText('Sự kiện đang bị khóa');
+    await expect(footerOf(page).getByRole('button', { name: 'Duyệt tay phát Vé' })).toBeDisabled();
+    await expect(cards(page)).toHaveCount(4);
+    expect(state.actions).toHaveLength(1);
+  });
+
+  test('hết chỗ (409 TICKET_TYPE_SOLD_OUT): Sheet giữ mở, báo tại chỗ, nhật ký thêm "Duyệt tay không thành · Hết chỗ", mục vẫn ở hàng', async ({
+    page,
+  }) => {
+    await openApi(page, {
+      actionReply: (call, s) => {
+        s.details[call.itemId]!.log.push({ kind: 'approve_sold_out', at: ACTION_AT, actorName: ACTOR });
+        return apiError(409, 'TICKET_TYPE_SOLD_OUT');
+      },
+    });
+    await page.goto(queuePath);
+    await cards(page).nth(2).click();
+    const dialog = page.getByRole('dialog', { name: 'Thanh toán mồ côi' });
+    await dialog.getByRole('button', { name: 'Duyệt tay phát Vé' }).click();
+    await expect(dialog.locator('[data-slot="review-action-error"]')).toContainText('Duyệt tay không thành · Hết chỗ');
+    await expect(logOf(page)).toHaveCount(3);
+    await expect(logOf(page).nth(2)).toHaveText('09:00 16/11/2026Duyệt tay không thành · Hết chỗ · Lê Minh');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Duyệt tay phát Vé' })).toBeEnabled();
+    await expect(cards(page)).toHaveCount(4);
+  });
+
+  test('lỗi máy chủ khi duyệt → báo tại chỗ; bấm lại gửi cùng Idempotency-Key', async ({ page }) => {
+    let fail = true;
+    const { state } = await openApi(page, {
+      actionReply: () => {
+        if (!fail) return undefined;
+        fail = false;
+        return apiError(500, 'INTERNAL_ERROR');
+      },
+    });
+    await page.goto(queuePath);
+    await cards(page).nth(0).click();
+    const approve = footerOf(page).getByRole('button', { name: 'Duyệt tay phát Vé' });
+    await approve.click();
+    await expect(footerOf(page).locator('[data-slot="review-action-error"]')).toContainText('Chưa duyệt tay được');
+    await approve.click();
+    await expect(toastOf(page, 'Đã phát 2 Vé cho Đơn TK5R8W1CAB.')).toBeVisible();
+    expect(state.actions).toHaveLength(2);
+    expect(state.actions[0]!.key).toMatch(UUID);
+    expect(state.actions[1]!.key).toBe(state.actions[0]!.key);
+  });
+
+  test('lỗi máy chủ trong Dialog "Từ chối" → Dialog giữ mở, báo "Chưa từ chối được"; xác nhận lại gửi cùng Idempotency-Key', async ({
+    page,
+  }) => {
+    let fail = true;
+    const { state } = await openApi(page, {
+      actionReply: (call) => {
+        if (call.action !== 'reject' || !fail) return undefined;
+        fail = false;
+        return apiError(500, 'INTERNAL_ERROR');
+      },
+    });
+    await page.goto(queuePath);
+    await cards(page).nth(0).click();
+    await footerOf(page).getByRole('button', { name: 'Từ chối' }).click();
+    const reject = page.getByRole('dialog', { name: 'Từ chối khoản tiền này?' });
+    await reject.getByRole('button', { name: 'Từ chối' }).click();
+    await expect(reject).toContainText('Chưa từ chối được');
+    await expect(reject).toBeVisible();
+    expect(state.actions).toHaveLength(1);
+    await reject.getByRole('button', { name: 'Từ chối' }).click();
+    await expect(toastOf(page, 'Đã hủy Đơn TK5R8W1CAB. Hoàn tiền cho khách rồi bấm "Đã hoàn tay".')).toBeVisible();
+    await expect(reject).toBeHidden();
+    expect(state.actions.map((a) => a.action)).toEqual(['reject', 'reject']);
+    expect(state.actions[0]!.key).toMatch(UUID);
+    expect(state.actions[1]!.key).toBe(state.actions[0]!.key);
+  });
+
+  test('từ md: Từ chối qua Dialog (Hủy không gọi API) → Đơn hủy, Sheet ở lại chỉ còn "Đã hoàn tay"; Đã hoàn tay (Dialog) → hàng rời, focus về hàng kế tiếp; mỗi thao tác một khóa', async ({
+    page,
+  }) => {
+    await page.setViewportSize(DESKTOP);
+    const { state } = await openApi(page);
+    await page.goto(queuePath);
+    await rows(page).nth(2).getByRole('button', { name: 'TK9B2X7EAB' }).click();
+    const sheetDialog = page.getByRole('dialog', { name: 'Thanh toán mồ côi' });
+    await sheetDialog.getByRole('button', { name: 'Từ chối' }).click();
+
+    const reject = page.getByRole('dialog', { name: 'Từ chối khoản tiền này?' });
+    await expect(reject).toContainText('Đơn TK9B2X7EAB sẽ bị hủy.');
+    await expect(reject).toContainText('Mục ở lại hàng Cần xử lý tới khi bạn bấm "Đã hoàn tay".');
+    await reject.getByRole('button', { name: 'Hủy' }).click();
+    await expect(reject).toBeHidden();
+    expect(state.actions).toEqual([]);
+
+    await sheetDialog.getByRole('button', { name: 'Từ chối' }).click();
+    await reject.getByRole('button', { name: 'Từ chối' }).click();
+    await expect(toastOf(page, 'Đã hủy Đơn TK9B2X7EAB. Hoàn tiền cho khách rồi bấm "Đã hoàn tay".')).toBeVisible();
+    await expect(reject).toBeHidden();
+    await expect(sheetDialog).toBeVisible();
+    await expect(footerOf(page).getByRole('button')).toHaveText(['Đã hoàn tay']);
+    // Nút "Từ chối" đã mất: focus ở lại trong `Sheet`, trên "Đã hoàn tay".
+    await expect(footerOf(page).getByRole('button', { name: 'Đã hoàn tay' })).toBeFocused();
+    await expect(sheetDialog.locator('[data-slot="review-order"] [data-slot="status-badge"]')).toHaveText('Đã hủy');
+    await expect(logOf(page).last()).toHaveText('09:00 16/11/2026Từ chối · Lê Minh');
+    // Mục vẫn `open`: ở lại hàng.
+    await expect(rows(page)).toHaveCount(4);
+
+    await footerOf(page).getByRole('button', { name: 'Đã hoàn tay' }).click();
+    const refund = page.getByRole('dialog', { name: 'Ghi nhận đã hoàn tay?' });
+    await expect(refund).toContainText('Bạn đã chuyển trả 300.000đ cho khách ngoài Tickee.');
+    await expect(refund).toContainText('Không hoàn tác được.');
+    await refund.getByRole('button', { name: 'Đã hoàn tay' }).click();
+    await expect(toastOf(page, 'Đã ghi nhận hoàn tay 300.000đ.')).toBeVisible();
+    await expect(sheetDialog).toBeHidden();
+    await expect(rows(page)).toHaveCount(3);
+    await expect(rows(page).nth(2).getByRole('button', { name: 'TK3J6N4DAB' })).toBeFocused();
+
+    expect(state.actions.map((a) => [a.action, a.itemId, a.body])).toEqual([
+      ['reject', itemId(3), null],
+      ['refund', itemId(3), null],
+    ]);
+    expect(state.actions[0]!.key).toMatch(UUID);
+    expect(state.actions[1]!.key).toMatch(UUID);
+    expect(state.actions[1]!.key).not.toBe(state.actions[0]!.key);
+  });
+
+  test('Bỏ qua: lý do bắt buộc (nút xác nhận tắt, FieldError), Hủy không gọi API; xác nhận gửi lý do đã trim, nhật ký kèm lý do', async ({
+    page,
+  }) => {
+    const { state } = await openApi(page);
+    await page.goto(queuePath);
+    await cards(page).nth(1).click();
+    const sheetDialog = page.getByRole('dialog', { name: 'Giao dịch chưa khớp' });
+    await expect(footerOf(page).getByRole('button')).toHaveText(['Đã hoàn tay', 'Bỏ qua']);
+    await sheetDialog.getByRole('button', { name: 'Bỏ qua' }).click();
+
+    const dismiss = page.getByRole('dialog', { name: 'Bỏ qua mục này?' });
+    const confirm = dismiss.getByRole('button', { name: 'Bỏ qua' });
+    const reason = dismiss.getByRole('textbox', { name: 'Lý do' });
+    await expect(confirm).toBeDisabled();
+    await reason.fill('   ');
+    await expect(dismiss.getByRole('alert')).toHaveText('Nhập lý do bỏ qua.');
+    await expect(reason).toHaveAttribute('aria-invalid', 'true');
+    await expect(confirm).toBeDisabled();
+    await dismiss.getByRole('button', { name: 'Hủy' }).click();
+    await expect(dismiss).toBeHidden();
+    expect(state.actions).toEqual([]);
+
+    await sheetDialog.getByRole('button', { name: 'Bỏ qua' }).click();
+    await expect(reason).toHaveValue('');
+    await reason.fill('  Khách chuyển nhầm, đã liên hệ  ');
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+    await expect(toastOf(page, 'Đã bỏ qua mục.')).toBeVisible();
+    await expect(sheetDialog).toBeHidden();
+    await expect(cards(page)).toHaveCount(3);
+    await expect(cards(page).nth(1)).toContainText('TK9B2X7EAB');
+    await expect(cards(page).nth(1)).toBeFocused();
+    expect(state.actions).toEqual([
+      { action: 'dismiss', itemId: itemId(2), key: expect.stringMatching(UUID), body: { reason: 'Khách chuyển nhầm, đã liên hệ' } },
+    ]);
+    expect(state.details[itemId(2)]!.log.at(-1)).toMatchObject({ kind: 'dismissed', note: 'Khách chuyển nhầm, đã liên hệ' });
+  });
+
+  test('nhật ký mục đã xử lý: dòng "Bỏ qua" kèm lý do; người làm không có tên → "Thành viên BTC"; không có nút thao tác', async ({
+    page,
+  }) => {
+    const done = detailOf(ITEMS[1]!, {
+      status: 'resolved',
+      resolution: 'dismissed',
+      actions: [],
+      log: [
+        { kind: 'payment_received', at: '2026-11-16T08:11:30+07:00' },
+        { kind: 'item_opened', at: ITEMS[1]!.createdAt },
+        { kind: 'dismissed', at: ACTION_AT, actorName: '', note: 'Khách chuyển nhầm' },
+      ],
+    });
+    await openApi(page, { details: { [itemId(2)]: done } });
+    await page.goto(queuePath);
+    await cards(page).nth(1).click();
+    await expect(logOf(page).last()).toContainText('Bỏ qua · Thành viên BTC');
+    await expect(logOf(page).last().locator('[data-slot="review-log-note"]')).toHaveText('Lý do: Khách chuyển nhầm');
+    await expect(footerOf(page)).toHaveCount(0);
+  });
+
+  test('Đã hoàn tay trên Thanh toán trùng: Dialog nêu Đơn giữ nguyên (Hủy không gọi API); mục cuối cùng rời hàng → focus về tiêu đề trang', async ({
+    page,
+  }) => {
+    const { state } = await openApi(page, { items: [ITEMS[3]!], openCount: 1 });
+    await page.goto(queuePath);
+    await cards(page).nth(0).click();
+    const sheetDialog = page.getByRole('dialog', { name: 'Thanh toán trùng' });
+    await sheetDialog.getByRole('button', { name: 'Đã hoàn tay' }).click();
+    const refund = page.getByRole('dialog', { name: 'Ghi nhận đã hoàn tay?' });
+    await expect(refund).toContainText('Đơn TK3J6N4DAB, Vé và doanh thu giữ nguyên.');
+    await refund.getByRole('button', { name: 'Hủy' }).click();
+    await expect(refund).toBeHidden();
+    expect(state.actions).toEqual([]);
+
+    await sheetDialog.getByRole('button', { name: 'Đã hoàn tay' }).click();
+    await refund.getByRole('button', { name: 'Đã hoàn tay' }).click();
+    await expect(toastOf(page, 'Đã ghi nhận hoàn tay 300.000đ.')).toBeVisible();
+    await expect(sheetDialog).toBeHidden();
+    await expect(page.locator('[data-slot="empty-state"]')).toContainText('Không có gì cần xử lý.');
+    await expect(heading(page)).toBeFocused();
+    expect(state.actions.map((a) => a.action)).toEqual(['refund']);
+  });
+
+  test('thua cuộc đua (409 REVIEW_ACTION_NOT_ALLOWED): toast "Mục này vừa được xử lý.", hàng và chi tiết tải lại', async ({
+    page,
+  }) => {
+    const { state, calls } = await openApi(page, {
+      actionReply: (call, s) => {
+        // Thành viên khác vừa từ chối rồi hoàn tay mục này.
+        const detail = s.details[call.itemId]!;
+        Object.assign(detail, { status: 'resolved', resolution: 'refunded', actions: [] });
+        detail.order!.status = 'refunded';
+        detail.log.push({ kind: 'refunded', at: ACTION_AT, actorName: 'Phạm Hà' });
+        leave(s, call.itemId);
+        return apiError(409, 'REVIEW_ACTION_NOT_ALLOWED');
+      },
+    });
+    await page.goto(queuePath);
+    await cards(page).nth(0).click();
+    const before = listGets(calls).length;
+    await footerOf(page).getByRole('button', { name: 'Duyệt tay phát Vé' }).click();
+    await expect(toastOf(page, 'Mục này vừa được xử lý.')).toBeVisible();
+    await expect(cards(page)).toHaveCount(3);
+    expect(listGets(calls).length).toBeGreaterThan(before);
+    const dialog = page.getByRole('dialog', { name: 'Lệch số tiền' });
+    await expect(logOf(page).last()).toHaveText('09:00 16/11/2026Đã hoàn tay · Phạm Hà');
+    await expect(dialog.locator('[data-slot="review-actions"]')).toHaveCount(0);
+    expect(state.actions).toHaveLength(1);
+    // Hàng đã mở `Sheet` không còn: đóng → focus về tiêu đề trang.
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(heading(page)).toBeFocused();
+  });
+
+  test('320px: Sheet có thao tác và các Dialog không cuộn ngang', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await openApi(page);
+    await page.goto(queuePath);
+    const settle = (locator: ReturnType<Page['locator']>) =>
+      locator.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    const within320 = async (locator: ReturnType<Page['locator']>) => {
+      const box = (await locator.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(320);
+    };
+
+    await cards(page).nth(0).click();
+    await expect(footerOf(page).getByRole('button')).toHaveCount(2);
+    await settle(sheet(page));
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    await within320(footerOf(page));
+    await footerOf(page).getByRole('button', { name: 'Từ chối' }).click();
+    const reject = page.getByRole('dialog', { name: 'Từ chối khoản tiền này?' });
+    await settle(reject);
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    await within320(reject);
+    await reject.getByRole('button', { name: 'Hủy' }).click();
+    await expect(reject).toBeHidden();
+    await page.keyboard.press('Escape');
+    await expect(sheet(page)).toHaveCount(0);
+
+    await cards(page).nth(1).click();
+    await footerOf(page).getByRole('button', { name: 'Bỏ qua' }).click();
+    const dismiss = page.getByRole('dialog', { name: 'Bỏ qua mục này?' });
+    await dismiss.getByRole('textbox', { name: 'Lý do' }).fill('Khách chuyển nhầm '.repeat(10));
+    await settle(dismiss);
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    await within320(dismiss);
+    await dismiss.getByRole('button', { name: 'Hủy' }).click();
+    await footerOf(page).getByRole('button', { name: 'Đã hoàn tay' }).click();
+    const refund = page.getByRole('dialog', { name: 'Ghi nhận đã hoàn tay?' });
+    await settle(refund);
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    await within320(refund);
   });
 });

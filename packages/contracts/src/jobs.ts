@@ -94,6 +94,11 @@ export const BuyerEmailKind = {
   TICKETS: 'tickets',
   /** Tiền về muộn cho Đơn đã hết hạn mà Hạng vé đã hết (mục `orphan` lý do `sold_out`): BTC sẽ liên hệ hoàn tiền. */
   ORPHAN_SOLD_OUT: 'orphan_sold_out',
+  /**
+   * BTC "Từ chối" khoản tiền của Đơn trên mục Cần xử lý (Story 4.4, Đơn `review` → `cancelled` `rejected`): BTC đã hủy
+   * Đơn, liên hệ BTC để được hoàn tiền.
+   */
+  ORDER_REJECTED: 'order_rejected',
 } as const;
 export type BuyerEmailKind = (typeof BuyerEmailKind)[keyof typeof BuyerEmailKind];
 export const buyerEmailKindSchema = z.enum(BuyerEmailKind);

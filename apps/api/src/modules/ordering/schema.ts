@@ -1,4 +1,4 @@
-import { FUNNEL_EVENT_TYPES, ORDER_STATUSES, PAYMENT_LINK_ERRORS } from '@tickee/contracts';
+import { FUNNEL_EVENT_TYPES, ORDER_CANCEL_REASONS, ORDER_STATUSES, PAYMENT_LINK_ERRORS } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import { bigint, boolean, check, index, integer, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, id, timestamptz } from '../../platform/db/index.js';
@@ -92,6 +92,10 @@ export type PaidSource = (typeof PAID_SOURCES)[number];
  * Thanh toán (`markPaid`): `paid_at`, `paid_amount` (số tiền ghi nhận, Đơn 0đ là 0), `paid_source` (`PAID_SOURCES`) có
  * đủ cả ba hoặc không có gì; Đơn `paid` luôn có. Đơn tổng 0đ (Story 3.3) có `expires_at` = lúc tạo (không Giữ chỗ).
  *
+ * Hủy (Story 4.4): `cancel_reason` (`ORDER_CANCEL_REASONS`) có đúng khi Đơn `cancelled`/`refunded` (giữ nguyên khi
+ * `cancelled` → `refunded`): `rejected` — BTC từ chối khoản tiền trên mục Cần xử lý; `event_cancelled` — Sự kiện bị hủy
+ * (Story 7.1).
+ *
  * Unique: `code`; `(user_id, idempotency_key)` (gửi lại cùng khóa trả Đơn đã có); một phần `(user_id, event_id) WHERE
  * status = 'pending'` (tối đa một Đơn chờ mỗi Người mua mỗi Sự kiện). `funnel_id`: `f` của lần bấm "Mua" dẫn tới Đơn.
  */
@@ -126,6 +130,7 @@ export const orders = pgTable(
     paidAt: timestamptz('paid_at'),
     paidAmount: bigint('paid_amount', { mode: 'number' }),
     paidSource: text('paid_source', { enum: PAID_SOURCES }),
+    cancelReason: text('cancel_reason', { enum: ORDER_CANCEL_REASONS }),
     createdAt: createdAt(),
     updatedAt: timestamptz('updated_at')
       .notNull()
@@ -151,6 +156,10 @@ export const orders = pgTable(
     check(
       'orders_payment_link_error_check',
       sql`${t.paymentLinkError} IS NULL OR ${t.paymentLinkError} IN ('provider_error', 'sales_paused', 'timeout')`,
+    ),
+    check(
+      'orders_cancel_reason_check',
+      sql`(${t.status} IN ('cancelled', 'refunded')) = (${t.cancelReason} IS NOT NULL) AND (${t.cancelReason} IS NULL OR ${t.cancelReason} IN ('rejected', 'event_cancelled'))`,
     ),
     check(
       'orders_paid_check',

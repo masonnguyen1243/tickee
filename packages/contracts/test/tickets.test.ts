@@ -84,6 +84,11 @@ describe('job email Người mua', () => {
       kind: 'orphan_sold_out',
       orderId: ORDER,
     });
+    expect(SendBuyerEmailPayload.parse({ kind: 'order_rejected', orderId: ORDER })).toEqual({
+      kind: 'order_rejected',
+      orderId: ORDER,
+    });
+    expect(Object.values(BuyerEmailKind)).toEqual(['tickets', 'orphan_sold_out', 'order_rejected']);
     expect(SendBuyerEmailPayload.safeParse({ kind: 'receipt', orderId: ORDER }).success).toBe(false);
     expect(SendBuyerEmailPayload.safeParse({ kind: 'tickets', orderId: 'TK8F3Q2AXM' }).success).toBe(false);
   });

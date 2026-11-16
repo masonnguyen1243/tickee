@@ -410,7 +410,9 @@ describe('Matrix: Sự kiện đã hủy', () => {
     // Hủy Sự kiện (Story 7.1) đưa Đơn chờ sang `cancelled` và nhả chỗ; ở đây Đơn đã hết hạn rồi mới hủy.
     const cancelled = await placeIn(sale, [1]);
     await expire(cancelled);
-    await h.db.pool.query("UPDATE orders SET status = 'cancelled' WHERE id = $1", [cancelled.orderId]);
+    await h.db.pool.query("UPDATE orders SET status = 'cancelled', cancel_reason = 'event_cancelled' WHERE id = $1", [
+      cancelled.orderId,
+    ]);
     expect(await inventory(h, tier)).toEqual({ capacity: 20, sold: 3, held: 2 });
     await setEvent(sale.event.id, CANCELLED);
 
@@ -577,7 +579,7 @@ describe('lỗi giữa chừng', () => {
     await expectInvariants(h, placed.eventId);
 
     // BTC xử lý xong mục chặn (tickee_app ghi được `status`, `resolution`), rồi Tingee gửi lại đúng IPN đó.
-    await h.db.pool.query("UPDATE review_items SET status = 'resolved', resolution = 'dismissed' WHERE id = $1", [
+    await h.db.pool.query("UPDATE review_items SET status = 'resolved', resolution = 'dismissed', dismiss_reason = 'Đã xử lý' WHERE id = $1", [
       blocker.rows[0]!.id,
     ]);
     expect((await postIpn(h, ipnKey, ipn).expect(200)).text).toBe(ACK_TEXT);
@@ -620,11 +622,12 @@ describe('bảng review_items', () => {
         reason?: string | null;
         status?: string;
         resolution?: string | null;
+        dismissReason?: string | null;
       }
       const insert = async (row: Row) => {
         await client.query(
-          `INSERT INTO review_items (organization_id, order_id, payment_event_id, type, reason, status, resolution)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          `INSERT INTO review_items (organization_id, order_id, payment_event_id, type, reason, status, resolution, dismiss_reason)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
           [
             org.orgId,
             row.orderId === undefined ? placed.orderId : row.orderId,
@@ -633,6 +636,7 @@ describe('bảng review_items', () => {
             row.reason ?? null,
             row.status ?? 'open',
             row.resolution ?? null,
+            row.dismissReason ?? null,
           ],
         );
       };
@@ -664,6 +668,15 @@ describe('bảng review_items', () => {
         ['event_cancelled duyệt', { type: 'event_cancelled', status: 'resolved', resolution: 'approved' }],
         ['event_cancelled từ chối', { type: 'event_cancelled', status: 'resolved', resolution: 'rejected' }],
         ['unmatched từ chối', { type: 'unmatched', orderId: null, status: 'resolved', resolution: 'rejected' }],
+        // Story 4.4: lý do "Bỏ qua" có đúng khi `dismissed`, 1–300 ký tự.
+        ['bỏ qua thiếu lý do', { type: 'unmatched', orderId: null, status: 'resolved', resolution: 'dismissed' }],
+        ['bỏ qua lý do rỗng', { type: 'unmatched', orderId: null, status: 'resolved', resolution: 'dismissed', dismissReason: '' }],
+        [
+          'bỏ qua lý do 301 ký tự',
+          { type: 'unmatched', orderId: null, status: 'resolved', resolution: 'dismissed', dismissReason: 'a'.repeat(301) },
+        ],
+        ['lý do bỏ qua ở mục đã hoàn', { type: 'event_cancelled', status: 'resolved', resolution: 'refunded', dismissReason: 'x' }],
+        ['lý do bỏ qua ở mục open', { type: 'event_cancelled', dismissReason: 'x' }],
       ];
       for (const [name, row] of rejectedByCheck) expect(await attempt(row), name).toBe('23514');
 
@@ -677,7 +690,14 @@ describe('bảng review_items', () => {
         ['amount_mismatch đã xử lý, cùng Đơn', { type: 'amount_mismatch', status: 'resolved', resolution: 'approved' }],
         ['duplicate_payment đã hoàn', { type: 'duplicate_payment', status: 'resolved', resolution: 'refunded' }],
         ['event_cancelled đã hoàn', { type: 'event_cancelled', status: 'resolved', resolution: 'refunded' }],
-        ['unmatched bỏ qua', { type: 'unmatched', orderId: null, status: 'resolved', resolution: 'dismissed' }],
+        [
+          'unmatched bỏ qua',
+          { type: 'unmatched', orderId: null, status: 'resolved', resolution: 'dismissed', dismissReason: 'Khách chuyển nhầm' },
+        ],
+        [
+          'duplicate_payment bỏ qua, lý do 300 ký tự',
+          { type: 'duplicate_payment', status: 'resolved', resolution: 'dismissed', dismissReason: 'a'.repeat(300) },
+        ],
       ];
       for (const [name, row] of accepted) expect(await attempt(row), name).toBeNull();
 
@@ -704,7 +724,7 @@ describe('bảng review_items', () => {
     expect(await reviewItemsOf(h, { orderId: placed.orderId })).toEqual([]);
   });
 
-  it('tickee_app chỉ UPDATE được status, resolution: cột khác → 42501', async () => {
+  it('tickee_app chỉ UPDATE được status, resolution, dismiss_reason: cột khác → 42501', async () => {
     const placed = await place([1]);
     const { item } = await expectReviewItem(paid(placed, { paidAmount: 3_000 }), {
       branch: 'mismatch',
@@ -740,5 +760,12 @@ describe('bảng review_items', () => {
       status: 'resolved',
       resolution: 'rejected',
     });
+    // Story 4.4: `dismiss_reason` ghi được (lý do "Bỏ qua").
+    await h.db.pool.query("UPDATE review_items SET resolution = 'dismissed', dismiss_reason = 'Khách chuyển nhầm' WHERE id = $1", [
+      item.id,
+    ]);
+    expect((await h.db.pool.query('SELECT dismiss_reason FROM review_items WHERE id = $1', [item.id])).rows).toEqual([
+      { dismiss_reason: 'Khách chuyển nhầm' },
+    ]);
   });
 });

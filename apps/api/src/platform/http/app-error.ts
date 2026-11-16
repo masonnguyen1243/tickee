@@ -61,6 +61,8 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   SHARED_TICKET_NOT_FOUND: 404,
   TICKET_NOT_FOUND: 404,
   REVIEW_ITEM_NOT_FOUND: 404,
+  REVIEW_ACTION_NOT_ALLOWED: 409,
+  EVENT_LOCKED: 409,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

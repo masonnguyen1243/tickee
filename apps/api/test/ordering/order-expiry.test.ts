@@ -95,7 +95,7 @@ describe('expireOrder (hàm của job, cũng dùng trước TX1)', () => {
 
     const notPending = await pendingOrder(1);
     await h.db.orm.execute(
-      sql`UPDATE orders SET status = 'cancelled', expires_at = now() - interval '1 second' WHERE id = ${notPending.row.id}`,
+      sql`UPDATE orders SET status = 'cancelled', cancel_reason = 'rejected', expires_at = now() - interval '1 second' WHERE id = ${notPending.row.id}`,
     );
     expect(await expireOrder(h.db, notPending.row.id)).toBe('skipped');
     expect(await inventory(h, notPending.tier.id)).toMatchObject({ held: 1 });

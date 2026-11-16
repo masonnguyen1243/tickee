@@ -24,14 +24,17 @@ export {
   OrderPaymentsModule,
   orderForPayment,
   type GatewaySource,
+  type ManualApproval,
   type MarkPaidOptions,
   type MarkPaidOutcome,
   type MarkPaidResult,
   type OrderForPayment,
 } from './mark-paid.js';
+export { notifyEventOrdersChanged } from './order-changed.js';
 export { ORDER_CODE_GENERATOR, type OrderCodeGenerator } from './order-code.js';
 export { markExpired, OrderingJobsModule, type MarkExpiredResult } from './order-jobs.js';
 export { type OrderingConfig } from './order-rate-limit.js';
+export { OrderReviewDecisions, type OrderDecision } from './order-review.js';
 export { OrderingModule } from './ordering.module.js';
 export { ORDER_HOLD } from './orders.service.js';
 export {

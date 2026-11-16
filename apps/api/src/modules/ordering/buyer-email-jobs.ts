@@ -24,13 +24,15 @@ import {
 import { eventOpenForTickets, ticketEventById } from '../event/index.js';
 import { organizerContactOf } from '../organizer/index.js';
 import { TicketsService } from '../ticketing/index.js';
-import { buildOrphanSoldOutEmail, buildTicketsEmail } from './buyer-email.js';
+import { buildOrderRejectedEmail, buildOrphanSoldOutEmail, buildTicketsEmail } from './buyer-email.js';
 import { orders } from './schema.js';
 
 /*
- * Hàng đợi email Người mua (Story 3.8, FR-23, AD-12): một queue cho hai loại email, phân biệt bằng `kind` của payload.
+ * Hàng đợi email Người mua (Story 3.8, FR-23, AD-12): một queue cho mọi loại email, phân biệt bằng `kind` của payload.
  * - `tickets`: email Vé, enqueue trong `markPaid` (`pay`) khi Đơn chuyển `paid`, mọi nguồn.
  * - `orphan_sold_out`: tiền về muộn cho Đơn `expired` mà Hạng vé đã hết, enqueue ở nhánh `sold_out` của IPN.
+ * - `order_rejected`: BTC "Từ chối" khoản tiền của Đơn trên mục Cần xử lý (Story 4.4), enqueue trong `tx` của CAS
+ *   `review → cancelled`.
  * Enqueue bằng chính `tx` của thay đổi (rollback thì không có job). Id job suy cố định từ (`kind`, `orderId`), nên enqueue
  * lặp không tạo job thứ hai khi dòng job cũ còn trong bảng của pg-boss (xem `EnqueueOptions.id`). Handler không ghi bảng
  * nào: idempotent nhờ id job cố định; gửi xong mà worker chết trước khi chốt job thì có thể gửi lặp một lần (chấp nhận).
@@ -94,6 +96,8 @@ async function orderOf(db: Database, orderId: string) {
  * - `tickets`: Đơn không còn `paid`, Sự kiện đã hủy, đồng hồ DB đã quá `effective_end_at` (retry có thể kéo dài vài giờ:
  *   mọi link chia sẻ trong email đã 404), hoặc Đơn không có Vé.
  * - `orphan_sold_out`: Đơn không còn `review` (BTC đã xử lý mục Cần xử lý).
+ * - `order_rejected`: Đơn không ở `cancelled`/`refunded` (vẫn gửi khi BTC đã bấm "Đã hoàn tay" trước khi job chạy hay
+ *   trong lúc SMTP retry: Người mua chưa từng được báo Đơn bị hủy).
  * Loại lạ (thêm vào `BuyerEmailKind` mà chưa có nhánh ở đây) → ném lỗi, không bao giờ rơi vào mẫu của loại khác.
  */
 async function messageOf(
@@ -136,6 +140,20 @@ async function messageOf(
       return {
         to: order.buyerEmail,
         ...buildOrphanSoldOutEmail({ eventName: event.name, orderCode: order.code, organizer }),
+      };
+    }
+    case BuyerEmailKind.ORDER_REJECTED: {
+      if (order.status !== OrderStatus.CANCELLED && order.status !== OrderStatus.REFUNDED) return null;
+      const organizer = await organizerContactOf(db.orm, { organizationId: order.organizationId });
+      if (!organizer) return null;
+      return {
+        to: order.buyerEmail,
+        ...buildOrderRejectedEmail({
+          eventName: event.name,
+          orderCode: order.code,
+          organizer,
+          orderLink: `${webOrigin.replace(/\/+$/, '')}${orderPath(order.code)}`,
+        }),
       };
     }
     default: {

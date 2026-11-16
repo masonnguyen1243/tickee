@@ -8,10 +8,13 @@ import {
   type PaymentServiceReason,
 } from './organizer.js';
 import {
+  reviewActionSchema,
+  reviewApproveBlockedReasonSchema,
   reviewItemReasonSchema,
   reviewItemResolutionSchema,
   reviewItemStatusSchema,
   reviewItemTypeSchema,
+  type ReviewAction,
 } from './payment.js';
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -309,17 +312,31 @@ export type ReviewItemOrder = z.infer<typeof ReviewItemOrder>;
 
 /**
  * Loại dòng nhật ký của mục: `payment_received` — Tingee báo tiền về (`paid_at`, không có thì lúc Tickee nhận);
- * `item_opened` — mục được mở (`created_at`). Story 4.4 thêm dòng thao tác vào cùng danh sách.
+ * `item_opened` — mục được mở (`created_at`). Dòng thao tác (Story 4.4, dựng từ audit của mục, lúc thao tác):
+ * `approved` — duyệt tay phát Vé; `approve_sold_out` — duyệt tay không thành vì hết chỗ (Đơn giữ `review`, mục vẫn
+ * `open`); `rejected` — từ chối (Đơn bị hủy); `refunded` — đã hoàn tay; `dismissed` — bỏ qua (kèm lý do).
  */
 export const ReviewItemLogKind = {
   PAYMENT_RECEIVED: 'payment_received',
   ITEM_OPENED: 'item_opened',
+  APPROVED: 'approved',
+  APPROVE_SOLD_OUT: 'approve_sold_out',
+  REJECTED: 'rejected',
+  REFUNDED: 'refunded',
+  DISMISSED: 'dismissed',
 } as const;
 export type ReviewItemLogKind = (typeof ReviewItemLogKind)[keyof typeof ReviewItemLogKind];
 
+/**
+ * Một dòng nhật ký. Dòng thao tác có `actorName`: tên thành viên đã làm (chuỗi rỗng khi tài khoản không có tên, vd.
+ * đăng nhập OTP; web hiện "Thành viên BTC"). Dòng `dismissed` có `note`: lý do "Bỏ qua". Dòng dữ liệu sẵn có
+ * (`payment_received`, `item_opened`) không có hai trường này.
+ */
 export const ReviewItemLogEntry = z.object({
   kind: z.enum(ReviewItemLogKind),
   at: z.iso.datetime({ offset: true }),
+  actorName: z.string().optional(),
+  note: z.string().optional(),
 });
 export type ReviewItemLogEntry = z.infer<typeof ReviewItemLogEntry>;
 
@@ -327,6 +344,10 @@ export type ReviewItemLogEntry = z.infer<typeof ReviewItemLogEntry>;
  * `GET /v1/orgs/:orgId/review-items/:itemId` (Owner, Admin: `review_queue.handle`; `no-store`): chi tiết một mục ở mọi
  * trạng thái — loại, lý do (`orphan`), trạng thái, cách xử lý, giao dịch, Đơn liên quan, Sự kiện, nhật ký (cũ trước).
  * Id sai dạng, không tồn tại hoặc của BTC khác → `404 REVIEW_ITEM_NOT_FOUND`.
+ * - `actions` (Story 4.4): thao tác được phép ở trạng thái hiện tại của mục và Đơn, theo thứ tự hiện nút (máy chủ tính,
+ *   web chỉ hiển thị); mục đã xử lý → rỗng.
+ * - `approveBlockedReason`: có `approve` trong `actions` mà Sự kiện không còn cho duyệt (đã hủy, đã kết thúc, bị khóa)
+ *   → nút tắt kèm lý do; còn lại `null`.
  */
 export const ReviewItemDetail = z.object({
   id: z.uuid(),
@@ -339,6 +360,8 @@ export const ReviewItemDetail = z.object({
   order: ReviewItemOrder.nullable(),
   event: ReviewItemEvent.nullable(),
   log: z.array(ReviewItemLogEntry),
+  actions: z.array(reviewActionSchema),
+  approveBlockedReason: reviewApproveBlockedReasonSchema.nullable(),
 });
 export type ReviewItemDetail = z.infer<typeof ReviewItemDetail>;
 
@@ -355,3 +378,10 @@ export const reviewItemsSummaryApiPath = (organizationId: string): string =>
 /** Đường API (sau `/v1`) của `ReviewItemDetail`. */
 export const reviewItemApiPath = (organizationId: string, itemId: string): string =>
   `${reviewItemsApiPath(organizationId)}/${encodeURIComponent(itemId)}`;
+
+/**
+ * Đường API (sau `/v1`) của một thao tác trên mục (Story 4.4): `POST …/review-items/:itemId/{approve,reject,refund,
+ * dismiss}`, header `Idempotency-Key` (uuid) bắt buộc, trả `ReviewActionResult`.
+ */
+export const reviewItemActionApiPath = (organizationId: string, itemId: string, action: ReviewAction): string =>
+  `${reviewItemApiPath(organizationId, itemId)}/${action}`;

@@ -357,7 +357,7 @@ describe('BuyerOrderView.buyerStatus', () => {
 
     const other = await place(1);
     for (const status of ['cancelled', 'refunded']) {
-      await h.db.pool.query('UPDATE orders SET status = $1 WHERE id = $2', [status, other.orderId]);
+      await h.db.pool.query("UPDATE orders SET status = $1, cancel_reason = 'rejected' WHERE id = $2", [status, other.orderId]);
       expect(await view(other)).toMatchObject({ buyerStatus: 'cancelled_by_organizer', tickets: [] });
     }
     // BTC không nhập kênh liên hệ → null.

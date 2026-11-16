@@ -21,6 +21,7 @@ import {
   ORDER_CODE_ALPHABET,
   ORDER_CODE_PATTERN,
   ORDER_RATE_LIMITS,
+  ORDER_CANCEL_REASONS,
   ORDER_STATUSES,
   orderPath,
   orderRequestFor,
@@ -262,6 +263,8 @@ describe('BuyerOrderView và lỗi', () => {
     const { organizer: _organizer, ...noOrganizer } = order;
     expect(BuyerOrderView.safeParse(noOrganizer).success).toBe(false);
     expect(ORDER_STATUSES).toEqual(['pending', 'paid', 'expired', 'review', 'cancelled', 'refunded']);
+    // Story 4.4: lý do hủy Đơn (khớp CHECK `orders_cancel_reason_check`).
+    expect(ORDER_CANCEL_REASONS).toEqual(['rejected', 'event_cancelled']);
   });
 
   it('buyerStatus: bảy giá trị; giá trị lạ vẫn parse (web hiện trạng thái an toàn); thiếu hoặc không phải chuỗi → không nhận', () => {
