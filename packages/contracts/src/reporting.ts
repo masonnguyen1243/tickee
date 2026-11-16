@@ -1,8 +1,18 @@
 import { z } from 'zod';
 
 import { ORDER_CODE_PATTERN, orderStatusSchema } from './order.js';
-import { roleSchema, type PaymentServiceReason } from './organizer.js';
-import { reviewItemTypeSchema } from './payment.js';
+import {
+  OrganizationSection,
+  organizationSectionPath,
+  roleSchema,
+  type PaymentServiceReason,
+} from './organizer.js';
+import {
+  reviewItemReasonSchema,
+  reviewItemResolutionSchema,
+  reviewItemStatusSchema,
+  reviewItemTypeSchema,
+} from './payment.js';
 
 // ---------------------------------------------------------------------------------------------------------------
 // Thông báo trạng thái cho `status-banner` (AD-34, UX-DR8): `reporting.notices(scope)` là nguồn duy nhất
@@ -123,9 +133,11 @@ export const statusNoticesApiPath = (organizationId: string): string =>
   `/orgs/${encodeURIComponent(organizationId)}/notices`;
 
 /**
- * Đường SSE (sau `/v1`) cấp BTC (Story 4.2-b, AD-17; Owner và Admin: `org.read`): chỉ đẩy `org_status_changed` của BTC
- * này và `resync`. Web tải lại `notices` (dải banner) và tổng quan Tài khoản nhận tiền. Hiện chỉ cờ dịch vụ thanh toán
- * (bật, đổi lý do, tắt) phát tín hiệu này; Closed Beta và tài khoản nhận tiền chưa phát (xem `deferred-work.md`).
+ * Đường SSE (sau `/v1`) cấp BTC (Story 4.2-b, AD-17; Owner và Admin: `org.read`): chỉ đẩy tín hiệu cấp BTC của BTC này
+ * (`org_status_changed`, và `org_review_items_changed` khi vai có `review_queue.handle`, Story 4.3) cùng `resync`. Web
+ * tải lại `notices` (dải banner), tổng quan Tài khoản nhận tiền, badge và hàng Cần xử lý. Với `org_status_changed`, hiện
+ * chỉ cờ dịch vụ thanh toán (bật, đổi lý do, tắt) phát; Closed Beta và tài khoản nhận tiền chưa phát (xem
+ * `deferred-work.md`).
  */
 export const organizationLiveApiPath = (organizationId: string): string =>
   `/orgs/${encodeURIComponent(organizationId)}/live`;
@@ -179,8 +191,9 @@ export type RecentOrder = z.infer<typeof RecentOrder>;
 /**
  * `GET /v1/orgs/:orgId/events/:eventId/overview` (Owner, Admin: `orders.view`): doanh thu = tổng `total_amount` của các
  * Đơn `paid` của Sự kiện, `paidOrders` = số Đơn `paid` (tính cả Đơn 0đ); `recentOrders` = tối đa `RECENT_ORDERS_LIMIT`
- * Đơn mới nhất ở mọi trạng thái, xếp theo lúc tạo rồi id, giảm dần. Web tải lại khi stream
- * `GET …/overview/live` báo `event_orders_changed`.
+ * Đơn mới nhất ở mọi trạng thái, xếp theo lúc tạo rồi id, giảm dần; `openReviewCount` = số mục Cần xử lý `open` gắn Đơn
+ * của Sự kiện (`needs-action-card`, Story 4.3; mục `unmatched` không gắn Sự kiện nào nên không tính). Web tải lại khi
+ * stream `GET …/overview/live` báo `event_orders_changed` hoặc `org_review_items_changed`.
  */
 export const EventOverview = z.object({
   revenue: z.object({
@@ -188,6 +201,7 @@ export const EventOverview = z.object({
     paidOrders: z.number().int().nonnegative(),
   }),
   recentOrders: z.array(RecentOrder).max(RECENT_ORDERS_LIMIT),
+  openReviewCount: z.number().int().nonnegative(),
 });
 export type EventOverview = z.infer<typeof EventOverview>;
 
@@ -195,6 +209,149 @@ export type EventOverview = z.infer<typeof EventOverview>;
 export const eventOverviewApiPath = (organizationId: string, eventId: string): string =>
   `/orgs/${encodeURIComponent(organizationId)}/events/${encodeURIComponent(eventId)}/overview`;
 
-/** Đường SSE (sau `/v1`) của Tổng quan Sự kiện: chỉ đẩy `event_orders_changed` của Sự kiện này và `resync`. */
+/**
+ * Đường SSE (sau `/v1`) của Tổng quan Sự kiện: đẩy `event_orders_changed` của Sự kiện này, `org_review_items_changed`
+ * của BTC (tín hiệu cấp BTC: mọi mục của BTC, kể cả mục của Sự kiện khác; tải lại thừa nhưng rẻ) và `resync`.
+ */
 export const eventOverviewLiveApiPath = (organizationId: string, eventId: string): string =>
   `${eventOverviewApiPath(organizationId, eventId)}/live`;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Hàng Cần xử lý của BTC (Story 4.3, FR-21): gộp mọi Sự kiện, đọc qua read model của `payment`, `ordering`, `event`
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Tham số lọc theo Sự kiện của trang Cần xử lý trên web (`/btc/{id}/can-xu-ly?suKien={eventId}`): đích của
+ * `needs-action-card` ở Tổng quan Sự kiện cho tới khi Story 6.1 đổi sang tab Đơn đã lọc.
+ */
+export const REVIEW_QUEUE_EVENT_PARAM = 'suKien';
+
+/** Trang Cần xử lý của web; có `eventId` thì lọc theo Sự kiện đó. */
+export function reviewQueuePath(organizationId: string, eventId?: string): string {
+  const base = organizationSectionPath(organizationId, OrganizationSection.REVIEW_QUEUE);
+  return eventId ? `${base}?${REVIEW_QUEUE_EVENT_PARAM}=${encodeURIComponent(eventId)}` : base;
+}
+
+/** Sự kiện của một mục (tên hiện tại), hoặc Sự kiện đang lọc của hàng. */
+export const ReviewItemEvent = z.object({ id: z.uuid(), name: z.string() });
+export type ReviewItemEvent = z.infer<typeof ReviewItemEvent>;
+
+/** Đơn của một mục trên hàng: mã, tên Người mua (bản chụp lúc đặt), tổng tiền. Không email, không SĐT. */
+export const ReviewQueueOrder = z.object({
+  code: z.string().regex(ORDER_CODE_PATTERN),
+  buyerName: z.string(),
+  totalAmount: z.number().int().nonnegative(),
+});
+export type ReviewQueueOrder = z.infer<typeof ReviewQueueOrder>;
+
+/**
+ * Một mục `open` của hàng (`needs-action-row`): loại, số tiền đã nhận (`payment_events.paid_amount`; `null` khi khoản
+ * tiền không ghi số tiền), lúc mở mục, Đơn và Sự kiện của Đơn. Mục `unmatched` không gắn Đơn: `order` và `event` `null`.
+ */
+export const ReviewQueueItem = z.object({
+  id: z.uuid(),
+  type: reviewItemTypeSchema,
+  receivedAmount: z.number().int().nonnegative().nullable(),
+  createdAt: z.iso.datetime({ offset: true }),
+  order: ReviewQueueOrder.nullable(),
+  event: ReviewItemEvent.nullable(),
+});
+export type ReviewQueueItem = z.infer<typeof ReviewQueueItem>;
+
+/**
+ * `GET /v1/orgs/:orgId/review-items[?eventId=]` (Owner, Admin: `review_queue.handle`; `no-store`): mọi mục `open` của
+ * BTC ở mọi Sự kiện, cũ nhất trước (lúc tạo rồi id, tăng dần); không phân trang. Có `eventId`: chỉ mục gắn Đơn của Sự
+ * kiện đó (không có mục `unmatched`), `event` là Sự kiện đang lọc; Sự kiện lạ, sai dạng hoặc của BTC khác → `404
+ * EVENT_NOT_FOUND`. Không lọc → `event` `null`.
+ */
+export const ReviewQueue = z.object({
+  event: ReviewItemEvent.nullable(),
+  items: z.array(ReviewQueueItem),
+});
+export type ReviewQueue = z.infer<typeof ReviewQueue>;
+
+/** Query của `GET /v1/orgs/:orgId/review-items`: `eventId` tùy chọn (id Sự kiện để lọc). */
+export const ReviewQueueQuery = z.object({ eventId: z.string().max(200).optional() });
+export type ReviewQueueQuery = z.input<typeof ReviewQueueQuery>;
+
+/** `GET /v1/orgs/:orgId/review-items/summary`: số mục `open` của BTC (badge "Cần xử lý" ở sidebar và tab bar). */
+export const ReviewQueueSummary = z.object({ openCount: z.number().int().nonnegative() });
+export type ReviewQueueSummary = z.infer<typeof ReviewQueueSummary>;
+
+/** Badge "Cần xử lý" hiện tối đa số này; lớn hơn thì "99+". */
+export const REVIEW_BADGE_MAX = 99;
+
+/**
+ * Giao dịch của một mục (phần "Giao dịch" của `Sheet`): số tiền nhận, mã giao dịch Tingee, lúc Tingee báo trả
+ * (`paidAt`, có thể `null`) và lúc Tickee nhận (`receivedAt`), phương thức. `providerOrderId` ("Mã Đơn trong giao dịch")
+ * chỉ có với mục `unmatched`. Không bao giờ có `bill_id`, `merchant_id`, `request_id`.
+ */
+export const ReviewItemTransaction = z.object({
+  receivedAmount: z.number().int().nonnegative().nullable(),
+  transactionCode: z.string().nullable(),
+  paidAt: z.iso.datetime({ offset: true }).nullable(),
+  receivedAt: z.iso.datetime({ offset: true }),
+  paymentMethod: z.string().nullable(),
+  providerOrderId: z.string().nullable(),
+});
+export type ReviewItemTransaction = z.infer<typeof ReviewItemTransaction>;
+
+/** Đơn liên quan của một mục (phần "Đơn liên quan" của `Sheet`). Không email, không SĐT. */
+export const ReviewItemOrder = z.object({
+  code: z.string().regex(ORDER_CODE_PATTERN),
+  status: orderStatusSchema,
+  buyerName: z.string(),
+  ticketCount: z.number().int().nonnegative(),
+  totalAmount: z.number().int().nonnegative(),
+  createdAt: z.iso.datetime({ offset: true }),
+});
+export type ReviewItemOrder = z.infer<typeof ReviewItemOrder>;
+
+/**
+ * Loại dòng nhật ký của mục: `payment_received` — Tingee báo tiền về (`paid_at`, không có thì lúc Tickee nhận);
+ * `item_opened` — mục được mở (`created_at`). Story 4.4 thêm dòng thao tác vào cùng danh sách.
+ */
+export const ReviewItemLogKind = {
+  PAYMENT_RECEIVED: 'payment_received',
+  ITEM_OPENED: 'item_opened',
+} as const;
+export type ReviewItemLogKind = (typeof ReviewItemLogKind)[keyof typeof ReviewItemLogKind];
+
+export const ReviewItemLogEntry = z.object({
+  kind: z.enum(ReviewItemLogKind),
+  at: z.iso.datetime({ offset: true }),
+});
+export type ReviewItemLogEntry = z.infer<typeof ReviewItemLogEntry>;
+
+/**
+ * `GET /v1/orgs/:orgId/review-items/:itemId` (Owner, Admin: `review_queue.handle`; `no-store`): chi tiết một mục ở mọi
+ * trạng thái — loại, lý do (`orphan`), trạng thái, cách xử lý, giao dịch, Đơn liên quan, Sự kiện, nhật ký (cũ trước).
+ * Id sai dạng, không tồn tại hoặc của BTC khác → `404 REVIEW_ITEM_NOT_FOUND`.
+ */
+export const ReviewItemDetail = z.object({
+  id: z.uuid(),
+  type: reviewItemTypeSchema,
+  reason: reviewItemReasonSchema.nullable(),
+  status: reviewItemStatusSchema,
+  resolution: reviewItemResolutionSchema.nullable(),
+  createdAt: z.iso.datetime({ offset: true }),
+  transaction: ReviewItemTransaction,
+  order: ReviewItemOrder.nullable(),
+  event: ReviewItemEvent.nullable(),
+  log: z.array(ReviewItemLogEntry),
+});
+export type ReviewItemDetail = z.infer<typeof ReviewItemDetail>;
+
+/** Đường API (sau `/v1`) của `ReviewQueue`; có `eventId` thì kèm `?eventId=`. */
+export const reviewItemsApiPath = (organizationId: string, eventId?: string): string => {
+  const base = `/orgs/${encodeURIComponent(organizationId)}/review-items`;
+  return eventId === undefined ? base : `${base}?eventId=${encodeURIComponent(eventId)}`;
+};
+
+/** Đường API (sau `/v1`) của `ReviewQueueSummary`. */
+export const reviewItemsSummaryApiPath = (organizationId: string): string =>
+  `${reviewItemsApiPath(organizationId)}/summary`;
+
+/** Đường API (sau `/v1`) của `ReviewItemDetail`. */
+export const reviewItemApiPath = (organizationId: string, itemId: string): string =>
+  `${reviewItemsApiPath(organizationId)}/${encodeURIComponent(itemId)}`;

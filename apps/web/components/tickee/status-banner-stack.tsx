@@ -16,7 +16,12 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTr
 import { refreshEventSaleStatus } from '@/lib/event/sale-status';
 import { payoutAccountQueryKey } from '@/lib/organizer/api';
 import { useLiveResource } from '@/lib/realtime/use-live-resource';
-import { fetchStatusNotices, STATUS_NOTICES_POLL_MS, statusNoticesQueryKey } from '@/lib/reporting/api';
+import {
+  fetchStatusNotices,
+  reviewQueueQueryPrefix,
+  STATUS_NOTICES_POLL_MS,
+  statusNoticesQueryKey,
+} from '@/lib/reporting/api';
 import {
   isStatusNoticeDismissed,
   saveStatusNoticeDismissed,
@@ -76,24 +81,44 @@ function NoticeBanner({ notice, onDismiss }: { notice: StatusNotice; onDismiss: 
  * dashboard / `Providers` xử lý.
  *
  * Tự cập nhật (Story 4.2-b, AD-17): `useLiveResource` + stream cấp BTC `GET /v1/orgs/:orgId/live`; mỗi tín hiệu
- * (`org_status_changed`, `resync`) tải lại `notices`, tổng quan Tài khoản nhận tiền (khối "Dịch vụ thanh toán", chỉ khi
- * trang đó đang mở) và trạng thái bán của Sự kiện (badge "Tạm ngừng bán" ở trang chủ BTC và tab Tổng quan, Story 4.2-c).
- * Không có SSE thì polling `notices` 10 giây; banner về điều kiện bán Vé có phí (dịch vụ thanh toán, Closed Beta, tài khoản
- * nhận tiền) đổi giữa hai lần polling thì hai tài nguyên kia cũng tải lại.
+ * (`org_status_changed`, `org_review_items_changed`, `resync`) tải lại `notices`, tổng quan Tài khoản nhận tiền (khối
+ * "Dịch vụ thanh toán", chỉ khi trang đó đang mở), trạng thái bán của Sự kiện (badge "Tạm ngừng bán" ở trang chủ BTC và
+ * tab Tổng quan, Story 4.2-c), và số mục, hàng, chi tiết Cần xử lý (badge ở sidebar và tab bar, trang Cần xử lý; Story
+ * 4.3). Đây là EventSource cấp BTC duy nhất của khung: nơi khác không mở stream thứ hai mà đọc `onConnectedChange` (qua
+ * `OrganizationLiveProvider`) để chỉ polling khi chưa có stream. Không có SSE thì polling `notices` 10 giây; banner về
+ * điều kiện bán Vé có phí (dịch vụ thanh toán, Closed Beta, tài khoản nhận tiền) đổi giữa hai lần polling thì hai tài
+ * nguyên kia cũng tải lại.
  */
-export function StatusBannerStack({ orgId }: { orgId: string }) {
+export function StatusBannerStack({
+  orgId,
+  onConnectedChange,
+}: {
+  orgId: string;
+  /** Stream cấp BTC vừa kết nối hoặc mất kết nối. */
+  onConnectedChange?: (connected: boolean) => void;
+}) {
   const queryClient = useQueryClient();
   const refreshPaymentServiceViews = () => {
     void queryClient.invalidateQueries({ queryKey: payoutAccountQueryKey(orgId), exact: true });
     void refreshEventSaleStatus(queryClient, orgId);
+  };
+  const refreshOnSignal = () => {
+    refreshPaymentServiceViews();
+    // Tín hiệu là lời nhắc chung (stream không nói topic nào): badge, hàng và chi tiết Cần xử lý cùng tải lại.
+    void queryClient.invalidateQueries({ queryKey: reviewQueueQueryPrefix(orgId) });
   };
   const { query: notices, connected } = useLiveResource({
     queryKey: statusNoticesQueryKey(orgId),
     queryFn: (signal) => fetchStatusNotices(orgId, signal),
     livePath: organizationLiveApiPath(orgId),
     pollInterval,
-    onSignal: refreshPaymentServiceViews,
+    onSignal: refreshOnSignal,
   });
+  const onConnectedChangeRef = useRef(onConnectedChange);
+  onConnectedChangeRef.current = onConnectedChange;
+  useEffect(() => {
+    onConnectedChangeRef.current?.(connected);
+  }, [connected]);
 
   // Polling (không có SSE nên không có `onSignal`): khối "Dịch vụ thanh toán" và badge trạng thái bán theo kịp banner khi
   // điều kiện bán Vé có phí đổi.

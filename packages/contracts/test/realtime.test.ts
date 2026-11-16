@@ -33,11 +33,13 @@ describe('Realtime (AD-17)', () => {
     expect(RealtimeSignal.safeParse(noEvent).success).toBe(false);
   });
 
-  it('tín hiệu cấp BTC (Story 4.2): org_status_changed không có eventId; có eventId → không nhận', () => {
-    expect(ORGANIZATION_REALTIME_TOPICS).toEqual(['org_status_changed']);
-    const signal = { type: 'org_status_changed', id: ORG, organizationId: ORG };
-    expect(RealtimeSignal.parse(signal)).toEqual(signal);
-    expect(RealtimeSignal.safeParse({ ...signal, eventId: EVENT }).success).toBe(false);
+  it('tín hiệu cấp BTC (Story 4.2, 4.3): org_review_items_changed, org_status_changed không có eventId; có eventId → không nhận', () => {
+    expect(ORGANIZATION_REALTIME_TOPICS).toEqual(['org_review_items_changed', 'org_status_changed']);
+    for (const type of ORGANIZATION_REALTIME_TOPICS) {
+      const signal = { type, id: ORG, organizationId: ORG };
+      expect(RealtimeSignal.parse(signal), type).toEqual(signal);
+      expect(RealtimeSignal.safeParse({ ...signal, eventId: EVENT }).success, type).toBe(false);
+    }
   });
 
   it('tin SSE chỉ có type (kể cả loại lạ); tín hiệu nối lại là resync; heartbeat 25 giây', () => {

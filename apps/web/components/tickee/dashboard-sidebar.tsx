@@ -4,24 +4,29 @@ import { organizationSectionPath, type Organization } from '@tickee/contracts';
 import Link from 'next/link';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { visibleSections, type NavSectionKey } from '@/lib/organizer/nav';
+import { navAccessibleName, visibleSections, type NavSectionKey } from '@/lib/organizer/nav';
 import { cn } from '@/lib/utils';
 
+import { NavBadge } from './nav-badge';
 import { OrganizationSwitcher, type MembershipsState } from './organization-switcher';
 
 type DashboardSidebarProps = {
   organization: Organization;
   memberships: MembershipsState;
   active: NavSectionKey | null;
+  /** Số mục Cần xử lý `open` (badge của mục "Cần xử lý"); chưa tải → không badge. */
+  reviewCount?: number;
 };
 
 /**
  * `dashboard-sidebar` (DESIGN.md › Dashboard): nền stage, BTC switcher ở đầu, các mục cấp BTC. Từ `lg` rộng
  * `sidebar-width` có nhãn; `md`–`lg` chỉ còn icon (mỗi mục có `aria-label` + tooltip là tên mục). Ẩn dưới `md`
  * (thay bằng `bottom-tab-bar`). Khung là `div` (không `aside`): đây là điều hướng chính, landmark là `nav` bên trong.
+ * "Cần xử lý" có badge số (Story 4.3): cạnh nhãn từ `lg`, góc trên icon ở `md`–`lg`; tên truy cập kèm số mục.
  */
-export function DashboardSidebar({ organization, memberships, active }: DashboardSidebarProps) {
+export function DashboardSidebar({ organization, memberships, active, reviewCount }: DashboardSidebarProps) {
   const sections = visibleSections(organization.role, 'sidebar');
+  const countOf = (key: NavSectionKey) => (key === 'review-queue' ? reviewCount : undefined);
 
   return (
     <div
@@ -39,7 +44,7 @@ export function DashboardSidebar({ organization, memberships, active }: Dashboar
                   <TooltipTrigger asChild>
                     <Link
                       href={organizationSectionPath(organization.id, key)}
-                      aria-label={label}
+                      aria-label={navAccessibleName(label, countOf(key))}
                       aria-current={current ? 'page' : undefined}
                       data-active={current || undefined}
                       className={cn(
@@ -51,6 +56,7 @@ export function DashboardSidebar({ organization, memberships, active }: Dashboar
                     >
                       <Icon aria-hidden="true" className={cn('size-5 shrink-0', current && 'text-primary')} />
                       <span className="hidden truncate lg:inline">{label}</span>
+                      <NavBadge count={countOf(key)} className="absolute -top-1 -right-2.5 lg:static lg:ml-auto" />
                     </Link>
                   </TooltipTrigger>
                   {/* Từ `lg` nhãn đã hiện cạnh icon nên không cần tooltip. */}

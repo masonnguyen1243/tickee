@@ -203,6 +203,11 @@ export const ErrorCode = {
    * sang lịch sử vẫn trả `200`, không có QR).
    */
   TICKET_NOT_FOUND: 'TICKET_NOT_FOUND',
+  /**
+   * Không tìm thấy mục Cần xử lý (`GET /v1/orgs/:orgId/review-items/:itemId`, Story 4.3): id sai dạng, không tồn tại
+   * hoặc của BTC khác (cùng lỗi để không lộ mục nào có thật).
+   */
+  REVIEW_ITEM_NOT_FOUND: 'REVIEW_ITEM_NOT_FOUND',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

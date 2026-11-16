@@ -1,7 +1,8 @@
 'use client';
 
 import { useQueryClient } from '@tanstack/react-query';
-import { ErrorCode, eventOverviewLiveApiPath, formatVnd, type RecentOrder } from '@tickee/contracts';
+import { ErrorCode, eventOverviewLiveApiPath, formatVnd, reviewQueuePath, type RecentOrder } from '@tickee/contracts';
+import Link from 'next/link';
 import { useEffect, useId, useRef } from 'react';
 import { toast } from 'sonner';
 
@@ -28,6 +29,7 @@ import {
   ticketCountLabel,
   updatedAtLabel,
 } from '@/lib/reporting/overview';
+import { NEEDS_ACTION_LINK, needsActionValue } from '@/lib/reporting/review-queue';
 
 /** Badge trạng thái kèm dòng loại Cần xử lý (nếu có). */
 function OrderStatusCell({ order }: { order: RecentOrder }) {
@@ -140,11 +142,43 @@ function RecentOrdersBlock({ orders }: { orders: RecentOrder[] }) {
   );
 }
 
+/**
+ * `needs-action-card` (card sáng phẳng cạnh `stat-card`, Story 4.3): số mục Cần xử lý `open` của Sự kiện. Có mục →
+ * "{n} mục Cần xử lý" kèm liên kết sang trang Cần xử lý đã lọc theo Sự kiện (`?suKien=`; Story 6.1 đổi đích sang tab Đơn
+ * lọc Cần xử lý). 0 mục → "Không có gì cần xử lý.", không liên kết.
+ */
+function NeedsActionCard({ orgId, eventId, count }: { orgId: string; eventId: string; count: number }) {
+  const headingId = useId();
+  return (
+    <section
+      aria-labelledby={headingId}
+      data-slot="needs-action-card"
+      className="flex min-w-0 flex-col gap-1 rounded-lg bg-card p-card-padding shadow-card"
+    >
+      <h2 id={headingId} className="text-label text-muted-foreground">
+        Cần xử lý
+      </h2>
+      <p data-slot="needs-action-value" className="text-title tabular-nums">
+        {needsActionValue(count)}
+      </p>
+      {count > 0 ? (
+        <Link
+          href={reviewQueuePath(orgId, eventId)}
+          className="self-start text-label font-bold text-brand-text underline-offset-4 hover:underline"
+        >
+          {NEEDS_ACTION_LINK}
+        </Link>
+      ) : null}
+    </section>
+  );
+}
+
 function OverviewSkeleton() {
   return (
     <div role="status" aria-busy="true" data-slot="event-overview-skeleton" className="flex flex-col gap-section">
       <span className="sr-only">Đang tải số liệu Sự kiện</span>
       <div className="grid gap-stack md:grid-cols-2">
+        <Skeleton className="h-28" />
         <Skeleton className="h-28" />
       </div>
       <Skeleton className="h-48" />
@@ -153,9 +187,10 @@ function OverviewSkeleton() {
 }
 
 /**
- * Hai khối đầu tab Tổng quan (Story 3.11, FR-31, UX-DR35): `stat-card` doanh thu (chỉ Đơn Đã thanh toán) và
- * `recent-orders-block` 5 Đơn mới nhất. Tự cập nhật qua `useLiveResource` + `GET …/overview/live` (tín hiệu
- * `event_orders_changed` → tải lại REST); không có SSE thì polling 10 giây. Mất mạng → một toast mỗi lần mất mạng, số
+ * Các khối đầu tab Tổng quan (Story 3.11, FR-31, UX-DR35): `stat-card` doanh thu (chỉ Đơn Đã thanh toán) cạnh
+ * `needs-action-card` (số mục Cần xử lý, Story 4.3), và `recent-orders-block` 5 Đơn mới nhất. Tự cập nhật qua
+ * `useLiveResource` + `GET …/overview/live` (tín hiệu `event_orders_changed` hoặc `org_review_items_changed` → tải lại
+ * REST); không có SSE thì polling 10 giây. Mất mạng → một toast mỗi lần mất mạng, số
  * liệu giữ giá trị cuối kèm "Cập nhật lúc HH:MM"; có mạng lại thì tải lại và ẩn nhãn. Lần tải lại lỗi khác (vd. 5xx)
  * khi đã có dữ liệu → cùng nhãn, không toast; tải lại được thì ẩn. Tải lần đầu lỗi → banner trong
  * khối kèm "Thử lại"; `401` → đăng nhập. Chỉ render cho Sự kiện không ở `draft` (nơi gọi quyết).
@@ -230,6 +265,7 @@ export function EventOverviewLive({ orgId, eventId }: { orgId: string; eventId: 
             value={formatVnd(data.revenue.amount)}
             caption={revenueCaption(data.revenue.paidOrders)}
           />
+          <NeedsActionCard orgId={orgId} eventId={eventId} count={data.openReviewCount} />
         </div>
       </div>
       <RecentOrdersBlock orders={data.recentOrders} />

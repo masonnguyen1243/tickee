@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ORDER_CODE_PATTERN, OrderStatus, ReviewItemType, type ReviewItemReason } from '@tickee/contracts';
+import { ORDER_CODE_PATTERN, OrderStatus, RealtimeTopic, ReviewItemType, type ReviewItemReason } from '@tickee/contracts';
 import { z } from 'zod';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
+import { realtime } from '../../platform/realtime/index.js';
 import {
   markExpired,
   OrderPayments,
@@ -290,7 +291,12 @@ export class IpnProcessor {
     return settlementOf(result, own.id, source);
   }
 
-  /** Tạo mục Cần xử lý `open` của BTC `organizationId` cho khoản tiền `paymentEventId`, trong `tx`. */
+  /**
+   * Tạo mục Cần xử lý `open` của BTC `organizationId` cho khoản tiền `paymentEventId`, trong `tx`, và phát
+   * `org_review_items_changed` (tín hiệu cấp BTC, Story 4.3) cũng trong `tx`: chỉ tới badge, hàng Cần xử lý và Tổng quan
+   * Sự kiện khi `tx` commit; rollback thì không ai nhận gì. Nơi INSERT duy nhất của `review_items` (IPN và Đối soát bù
+   * cùng đi qua đây).
+   */
   private async openReviewItem(
     tx: Tx,
     organizationId: string,
@@ -302,6 +308,7 @@ export class IpnProcessor {
       .values({ organizationId, orderId: item.orderId, paymentEventId, type: item.type, reason: item.reason })
       .returning({ id: reviewItems.id });
     if (!row) throw new Error('INSERT review_items không trả về dòng nào');
+    await realtime.notifyOrganization(tx, RealtimeTopic.ORG_REVIEW_ITEMS_CHANGED, organizationId);
     return { id: row.id, type: item.type, reason: item.reason };
   }
 

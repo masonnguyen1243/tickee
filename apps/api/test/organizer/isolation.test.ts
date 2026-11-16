@@ -112,7 +112,14 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('GET /v1/orgs/:orgId/live');
     // Story 4.2-c: trạng thái bán trên dashboard của `ordering` (ngoài tiền tố `…/events/`, như danh sách Sự kiện).
     expect(guarded).toContain('GET /v1/orgs/:orgId/event-sale-status');
+    // Story 4.3: hàng Cần xử lý của `reporting` (Owner và Admin, `review_queue.handle`).
+    expect(guarded).toContain('GET /v1/orgs/:orgId/review-items');
+    expect(guarded).toContain('GET /v1/orgs/:orgId/review-items/summary');
+    expect(guarded).toContain('GET /v1/orgs/:orgId/review-items/:itemId');
     const permissionOf = (path: string) => routes.find((r) => r.method === 'GET' && r.path === path)?.permission;
+    for (const path of ['', '/summary', '/:itemId']) {
+      expect(permissionOf(`/v1/orgs/:orgId/review-items${path}`), path).toBe(Permission.REVIEW_QUEUE_HANDLE);
+    }
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/overview')).toBe(Permission.ORDERS_VIEW);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/overview/live')).toBe(Permission.ORDERS_VIEW);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/pending-payment-count')).toBe(Permission.EVENTS_MANAGE);
@@ -205,6 +212,17 @@ describe('cách ly BTC', () => {
     const hash = createHash('sha256').update(token, 'utf8').digest('hex');
     const { rows } = await h.db.pool.query('SELECT used_at FROM reauth_grants WHERE token_hash = $1', [hash]);
     expect(rows).toEqual([{ used_at: null }]);
+  });
+
+  it('route Cần xử lý trên BTC A (Story 4.3): danh sách và summary → 200; mục id ngẫu nhiên → 404 REVIEW_ITEM_NOT_FOUND', async () => {
+    const reviewRoutes = routes.filter((r) => r.permission && r.path.startsWith('/v1/orgs/:orgId/review-items'));
+    expect(reviewRoutes).toHaveLength(3);
+    for (const route of reviewRoutes) {
+      const res = await call(route, orgA, ownerA.cookie);
+      const expected = route.path.endsWith('/:itemId') ? 404 : 200;
+      expect(res.status, label(route)).toBe(expected);
+      if (expected === 404) expect(ErrorResponse.parse(res.body).error.code, label(route)).toBe('REVIEW_ITEM_NOT_FOUND');
+    }
   });
 
   it('route Sự kiện trên BTC A: body {} → 400, id ngẫu nhiên → 404 EVENT_NOT_FOUND', async () => {

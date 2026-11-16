@@ -16,7 +16,9 @@ import { z } from 'zod';
  *   (Story 3.9).
  * - `event_orders_changed`: Owner, Admin → Đơn gần đây, số liệu Sự kiện (Story 3.11).
  * - `event_checkins_changed`: Owner, Admin, CTV được giao → số liệu check-in.
- * - `org_review_items_changed`: Owner, Admin → số mục Cần xử lý.
+ * - `org_review_items_changed`: Owner, Admin → số mục Cần xử lý (badge), hàng Cần xử lý và `needs-action-card` của
+ *   Tổng quan Sự kiện (Story 4.3). Tín hiệu cấp BTC: `id` = `organizationId`, không có `eventId` (mục `unmatched` không
+ *   gắn Sự kiện nào). Phát trong cùng `tx` với INSERT `review_items` (IPN và Đối soát bù).
  * - `org_status_changed`: thành viên BTC → `notices`, vai trò. Tín hiệu cấp BTC: `id` = `organizationId`, không có
  *   `eventId`. Hiện chỉ cờ dịch vụ thanh toán phát (Story 4.2: bật, đổi lý do hoặc tắt); duyệt/thu hồi Closed Beta và
  *   liên kết/hủy liên kết tài khoản nhận tiền chưa phát (xem `deferred-work.md`).
@@ -33,7 +35,10 @@ export const REALTIME_TOPICS = Object.values(RealtimeTopic) as [RealtimeTopic, .
 export const realtimeTopicSchema = z.enum(RealtimeTopic);
 
 /** Topic cấp BTC: tín hiệu không gắn Sự kiện nào (`eventId` vắng, `id` = `organizationId`). */
-export const ORGANIZATION_REALTIME_TOPICS = [RealtimeTopic.ORG_STATUS_CHANGED] as const;
+export const ORGANIZATION_REALTIME_TOPICS = [
+  RealtimeTopic.ORG_REVIEW_ITEMS_CHANGED,
+  RealtimeTopic.ORG_STATUS_CHANGED,
+] as const;
 export type OrganizationRealtimeTopic = (typeof ORGANIZATION_REALTIME_TOPICS)[number];
 
 const isOrganizationTopic = (topic: RealtimeTopic): topic is OrganizationRealtimeTopic =>

@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { BuyerOrderView, JobQueue } from '@tickee/contracts';
-import type pg from 'pg';
+import { BuyerOrderView, JobQueue, RealtimeTopic } from '@tickee/contracts';
+import pg from 'pg';
 import type { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { TingeeCredential } from '../../src/modules/tingee/index.js';
 import { BOSS } from '../../src/platform/jobs/index.js';
+import { REALTIME_CHANNEL } from '../../src/platform/realtime/index.js';
+import { databaseUrl } from '../helpers.js';
 import { createHarness, signUp, type Harness } from '../identity/harness.js';
 import {
   eventOnSale,
@@ -21,6 +23,7 @@ import {
   type TierSpec,
   type User,
 } from '../ordering/order-fixtures.js';
+import { sleep } from '../platform/sse-client.js';
 import { fakeAccount, fakeIpnPayload, signIpn, startTingeeFake, type FakeIpnPayload, type TingeeFake } from '../tingee-fake/server.js';
 import {
   ACK_TEXT,
@@ -38,6 +41,8 @@ import {
  * trừ gửi đồng thời (ipn-concurrency.test.ts): khoản tiền không thành Vé → đúng một `review_items` của BTC sở hữu
  * `ipnKey`, gắn event vừa lưu; Đơn `pending`/`expired` chuyển `review` khi cần; tiền về muộn cho Đơn `expired` bán lại có
  * điều kiện. Sau mỗi ca: bất biến tồn kho – Vé (`expectInvariants`). Cuối file: CHECK/unique và quyền cột của bảng.
+ * Story 4.3: mỗi mục tạo ra phát đúng một `org_review_items_changed` (cấp BTC, BTC của `ipnKey`) khi commit; IPN không tạo
+ * mục và transaction rollback không phát gì.
  */
 
 const MAIN: TingeeCredential = { clientId: 'tg-edge-main-4b2d', secretToken: 'tg-edge-main-secret-Pq8Ws7Ed6' };
@@ -59,6 +64,12 @@ let org: Org;
 let other: Org;
 let ipnKey: string;
 let otherKey: string;
+/** Kết nối `LISTEN` riêng của test: các tín hiệu `org_review_items_changed` đã commit. */
+let listener: pg.Client;
+const reviewSignals: Record<string, unknown>[] = [];
+
+/** Tín hiệu `org_review_items_changed` của BTC `organizationId` đã nhận. */
+const reviewSignalsOf = (organizationId: string) => reviewSignals.filter((s) => s.organizationId === organizationId);
 
 beforeAll(async () => {
   fake = await startTingeeFake({
@@ -72,11 +83,19 @@ beforeAll(async () => {
   other = await paidReadyOrg(h, { name: 'CLB Futsal Bình Thạnh', credential: OTHER, payout: payoutOf(otherAccount) });
   ipnKey = await ipnKeyOf(h, org.orgId);
   otherKey = await ipnKeyOf(h, other.orgId);
+  listener = new pg.Client({ connectionString: databaseUrl() });
+  await listener.connect();
+  listener.on('notification', (message) => {
+    const payload = JSON.parse(message.payload ?? '{}') as Record<string, unknown>;
+    if (payload.type === RealtimeTopic.ORG_REVIEW_ITEMS_CHANGED) reviewSignals.push(payload);
+  });
+  await listener.query(`LISTEN ${REALTIME_CHANNEL}`);
 });
 beforeEach(async () => {
   await resetOrderRateLimit(h);
 });
 afterAll(async () => {
+  await listener.end();
   await h.close();
   await fake.close();
 });
@@ -183,12 +202,14 @@ interface ExpectedItem {
 
 /**
  * AC: gửi IPN `success` (BTC `org`) → 200 `00`; event đã lưu có đúng một `review_items` `open` cùng BTC của `ipnKey`,
- * đúng loại, lý do, Đơn; log warn kèm nhánh và loại mục (`unmatched`: log error kèm `alert`). Trả event và mục.
+ * đúng loại, lý do, Đơn; log warn kèm nhánh và loại mục (`unmatched`: log error kèm `alert`); đúng một
+ * `org_review_items_changed` cấp BTC (`id` = `organizationId`, không `eventId`, Story 4.3). Trả event và mục.
  */
 async function expectReviewItem(
   payload: FakeIpnPayload,
   expected: ExpectedItem,
 ): Promise<{ event: PaymentEventRow; item: ReviewItemRow }> {
+  const signalsBefore = reviewSignalsOf(org.orgId).length;
   const res = await send(payload).expect(200);
   expect(res.text).toBe(ACK_TEXT);
   const event = await eventOf(payload);
@@ -216,6 +237,12 @@ async function expectReviewItem(
   });
   if (unmatched) expect(logged[0]).toMatchObject({ alert: 'payment_unmatched' });
   else expect(logged[0]!.alert).toBeUndefined();
+  await expect.poll(() => reviewSignalsOf(org.orgId).length).toBe(signalsBefore + 1);
+  expect(reviewSignalsOf(org.orgId).at(-1)).toEqual({
+    type: 'org_review_items_changed',
+    id: org.orgId,
+    organizationId: org.orgId,
+  });
   return { event, item };
 }
 
@@ -476,6 +503,9 @@ describe('Matrix: không khớp Đơn của BTC', () => {
     // Đơn B vẫn nhận IPN của chính BTC B.
     await send(paid(foreign), OTHER, otherKey).expect(200);
     expect(await orderState(h, foreign.code)).toMatchObject({ status: 'paid', tickets: 2 });
+    // Tín hiệu chỉ tới BTC sở hữu `ipnKey` (A), không tới BTC của Đơn (B).
+    await sleep(300);
+    expect(reviewSignalsOf(other.orgId)).toEqual([]);
   });
 
   it('mã sai định dạng → chỉ lưu event, không mục; log info', async () => {
@@ -492,13 +522,16 @@ describe('Matrix: không khớp Đơn của BTC', () => {
 });
 
 describe('không tạo mục', () => {
-  it('IPN trạng thái (expired, canceled, lạ) và IPN lặp → không mục; khoản đúng tiền phát Vé → không mục', async () => {
+  it('IPN trạng thái (expired, canceled, lạ) và IPN lặp → không mục, không tín hiệu; khoản đúng tiền phát Vé → không mục, không tín hiệu', async () => {
     const sale = await saleOf([TIER_A]);
     const placed = await placeIn(sale, [1]);
+    const signalsBefore = reviewSignalsOf(org.orgId).length;
     await send(statusIpn(placed, 'pending')).expect(200);
     await send(statusIpn(placed, 'expired')).expect(200);
     await send(statusIpn(placed, 'canceled')).expect(200);
     expect(await reviewItemsOf(h, { orderId: placed.orderId })).toEqual([]);
+    await sleep(300);
+    expect(reviewSignalsOf(org.orgId)).toHaveLength(signalsBefore);
 
     const mismatch = paid(placed, { paidAmount: 7_000 });
     await expectReviewItem(mismatch, { branch: 'mismatch', type: 'amount_mismatch', orderId: placed.orderId });
@@ -511,6 +544,8 @@ describe('không tạo mục', () => {
     const good = await placeIn(sale, [1]);
     await expectPaid(paid(good));
     expect(await reviewItemsOf(h, { orderId: good.orderId })).toEqual([]);
+    await sleep(300);
+    expect(reviewSignalsOf(org.orgId)).toHaveLength(signalsBefore + 1);
   });
 });
 
@@ -529,9 +564,13 @@ describe('lỗi giữa chừng', () => {
       [org.orgId, placed.orderId, setup.rows[0]!.id],
     );
     const ipn = signIpn(MAIN.secretToken, paid(placed, { paidAmount: placed.total - 2_000 }));
+    const signalsBefore = reviewSignalsOf(org.orgId).length;
     const failed = await postIpn(h, ipnKey, ipn);
     expect(failed.status).toBeGreaterThanOrEqual(500);
     expect(await paymentEventsOf(h, org.orgId, placed.code)).toEqual([]);
+    // Story 4.3: `tx` rollback → không có `org_review_items_changed`.
+    await sleep(300);
+    expect(reviewSignalsOf(org.orgId)).toHaveLength(signalsBefore);
     expect((await reviewItemsOf(h, { orderId: placed.orderId })).map((i) => i.id)).toEqual([blocker.rows[0]!.id]);
     expect(await orderState(h, placed.code)).toMatchObject({ status: 'pending', tickets: 0 });
     expect(await inventory(h, placed.tiers[0]!)).toEqual({ capacity: 5, sold: 0, held: 2 });
@@ -543,6 +582,10 @@ describe('lỗi giữa chừng', () => {
     ]);
     expect((await postIpn(h, ipnKey, ipn).expect(200)).text).toBe(ACK_TEXT);
     expect((await postIpn(h, ipnKey, ipn).expect(200)).text).toBe(ACK_TEXT);
+    // Gửi lại thành công tạo mục → đúng một tín hiệu; lần lặp sau đó không phát thêm.
+    await expect.poll(() => reviewSignalsOf(org.orgId).length).toBe(signalsBefore + 1);
+    await sleep(300);
+    expect(reviewSignalsOf(org.orgId)).toHaveLength(signalsBefore + 1);
     const events = await paymentEventsOf(h, org.orgId, placed.code);
     expect(events).toHaveLength(1);
     expect(await reviewItemsOf(h, { paymentEventId: events[0]!.id })).toEqual([

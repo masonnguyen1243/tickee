@@ -3,6 +3,7 @@ import {
   OrganizationSection,
   organizationDashboardPath,
   Permission,
+  REVIEW_BADGE_MAX,
   Role,
   roleHasPermission,
 } from '@tickee/contracts';
@@ -89,6 +90,20 @@ export function activeSection(organizationId: string, pathname: string): NavSect
     return segment !== '' && (rest === segment || rest.startsWith(`${segment}/`));
   });
   return match?.key ?? null;
+}
+
+/**
+ * Số trên badge của mục điều hướng (Story 4.3: "Cần xử lý"): 0 (hoặc chưa tải) → `null` (ẩn badge); quá
+ * `REVIEW_BADGE_MAX` → "99+".
+ */
+export function navBadgeLabel(count: number | undefined): string | null {
+  if (!count || count <= 0) return null;
+  return count > REVIEW_BADGE_MAX ? `${REVIEW_BADGE_MAX}+` : String(count);
+}
+
+/** Tên truy cập của mục điều hướng có badge: "Cần xử lý, 3 mục"; không có badge → chỉ tên mục. */
+export function navAccessibleName(label: string, count: number | undefined): string {
+  return navBadgeLabel(count) === null ? label : `${label}, ${count} mục`;
 }
 
 const ROLE_LABELS: Readonly<Record<Role, string>> = { owner: 'Owner', admin: 'Admin' };

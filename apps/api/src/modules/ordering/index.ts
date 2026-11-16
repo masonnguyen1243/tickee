@@ -5,9 +5,11 @@ export {
   eventRevenueOf,
   pendingPaymentCountOf,
   recentOrdersOf,
+  reviewOrdersOf,
   type EventOrdersScope,
   type EventRevenue,
   type RecentOrderRow,
+  type ReviewOrderRow,
 } from './event-overview-read.js';
 export {
   changeCapacity,

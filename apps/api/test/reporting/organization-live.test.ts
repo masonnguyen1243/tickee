@@ -11,9 +11,9 @@ import { listen, openSse, sleep, type SseClient } from '../platform/sse-client.j
 
 /*
  * Story 4.2-b: stream SSE cấp BTC `GET /v1/orgs/:orgId/live` (`reporting`, `org.read`) trên Postgres thật, server HTTP
- * thật và client SSE thật. Chỉ đẩy `org_status_changed` của đúng BTC (tín hiệu cấp BTC, không có `eventId`); tín hiệu cấp
- * Sự kiện của cùng BTC hay tín hiệu của BTC khác không tới. Owner và Admin mở được; người ngoài → 403, chưa đăng nhập →
- * 401 (JSON, không treo); hub chưa `LISTEN` → 503.
+ * thật và client SSE thật. Chỉ đẩy tín hiệu cấp BTC của đúng BTC (không có `eventId`: `org_status_changed`, và
+ * `org_review_items_changed` của Story 4.3); tín hiệu cấp Sự kiện của cùng BTC hay tín hiệu của BTC khác không tới.
+ * Owner và Admin mở được; người ngoài → 403, chưa đăng nhập → 401 (JSON, không treo); hub chưa `LISTEN` → 503.
  */
 
 let h: Harness;
@@ -123,7 +123,7 @@ describe('GET /v1/orgs/:orgId/live: chỉ tín hiệu của BTC này', () => {
     expect(ownerStream.messages).toHaveLength(1);
   });
 
-  it('tín hiệu cấp Sự kiện của cùng BTC (Đơn, check-in, Cần xử lý) không tới stream cấp BTC', async () => {
+  it('tín hiệu cấp Sự kiện của cùng BTC (Đơn, check-in) không tới stream cấp BTC', async () => {
     const s = await live(orgA, owner.cookie);
     const eventId = randomUUID();
     await h.db.transaction(async (tx) => {
@@ -131,10 +131,35 @@ describe('GET /v1/orgs/:orgId/live: chỉ tín hiệu của BTC này', () => {
       await realtime.notify(tx, RealtimeTopic.EVENT_ORDERS_CHANGED, ids);
       await realtime.notify(tx, RealtimeTopic.ORDER_CHANGED, ids);
       await realtime.notify(tx, RealtimeTopic.EVENT_CHECKINS_CHANGED, ids);
-      await realtime.notify(tx, RealtimeTopic.ORG_REVIEW_ITEMS_CHANGED, ids);
     });
     await sleep(400);
     expect(s.messages).toEqual([]);
+  });
+
+  it('Story 4.3: org_review_items_changed của BTC A → stream A (Owner, Admin) nhận {type} trong 1 giây; stream BTC khác không nhận; rollback → không gì', async () => {
+    const ownerStream = await live(orgA, owner.cookie);
+    const adminStream = await live(orgA, admin.cookie);
+    const otherOwner = await signUp(h);
+    const orgC = await createOrg(otherOwner.cookie, 'CLB Bơi lội Quận 7');
+    const streamC = await live(orgC, otherOwner.cookie);
+
+    await h.db.transaction((tx) => realtime.notifyOrganization(tx, RealtimeTopic.ORG_REVIEW_ITEMS_CHANGED, orgA));
+    for (const s of [ownerStream, adminStream]) {
+      const [message] = await s.waitForMessages(1, 1_000);
+      expect(message!.raw).toBe('{"type":"org_review_items_changed"}');
+    }
+
+    // Transaction rollback: Postgres không giao NOTIFY.
+    await expect(
+      h.db.transaction(async (tx) => {
+        await realtime.notifyOrganization(tx, RealtimeTopic.ORG_REVIEW_ITEMS_CHANGED, orgA);
+        throw new Error('rollback giả lập');
+      }),
+    ).rejects.toThrow('rollback giả lập');
+    await sleep(400);
+    expect(ownerStream.messages).toHaveLength(1);
+    expect(adminStream.messages).toHaveLength(1);
+    expect(streamC.messages).toEqual([]);
   });
 
   it('đường thật: Quản trị Tingee mở lại dịch vụ thanh toán của BTC A → stream A nhận org_status_changed', async () => {
