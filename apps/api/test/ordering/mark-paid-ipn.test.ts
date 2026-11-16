@@ -228,7 +228,7 @@ describe('markPaid nguồn ipn: Đơn không còn chờ tiền', () => {
   it('Đơn cancelled hay refunded → duplicate_payment; Sự kiện đã hủy → event_cancelled, Đơn cancelled giữ nguyên', async () => {
     for (const status of ['cancelled', 'refunded']) {
       const order = await expiredOrder();
-      await h.db.pool.query('UPDATE orders SET status = $2 WHERE id = $1', [order.id, status]);
+      await h.db.pool.query("UPDATE orders SET status = $2, cancel_reason = 'rejected' WHERE id = $1", [order.id, status]);
       expect(await ipnPaid(order.id, order.total)).toEqual({ outcome: 'duplicate_payment' });
       await setEvent(order.eventId, CANCELLED);
       expect(await ipnPaid(order.id, order.total)).toEqual({ outcome: 'event_cancelled' });
@@ -387,7 +387,7 @@ describe('markPaid nguồn reconciliation (Story 4.1)', () => {
     expect(await orderState(h, review.code)).toMatchObject({ status: 'review', tickets: 0 });
 
     const cancelled = await expiredOrder();
-    await h.db.pool.query("UPDATE orders SET status = 'cancelled' WHERE id = $1", [cancelled.id]);
+    await h.db.pool.query("UPDATE orders SET status = 'cancelled', cancel_reason = 'rejected' WHERE id = $1", [cancelled.id]);
     expect(await reconciled(cancelled.id, cancelled.total)).toEqual({ outcome: 'already_settled' });
     expect(await orderState(h, cancelled.code)).toMatchObject({ status: 'cancelled', tickets: 0 });
     await expectInvariants(h, cancelled.eventId);
@@ -410,6 +410,80 @@ describe('markPaid nguồn reconciliation (Story 4.1)', () => {
     expect(await reconciled(cancelled.id, cancelled.total)).toEqual({ outcome: 'event_cancelled' });
     expect(await orderState(h, cancelled.code)).toMatchObject({ status: 'review', tickets: 0 });
     await expectInvariants(h, cancelled.eventId);
+  });
+});
+
+describe('markPaid nguồn manual (Story 4.4, duyệt tay)', () => {
+  /** Đơn `review` (lệch tiền qua IPN: đã nhả held). */
+  async function reviewOrder() {
+    const order = await pendingOrder();
+    expect(await ipnPaid(order.id, order.total - 1_000)).toEqual({ outcome: 'mismatch' });
+    return order;
+  }
+  const approval = () => ({ organizationId: org.orgId, actorUserId: org.owner.userId });
+  const manual = (orderId: string, amount: number, manualApproval = approval()) =>
+    db.transaction((tx) => payments.markPaid(tx, orderId, 'manual', amount, { manual: manualApproval }));
+
+  it('Đơn review còn chỗ → paid (paid_source manual, paid_amount = số nhận), bán sold += n, N Vé, một email Vé, audit có người duyệt; gọi lại → lost_race', async () => {
+    const order = await reviewOrder();
+    expect(await manual(order.id, 449_000)).toEqual({ outcome: 'paid' });
+    expect(await orderState(h, order.code)).toMatchObject({
+      status: 'paid',
+      paid_source: 'manual',
+      paid_amount: '449000',
+      tickets: 3,
+    });
+    expect(await inventory(h, order.a)).toEqual({ capacity: 5, sold: 2, held: 0 });
+    expect(await inventory(h, order.b)).toEqual({ capacity: 3, sold: 1, held: 0 });
+    expect(await buyerEmails(order.id)).toEqual([{ kind: 'tickets', orderId: order.id }]);
+    const { rows } = await h.db.pool.query(
+      "SELECT actor_user_id FROM audit_events WHERE action = 'order.paid' AND target_id = $1",
+      [order.id],
+    );
+    expect(rows).toEqual([{ actor_user_id: org.owner.userId }]);
+    expect(await manual(order.id, 449_000)).toEqual({ outcome: 'lost_race' });
+    expect(await auditCount(order.id)).toBe(1);
+    await expectInvariants(h, order.eventId);
+  });
+
+  it('Đơn không ở review (pending, paid, expired) hoặc BTC khác → lost_race, không đổi gì; thiếu người duyệt → lỗi', async () => {
+    const pending = await pendingOrder();
+    expect(await manual(pending.id, pending.total)).toEqual({ outcome: 'lost_race' });
+    expect(await orderState(h, pending.code)).toMatchObject({ status: 'pending', tickets: 0 });
+    const expired = await expiredOrder();
+    expect(await manual(expired.id, expired.total)).toEqual({ outcome: 'lost_race' });
+    const review = await reviewOrder();
+    expect(await manual(review.id, 1, { organizationId: randomUUID(), actorUserId: org.owner.userId })).toEqual({
+      outcome: 'lost_race',
+    });
+    expect(await orderState(h, review.code)).toMatchObject({ status: 'review', tickets: 0 });
+    await expect(db.transaction((tx) => payments.markPaid(tx, review.id, 'manual', 1))).rejects.toThrow(/người duyệt/);
+    expect(await inventory(h, review.a)).toEqual({ capacity: 5, sold: 0, held: 0 });
+  });
+
+  it('Sự kiện hủy → event_cancelled; đã kết thúc → orphan event_ended; bị khóa → orphan event_locked; Đơn giữ review, không email', async () => {
+    for (const [set, expected] of [
+      [CANCELLED, { outcome: 'event_cancelled' }],
+      [ENDED, { outcome: 'orphan', reason: 'event_ended' }],
+      [LOCKED, { outcome: 'orphan', reason: 'event_locked' }],
+      [`${ENDED}, ${CANCELLED}`, { outcome: 'event_cancelled' }],
+    ] as const) {
+      const order = await reviewOrder();
+      await setEvent(order.eventId, set);
+      expect(await manual(order.id, order.total), set).toEqual(expected);
+      expect(await orderState(h, order.code)).toMatchObject({ status: 'review', tickets: 0 });
+      expect(await buyerEmails(order.id)).toEqual([]);
+      await expectInvariants(h, order.eventId);
+    }
+  });
+
+  it('một Hạng vé hết chỗ → orphan sold_out: rollback savepoint (không Hạng nào bán), Đơn giữ review, không email', async () => {
+    const order = await reviewOrder();
+    await h.db.pool.query('UPDATE ticket_type_inventory SET capacity = 0 WHERE ticket_type_id = $1', [order.b]);
+    expect(await manual(order.id, order.total)).toEqual({ outcome: 'orphan', reason: 'sold_out' });
+    expect(await inventory(h, order.a)).toEqual({ capacity: 5, sold: 0, held: 0 });
+    expect(await orderState(h, order.code)).toMatchObject({ status: 'review', tickets: 0 });
+    expect(await buyerEmails(order.id)).toEqual([]);
   });
 });
 

@@ -19,7 +19,12 @@ import {
   sendBuyerEmail,
   type BuyerEmailSender,
 } from '../../src/modules/ordering/buyer-email-jobs.js';
-import { buildOrphanSoldOutEmail, buildTicketsEmail } from '../../src/modules/ordering/buyer-email.js';
+import {
+  buildOrderRejectedEmail,
+  buildOrphanSoldOutEmail,
+  buildTicketsEmail,
+  ORDER_REJECTED_MESSAGE,
+} from '../../src/modules/ordering/buyer-email.js';
 import { markExpired, OrderPayments } from '../../src/modules/ordering/index.js';
 import { TicketsService } from '../../src/modules/ticketing/index.js';
 import { DATABASE, type Database } from '../../src/platform/db/index.js';
@@ -251,6 +256,32 @@ describe('mẫu email', () => {
     });
     expect(noContact.text).not.toMatch(/SĐT|Email:/);
   });
+
+  it('email order_rejected (Story 4.4): câu báo hủy kèm liên hệ hoàn tiền, Sự kiện, mã Đơn, kênh liên hệ BTC, link Trang Đơn (escape trong HTML)', () => {
+    const orderLink = `${TEST_WEB_ORIGIN}/orders/TK8F3Q2AXM`;
+    const message = buildOrderRejectedEmail({
+      eventName: 'Giải <Mùa thu>',
+      orderCode: 'TK8F3Q2AXM',
+      organizer: { name: 'CLB <X>', contactPhone: '0912345678', contactEmail: 'btc@vidu.vn' },
+      orderLink,
+    });
+    expect(ORDER_REJECTED_MESSAGE).toBe('BTC đã hủy Đơn này. Liên hệ BTC để được hoàn tiền nếu bạn đã chuyển.');
+    expect(message.subject).toContain('TK8F3Q2AXM');
+    for (const part of [
+      ORDER_REJECTED_MESSAGE,
+      'Sự kiện: Giải <Mùa thu>',
+      'Mã Đơn: TK8F3Q2AXM',
+      'Liên hệ BTC: CLB <X>',
+      'SĐT: 0912345678',
+      'Email: btc@vidu.vn',
+      `Xem Đơn của bạn: ${orderLink}`,
+    ]) {
+      expect(message.text).toContain(part);
+    }
+    expect(message.html).toContain(`href="${orderLink}"`);
+    expect(message.html).toContain('CLB &lt;X&gt;');
+    expect(message.html).not.toMatch(/<Mùa thu>|<X>/);
+  });
 });
 
 describe('sendBuyerEmail (handler)', () => {
@@ -303,6 +334,25 @@ describe('sendBuyerEmail (handler)', () => {
     expect(email.sent[0]).toMatchObject({ to: buyer.email });
     expect(email.sent[0]!.text).toContain(order.code);
     expect(email.sent[0]!.text).toContain('CLB Chạy bộ <Sáng> & "Tối"');
+  });
+
+  it('order_rejected (Story 4.4): Đơn cancelled hay refunded → email tới buyer_email kèm mã Đơn, tên BTC, link Trang Đơn; Đơn ở trạng thái khác → skipped', async () => {
+    const { orderId, buyer, order } = await placeOrder(100_000, 1);
+    expect(await send({ kind: 'order_rejected', orderId })).toBe('skipped');
+    await h.db.pool.query("UPDATE orders SET status = 'cancelled', cancel_reason = 'rejected' WHERE id = $1", [orderId]);
+    expect(await send({ kind: 'order_rejected', orderId })).toBe('sent');
+    expect(email.sent).toHaveLength(1);
+    expect(email.sent[0]).toMatchObject({ to: buyer.email });
+    expect(email.sent[0]!.text).toContain('BTC đã hủy Đơn này. Liên hệ BTC để được hoàn tiền nếu bạn đã chuyển.');
+    expect(email.sent[0]!.text).toContain(order.code);
+    expect(email.sent[0]!.text).toContain('CLB Chạy bộ <Sáng> & "Tối"');
+    expect(email.sent[0]!.text).toContain(`${TEST_WEB_ORIGIN}/orders/${order.code}`);
+    // BTC đã bấm "Đã hoàn tay" trước khi job chạy (hay trong lúc SMTP retry) → vẫn gửi: Người mua chưa từng được báo.
+    await h.db.pool.query("UPDATE orders SET status = 'refunded' WHERE id = $1", [orderId]);
+    expect(await send({ kind: 'order_rejected', orderId })).toBe('sent');
+    expect(email.sent).toHaveLength(2);
+    expect(email.sent[1]).toMatchObject({ to: buyer.email });
+    expect(email.sent[1]!.text).toContain(order.code);
   });
 
   it('SMTP lỗi → ném lỗi chỉ có tên lớp (không email), không gửi', async () => {

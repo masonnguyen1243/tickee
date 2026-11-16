@@ -298,7 +298,7 @@ describe('POST /v1/events/:slug/orders — Đơn tổng 0đ', () => {
     const capped = await register(buyer, sale.event.slug, [{ ticketTypeId: tier.id, quantity: 2 }]).expect(409);
     expect(errorOf(capped.body).code).toBe('FREE_TICKET_LIMIT_REACHED');
     // Đơn đã hủy (vd. Story 4.4) không còn tính vào trần.
-    await h.db.orm.execute(sql`UPDATE orders SET status = 'cancelled' WHERE code = ${first.code}`);
+    await h.db.orm.execute(sql`UPDATE orders SET status = 'cancelled', cancel_reason = 'rejected' WHERE code = ${first.code}`);
     await register(buyer, sale.event.slug, [{ ticketTypeId: tier.id, quantity: 4 }]).expect(201);
   });
 

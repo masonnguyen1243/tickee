@@ -208,6 +208,14 @@ export const ErrorCode = {
    * hoặc của BTC khác (cùng lỗi để không lộ mục nào có thật).
    */
   REVIEW_ITEM_NOT_FOUND: 'REVIEW_ITEM_NOT_FOUND',
+  /**
+   * Thao tác trên mục Cần xử lý (Story 4.4) không được phép ở trạng thái hiện tại của mục và Đơn: mục đã được xử lý theo
+   * cách khác, Đơn không còn ở trạng thái thao tác cần (kể cả khi hai thành viên bấm cùng lúc và bên kia thắng), hoặc
+   * thao tác không áp cho loại mục này. Không đổi gì.
+   */
+  REVIEW_ACTION_NOT_ALLOWED: 'REVIEW_ACTION_NOT_ALLOWED',
+  /** "Duyệt tay phát Vé" (Story 4.4) khi Sự kiện hoặc BTC đang bị khóa. Không đổi gì. */
+  EVENT_LOCKED: 'EVENT_LOCKED',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

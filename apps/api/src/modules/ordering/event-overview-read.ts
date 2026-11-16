@@ -1,4 +1,4 @@
-import { OrderStatus } from '@tickee/contracts';
+import { OrderStatus, type OrderCancelReason } from '@tickee/contracts';
 import { and, desc, eq, gt, inArray, isNotNull, sql } from 'drizzle-orm';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import type { DbExecutor } from '../../platform/db/index.js';
@@ -78,9 +78,13 @@ export async function recentOrdersOf(
   return rows.map((r) => ({ ...r, ticketCount: ticketsOf.get(r.id) ?? 0 }));
 }
 
-/** Đơn của một mục Cần xử lý (Story 4.3): `id` nội bộ và `eventId` chỉ để `reporting` ghép, không ra response. */
+/**
+ * Đơn của một mục Cần xử lý (Story 4.3): `id` nội bộ và `eventId` chỉ để `reporting` ghép, không ra response.
+ * `cancelReason` (Story 4.4): lý do hủy khi Đơn `cancelled`/`refunded`, để tính thao tác được phép trên mục.
+ */
 export interface ReviewOrderRow extends RecentOrderRow {
   eventId: string;
+  cancelReason: OrderCancelReason | null;
 }
 
 /**
@@ -102,6 +106,7 @@ export async function reviewOrdersOf(
       buyerName: orders.buyerName,
       totalAmount: orders.totalAmount,
       status: orders.status,
+      cancelReason: orders.cancelReason,
       eventId: orders.eventId,
       createdAt: orders.createdAt,
     })

@@ -5,6 +5,8 @@ import { OrderPaymentsModule } from '../ordering/index.js';
 import { IPN_SETTINGS, TingeeIpnController, type IpnSettings } from './ipn.controller.js';
 import { IpnProcessor } from './ipn-processor.js';
 import { PaymentServiceResumedWorker } from './payment-service-resumed-worker.js';
+import { ReviewActionsController } from './review-actions.controller.js';
+import { ReviewActionsService } from './review-actions.js';
 import {
   RECONCILIATION_SETTINGS,
   reconciliationSettings,
@@ -54,21 +56,23 @@ export class PaymentJobsModule {
 }
 
 /**
- * `payment` ở vai api (Story 3.5): endpoint IPN Tingee `POST /v1/payments/tingee/ipn/:ipnKey` (`@Public`) trên lõi xử lý.
- * Cần thêm ở gốc DI những gì `PaymentProcessingModule` cần.
+ * `payment` ở vai api: endpoint IPN Tingee `POST /v1/payments/tingee/ipn/:ipnKey` (`@Public`, Story 3.5) trên lõi xử lý,
+ * và thao tác của Owner/Admin trên mục Cần xử lý `POST /v1/orgs/:orgId/review-items/:itemId/{approve,reject,refund,
+ * dismiss}` (Story 4.4-a). Cần thêm ở gốc DI những gì `PaymentProcessingModule` cần.
  */
 @Module({})
 export class PaymentModule {
   static forRoot(config: PaymentConfig): DynamicModule {
     return {
       module: PaymentModule,
-      imports: [PaymentProcessingModule],
-      controllers: [TingeeIpnController],
+      imports: [PaymentProcessingModule, OrderPaymentsModule],
+      controllers: [TingeeIpnController, ReviewActionsController],
       providers: [
         {
           provide: IPN_SETTINGS,
           useFactory: (): IpnSettings => ({ secretBox: new SecretBox(parseCredentialKeys(config.TINGEE_CREDENTIAL_KEYS)) }),
         },
+        ReviewActionsService,
       ],
     };
   }

@@ -10,12 +10,15 @@ import { TicketsService } from '../ticketing/index.js';
 import { BuyerEmailQueues, enqueueBuyerEmail } from './buyer-email-jobs.js';
 import { releaseOrderHeld, sellInventory, settleHeld } from './inventory.service.js';
 import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
+import { OrderReviewDecisions } from './order-review.js';
 import { checkoutFunnelEvents, orderItems, orders, type PaidSource } from './schema.js';
 
 /**
  * Kết quả `markPaid` (AD-1, AD-7), đủ để bên gọi chọn mục Cần xử lý (Story 3.6):
- * - `paid`: Đơn vừa chuyển `paid` (từ `pending`, hoặc từ `expired` khi tiền về muộn còn chỗ) và Vé đã phát.
- * - `lost_race`: chỉ nguồn `free` — Đơn không còn `pending` (một lần gọi khác đã chuyển trước), không phát gì.
+ * - `paid`: Đơn vừa chuyển `paid` (từ `pending`, hoặc từ `expired` khi tiền về muộn còn chỗ, hoặc từ `review` khi BTC
+ *   duyệt tay) và Vé đã phát.
+ * - `lost_race`: chỉ nguồn `free` — Đơn không còn `pending` (một lần gọi khác đã chuyển trước); nguồn `manual` — Đơn
+ *   không còn `review` hoặc không thuộc BTC của người duyệt. Không đổi gì.
  * - `already_settled`: chỉ nguồn `reconciliation` — Đơn đã rời `pending`/`expired` (khoản tiền này đã được ghi nhận, vd.
  *   IPN tới trước), không đổi gì, không tạo mục.
  * - `event_cancelled`: Sự kiện đã hủy.
@@ -25,7 +28,8 @@ import { checkoutFunnelEvents, orderItems, orders, type PaidSource } from './sch
  *
  * Khác `paid`/`lost_race`/`already_settled`, Đơn `pending`/`expired` đã chuyển `review` trong `tx` (trừ
  * `duplicate_payment`, và `event_cancelled` khi Đơn ở trạng thái khác: giữ nguyên); bên gọi (`payment`) tạo `review_item`
- * trong cùng `tx`.
+ * trong cùng `tx`. Nguồn `manual` (Story 4.4) không bao giờ đổi Đơn ngoài `paid`: `event_cancelled` và `orphan`
+ * (`event_ended`/`event_locked`/`sold_out`) nghĩa là chưa duyệt được, Đơn giữ `review`.
  */
 export type MarkPaidResult =
   | { outcome: 'paid' }
@@ -43,9 +47,20 @@ export type MarkPaidOutcome = MarkPaidResult['outcome'];
  */
 export type GatewaySource = Extract<PaidSource, 'ipn' | 'reconciliation'>;
 
-/** Tùy chọn của nguồn có phí. `paidAt`: lúc Tingee báo tiền về; thiếu → đồng hồ DB. Nguồn `free` bỏ qua. */
+/**
+ * Tùy chọn của nguồn có phí. `paidAt`: lúc Tingee báo tiền về; thiếu → đồng hồ DB. Nguồn `free` bỏ qua. `manual` (bắt
+ * buộc với nguồn `manual`, Story 4.4): BTC của người duyệt (CAS thêm `AND organization_id`) và người duyệt (actor của
+ * audit `order.paid`).
+ */
 export interface MarkPaidOptions {
   paidAt?: Date | null;
+  manual?: ManualApproval;
+}
+
+/** Người duyệt tay một khoản tiền (Story 4.4): thành viên BTC `organizationId` (đã qua `review_queue.handle`). */
+export interface ManualApproval {
+  organizationId: string;
+  actorUserId: string;
 }
 
 /**
@@ -123,6 +138,16 @@ async function sellAllOrNothing(tx: Tx, lines: readonly PaidLine[]): Promise<boo
   }
 }
 
+/** Thứ tự kiểm "Sự kiện còn cho phát Vé" của nguồn `manual`: đã hủy → đã kết thúc (đồng hồ DB) → bị khóa. */
+async function manualBlockOf(tx: Tx, event: PublicEventRef, now: Date): Promise<MarkPaidResult | null> {
+  if (event.status === EventStatus.CANCELLED) return { outcome: 'event_cancelled' };
+  if (now.getTime() > event.effectiveEndAt.getTime()) return orphan(ReviewItemReason.EVENT_ENDED);
+  if (event.lockedAt !== null || (await organizationLocked(tx, { organizationId: event.organizationId }))) {
+    return orphan(ReviewItemReason.EVENT_LOCKED);
+  }
+  return null;
+}
+
 /** Trạng thái Đơn còn chuyển được sang `review` khi khoản tiền không thành Vé (AD-3). */
 type Reviewable = typeof OrderStatus.PENDING | typeof OrderStatus.EXPIRED;
 const isReviewable = (status: OrderStatus): status is Reviewable =>
@@ -193,7 +218,14 @@ export class OrderPayments {
    *   kiện khi tiền về muộn), trừ một điều: sau khi khóa Đơn, Đơn không còn `pending`/`expired` → `already_settled`, không
    *   đổi Đơn, không tạo mục. Tra theo `orderId` là hỏi lại khoản tiền của chính đơn Gateway đó, không bao giờ là trả
    *   trùng (khoản trả thật lần hai vẫn tới bằng IPN và đi bước 4).
-   * - `manual`: chưa làm (Story 4.4) → ném lỗi.
+   * - `manual` (Story 4.4, BTC "Duyệt tay phát Vé" trên mục `amount_mismatch`/`orphan`): đường riêng, không đi bước 3–7
+   *   (bước 4 sẽ trả `duplicate_payment` cho Đơn `review`). Khóa Sự kiện `FOR SHARE` rồi khóa Đơn `FOR NO KEY UPDATE`:
+   *   Đơn không còn `review` hoặc không thuộc `options.manual.organizationId` → `lost_race`. Sự kiện đã hủy →
+   *   `event_cancelled`; đồng hồ DB đã quá `effective_end_at` → `orphan` `event_ended`; Sự kiện hoặc BTC bị khóa →
+   *   `orphan` `event_locked` (không đổi gì). Còn lại bán có điều kiện cả Đơn (`sold += n`) trong savepoint: thiếu một
+   *   Hạng vé → `orphan` `sold_out`, Đơn giữ `review` (không email: Người mua đã có trạng thái "BTC đang kiểm tra");
+   *   đủ chỗ → CAS `review → paid` (thêm `AND organization_id`) như bước 7, `paid_amount` = `paidAmount` (số tiền nhận
+   *   của mục, có thể khác `total_amount`), audit `order.paid` có người duyệt.
    *
    * `paid` luôn kèm đúng một job email Vé (`tickets`) trong `tx`. Bên gọi đã `ready()` trước transaction. Lỗi bất kỳ
    * (phát Vé, enqueue, audit…) → ném, cả `tx` rollback (không Vé, không job).
@@ -205,11 +237,12 @@ export class OrderPayments {
     paidAmount: number,
     options: MarkPaidOptions = {},
   ): Promise<MarkPaidResult> {
-    // Danh sách cho phép: nguồn mới chưa làm (vd. `manual`, Story 4.4) không bao giờ rơi vào đường Đơn 0đ.
-    if (source !== 'free' && source !== 'ipn' && source !== 'reconciliation') {
-      throw new Error(`markPaid: nguồn ${source} chưa hỗ trợ`);
+    // Danh sách cho phép: nguồn mới chưa làm không bao giờ rơi vào đường Đơn 0đ.
+    if (source !== 'free' && source !== 'ipn' && source !== 'reconciliation' && source !== 'manual') {
+      throw new Error(`markPaid: nguồn ${String(source)} chưa hỗ trợ`);
     }
     if (source === 'free' && paidAmount !== 0) throw new Error('markPaid: Đơn 0đ chỉ ghi nhận 0đ');
+    if (source === 'manual' && !options.manual) throw new Error('markPaid: nguồn manual cần người duyệt');
 
     const [current] = await tx
       .select({ eventId: orders.eventId, totalAmount: orders.totalAmount })
@@ -219,9 +252,16 @@ export class OrderPayments {
     if (source === 'free' && current.totalAmount !== 0) throw new Error('markPaid: nguồn free chỉ dành cho Đơn tổng 0đ');
 
     // Thứ tự khóa: Sự kiện → Đơn → tồn kho theo id. TX1 đã khóa Sự kiện thì khóa lại không chờ.
+    // Thao tác trên mục Cần xử lý (Story 4.4, `payment`) khóa `review_items FOR UPDATE` theo `(id, organization_id)`
+    // *trước* mọi khóa ở đây: "Duyệt tay" (nguồn `manual`) đi mục → Sự kiện → Đơn → tồn kho; "Từ chối" và "Đã hoàn tay"
+    // (`OrderReviewDecisions`) chỉ CAS Đơn sau khi khóa mục, không khóa Sự kiện. Đường mới khóa cả Sự kiện lẫn mục
+    // (vd. hủy Sự kiện, Story 7.1) phải giữ thứ tự mục → Sự kiện → Đơn để không deadlock với thao tác này.
     const event = await lockEventByIdForShare(tx, current.eventId);
     if (source === 'ipn' || source === 'reconciliation') {
       return this.settleGateway(tx, orderId, source, event, current.totalAmount, paidAmount, options.paidAt ?? null);
+    }
+    if (source === 'manual') {
+      return this.settleManual(tx, orderId, event, paidAmount, options.paidAt ?? null, options.manual!);
     }
     // Đơn 0đ đã bán (`sold += n`) ngay trong TX1.
     const paid = await this.pay(tx, orderId, {
@@ -312,6 +352,48 @@ export class OrderPayments {
   }
 
   /**
+   * Duyệt tay (nguồn `manual`, xem `markPaid`). Sự kiện đã khóa `FOR SHARE`. Không đổi gì trừ khi `paid`.
+   */
+  private async settleManual(
+    tx: Tx,
+    orderId: string,
+    event: PublicEventRef,
+    paidAmount: number,
+    reportedPaidAt: Date | null,
+    approval: ManualApproval,
+  ): Promise<MarkPaidResult> {
+    const [locked] = await tx
+      .select({ status: orders.status, organizationId: orders.organizationId })
+      .from(orders)
+      .where(eq(orders.id, orderId))
+      .for('no key update');
+    if (!locked) throw new Error('markPaid: không có Đơn này');
+    if (locked.status !== OrderStatus.REVIEW || locked.organizationId !== approval.organizationId) {
+      return { outcome: 'lost_race' };
+    }
+    // Đồng hồ DB lúc gọi: mốc so `effective_end_at` và `issued_at` của Vé (transaction có thể đã chờ khóa mục, Sự kiện).
+    const now = await dbClock(tx);
+    const blocked = await manualBlockOf(tx, event, now);
+    if (blocked) return blocked;
+    // Đơn `review` không còn giữ chỗ (`pending → review` đã nhả, `expired` nhả lúc hết hạn): bán lại có điều kiện.
+    const lines = await linesOf(tx, orderId);
+    if (!(await sellAllOrNothing(tx, lines))) return orphan(ReviewItemReason.SOLD_OUT);
+    // Đơn đã khóa nên CAS không thể thua; 0 dòng là lỗi lập trình → ném, cả `tx` rollback (kể cả phép bán ở trên).
+    const paid = await this.pay(tx, orderId, {
+      from: OrderStatus.REVIEW,
+      source: 'manual',
+      paidAt: reportedPaidAt ?? now,
+      paidAmount,
+      issuedAt: now,
+      lines,
+      organizationId: approval.organizationId,
+      actorUserId: approval.actorUserId,
+    });
+    if (!paid) throw new Error('markPaid: CAS review → paid thua dù đã khóa Đơn');
+    return { outcome: 'paid' };
+  }
+
+  /**
    * CAS `from → paid` (kèm `paid_at`, `paid_amount`, `paid_source`) → phát N Vé (`issued_at` = `issuedAt`, thiếu →
    * `paid_at`) → enqueue email Vé (`tickets`, id job cố định theo Đơn) → audit `order.paid` → phễu `paid` →
    * `order_changed` (trừ nguồn `free`: Đơn 0đ thành `paid` ngay trong TX1, không `NOTIFY` trong TX1, response tạo Đơn đã
@@ -321,7 +403,13 @@ export class OrderPayments {
     const [order] = await tx
       .update(orders)
       .set({ status: OrderStatus.PAID, paidAt: input.paidAt, paidAmount: input.paidAmount, paidSource: input.source })
-      .where(and(eq(orders.id, orderId), eq(orders.status, input.from)))
+      .where(
+        and(
+          eq(orders.id, orderId),
+          eq(orders.status, input.from),
+          input.organizationId === undefined ? undefined : eq(orders.organizationId, input.organizationId),
+        ),
+      )
       .returning({
         id: orders.id,
         code: orders.code,
@@ -346,7 +434,7 @@ export class OrderPayments {
     });
     await enqueueBuyerEmail(this.boss, tx, BuyerEmailKind.TICKETS, order.id);
     await audit.record(tx, {
-      actorUserId: null,
+      actorUserId: input.actorUserId ?? null,
       organizationId: order.organizationId,
       action: 'order.paid',
       target: { type: 'order', id: order.id },
@@ -364,20 +452,29 @@ export class OrderPayments {
   }
 }
 
-/** Đầu vào của `pay`: trạng thái nguồn của CAS, nguồn ghi nhận, giá trị `paid_*`, giờ phát Vé, dòng của Đơn. */
+/**
+ * Đầu vào của `pay`: trạng thái nguồn của CAS, nguồn ghi nhận, giá trị `paid_*`, giờ phát Vé, dòng của Đơn. Duyệt tay
+ * (`review`, Story 4.4) thêm BTC của người duyệt (CAS `AND organization_id`) và người duyệt (actor của audit).
+ */
 interface PayInput {
-  from: typeof OrderStatus.PENDING | typeof OrderStatus.EXPIRED;
+  from: typeof OrderStatus.PENDING | typeof OrderStatus.EXPIRED | typeof OrderStatus.REVIEW;
   source: PaidSource;
   paidAt: Date | SQL;
   paidAmount: number;
   issuedAt: Date | null;
   lines: readonly PaidLine[];
+  organizationId?: string;
+  actorUserId?: string;
 }
 
 /**
- * `OrderPayments` (`markPaid`) cho mọi vai: `OrderingModule` (api, Đơn 0đ), `payment` (IPN ở api, Đối soát bù ở worker).
- * Kèm `BuyerEmailQueues` (tạo queue email Người mua mà `markPaid` enqueue vào). Không controller, không cấu hình; cần
- * `TicketingModule` (toàn cục: `TicketsService`), `JobsModule` và `DbModule` ở gốc DI.
+ * `OrderPayments` (`markPaid`) cho mọi vai: `OrderingModule` (api, Đơn 0đ), `payment` (IPN ở api, Đối soát bù ở worker,
+ * thao tác trên mục Cần xử lý ở api). Kèm `OrderReviewDecisions` (từ chối, đã hoàn tay; Story 4.4) và `BuyerEmailQueues`
+ * (tạo queue email Người mua mà cả hai enqueue vào). Không controller, không cấu hình; cần `TicketingModule` (toàn cục:
+ * `TicketsService`), `JobsModule` và `DbModule` ở gốc DI.
  */
-@Module({ providers: [OrderPayments, BuyerEmailQueues], exports: [OrderPayments] })
+@Module({
+  providers: [OrderPayments, OrderReviewDecisions, BuyerEmailQueues],
+  exports: [OrderPayments, OrderReviewDecisions],
+})
 export class OrderPaymentsModule {}

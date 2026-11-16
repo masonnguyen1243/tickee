@@ -1,4 +1,5 @@
-import type { Tx } from '../db/index.js';
+import { and, asc, eq, inArray } from 'drizzle-orm';
+import type { DbExecutor, Tx } from '../db/index.js';
 import { auditEvents } from './schema.js';
 
 /** Hành động audit: `<đối tượng>.<động từ>`. Story sau thêm vào union này. */
@@ -110,10 +111,35 @@ export type AuditAction =
   /** Owner/Admin đổi thứ tự câu hỏi riêng (đối tượng: Sự kiện). */
   | 'event_form.reordered'
   /**
-   * Đơn chuyển `pending` → `paid` và Vé được phát (`ordering.markPaid`, Story 3.3; actor: hệ thống; đối tượng: Đơn). Một
-   * dòng cho mỗi lần chuyển thành công, cùng transaction với phát Vé.
+   * Đơn chuyển `paid` và Vé được phát (`ordering.markPaid`, Story 3.3; đối tượng: Đơn). Một dòng cho mỗi lần chuyển
+   * thành công, cùng transaction với phát Vé. Actor: hệ thống (`null`), trừ nguồn `manual` (Story 4.4: thành viên BTC
+   * bấm "Duyệt tay phát Vé").
    */
   | 'order.paid'
+  /**
+   * BTC "Từ chối" khoản tiền của Đơn trên mục Cần xử lý (Story 4.4; actor: thành viên BTC; đối tượng: Đơn): `review` →
+   * `cancelled`, `cancel_reason` `rejected`.
+   */
+  | 'order.rejected'
+  /**
+   * BTC bấm "Đã hoàn tay" trên mục của Đơn đã từ chối (Story 4.4; actor: thành viên BTC; đối tượng: Đơn): `cancelled` →
+   * `refunded`.
+   */
+  | 'order.refunded'
+  /**
+   * Thao tác trên mục Cần xử lý (Story 4.4; actor: thành viên BTC; đối tượng: `{ type: 'review_item', id }`), cùng
+   * transaction với thay đổi; nhật ký của `Sheet` dựng từ các dòng này. Không ghi số tiền, lý do hay tên.
+   * - `approve`: duyệt tay phát Vé (Đơn `paid`, mục `approved`);
+   * - `approve_sold_out`: duyệt tay không thành vì hết chỗ (Đơn giữ `review`, mục vẫn `open`);
+   * - `reject`: từ chối (Đơn `cancelled`, mục vẫn `open`);
+   * - `refund`: đã hoàn tay (mục `refunded`; Đơn đã từ chối → `refunded`);
+   * - `dismiss`: bỏ qua (mục `dismissed`, lý do lưu ở `review_items.dismiss_reason`).
+   */
+  | 'review_item.approve'
+  | 'review_item.approve_sold_out'
+  | 'review_item.reject'
+  | 'review_item.refund'
+  | 'review_item.dismiss'
   /**
    * Chủ Vé bấm "Tạo lại link" chia sẻ Vé (Story 3.8, AD-29; actor: chủ Vé; đối tượng: Vé): link cũ chết ngay, Mã QR vé
    * không đổi. Không ghi token hay hash.
@@ -131,6 +157,14 @@ export interface AuditEvent {
   changedFields?: readonly string[];
 }
 
+/** Một dòng audit đã ghi, đọc lại theo đối tượng (`audit.trailOf`). */
+export interface AuditTrailEntry {
+  action: AuditAction;
+  actorUserId: string | null;
+  /** Lúc ghi (`now()` của transaction đã ghi). */
+  at: Date;
+}
+
 /**
  * Ghi audit trong cùng transaction với thay đổi (`tx`): thay đổi rollback thì audit cũng rollback.
  */
@@ -144,5 +178,30 @@ export const audit = {
       targetId: event.target.id,
       changedFields: [...(event.changedFields ?? [])],
     });
+  },
+
+  /**
+   * Các dòng audit của đối tượng `target` thuộc BTC `organizationId`, chỉ các `actions` cho trước, cũ trước (lúc ghi rồi
+   * id; index `audit_events_target_idx`). Dùng cho nhật ký thao tác hiện cho thành viên BTC (Story 4.4): chỉ hành động,
+   * người làm và lúc làm — audit không bao giờ chứa giá trị.
+   */
+  async trailOf(
+    db: DbExecutor,
+    query: { organizationId: string; target: { type: string; id: string }; actions: readonly AuditAction[] },
+  ): Promise<AuditTrailEntry[]> {
+    if (query.actions.length === 0) return [];
+    const rows = await db
+      .select({ action: auditEvents.action, actorUserId: auditEvents.actorUserId, at: auditEvents.createdAt })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.targetType, query.target.type),
+          eq(auditEvents.targetId, query.target.id),
+          eq(auditEvents.organizationId, query.organizationId),
+          inArray(auditEvents.action, [...query.actions]),
+        ),
+      )
+      .orderBy(asc(auditEvents.createdAt), asc(auditEvents.id));
+    return rows.map((row) => ({ ...row, action: row.action as AuditAction }));
   },
 };

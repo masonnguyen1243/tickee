@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Controller, Get } from '@nestjs/common';
 import { DiscoveryModule } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
-import { ErrorResponse, Permission, REAUTH_HEADER } from '@tickee/contracts';
+import { ErrorResponse, IDEMPOTENCY_KEY_HEADER, Permission, REAUTH_HEADER, REVIEW_ACTIONS } from '@tickee/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RequirePermission } from '../../src/platform/access/index.js';
 import { createHarness, reauthToken, signUp, type Harness } from '../identity/harness.js';
@@ -116,9 +116,17 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('GET /v1/orgs/:orgId/review-items');
     expect(guarded).toContain('GET /v1/orgs/:orgId/review-items/summary');
     expect(guarded).toContain('GET /v1/orgs/:orgId/review-items/:itemId');
-    const permissionOf = (path: string) => routes.find((r) => r.method === 'GET' && r.path === path)?.permission;
+    // Story 4.4-a: thao tác trên mục của `payment` (Owner và Admin, `review_queue.handle`).
+    for (const action of REVIEW_ACTIONS) expect(guarded).toContain(`POST /v1/orgs/:orgId/review-items/:itemId/${action}`);
+    const permissionOf = (path: string, method = 'GET') =>
+      routes.find((r) => r.method === method && r.path === path)?.permission;
     for (const path of ['', '/summary', '/:itemId']) {
       expect(permissionOf(`/v1/orgs/:orgId/review-items${path}`), path).toBe(Permission.REVIEW_QUEUE_HANDLE);
+    }
+    for (const action of REVIEW_ACTIONS) {
+      expect(permissionOf(`/v1/orgs/:orgId/review-items/:itemId/${action}`, 'POST'), action).toBe(
+        Permission.REVIEW_QUEUE_HANDLE,
+      );
     }
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/overview')).toBe(Permission.ORDERS_VIEW);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/overview/live')).toBe(Permission.ORDERS_VIEW);
@@ -214,11 +222,32 @@ describe('cách ly BTC', () => {
     expect(rows).toEqual([{ used_at: null }]);
   });
 
-  it('route Cần xử lý trên BTC A (Story 4.3): danh sách và summary → 200; mục id ngẫu nhiên → 404 REVIEW_ITEM_NOT_FOUND', async () => {
+  it('route Cần xử lý trên BTC A (Story 4.3, 4.4-a): danh sách và summary → 200; mục id ngẫu nhiên → 404 REVIEW_ITEM_NOT_FOUND; thao tác thiếu Idempotency-Key → 400', async () => {
     const reviewRoutes = routes.filter((r) => r.permission && r.path.startsWith('/v1/orgs/:orgId/review-items'));
-    expect(reviewRoutes).toHaveLength(3);
+    expect(reviewRoutes).toHaveLength(3 + REVIEW_ACTIONS.length);
     for (const route of reviewRoutes) {
       const res = await call(route, orgA, ownerA.cookie);
+      if (route.method === 'POST') {
+        // Thao tác (Story 4.4-a): header kiểm trước mục → thiếu khóa 400; có khóa (và lý do của "Bỏ qua") → mục lạ 404.
+        expect(res.status, label(route)).toBe(400);
+        expect(ErrorResponse.parse(res.body).error.code, label(route)).toBe('VALIDATION_FAILED');
+        const keyed = await h.http
+          .post(fill(route.path, orgA))
+          .set('cookie', ownerA.cookie)
+          .set(IDEMPOTENCY_KEY_HEADER, randomUUID())
+          .send({ reason: 'Bỏ qua' });
+        expect(keyed.status, label(route)).toBe(404);
+        expect(ErrorResponse.parse(keyed.body).error.code, label(route)).toBe('REVIEW_ITEM_NOT_FOUND');
+        // Có khóa vẫn không mở được BTC B.
+        const cross = await h.http
+          .post(fill(route.path, orgB))
+          .set('cookie', ownerA.cookie)
+          .set(IDEMPOTENCY_KEY_HEADER, randomUUID())
+          .send({ reason: 'Bỏ qua' });
+        expect(cross.status, label(route)).toBe(403);
+        expect(ErrorResponse.parse(cross.body).error.code, label(route)).toBe('NOT_A_MEMBER');
+        continue;
+      }
       const expected = route.path.endsWith('/:itemId') ? 404 : 200;
       expect(res.status, label(route)).toBe(expected);
       if (expected === 404) expect(ErrorResponse.parse(res.body).error.code, label(route)).toBe('REVIEW_ITEM_NOT_FOUND');

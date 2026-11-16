@@ -1,7 +1,11 @@
 import {
   EventOverview,
   eventOverviewApiPath,
+  IDEMPOTENCY_KEY_HEADER,
+  ReviewAction,
+  ReviewActionResult,
   ReviewItemDetail,
+  reviewItemActionApiPath,
   reviewItemApiPath,
   ReviewQueue,
   reviewItemsApiPath,
@@ -77,3 +81,29 @@ export const fetchReviewQueue = (orgId: string, eventId: string | null, signal?:
 /** `GET /v1/orgs/:orgId/review-items/:itemId`: chi tiết một mục ở mọi trạng thái. */
 export const fetchReviewItem = (orgId: string, itemId: string, signal?: AbortSignal) =>
   apiRequest(reviewItemApiPath(orgId, itemId), { schema: ReviewItemDetail, init: { signal } });
+
+/** Thao tác trên mục (Story 4.4) và phần thân của nó: chỉ "Bỏ qua" có lý do. */
+export type ReviewActionInput =
+  | { action: typeof ReviewAction.APPROVE | typeof ReviewAction.REJECT | typeof ReviewAction.REFUND }
+  | { action: typeof ReviewAction.DISMISS; reason: string };
+
+/**
+ * `POST /v1/orgs/:orgId/review-items/:itemId/{approve,reject,refund,dismiss}` (Story 4.4) với header `Idempotency-Key`:
+ * nơi gọi sinh một khóa mỗi lần mở thao tác và giữ nguyên khi thử lại. Máy chủ xử lý theo trạng thái: gửi lại sau khi đã
+ * thắng trả `200` trạng thái hiện tại, không làm lại. "Bỏ qua" gửi `{ reason }`; ba thao tác còn lại không có thân.
+ */
+export function postReviewAction(
+  orgId: string,
+  itemId: string,
+  idempotencyKey: string,
+  input: ReviewActionInput,
+): Promise<ReviewActionResult> {
+  return apiRequest(reviewItemActionApiPath(orgId, itemId, input.action), {
+    schema: ReviewActionResult,
+    init: {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+      ...(input.action === ReviewAction.DISMISS ? { body: JSON.stringify({ reason: input.reason }) } : {}),
+    },
+  });
+}

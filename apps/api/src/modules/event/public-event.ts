@@ -160,27 +160,32 @@ export async function saleEventById(db: DbExecutor, eventId: string): Promise<Sa
 /**
  * Phần Sự kiện in trên Vé (Story 3.8): trang chia sẻ Vé (`ticketing`), email Vé và email đổi giờ/địa điểm (`ordering`,
  * Story 3.10). Tên, giờ bắt đầu, giờ kết thúc và địa điểm hiện tại, trạng thái, `effective_end_at`; `ended`: đồng hồ DB
- * đã quá `effective_end_at` (AD-14, so tại lúc đọc, không theo đồng hồ máy chủ ứng dụng).
+ * đã quá `effective_end_at` (AD-14, so tại lúc đọc, không theo đồng hồ máy chủ ứng dụng). `lockedAt`: Sự kiện đang bị
+ * khóa (Epic 7) — chi tiết mục Cần xử lý tắt "Duyệt tay phát Vé" (Story 4.4).
  */
 export interface TicketEventRef {
   id: string;
+  organizationId: string;
   name: string;
   startsAt: Date;
   endsAt: Date;
   venue: string | null;
   status: EventRow['status'];
   effectiveEndAt: Date;
+  lockedAt: Date | null;
   ended: boolean;
 }
 
 const ticketEventColumns = {
   id: events.id,
+  organizationId: events.organizationId,
   name: events.name,
   startsAt: events.startsAt,
   endsAt: events.endsAt,
   venue: events.venue,
   status: events.status,
   effectiveEndAt: events.effectiveEndAt,
+  lockedAt: events.lockedAt,
   ended: endedNow,
 };
 
