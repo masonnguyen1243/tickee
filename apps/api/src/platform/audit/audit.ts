@@ -141,6 +141,19 @@ export type AuditAction =
   | 'review_item.refund'
   | 'review_item.dismiss'
   /**
+   * "Ghép với Đơn" trên mục `unmatched` (Story 4.4-b; actor: thành viên BTC; đối tượng: mục), cùng transaction với thay
+   * đổi; nhật ký của `Sheet` dựng từ các dòng này (mã Đơn đọc qua liên kết giao dịch → Đơn, không ghi trong audit):
+   * - `match`: đã ghép (Đơn `paid`, mục `approved`; cùng `tx` có `order.paid` và `payment_event.match`);
+   * - `match_sold_out`: ghép không thành vì hết chỗ (Đơn giữ nguyên trạng thái, mục vẫn `open`).
+   */
+  | 'review_item.match'
+  | 'review_item.match_sold_out'
+  /**
+   * Khoản tiền chưa khớp được gắn vào Đơn khi "Ghép với Đơn" (Story 4.4-b; actor: thành viên BTC; đối tượng: `{ type:
+   * 'payment_event', id }`; `changedFields` `['order_id']`). Không ghi mã Đơn hay số tiền.
+   */
+  | 'payment_event.match'
+  /**
    * Chủ Vé bấm "Tạo lại link" chia sẻ Vé (Story 3.8, AD-29; actor: chủ Vé; đối tượng: Vé): link cũ chết ngay, Mã QR vé
    * không đổi. Không ghi token hay hash.
    */

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DISMISS_REASON_MAX,
   DismissReviewItemRequest,
+  MatchReviewItemRequest,
   REVIEW_ACTIONS,
   REVIEW_APPROVE_BLOCKED_REASONS,
   ReviewActionResult,
@@ -22,10 +23,11 @@ describe('review_items (Story 3.6)', () => {
     expect(reviewItemTypeSchema.safeParse('lost_race').success).toBe(false);
   });
 
-  it('event_cancelled, duplicate_payment và unmatched chỉ kết thúc bằng refunded/dismissed; loại khác được mọi cách xử lý', () => {
-    for (const type of ['event_cancelled', 'duplicate_payment', 'unmatched'] as const) {
+  it('event_cancelled, duplicate_payment chỉ kết thúc bằng refunded/dismissed; unmatched thêm approved (ghép, Story 4.4-b); loại khác được mọi cách xử lý', () => {
+    for (const type of ['event_cancelled', 'duplicate_payment'] as const) {
       expect(reviewItemResolutionsFor(type)).toEqual(['refunded', 'dismissed']);
     }
+    expect(reviewItemResolutionsFor('unmatched')).toEqual(['approved', 'refunded', 'dismissed']);
     for (const type of ['amount_mismatch', 'orphan'] as const) {
       expect(reviewItemResolutionsFor(type)).toEqual(REVIEW_ITEM_RESOLUTIONS);
     }
@@ -33,8 +35,8 @@ describe('review_items (Story 3.6)', () => {
 });
 
 describe('thao tác trên mục Cần xử lý (Story 4.4-a)', () => {
-  it('bốn thao tác; lý do tắt "Duyệt tay"', () => {
-    expect(REVIEW_ACTIONS).toEqual(['approve', 'reject', 'refund', 'dismiss']);
+  it('năm thao tác (4.4-b thêm "Ghép với Đơn"); lý do tắt "Duyệt tay"', () => {
+    expect(REVIEW_ACTIONS).toEqual(['approve', 'reject', 'refund', 'dismiss', 'match']);
     expect(REVIEW_APPROVE_BLOCKED_REASONS).toEqual(['event_cancelled', 'event_ended', 'event_locked']);
   });
 
@@ -61,7 +63,30 @@ describe('thao tác trên mục Cần xử lý (Story 4.4-a)', () => {
     expect(ReviewActionResult.parse(result)).toEqual(result);
     const unmatched = { ...result, action: 'dismiss', resolution: 'dismissed', orderCode: null, orderStatus: null, ticketCount: 0 };
     expect(ReviewActionResult.parse(unmatched)).toEqual(unmatched);
-    expect(ReviewActionResult.safeParse({ ...result, action: 'match' }).success).toBe(false);
+    expect(ReviewActionResult.safeParse({ ...result, action: 'merge' }).success).toBe(false);
     expect(ReviewActionResult.safeParse({ ...result, orderCode: 'TK1' }).success).toBe(false);
+  });
+});
+
+describe('Ghép với Đơn (Story 4.4-b)', () => {
+  it('body: mã Đơn đúng ORDER_CODE_PATTERN', () => {
+    expect(MatchReviewItemRequest.parse({ orderCode: 'TK5R8W1CAB' })).toEqual({ orderCode: 'TK5R8W1CAB' });
+    for (const orderCode of ['', 'TK1', 'tk5r8w1cab', 'TK5R8W1CABX', undefined, 42]) {
+      expect(MatchReviewItemRequest.safeParse({ orderCode }).success, String(orderCode)).toBe(false);
+    }
+  });
+
+  it('kết quả ghép: Đơn đã ghép (mã, số Vé) trên mục unmatched đã approved', () => {
+    const result = {
+      itemId: '019a3b2c-0a01-7abc-8def-0123456789ab',
+      action: 'match',
+      status: 'resolved',
+      resolution: 'approved',
+      orderCode: 'TK5R8W1CAB',
+      orderStatus: 'paid',
+      ticketCount: 2,
+      amount: 300_000,
+    };
+    expect(ReviewActionResult.parse(result)).toEqual(result);
   });
 });

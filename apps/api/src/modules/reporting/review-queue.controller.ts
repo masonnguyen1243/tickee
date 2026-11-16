@@ -1,7 +1,9 @@
 import { Controller, Get, Header, Inject, Param, Query } from '@nestjs/common';
 import {
+  MatchCandidatesQuery,
   Permission,
   ReviewQueueQuery,
+  type MatchCandidates,
   type ReviewItemDetail,
   type ReviewQueue,
   type ReviewQueueSummary,
@@ -11,7 +13,8 @@ import { parseRequest } from '../../platform/http/index.js';
 import { ReviewQueueService } from './review-queue.service.js';
 
 /**
- * Hàng Cần xử lý của BTC (Story 4.3, FR-21): danh sách mục `open` gộp mọi Sự kiện, số mục cho badge, chi tiết một mục.
+ * Hàng Cần xử lý của BTC (Story 4.3, FR-21): danh sách mục `open` gộp mọi Sự kiện, số mục cho badge, chi tiết một mục,
+ * Đơn ứng viên của "Ghép với Đơn" (Story 4.4-b).
  * Chỉ Owner và Admin (`review_queue.handle`); không phải thành viên (kể cả CTV) → `403 NOT_A_MEMBER` (guard). Dữ liệu
  * thanh toán nên `no-store`. `summary` khai báo trước `:itemId` để không bị nuốt. Badge, hàng và `needs-action-card` tải
  * lại theo `org_review_items_changed` của stream `GET …/live` cấp BTC.
@@ -43,5 +46,21 @@ export class ReviewQueueController {
   @Header('cache-control', 'no-store')
   detail(@Access() ctx: AccessContext, @Param('itemId') itemId: string): Promise<ReviewItemDetail> {
     return this.reviewQueue.detail(ctx, itemId);
+  }
+
+  /**
+   * `GET /v1/orgs/:orgId/review-items/:itemId/match-candidates[?eventId=]` (Story 4.4-b): `MatchCandidates` — Đơn
+   * `expired`/`review` cùng số tiền của mục `unmatched`, mới nhất trước, tối đa 100 kèm `truncated`.
+   */
+  @Get(':itemId/match-candidates')
+  @RequirePermission(Permission.REVIEW_QUEUE_HANDLE)
+  @Header('cache-control', 'no-store')
+  matchCandidates(
+    @Access() ctx: AccessContext,
+    @Param('itemId') itemId: string,
+    @Query() query: unknown,
+  ): Promise<MatchCandidates> {
+    const { eventId } = parseRequest(MatchCandidatesQuery, query);
+    return this.reviewQueue.matchCandidates(ctx, itemId, eventId);
   }
 }

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { ORDER_CODE_PATTERN, orderStatusSchema } from './order.js';
+import { ORDER_CODE_PATTERN, OrderStatus, orderStatusSchema } from './order.js';
 import {
   OrganizationSection,
   organizationSectionPath,
@@ -314,7 +314,9 @@ export type ReviewItemOrder = z.infer<typeof ReviewItemOrder>;
  * Loại dòng nhật ký của mục: `payment_received` — Tingee báo tiền về (`paid_at`, không có thì lúc Tickee nhận);
  * `item_opened` — mục được mở (`created_at`). Dòng thao tác (Story 4.4, dựng từ audit của mục, lúc thao tác):
  * `approved` — duyệt tay phát Vé; `approve_sold_out` — duyệt tay không thành vì hết chỗ (Đơn giữ `review`, mục vẫn
- * `open`); `rejected` — từ chối (Đơn bị hủy); `refunded` — đã hoàn tay; `dismissed` — bỏ qua (kèm lý do).
+ * `open`); `rejected` — từ chối (Đơn bị hủy); `refunded` — đã hoàn tay; `dismissed` — bỏ qua (kèm lý do); `matched` —
+ * đã ghép với Đơn (Story 4.4-b, kèm mã Đơn); `match_sold_out` — ghép không thành vì hết chỗ (Đơn giữ nguyên, mục vẫn
+ * `open`).
  */
 export const ReviewItemLogKind = {
   PAYMENT_RECEIVED: 'payment_received',
@@ -324,13 +326,15 @@ export const ReviewItemLogKind = {
   REJECTED: 'rejected',
   REFUNDED: 'refunded',
   DISMISSED: 'dismissed',
+  MATCHED: 'matched',
+  MATCH_SOLD_OUT: 'match_sold_out',
 } as const;
 export type ReviewItemLogKind = (typeof ReviewItemLogKind)[keyof typeof ReviewItemLogKind];
 
 /**
  * Một dòng nhật ký. Dòng thao tác có `actorName`: tên thành viên đã làm (chuỗi rỗng khi tài khoản không có tên, vd.
- * đăng nhập OTP; web hiện "Thành viên BTC"). Dòng `dismissed` có `note`: lý do "Bỏ qua". Dòng dữ liệu sẵn có
- * (`payment_received`, `item_opened`) không có hai trường này.
+ * đăng nhập OTP; web hiện "Thành viên BTC"). Dòng `dismissed` có `note`: lý do "Bỏ qua"; dòng `matched` có `note`: mã
+ * Đơn đã ghép. Dòng dữ liệu sẵn có (`payment_received`, `item_opened`) không có hai trường này.
  */
 export const ReviewItemLogEntry = z.object({
   kind: z.enum(ReviewItemLogKind),
@@ -343,7 +347,8 @@ export type ReviewItemLogEntry = z.infer<typeof ReviewItemLogEntry>;
 /**
  * `GET /v1/orgs/:orgId/review-items/:itemId` (Owner, Admin: `review_queue.handle`; `no-store`): chi tiết một mục ở mọi
  * trạng thái — loại, lý do (`orphan`), trạng thái, cách xử lý, giao dịch, Đơn liên quan, Sự kiện, nhật ký (cũ trước).
- * Id sai dạng, không tồn tại hoặc của BTC khác → `404 REVIEW_ITEM_NOT_FOUND`.
+ * Mục `unmatched` đã ghép (Story 4.4-b): `order`, `event` là Đơn được ghép và Sự kiện của nó (qua liên kết giao dịch →
+ * Đơn); chưa ghép thì `null`. Id sai dạng, không tồn tại hoặc của BTC khác → `404 REVIEW_ITEM_NOT_FOUND`.
  * - `actions` (Story 4.4): thao tác được phép ở trạng thái hiện tại của mục và Đơn, theo thứ tự hiện nút (máy chủ tính,
  *   web chỉ hiển thị); mục đã xử lý → rỗng.
  * - `approveBlockedReason`: có `approve` trong `actions` mà Sự kiện không còn cho duyệt (đã hủy, đã kết thúc, bị khóa)
@@ -381,7 +386,57 @@ export const reviewItemApiPath = (organizationId: string, itemId: string): strin
 
 /**
  * Đường API (sau `/v1`) của một thao tác trên mục (Story 4.4): `POST …/review-items/:itemId/{approve,reject,refund,
- * dismiss}`, header `Idempotency-Key` (uuid) bắt buộc, trả `ReviewActionResult`.
+ * dismiss,match}`, header `Idempotency-Key` (uuid) bắt buộc, trả `ReviewActionResult`.
  */
 export const reviewItemActionApiPath = (organizationId: string, itemId: string, action: ReviewAction): string =>
   `${reviewItemApiPath(organizationId, itemId)}/${action}`;
+
+// ---------------------------------------------------------------------------------------------------------------
+// "Ghép với Đơn" (Story 4.4-b): Đơn ứng viên cho một mục `unmatched`
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Số Đơn ứng viên tối đa mỗi lần đọc (mới nhất trước); nhiều hơn thì `truncated`. Không phân trang. */
+export const MATCH_CANDIDATES_LIMIT = 100;
+
+/** Trạng thái Đơn ghép được: đã hết hạn, hoặc đang Cần xử lý. Không bao giờ `pending`/`paid`/`cancelled`/`refunded`. */
+export const MATCHABLE_ORDER_STATUSES = [OrderStatus.EXPIRED, OrderStatus.REVIEW] as const;
+export const matchableOrderStatusSchema = z.enum(MATCHABLE_ORDER_STATUSES);
+
+/**
+ * Một Đơn ứng viên: mã, tên Người mua (bản chụp lúc đặt), Sự kiện (tên hiện tại), trạng thái, số Vé, lúc tạo.
+ * `blockedReason`: Sự kiện của Đơn không còn cho phát Vé (đã hủy / đã kết thúc theo đồng hồ DB / bị khóa) → web hiện
+ * dòng tắt kèm lý do; còn lại `null`. Không email, không SĐT, không id nội bộ của Đơn.
+ */
+export const MatchCandidate = z.object({
+  code: z.string().regex(ORDER_CODE_PATTERN),
+  buyerName: z.string(),
+  event: ReviewItemEvent,
+  status: matchableOrderStatusSchema,
+  ticketCount: z.number().int().nonnegative(),
+  createdAt: z.iso.datetime({ offset: true }),
+  blockedReason: reviewApproveBlockedReasonSchema.nullable(),
+});
+export type MatchCandidate = z.infer<typeof MatchCandidate>;
+
+/**
+ * `GET /v1/orgs/:orgId/review-items/:itemId/match-candidates[?eventId=]` (Owner, Admin: `review_queue.handle`;
+ * `no-store`): Đơn của BTC ở trạng thái `expired`/`review` có `total_amount` bằng số tiền nhận của giao dịch, mới nhất
+ * trước (lúc tạo rồi id, giảm dần), tối đa `MATCH_CANDIDATES_LIMIT`; `truncated` khi còn Đơn khác. Có `eventId`: chỉ Đơn
+ * của Sự kiện đó (Sự kiện lạ, sai dạng hoặc của BTC khác → `404 EVENT_NOT_FOUND`). Mục lạ hoặc của BTC khác → `404
+ * REVIEW_ITEM_NOT_FOUND`; mục không có thao tác `match` (đã xử lý, không phải `unmatched`) → danh sách rỗng.
+ */
+export const MatchCandidates = z.object({
+  candidates: z.array(MatchCandidate).max(MATCH_CANDIDATES_LIMIT),
+  truncated: z.boolean(),
+});
+export type MatchCandidates = z.infer<typeof MatchCandidates>;
+
+/** Query của `GET …/match-candidates`: `eventId` tùy chọn (id Sự kiện để lọc). */
+export const MatchCandidatesQuery = z.object({ eventId: z.string().max(200).optional() });
+export type MatchCandidatesQuery = z.input<typeof MatchCandidatesQuery>;
+
+/** Đường API (sau `/v1`) của `MatchCandidates`; có `eventId` thì kèm `?eventId=`. */
+export const reviewItemMatchCandidatesApiPath = (organizationId: string, itemId: string, eventId?: string): string => {
+  const base = `${reviewItemApiPath(organizationId, itemId)}/match-candidates`;
+  return eventId === undefined ? base : `${base}?eventId=${encodeURIComponent(eventId)}`;
+};

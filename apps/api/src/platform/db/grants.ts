@@ -7,7 +7,8 @@ export const APP_DB_ROLE = 'tickee_app';
  * Bảng chỉ cho INSERT/SELECT với `tickee_app` (`schema.table`). Thu UPDATE/DELETE/TRUNCATE sau khi cấp quyền,
  * nên quyền này vẫn bị chặn sau mỗi lần migrate. `checkout_funnel_events`: phễu mua (Story 3.1). `order_items`,
  * `order_answers`: bản chụp dòng Đơn và câu trả lời form lúc đặt (Story 3.2). `payment_events`: IPN Tingee đã nhận
- * (Story 3.5; `INSERT … ON CONFLICT DO NOTHING` chỉ cần INSERT).
+ * (Story 3.5; `INSERT … ON CONFLICT DO NOTHING` chỉ cần INSERT; riêng cột `order_id` được UPDATE lại qua
+ * `UPDATE_PROTECTED_COLUMNS`, Story 4.4-b).
  */
 export const APPEND_ONLY_TABLES = [
   'public.audit_events',
@@ -63,6 +64,27 @@ export const UPDATE_PROTECTED_COLUMNS: Readonly<Record<string, readonly string[]
   // Mục Cần xử lý (Story 3.6): khoản tiền, Đơn, BTC, loại và lý do cố định từ lúc tạo. Ghi được: `status`, `resolution`,
   // `dismiss_reason` (Story 4.4, và cột thêm sau).
   'public.review_items': ['id', 'organization_id', 'order_id', 'payment_event_id', 'type', 'reason', 'created_at'],
+  // Khoản tiền Tingee (Story 3.5): vẫn trong `APPEND_ONLY_TABLES` (DELETE, TRUNCATE bị thu). Vòng cấp theo cột chạy sau
+  // lệnh thu của bảng chỉ-thêm, nên chỉ `order_id` được UPDATE lại: "Ghép với Đơn" (Story 4.4-b) gắn khoản tiền của mục
+  // `unmatched` vào Đơn. Trigger `payment_events_link_order_once` (migration 0026) chặn đổi `order_id` đã có và đổi cột
+  // khác (kể cả cột thêm sau, vốn tự được cấp UPDATE ở đây).
+  'public.payment_events': [
+    'id',
+    'organization_id',
+    'kind',
+    'status',
+    'provider_order_id',
+    'provider_transaction_code',
+    'amount',
+    'paid_amount',
+    'paid_at',
+    'status_code',
+    'payment_method',
+    'bill_id',
+    'merchant_id',
+    'request_id',
+    'received_at',
+  ],
 };
 
 const quoteIdent = (name: string) => `"${name.replaceAll('"', '""')}"`;

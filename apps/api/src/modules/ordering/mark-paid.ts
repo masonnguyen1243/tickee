@@ -16,9 +16,10 @@ import { checkoutFunnelEvents, orderItems, orders, type PaidSource } from './sch
 /**
  * Kết quả `markPaid` (AD-1, AD-7), đủ để bên gọi chọn mục Cần xử lý (Story 3.6):
  * - `paid`: Đơn vừa chuyển `paid` (từ `pending`, hoặc từ `expired` khi tiền về muộn còn chỗ, hoặc từ `review` khi BTC
- *   duyệt tay) và Vé đã phát.
+ *   duyệt tay, hoặc từ `expired`/`review` khi BTC ghép giao dịch chưa khớp) và Vé đã phát.
  * - `lost_race`: chỉ nguồn `free` — Đơn không còn `pending` (một lần gọi khác đã chuyển trước); nguồn `manual` — Đơn
- *   không còn `review` hoặc không thuộc BTC của người duyệt. Không đổi gì.
+ *   không còn ở trạng thái nguồn cho phép (`ManualApproval.from`), không thuộc BTC của người duyệt, hoặc (ghép) khác
+ *   `ManualApproval.totalAmount`. Không đổi gì.
  * - `already_settled`: chỉ nguồn `reconciliation` — Đơn đã rời `pending`/`expired` (khoản tiền này đã được ghi nhận, vd.
  *   IPN tới trước), không đổi gì, không tạo mục.
  * - `event_cancelled`: Sự kiện đã hủy.
@@ -29,7 +30,8 @@ import { checkoutFunnelEvents, orderItems, orders, type PaidSource } from './sch
  * Khác `paid`/`lost_race`/`already_settled`, Đơn `pending`/`expired` đã chuyển `review` trong `tx` (trừ
  * `duplicate_payment`, và `event_cancelled` khi Đơn ở trạng thái khác: giữ nguyên); bên gọi (`payment`) tạo `review_item`
  * trong cùng `tx`. Nguồn `manual` (Story 4.4) không bao giờ đổi Đơn ngoài `paid`: `event_cancelled` và `orphan`
- * (`event_ended`/`event_locked`/`sold_out`) nghĩa là chưa duyệt được, Đơn giữ `review`.
+ * (`event_ended`/`event_locked`/`sold_out`) nghĩa là chưa duyệt/ghép được, Đơn giữ nguyên trạng thái (`review` vẫn
+ * `review`, `expired` vẫn `expired`).
  */
 export type MarkPaidResult =
   | { outcome: 'paid' }
@@ -57,10 +59,20 @@ export interface MarkPaidOptions {
   manual?: ManualApproval;
 }
 
-/** Người duyệt tay một khoản tiền (Story 4.4): thành viên BTC `organizationId` (đã qua `review_queue.handle`). */
+/** Trạng thái Đơn mà nguồn `manual` ghi nhận được từ đó (không bao giờ `pending`: Đơn còn giữ chỗ, bán lại đếm hai lần). */
+export type ManualSourceStatus = typeof OrderStatus.REVIEW | typeof OrderStatus.EXPIRED;
+
+/**
+ * Người ghi nhận tay một khoản tiền (Story 4.4): thành viên BTC `organizationId` (đã qua `review_queue.handle`).
+ * - `from`: trạng thái Đơn được phép — "Duyệt tay phát Vé" `[review]`; "Ghép với Đơn" (Story 4.4-b) `[review, expired]`.
+ * - `totalAmount` (chỉ "Ghép với Đơn"): Đơn phải có đúng `total_amount` này (số tiền nhận của giao dịch), kiểm dưới khóa
+ *   Đơn; thiếu → không kiểm (duyệt tay ghi nhận cả khoản lệch tiền).
+ */
 export interface ManualApproval {
   organizationId: string;
   actorUserId: string;
+  from: readonly ManualSourceStatus[];
+  totalAmount?: number;
 }
 
 /**
@@ -171,6 +183,10 @@ async function moveToReview(tx: Tx, orderId: string, from: Reviewable): Promise<
 
 const orphan = (reason: ReviewItemReason): MarkPaidResult => ({ outcome: 'orphan', reason });
 
+/** Đơn đã khóa ở một trạng thái nguồn mà người ghi nhận tay cho phép (`ManualApproval.from`). */
+const isManualSource = (status: OrderStatus, approval: ManualApproval): status is ManualSourceStatus =>
+  (approval.from as readonly OrderStatus[]).includes(status);
+
 /*
  * Đường duy nhất phát Vé (AD-1, Story 3.3): mọi nguồn ghi nhận thanh toán (`PAID_SOURCES`) đi qua `markPaid` trong `tx`
  * của bên gọi. Một transaction: khóa Sự kiện `FOR SHARE` → (nguồn có phí: khóa Đơn, thứ tự kiểm 3–7 của AD-7) → CAS Đơn
@@ -218,14 +234,17 @@ export class OrderPayments {
    *   kiện khi tiền về muộn), trừ một điều: sau khi khóa Đơn, Đơn không còn `pending`/`expired` → `already_settled`, không
    *   đổi Đơn, không tạo mục. Tra theo `orderId` là hỏi lại khoản tiền của chính đơn Gateway đó, không bao giờ là trả
    *   trùng (khoản trả thật lần hai vẫn tới bằng IPN và đi bước 4).
-   * - `manual` (Story 4.4, BTC "Duyệt tay phát Vé" trên mục `amount_mismatch`/`orphan`): đường riêng, không đi bước 3–7
-   *   (bước 4 sẽ trả `duplicate_payment` cho Đơn `review`). Khóa Sự kiện `FOR SHARE` rồi khóa Đơn `FOR NO KEY UPDATE`:
-   *   Đơn không còn `review` hoặc không thuộc `options.manual.organizationId` → `lost_race`. Sự kiện đã hủy →
-   *   `event_cancelled`; đồng hồ DB đã quá `effective_end_at` → `orphan` `event_ended`; Sự kiện hoặc BTC bị khóa →
-   *   `orphan` `event_locked` (không đổi gì). Còn lại bán có điều kiện cả Đơn (`sold += n`) trong savepoint: thiếu một
-   *   Hạng vé → `orphan` `sold_out`, Đơn giữ `review` (không email: Người mua đã có trạng thái "BTC đang kiểm tra");
-   *   đủ chỗ → CAS `review → paid` (thêm `AND organization_id`) như bước 7, `paid_amount` = `paidAmount` (số tiền nhận
-   *   của mục, có thể khác `total_amount`), audit `order.paid` có người duyệt.
+   * - `manual` (Story 4.4, BTC "Duyệt tay phát Vé" trên mục `amount_mismatch`/`orphan`, hoặc "Ghép với Đơn" một giao
+   *   dịch `unmatched`, Story 4.4-b): đường riêng, không đi bước 3–7 (bước 4 sẽ trả `duplicate_payment` cho Đơn
+   *   `review`). Khóa Sự kiện `FOR SHARE` rồi khóa Đơn `FOR NO KEY UPDATE`: Đơn không ở trạng thái trong
+   *   `options.manual.from` (duyệt `[review]`, ghép `[review, expired]`), không thuộc `options.manual.organizationId`,
+   *   hoặc khác `options.manual.totalAmount` (ghép) → `lost_race`. Sự kiện đã hủy → `event_cancelled`; đồng hồ DB đã quá
+   *   `effective_end_at` → `orphan` `event_ended`; Sự kiện hoặc BTC bị khóa → `orphan` `event_locked` (không đổi gì).
+   *   Còn lại bán có điều kiện cả Đơn (`sold += n`; Đơn `review`/`expired` không còn giữ chỗ) trong savepoint: thiếu
+   *   một Hạng vé → `orphan` `sold_out`, Đơn giữ nguyên trạng thái (không sang `review`, không email: Người mua của Đơn
+   *   `review` đã có trạng thái "BTC đang kiểm tra"); đủ chỗ → CAS `<trạng thái đã khóa> → paid` (thêm `AND
+   *   organization_id`) như bước 7, `paid_amount` = `paidAmount` (số tiền nhận của mục, có thể khác `total_amount` khi
+   *   duyệt tay), audit `order.paid` có người làm.
    *
    * `paid` luôn kèm đúng một job email Vé (`tickets`) trong `tx`. Bên gọi đã `ready()` trước transaction. Lỗi bất kỳ
    * (phát Vé, enqueue, audit…) → ném, cả `tx` rollback (không Vé, không job).
@@ -253,9 +272,11 @@ export class OrderPayments {
 
     // Thứ tự khóa: Sự kiện → Đơn → tồn kho theo id. TX1 đã khóa Sự kiện thì khóa lại không chờ.
     // Thao tác trên mục Cần xử lý (Story 4.4, `payment`) khóa `review_items FOR UPDATE` theo `(id, organization_id)`
-    // *trước* mọi khóa ở đây: "Duyệt tay" (nguồn `manual`) đi mục → Sự kiện → Đơn → tồn kho; "Từ chối" và "Đã hoàn tay"
-    // (`OrderReviewDecisions`) chỉ CAS Đơn sau khi khóa mục, không khóa Sự kiện. Đường mới khóa cả Sự kiện lẫn mục
-    // (vd. hủy Sự kiện, Story 7.1) phải giữ thứ tự mục → Sự kiện → Đơn để không deadlock với thao tác này.
+    // *trước* mọi khóa ở đây: "Duyệt tay" và "Ghép với Đơn" (nguồn `manual`) đi mục → Sự kiện → Đơn → tồn kho; ghép chỉ
+    // gắn `payment_events.order_id` sau khi `markPaid` trả `paid` (khóa ngoại lấy `KEY SHARE` trên Đơn đã khóa, không
+    // chờ). "Từ chối" và "Đã hoàn tay" (`OrderReviewDecisions`) chỉ CAS Đơn sau khi khóa mục, không khóa Sự kiện. Đường
+    // mới khóa cả Sự kiện lẫn mục (vd. hủy Sự kiện, Story 7.1) phải giữ thứ tự mục → Sự kiện → Đơn để không deadlock với
+    // thao tác này.
     const event = await lockEventByIdForShare(tx, current.eventId);
     if (source === 'ipn' || source === 'reconciliation') {
       return this.settleGateway(tx, orderId, source, event, current.totalAmount, paidAmount, options.paidAt ?? null);
@@ -352,7 +373,7 @@ export class OrderPayments {
   }
 
   /**
-   * Duyệt tay (nguồn `manual`, xem `markPaid`). Sự kiện đã khóa `FOR SHARE`. Không đổi gì trừ khi `paid`.
+   * Duyệt tay hoặc ghép (nguồn `manual`, xem `markPaid`). Sự kiện đã khóa `FOR SHARE`. Không đổi gì trừ khi `paid`.
    */
   private async settleManual(
     tx: Tx,
@@ -363,24 +384,30 @@ export class OrderPayments {
     approval: ManualApproval,
   ): Promise<MarkPaidResult> {
     const [locked] = await tx
-      .select({ status: orders.status, organizationId: orders.organizationId })
+      .select({ status: orders.status, organizationId: orders.organizationId, totalAmount: orders.totalAmount })
       .from(orders)
       .where(eq(orders.id, orderId))
       .for('no key update');
     if (!locked) throw new Error('markPaid: không có Đơn này');
-    if (locked.status !== OrderStatus.REVIEW || locked.organizationId !== approval.organizationId) {
+    const from = locked.status;
+    if (
+      !isManualSource(from, approval) ||
+      locked.organizationId !== approval.organizationId ||
+      (approval.totalAmount !== undefined && locked.totalAmount !== approval.totalAmount)
+    ) {
       return { outcome: 'lost_race' };
     }
     // Đồng hồ DB lúc gọi: mốc so `effective_end_at` và `issued_at` của Vé (transaction có thể đã chờ khóa mục, Sự kiện).
     const now = await dbClock(tx);
     const blocked = await manualBlockOf(tx, event, now);
     if (blocked) return blocked;
-    // Đơn `review` không còn giữ chỗ (`pending → review` đã nhả, `expired` nhả lúc hết hạn): bán lại có điều kiện.
+    // Đơn `review`/`expired` không còn giữ chỗ (`pending → review` đã nhả, `expired` nhả lúc hết hạn): bán lại có điều
+    // kiện.
     const lines = await linesOf(tx, orderId);
     if (!(await sellAllOrNothing(tx, lines))) return orphan(ReviewItemReason.SOLD_OUT);
     // Đơn đã khóa nên CAS không thể thua; 0 dòng là lỗi lập trình → ném, cả `tx` rollback (kể cả phép bán ở trên).
     const paid = await this.pay(tx, orderId, {
-      from: OrderStatus.REVIEW,
+      from,
       source: 'manual',
       paidAt: reportedPaidAt ?? now,
       paidAmount,
@@ -389,7 +416,7 @@ export class OrderPayments {
       organizationId: approval.organizationId,
       actorUserId: approval.actorUserId,
     });
-    if (!paid) throw new Error('markPaid: CAS review → paid thua dù đã khóa Đơn');
+    if (!paid) throw new Error(`markPaid: CAS ${from} → paid thua dù đã khóa Đơn`);
     return { outcome: 'paid' };
   }
 
@@ -453,8 +480,8 @@ export class OrderPayments {
 }
 
 /**
- * Đầu vào của `pay`: trạng thái nguồn của CAS, nguồn ghi nhận, giá trị `paid_*`, giờ phát Vé, dòng của Đơn. Duyệt tay
- * (`review`, Story 4.4) thêm BTC của người duyệt (CAS `AND organization_id`) và người duyệt (actor của audit).
+ * Đầu vào của `pay`: trạng thái nguồn của CAS, nguồn ghi nhận, giá trị `paid_*`, giờ phát Vé, dòng của Đơn. Ghi nhận tay
+ * (`review`/`expired`, Story 4.4) thêm BTC của người làm (CAS `AND organization_id`) và người làm (actor của audit).
  */
 interface PayInput {
   from: typeof OrderStatus.PENDING | typeof OrderStatus.EXPIRED | typeof OrderStatus.REVIEW;

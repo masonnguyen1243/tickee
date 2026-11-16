@@ -116,11 +116,14 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('GET /v1/orgs/:orgId/review-items');
     expect(guarded).toContain('GET /v1/orgs/:orgId/review-items/summary');
     expect(guarded).toContain('GET /v1/orgs/:orgId/review-items/:itemId');
-    // Story 4.4-a: thao tác trên mục của `payment` (Owner và Admin, `review_queue.handle`).
+    // Story 4.4-a, 4.4-b: thao tác trên mục của `payment` (Owner và Admin, `review_queue.handle`), kể cả "Ghép với Đơn".
     for (const action of REVIEW_ACTIONS) expect(guarded).toContain(`POST /v1/orgs/:orgId/review-items/:itemId/${action}`);
+    expect(guarded).toContain('POST /v1/orgs/:orgId/review-items/:itemId/match');
+    // Story 4.4-b: Đơn ứng viên của "Ghép với Đơn" (`reporting`).
+    expect(guarded).toContain('GET /v1/orgs/:orgId/review-items/:itemId/match-candidates');
     const permissionOf = (path: string, method = 'GET') =>
       routes.find((r) => r.method === method && r.path === path)?.permission;
-    for (const path of ['', '/summary', '/:itemId']) {
+    for (const path of ['', '/summary', '/:itemId', '/:itemId/match-candidates']) {
       expect(permissionOf(`/v1/orgs/:orgId/review-items${path}`), path).toBe(Permission.REVIEW_QUEUE_HANDLE);
     }
     for (const action of REVIEW_ACTIONS) {
@@ -222,20 +225,23 @@ describe('cách ly BTC', () => {
     expect(rows).toEqual([{ used_at: null }]);
   });
 
-  it('route Cần xử lý trên BTC A (Story 4.3, 4.4-a): danh sách và summary → 200; mục id ngẫu nhiên → 404 REVIEW_ITEM_NOT_FOUND; thao tác thiếu Idempotency-Key → 400', async () => {
+  it('route Cần xử lý trên BTC A (Story 4.3, 4.4-a, 4.4-b): danh sách và summary → 200; mục id ngẫu nhiên → 404 REVIEW_ITEM_NOT_FOUND; thao tác thiếu Idempotency-Key → 400', async () => {
     const reviewRoutes = routes.filter((r) => r.permission && r.path.startsWith('/v1/orgs/:orgId/review-items'));
-    expect(reviewRoutes).toHaveLength(3 + REVIEW_ACTIONS.length);
+    // 3 GET của 4.3, GET Đơn ứng viên của 4.4-b, một POST mỗi thao tác.
+    expect(reviewRoutes).toHaveLength(4 + REVIEW_ACTIONS.length);
+    /** Body đúng theo thao tác: lý do của "Bỏ qua", mã Đơn của "Ghép với Đơn"; còn lại không đọc body. */
+    const bodyOf = (path: string) => (path.endsWith('/match') ? { orderCode: 'TK5R8W1CAB' } : { reason: 'Bỏ qua' });
     for (const route of reviewRoutes) {
       const res = await call(route, orgA, ownerA.cookie);
       if (route.method === 'POST') {
-        // Thao tác (Story 4.4-a): header kiểm trước mục → thiếu khóa 400; có khóa (và lý do của "Bỏ qua") → mục lạ 404.
+        // Thao tác (Story 4.4): header kiểm trước mục → thiếu khóa 400; có khóa (và body đúng) → mục lạ 404.
         expect(res.status, label(route)).toBe(400);
         expect(ErrorResponse.parse(res.body).error.code, label(route)).toBe('VALIDATION_FAILED');
         const keyed = await h.http
           .post(fill(route.path, orgA))
           .set('cookie', ownerA.cookie)
           .set(IDEMPOTENCY_KEY_HEADER, randomUUID())
-          .send({ reason: 'Bỏ qua' });
+          .send(bodyOf(route.path));
         expect(keyed.status, label(route)).toBe(404);
         expect(ErrorResponse.parse(keyed.body).error.code, label(route)).toBe('REVIEW_ITEM_NOT_FOUND');
         // Có khóa vẫn không mở được BTC B.
@@ -243,12 +249,13 @@ describe('cách ly BTC', () => {
           .post(fill(route.path, orgB))
           .set('cookie', ownerA.cookie)
           .set(IDEMPOTENCY_KEY_HEADER, randomUUID())
-          .send({ reason: 'Bỏ qua' });
+          .send(bodyOf(route.path));
         expect(cross.status, label(route)).toBe(403);
         expect(ErrorResponse.parse(cross.body).error.code, label(route)).toBe('NOT_A_MEMBER');
         continue;
       }
-      const expected = route.path.endsWith('/:itemId') ? 404 : 200;
+      // Route theo mục (chi tiết, Đơn ứng viên) với id ngẫu nhiên → 404; danh sách và summary → 200.
+      const expected = route.path.includes('/:itemId') ? 404 : 200;
       expect(res.status, label(route)).toBe(expected);
       if (expected === 404) expect(ErrorResponse.parse(res.body).error.code, label(route)).toBe('REVIEW_ITEM_NOT_FOUND');
     }

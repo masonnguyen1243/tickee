@@ -58,7 +58,7 @@ export class PaymentJobsModule {
 /**
  * `payment` ở vai api: endpoint IPN Tingee `POST /v1/payments/tingee/ipn/:ipnKey` (`@Public`, Story 3.5) trên lõi xử lý,
  * và thao tác của Owner/Admin trên mục Cần xử lý `POST /v1/orgs/:orgId/review-items/:itemId/{approve,reject,refund,
- * dismiss}` (Story 4.4-a). Cần thêm ở gốc DI những gì `PaymentProcessingModule` cần.
+ * dismiss,match}` (Story 4.4-a, 4.4-b). Cần thêm ở gốc DI những gì `PaymentProcessingModule` cần.
  */
 @Module({})
 export class PaymentModule {

@@ -22,11 +22,14 @@ export type PaymentEventKind = (typeof PAYMENT_EVENT_KINDS)[number];
  * Sự kiện thanh toán nhận từ Tingee (Story 3.5, AD-7): mỗi IPN hợp lệ (đã qua chữ ký), hoặc mỗi kết quả tra trạng thái
  * của Đối soát bù (Story 4.1, `success`/`expired`/`canceled`; kết quả "chưa trả" không lưu), đúng một dòng, chỉ các
  * trường trong whitelist. IPN và kết quả tra cùng khóa chống lặp là một dòng. Không bao giờ lưu `description`,
- * `orderInfo` (nội dung tự do) hay `customerEmail` (PII của người trả). Chỉ INSERT/SELECT (`APPEND_ONLY_TABLES`).
+ * `orderInfo` (nội dung tự do) hay `customerEmail` (PII của người trả). Chỉ INSERT/SELECT (`APPEND_ONLY_TABLES`), trừ
+ * UPDATE cột `order_id` (Story 4.4-b, `UPDATE_PROTECTED_COLUMNS`).
  *
  * - `organization_id`: BTC sở hữu `ipnKey` của URL nhận IPN (luôn có).
  * - `order_id`: Đơn có mã `provider_order_id` thuộc chính BTC đó; `null` khi mã sai dạng, không có Đơn, hoặc Đơn thuộc BTC
- *   khác (IPN lạc: chỉ lưu, không phát Vé).
+ *   khác (IPN lạc: chỉ lưu, không phát Vé). "Ghép với Đơn" (Story 4.4-b) gắn khoản tiền của mục `unmatched` vào Đơn được
+ *   chọn: cột duy nhất `tickee_app` UPDATE được, chỉ khi đang `null` (ứng dụng ghi `WHERE order_id IS NULL`; trigger
+ *   `payment_events_link_order_once` chặn mọi lần đổi giá trị đã có, và mọi lần đổi cột khác, kể cả với role khác).
  * - Chống lặp theo BTC: `(organization_id, provider_transaction_code)` cho `payment`, `(organization_id,
  *   provider_order_id, status)` cho `status`. Khóa có `organization_id` để một BTC (tự ký được IPN bằng secret của mình)
  *   không chiếm trước mã giao dịch thật của BTC khác. Trùng khóa → IPN lặp: trả `00`, không làm gì thêm.
@@ -85,8 +88,9 @@ export const paymentEvents = pgTable(
  * - `order_id`: `null` đúng khi loại `unmatched` (không có Đơn, hoặc Đơn thuộc BTC khác: không gắn Đơn của BTC kia).
  * - `payment_event_id`: khoản tiền của mục; unique (một khoản tiền một mục).
  * - `reason`: chỉ loại `orphan`, và bắt buộc với loại đó (`REVIEW_ITEM_REASONS`).
- * - `resolution`: có đúng khi `status = 'resolved'`; `event_cancelled`/`duplicate_payment`/`unmatched` chỉ
- *   `refunded`/`dismissed` (không phát Vé).
+ * - `resolution`: có đúng khi `status = 'resolved'`; `event_cancelled`/`duplicate_payment` chỉ `refunded`/`dismissed`
+ *   (không phát Vé); `unmatched` thêm `approved` (đã ghép với Đơn, Story 4.4-b: `payment_events.order_id` của khoản tiền
+ *   trỏ tới Đơn được ghép; `order_id` của mục vẫn `null`).
  * - `dismiss_reason` (Story 4.4): lý do "Bỏ qua" (đã trim, 1–`DISMISS_REASON_MAX` ký tự), có đúng khi `resolution =
  *   'dismissed'`. Không bao giờ vào audit hay log.
  * - Unique một phần `(order_id, type) WHERE status = 'open' AND type IN ('amount_mismatch', 'orphan')`: hai loại này đưa
@@ -140,7 +144,7 @@ export const reviewItems = pgTable(
     ),
     check(
       'review_items_refund_only_check',
-      sql`${t.type} NOT IN ('event_cancelled', 'duplicate_payment', 'unmatched') OR ${t.resolution} IS NULL OR ${t.resolution} IN ('refunded', 'dismissed')`,
+      sql`${t.type} NOT IN ('event_cancelled', 'duplicate_payment', 'unmatched') OR ${t.resolution} IS NULL OR ${t.resolution} IN ('refunded', 'dismissed') OR (${t.type} = 'unmatched' AND ${t.resolution} = 'approved')`,
     ),
   ],
 );

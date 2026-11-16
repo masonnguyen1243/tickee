@@ -4,6 +4,7 @@ import {
   ErrorCode,
   IDEMPOTENCY_KEY_HEADER,
   IdempotencyKey,
+  MatchReviewItemRequest,
   Permission,
   ReviewAction,
   type ReviewActionResult,
@@ -23,12 +24,13 @@ function assertIdempotencyKey(raw: unknown): void {
 }
 
 /**
- * Thao tác trên mục Cần xử lý (Story 4.4-a, FR-21): `POST /v1/orgs/:orgId/review-items/:itemId/{approve,reject,refund,
- * dismiss}`. Chỉ Owner và Admin (`review_queue.handle`); không phải thành viên (kể cả CTV) → `403 NOT_A_MEMBER` (guard).
- * Thứ tự kiểm: header `Idempotency-Key` (uuid) → body (`dismiss`) → mục (`404 REVIEW_ITEM_NOT_FOUND`) → bảng thao tác
- * (`409 REVIEW_ACTION_NOT_ALLOWED`; gửi lại thao tác đã thắng → `200`). `200` `ReviewActionResult`, `no-store`.
- * "Duyệt tay" còn trả `409 EVENT_CANCELLED` / `EVENT_ALREADY_ENDED` / `EVENT_LOCKED` (không đổi gì) và `409
- * TICKET_TYPE_SOLD_OUT` (Đơn giữ `review`, nhật ký có dòng "không thành").
+ * Thao tác trên mục Cần xử lý (Story 4.4-a, 4.4-b, FR-21): `POST /v1/orgs/:orgId/review-items/:itemId/{approve,reject,
+ * refund,dismiss,match}`. Chỉ Owner và Admin (`review_queue.handle`); không phải thành viên (kể cả CTV) → `403
+ * NOT_A_MEMBER` (guard). Thứ tự kiểm: header `Idempotency-Key` (uuid) → body (`dismiss`) → mục (`404
+ * REVIEW_ITEM_NOT_FOUND`) → body (`match`) → bảng thao tác (`409 REVIEW_ACTION_NOT_ALLOWED`; gửi lại thao tác đã thắng →
+ * `200`). `200` `ReviewActionResult`, `no-store`. "Duyệt tay" và "Ghép" còn trả `409 EVENT_CANCELLED` /
+ * `EVENT_ALREADY_ENDED` / `EVENT_LOCKED` (không đổi gì) và `409 TICKET_TYPE_SOLD_OUT` (Đơn giữ nguyên, nhật ký có dòng
+ * "không thành"); "Ghép" còn trả `409 MATCH_ORDER_NOT_ELIGIBLE` (không đổi gì).
  */
 @Controller('orgs/:orgId/review-items/:itemId')
 export class ReviewActionsController {
@@ -90,5 +92,26 @@ export class ReviewActionsController {
     assertIdempotencyKey(key);
     const { reason } = parseRequest(DismissReviewItemRequest, body);
     return this.reviewActions.perform(ctx, itemId, { action: ReviewAction.DISMISS, reason });
+  }
+
+  /**
+   * "Ghép với Đơn" (Story 4.4-b, chỉ mục `unmatched`): body `{ orderCode }`; Đơn `expired`/`review` cùng BTC, cùng số tiền
+   * → `paid` (nguồn `manual`), Vé, email Vé; giao dịch gắn vào Đơn; mục `approved`. Mục kiểm trước body: mục lạ luôn
+   * `404`, dù body sai.
+   */
+  @Post('match')
+  @HttpCode(200)
+  @RequirePermission(Permission.REVIEW_QUEUE_HANDLE)
+  @Header('cache-control', 'no-store')
+  async match(
+    @Access() ctx: AccessContext,
+    @Param('itemId') itemId: string,
+    @Headers(IDEMPOTENCY_KEY_HEADER) key: string | undefined,
+    @Body() body: unknown,
+  ): Promise<ReviewActionResult> {
+    assertIdempotencyKey(key);
+    await this.reviewActions.assertItemOf(ctx, itemId);
+    const { orderCode } = parseRequest(MatchReviewItemRequest, body);
+    return this.reviewActions.perform(ctx, itemId, { action: ReviewAction.MATCH, orderCode });
   }
 }

@@ -707,3 +707,9 @@ Spec 4.2 đầy đủ khoảng 5.500 token. Mason chọn tách ba ngày 13/11/20
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-4-a-duyet-tay-tu-choi-va-hoan-tay.md`
   summary: Story 7.1/7.2. Đơn `review` chỉ có mục `event_cancelled` (tiền về sau khi Sự kiện bị hủy) giữ `review` sau khi BTC "Đã hoàn tay"/"Bỏ qua" mọi mục của nó, vì AD-3 không có `review → refunded` và 4.4-a chỉ đóng mục. Người mua thấy "BTC đang kiểm tra" mãi. Khi làm hủy Sự kiện, chốt chuyển Đơn này sang `cancelled` (`event_cancelled`) rồi `refunded`, hoặc để `flows.cancelEvent` chuyển cả Đơn `review`.
   evidence: Build 4.4-a. `payment/review-actions.ts` › `apply` (nhánh refund-only chỉ `closeItem`); test `review-actions.test.ts` "Sự kiện đã hủy: Đã hoàn tay đóng mục, Đơn giữ review". Hiện chưa xảy ra được: hủy Sự kiện là Story 7.1.
+
+## Deferred from: code review of spec-4-4-b-ghep-voi-don.md (2026-11-16)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-4-b-ghep-voi-don.md`
+  summary: Đối soát bù dừng tra khi Đơn rời `pending`/`expired`, nên khoản trả qua link Gateway của chính Đơn đó (IPN bị mất) không bao giờ được ghi nhận nếu Đơn đã `paid` nhờ "Ghép với Đơn" (4.4-b) hoặc đã vào `review` vì một khoản khác (lệch tiền); tiền của Người mua không có mục Cần xử lý nào để hoàn. Hướng sửa: tiếp tục tra các mốc sau hết hạn với Đơn `review` và Đơn `paid` nguồn `manual`, kết quả `success` của giao dịch chưa có trong `payment_events` đi bước 4 (`duplicate_payment`).
+  evidence: Review 4.4-b (ECH). `payment/reconciliation-worker.ts` › `reconcile` (:153-157, `not_open`). Cần IPN mất hẳn, Đơn có link, và khoản thứ hai được ghép hoặc tạo `review` trước mốc tra sau hết hạn (30 phút, 2 giờ, 24 giờ). Sửa đổi Đối soát bù, ngoài intent của 4.4-b (Never: không đổi Đối soát bù).
