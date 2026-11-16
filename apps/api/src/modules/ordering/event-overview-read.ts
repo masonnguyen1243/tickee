@@ -5,11 +5,11 @@ import type { DbExecutor } from '../../platform/db/index.js';
 import { orderItems, orders } from './schema.js';
 
 /*
- * Read model của Đơn cho màn BTC của Sự kiện: Tổng quan Sự kiện (Story 3.11, AD-33; `reporting` đọc qua các hàm này,
- * xuất từ `index.ts`, không join bảng `orders`/`order_items`) và số Đơn đang chờ thanh toán của `Dialog` "Kết thúc"
- * (E3-2, `flows`). Như `paidBuyerCount`: hàm query thay cho view `ordering_read_*`, nên đổi cột
- * chỉ sửa ở đây. Mọi hàm lọc cả `organization_id` (`orgScope`) lẫn `event_id`; người gọi đã kiểm Sự kiện thuộc BTC.
- * Chỉ đọc bản chụp trên Đơn (tên Người mua, tổng tiền), không bao giờ trả email hay SĐT.
+ * Read model của Đơn cho màn BTC: Tổng quan Sự kiện (Story 3.11, AD-33; `reporting` đọc qua các hàm này, xuất từ
+ * `index.ts`, không join bảng `orders`/`order_items`), hàng Cần xử lý (Story 4.3, `reviewOrdersOf`) và số Đơn đang chờ
+ * thanh toán của `Dialog` "Kết thúc" (E3-2, `flows`). Như `paidBuyerCount`: hàm query thay cho view `ordering_read_*`,
+ * nên đổi cột chỉ sửa ở đây. Mọi hàm lọc `organization_id` (`orgScope`); hàm theo Sự kiện lọc thêm `event_id` (người
+ * gọi đã kiểm Sự kiện thuộc BTC). Chỉ đọc bản chụp trên Đơn (tên Người mua, tổng tiền), không bao giờ trả email hay SĐT.
  */
 
 /** Phạm vi BTC của người xem. */
@@ -71,18 +71,58 @@ export async function recentOrdersOf(
     .orderBy(desc(orders.createdAt), desc(orders.id))
     .limit(limit);
   if (rows.length === 0) return [];
+  const ticketsOf = await ticketCountsOf(
+    db,
+    rows.map((r) => r.id),
+  );
+  return rows.map((r) => ({ ...r, ticketCount: ticketsOf.get(r.id) ?? 0 }));
+}
+
+/** Đơn của một mục Cần xử lý (Story 4.3): `id` nội bộ và `eventId` chỉ để `reporting` ghép, không ra response. */
+export interface ReviewOrderRow extends RecentOrderRow {
+  eventId: string;
+}
+
+/**
+ * Bản theo lô cho hàng và `Sheet` Cần xử lý (Story 4.3): Đơn của BTC theo danh sách id, kèm Sự kiện và tổng số Vé, theo id
+ * Đơn. Lọc `orgScope` (id của BTC khác, trùng hay không có thì không có trong kết quả). Hai câu như `recentOrdersOf`:
+ * Đơn trước, rồi số Vé của đúng các Đơn đó. Danh sách rỗng → không chạm DB.
+ */
+export async function reviewOrdersOf(
+  db: DbExecutor,
+  scope: EventOrdersScope,
+  orderIds: readonly string[],
+): Promise<Map<string, ReviewOrderRow>> {
+  const ids = [...new Set(orderIds)];
+  if (ids.length === 0) return new Map();
+  const rows = await db
+    .select({
+      id: orders.id,
+      code: orders.code,
+      buyerName: orders.buyerName,
+      totalAmount: orders.totalAmount,
+      status: orders.status,
+      eventId: orders.eventId,
+      createdAt: orders.createdAt,
+    })
+    .from(orders)
+    .where(and(orgScope(scope)(orders), inArray(orders.id, ids)));
+  if (rows.length === 0) return new Map();
+  const ticketsOf = await ticketCountsOf(
+    db,
+    rows.map((r) => r.id),
+  );
+  return new Map(rows.map((r) => [r.id, { ...r, ticketCount: ticketsOf.get(r.id) ?? 0 }]));
+}
+
+/** Tổng `quantity` các dòng của từng Đơn trong `orderIds` (Đơn không có dòng nào không có trong kết quả). */
+async function ticketCountsOf(db: DbExecutor, orderIds: string[]): Promise<Map<string, number>> {
   const counts = await db
     .select({ orderId: orderItems.orderId, tickets: sql<number>`SUM(${orderItems.quantity})::int`.mapWith(Number) })
     .from(orderItems)
-    .where(
-      inArray(
-        orderItems.orderId,
-        rows.map((r) => r.id),
-      ),
-    )
+    .where(inArray(orderItems.orderId, orderIds))
     .groupBy(orderItems.orderId);
-  const ticketsOf = new Map(counts.map((c) => [c.orderId, c.tickets]));
-  return rows.map((r) => ({ ...r, ticketCount: ticketsOf.get(r.id) ?? 0 }));
+  return new Map(counts.map((c) => [c.orderId, c.tickets]));
 }
 
 /**

@@ -402,24 +402,28 @@ test('danh sách Sự kiện trống: "Tạo Sự kiện" → wizard bước 1, 
   await expect(tabBar(page).getByRole('link', { name: 'Sự kiện' })).toHaveAttribute('aria-current', 'page');
 });
 
-test('mục chưa có trang: trang tạm "Sắp có" trong khung, mục đang chọn có aria-current', async ({ page }) => {
+test('mục chưa có trang: trang tạm "Sắp có" trong khung, mục đang chọn có aria-current; Cần xử lý là trang thật', async ({
+  page,
+}) => {
   await page.setViewportSize(DESKTOP);
   await openDashboard(page, { path: `${base}/token` });
   await expect(page.getByRole('heading', { name: 'Token' })).toBeVisible();
   await expect(page.getByText('Sắp có', { exact: true })).toBeVisible();
   await expect(sidebar(page).getByRole('link', { name: 'Token' })).toHaveAttribute('aria-current', 'page');
 
-  const pages: [string, string][] = [
-    ['Cần xử lý', `${base}/can-xu-ly`],
-    ['Cài đặt', `${base}/cai-dat`],
-  ];
-  for (const [name, path] of pages) {
-    await sidebar(page).getByRole('link', { name, exact: true }).click();
-    await page.waitForURL(`**${path}`);
-    await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
-    await expect(page.getByText('Sắp có', { exact: true })).toBeVisible();
-    await expect(sidebar(page).getByRole('link', { name, exact: true })).toHaveAttribute('aria-current', 'page');
-  }
+  await sidebar(page).getByRole('link', { name: 'Cài đặt', exact: true }).click();
+  await page.waitForURL(`**${base}/cai-dat`);
+  await expect(page.getByRole('heading', { name: 'Cài đặt', exact: true })).toBeVisible();
+  await expect(page.getByText('Sắp có', { exact: true })).toBeVisible();
+  await expect(sidebar(page).getByRole('link', { name: 'Cài đặt', exact: true })).toHaveAttribute('aria-current', 'page');
+
+  // Story 4.3: "Cần xử lý" là trang thật (hàng trống), không còn "Sắp có".
+  await sidebar(page).getByRole('link', { name: 'Cần xử lý', exact: true }).click();
+  await page.waitForURL(`**${base}/can-xu-ly`);
+  await expect(page.getByRole('heading', { name: 'Cần xử lý', exact: true, level: 1 })).toBeVisible();
+  await expect(page.getByText('Không có gì cần xử lý.')).toBeVisible();
+  await expect(page.getByText('Sắp có', { exact: true })).toHaveCount(0);
+  await expect(sidebar(page).getByRole('link', { name: 'Cần xử lý', exact: true })).toHaveAttribute('aria-current', 'page');
 
   await page.setViewportSize({ width: 375, height: 667 });
   await tabBar(page).getByRole('link', { name: 'Quét vé' }).click();

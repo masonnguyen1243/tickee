@@ -38,4 +38,13 @@ export {
   type ReconciliationStopReason,
 } from './reconciliation-worker.js';
 export { PaymentServiceResumedWorker, type ResumedReconciliation } from './payment-service-resumed-worker.js';
-export { openReviewsOf, type OpenReview } from './review-read.js';
+export {
+  openReviewCountOf,
+  openReviewItemsOf,
+  openReviewsOf,
+  reviewItemDetailOf,
+  type OpenReview,
+  type OpenReviewItemRow,
+  type ReviewItemDetailRow,
+  type ReviewScope,
+} from './review-read.js';

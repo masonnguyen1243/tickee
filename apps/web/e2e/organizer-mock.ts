@@ -12,8 +12,9 @@ import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
  * `GET /orgs/:id/events/:eventId/form` → `{ questions: [] }`, `GET /orgs/:id/events/:eventId/publish-readiness` → bốn
  * điều kiện luôn có, đều đạt (`readyConditions`), `GET /orgs/:id/events/:eventId/overview` → chưa có Đơn
  * (`emptyOverview`), SSE `GET /orgs/:id/events/:eventId/overview/live` → 503 (không realtime: polling 10 giây), SSE cấp
- * BTC `GET /orgs/:id/live` (khung dashboard luôn mở, Story 4.2-b) → 503 (dải banner polling 10 giây); lời gọi không có
- * handler → 500.
+ * BTC `GET /orgs/:id/live` (khung dashboard luôn mở, Story 4.2-b) → 503 (dải banner polling 10 giây),
+ * `GET /orgs/:id/review-items/summary` (badge "Cần xử lý" của khung, Story 4.3) → `{ openCount: 0 }`,
+ * `GET /orgs/:id/review-items` (trang Cần xử lý) → hàng trống không lọc; lời gọi không có handler → 500.
  */
 
 export const ORG_ID = '019a3b2c-5678-7abc-8def-0123456789ab';
@@ -29,12 +30,14 @@ const OVERVIEW_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/overview$/;
 const OVERVIEW_LIVE_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/overview\/live$/;
 const ORG_LIVE_KEY = /^GET \/orgs\/[^/]+\/live$/;
 const SALE_STATUS_KEY = /^GET \/orgs\/[^/]+\/event-sale-status$/;
+const REVIEW_SUMMARY_KEY = /^GET \/orgs\/[^/]+\/review-items\/summary$/;
+const REVIEW_ITEMS_KEY = /^GET \/orgs\/[^/]+\/review-items$/;
 
 /** Đường SSE cấp BTC (Story 4.2-b), để `fakeEventSource` chọn đúng stream giữa stream của khung và stream của trang. */
 export const ORG_LIVE_URL = /\/v1\/orgs\/[^/]+\/live$/;
 
-/** `EventOverview` của Sự kiện chưa có Đơn nào (Story 3.11). */
-export const emptyOverview = () => ({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: [] });
+/** `EventOverview` của Sự kiện chưa có Đơn nào (Story 3.11), không có mục Cần xử lý (Story 4.3). */
+export const emptyOverview = () => ({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: [], openReviewCount: 0 });
 
 /** Bốn điều kiện mở bán luôn có (Story 2.10). */
 export const ALWAYS_CONDITIONS = ['REFUND_POLICY', 'HAS_TICKET_TYPE', 'EVENT_NOT_ENDED', 'ORGANIZATION_NOT_LOCKED'];
@@ -63,6 +66,9 @@ function defaultHandler(key: string): Handler | undefined {
   if (ORG_LIVE_KEY.test(key)) return () => apiError(503, 'SERVICE_UNAVAILABLE');
   // Nhãn trạng thái bán của thẻ Sự kiện và badge Tổng quan (Story 4.2-c): mặc định không có Sự kiện nào → nhãn dự phòng.
   if (SALE_STATUS_KEY.test(key)) return () => ({ status: 200, body: { events: [] } });
+  // Khung dashboard luôn tải số mục Cần xử lý cho badge (Story 4.3): mặc định 0 (không badge).
+  if (REVIEW_SUMMARY_KEY.test(key)) return () => ({ status: 200, body: { openCount: 0 } });
+  if (REVIEW_ITEMS_KEY.test(key)) return () => ({ status: 200, body: { event: null, items: [] } });
   return undefined;
 }
 

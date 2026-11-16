@@ -27,6 +27,7 @@ describe('EventOverview', () => {
   it('doanh thu + tối đa 5 Đơn, mọi trạng thái; Đơn review kèm loại và số tiền nhận', () => {
     const parsed = EventOverview.parse({
       revenue: { amount: 450_000, paidOrders: 2 },
+      openReviewCount: 2,
       recentOrders: [
         order(),
         order({ code: 'TK5R8W1CAB', status: 'review', review: { type: 'amount_mismatch', receivedAmount: 250_000 } }),
@@ -39,16 +40,26 @@ describe('EventOverview', () => {
     expect(parsed.recentOrders[1]!.review).toEqual({ type: 'amount_mismatch', receivedAmount: 250_000 });
   });
 
-  it('chưa có Đơn: 0đ, 0 Đơn, danh sách rỗng', () => {
-    expect(EventOverview.parse({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: [] })).toEqual({
+  it('chưa có Đơn: 0đ, 0 Đơn, danh sách rỗng, 0 mục Cần xử lý', () => {
+    expect(EventOverview.parse({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: [], openReviewCount: 0 })).toEqual({
       revenue: { amount: 0, paidOrders: 0 },
       recentOrders: [],
+      openReviewCount: 0,
     });
+  });
+
+  it('openReviewCount (Story 4.3) bắt buộc, số nguyên không âm', () => {
+    const base = { revenue: { amount: 0, paidOrders: 0 }, recentOrders: [] };
+    expect(EventOverview.safeParse(base).success).toBe(false);
+    expect(EventOverview.safeParse({ ...base, openReviewCount: -1 }).success).toBe(false);
+    expect(EventOverview.safeParse({ ...base, openReviewCount: 1.5 }).success).toBe(false);
   });
 
   it('từ chối: quá 5 Đơn, mã Đơn sai dạng, trạng thái hay loại lạ, số âm', () => {
     const six = Array.from({ length: RECENT_ORDERS_LIMIT + 1 }, () => order());
-    expect(EventOverview.safeParse({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: six }).success).toBe(false);
+    expect(
+      EventOverview.safeParse({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: six, openReviewCount: 0 }).success,
+    ).toBe(false);
     expect(RecentOrder.safeParse(order({ code: 'TK123' })).success).toBe(false);
     expect(RecentOrder.safeParse(order({ status: 'confirming' })).success).toBe(false);
     expect(RecentOrder.safeParse(order({ review: { type: 'lost', receivedAmount: 1 } })).success).toBe(false);

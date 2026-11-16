@@ -1,4 +1,15 @@
-import { EventOverview, eventOverviewApiPath, StatusNotice, statusNoticesApiPath } from '@tickee/contracts';
+import {
+  EventOverview,
+  eventOverviewApiPath,
+  ReviewItemDetail,
+  reviewItemApiPath,
+  ReviewQueue,
+  reviewItemsApiPath,
+  reviewItemsSummaryApiPath,
+  ReviewQueueSummary,
+  StatusNotice,
+  statusNoticesApiPath,
+} from '@tickee/contracts';
 import { z } from 'zod';
 
 import { apiRequest } from '@/lib/api/client';
@@ -33,3 +44,36 @@ export const eventOverviewQueryKey = (orgId: string, eventId: string) =>
 /** `GET /v1/orgs/:orgId/events/:eventId/overview`: doanh thu (Đơn `paid`) và 5 Đơn mới nhất ở mọi trạng thái. */
 export const fetchEventOverview = (orgId: string, eventId: string, signal?: AbortSignal) =>
   apiRequest(eventOverviewApiPath(orgId, eventId), { schema: EventOverview, init: { signal } });
+
+/**
+ * Gốc khóa TanStack Query của hàng Cần xử lý một BTC (Story 4.3): số mục (badge), hàng (theo bộ lọc Sự kiện) và chi
+ * tiết mục đều nằm dưới khóa này, nên tín hiệu `org_review_items_changed` của stream cấp BTC làm mới cả ba bằng một lệnh
+ * invalidate không `exact`.
+ */
+export const reviewQueueQueryPrefix = (orgId: string) => ['reporting', 'review-queue', orgId] as const;
+
+/** Số mục `open` của BTC (badge ở sidebar và tab bar). */
+export const reviewQueueSummaryQueryKey = (orgId: string) => [...reviewQueueQueryPrefix(orgId), 'summary'] as const;
+
+/** Hàng Cần xử lý; `eventId` `null` = không lọc. */
+export const reviewQueueQueryKey = (orgId: string, eventId: string | null) =>
+  [...reviewQueueQueryPrefix(orgId), 'list', eventId] as const;
+
+/** Chi tiết một mục (`Sheet`). */
+export const reviewItemQueryKey = (orgId: string, itemId: string) =>
+  [...reviewQueueQueryPrefix(orgId), 'item', itemId] as const;
+
+/** Polling badge và hàng Cần xử lý khi stream cấp BTC chưa kết nối (AD-17: 10 giây ở dashboard, như `notices`). */
+export const REVIEW_QUEUE_POLL_MS = 10_000;
+
+/** `GET /v1/orgs/:orgId/review-items/summary`: `{ openCount }`. */
+export const fetchReviewQueueSummary = (orgId: string, signal?: AbortSignal) =>
+  apiRequest(reviewItemsSummaryApiPath(orgId), { schema: ReviewQueueSummary, init: { signal } });
+
+/** `GET /v1/orgs/:orgId/review-items[?eventId=]`: mục `open`, cũ nhất trước; lọc thì kèm Sự kiện đang lọc. */
+export const fetchReviewQueue = (orgId: string, eventId: string | null, signal?: AbortSignal) =>
+  apiRequest(reviewItemsApiPath(orgId, eventId ?? undefined), { schema: ReviewQueue, init: { signal } });
+
+/** `GET /v1/orgs/:orgId/review-items/:itemId`: chi tiết một mục ở mọi trạng thái. */
+export const fetchReviewItem = (orgId: string, itemId: string, signal?: AbortSignal) =>
+  apiRequest(reviewItemApiPath(orgId, itemId), { schema: ReviewItemDetail, init: { signal } });

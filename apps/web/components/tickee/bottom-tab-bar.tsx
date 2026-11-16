@@ -7,15 +7,18 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
-import { visibleSections, type NavSectionKey } from '@/lib/organizer/nav';
+import { navAccessibleName, visibleSections, type NavSectionKey } from '@/lib/organizer/nav';
 import { cn } from '@/lib/utils';
 
+import { NavBadge } from './nav-badge';
 import { OrganizationSwitcher, type MembershipsState } from './organization-switcher';
 
 type BottomTabBarProps = {
   organization: Organization;
   memberships: MembershipsState;
   active: NavSectionKey | null;
+  /** Số mục Cần xử lý `open` (badge của tab "Cần xử lý"); chưa tải → không badge. */
+  reviewCount?: number;
 };
 
 /** Ô của tab bar: icon 24px + nhãn meta; đang chọn màu brand + vạch coral 2px phía trên. */
@@ -27,10 +30,13 @@ const tabClass = (current: boolean) =>
       : 'text-stage-muted',
   );
 
-function TabLabel({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
+function TabLabel({ icon: Icon, label, count }: { icon: LucideIcon; label: string; count?: number }) {
   return (
     <>
-      <Icon aria-hidden="true" className="size-6 shrink-0" />
+      <span className="relative">
+        <Icon aria-hidden="true" className="size-6 shrink-0" />
+        <NavBadge count={count} className="absolute -top-1.5 left-3.5" />
+      </span>
       <span className="max-w-full truncate">{label}</span>
     </>
   );
@@ -38,9 +44,10 @@ function TabLabel({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
 
 /**
  * `bottom-tab-bar` (< `md`): cố định ở đáy, nền `bar`, cao `tab-bar-height` + safe-area. Sự kiện · Cần xử lý ·
- * Quét vé · Thêm; "Thêm" mở Sheet gồm các mục còn lại (đã lọc theo quyền) và BTC switcher.
+ * Quét vé · Thêm; "Thêm" mở Sheet gồm các mục còn lại (đã lọc theo quyền) và BTC switcher. "Cần xử lý" có badge số ở góc
+ * trên icon (Story 4.3); khi có badge, tên truy cập của tab kèm số mục.
  */
-export function BottomTabBar({ organization, memberships, active }: BottomTabBarProps) {
+export function BottomTabBar({ organization, memberships, active, reviewCount }: BottomTabBarProps) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   // Đổi trang mà không bấm trong Sheet (Back của trình duyệt/Android) cũng đóng Sheet. Chỉnh state ngay lúc render
@@ -64,14 +71,17 @@ export function BottomTabBar({ organization, memberships, active }: BottomTabBar
       <ul className="grid h-tab-bar-height auto-cols-fr grid-flow-col">
         {tabs.map(({ key, label, icon }) => {
           const current = key === active;
+          const count = key === 'review-queue' ? reviewCount : undefined;
+          const name = navAccessibleName(label, count);
           return (
             <li key={key} className="min-w-0">
               <Link
                 href={organizationSectionPath(organization.id, key)}
+                aria-label={name === label ? undefined : name}
                 aria-current={current ? 'page' : undefined}
                 className={tabClass(current)}
               >
-                <TabLabel icon={icon} label={label} />
+                <TabLabel icon={icon} label={label} count={count} />
               </Link>
             </li>
           );

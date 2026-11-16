@@ -60,6 +60,7 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   IPN_SIGNATURE_INVALID: 401,
   SHARED_TICKET_NOT_FOUND: 404,
   TICKET_NOT_FOUND: 404,
+  REVIEW_ITEM_NOT_FOUND: 404,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

@@ -153,7 +153,11 @@ describe('GET …/overview: doanh thu và Đơn gần đây', () => {
     const sale = await saleEvent();
     const res = await h.http.get(overviewPath(sale.event.id)).set('cookie', org.owner.cookie).expect(200);
     expect(res.headers['cache-control']).toBe('no-store');
-    expect(EventOverview.parse(res.body)).toEqual({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: [] });
+    expect(EventOverview.parse(res.body)).toEqual({
+      revenue: { amount: 0, paidOrders: 0 },
+      recentOrders: [],
+      openReviewCount: 0,
+    });
   });
 
   it('doanh thu chỉ tính Đơn paid (kể cả Đơn 0đ); Đơn mọi trạng thái mới nhất trước; Đơn review kèm loại và số tiền nhận', async () => {
@@ -167,6 +171,7 @@ describe('GET …/overview: doanh thu và Đơn gần đây', () => {
 
     const overview = await overviewOf(sale.event.id);
     expect(overview.revenue).toEqual({ amount: PRICE, paidOrders: 2 });
+    expect(overview.openReviewCount).toBe(1);
     expect(overview.recentOrders.map((o) => [o.code, o.status, o.buyerName, o.ticketCount, o.totalAmount])).toEqual([
       [d.code, 'pending', 'Trần Quốc Bảo', 2, 2 * PRICE],
       [c.code, 'review', 'Lê Hoàng Nam', 1, PRICE],
@@ -213,16 +218,42 @@ describe('GET …/overview: doanh thu và Đơn gần đây', () => {
     await sendIpn(placed, { paidAmount: PRICE }).expect(200);
     const first = await overviewOf(sale.event.id);
     expect(first.recentOrders[0]).toMatchObject({ status: 'review', review: { type: 'amount_mismatch', receivedAmount: 100_000 } });
+    expect(first.openReviewCount).toBe(2);
 
     await h.db.orm.execute(sql`
       UPDATE review_items SET status = 'resolved', resolution = 'rejected'
        WHERE order_id = ${placed.orderId} AND type = 'amount_mismatch'`);
     const second = await overviewOf(sale.event.id);
     expect(second.recentOrders[0]).toMatchObject({ status: 'review', review: { type: 'duplicate_payment', receivedAmount: PRICE } });
+    expect(second.openReviewCount).toBe(1);
 
     await h.db.orm.execute(sql`
       UPDATE review_items SET status = 'resolved', resolution = 'refunded' WHERE order_id = ${placed.orderId}`);
-    expect((await overviewOf(sale.event.id)).recentOrders[0]).toMatchObject({ status: 'review', review: null });
+    const third = await overviewOf(sale.event.id);
+    expect(third.recentOrders[0]).toMatchObject({ status: 'review', review: null });
+    expect(third.openReviewCount).toBe(0);
+  });
+
+  it('Story 4.3: openReviewCount chỉ đếm mục open gắn Đơn của Sự kiện này, ở mọi trạng thái Đơn (kể cả trả trùng cho Đơn paid); không đếm Sự kiện khác hay mục chưa khớp', async () => {
+    const x = await saleEvent();
+    const y = await saleEvent();
+    await sendIpn(await place(x), { paidAmount: 1_000 }).expect(200);
+    await sendIpn(await place(y), { paidAmount: 2_000 }).expect(200);
+    await postIpn(h, ipnKey, signIpn(MAIN.secretToken, fakeIpnPayload('TK0000ZZZZ', 3_000))).expect(200);
+    const paid = await place(x);
+    await sendIpn(paid).expect(200);
+    await sendIpn(paid).expect(200);
+
+    expect((await overviewOf(x.event.id)).openReviewCount).toBe(2);
+    expect((await overviewOf(y.event.id)).openReviewCount).toBe(1);
+    // Id Sự kiện viết HOA trên URL vẫn đếm đúng.
+    const upper = await h.http.get(overviewPath(x.event.id.toUpperCase())).set('cookie', org.owner.cookie).expect(200);
+    expect(EventOverview.parse(upper.body).openReviewCount).toBe(2);
+
+    await h.db.orm.execute(sql`
+      UPDATE review_items SET status = 'resolved', resolution = 'refunded'
+       WHERE order_id = ${paid.orderId}`);
+    expect((await overviewOf(x.event.id)).openReviewCount).toBe(1);
   });
 });
 
@@ -342,6 +373,32 @@ describe('stream …/overview/live: event_orders_changed theo Sự kiện', () =
       totalAmount: PRICE,
       review: { type: 'amount_mismatch', receivedAmount: 250_000 },
     });
+  });
+});
+
+describe('stream …/overview/live: org_review_items_changed (Story 4.3)', () => {
+  it('mục Cần xử lý mới của BTC (Sự kiện khác, chưa khớp) → stream của X nhận org_review_items_changed; event_orders_changed của Sự kiện khác vẫn không tới; BTC khác không tới', async () => {
+    const x = await saleEvent();
+    const y = await saleEvent();
+    const placedY = await place(y);
+    await expect.poll(() => signalsOf({ id: placedY.orderId }).length).toBe(3);
+    const streamX = await live(x.event.id, org.owner.cookie);
+    expect(streamX.status).toBe(200);
+
+    await sendIpn(placedY, { paidAmount: 1_000 }).expect(200);
+    await streamX.waitForMessages(1, 1_000);
+    await postIpn(h, ipnKey, signIpn(MAIN.secretToken, fakeIpnPayload('TK0000ZZZZ', 5_000))).expect(200);
+    await streamX.waitForMessages(2, 1_000);
+    // Mục của BTC khác (chèn bằng SQL, tín hiệu phát tay như IPN) không tới.
+    const other = await paidReadyOrg(h, { name: 'BTC khác' });
+    await h.db.transaction((tx) => realtime.notifyOrganization(tx, RealtimeTopic.ORG_REVIEW_ITEMS_CHANGED, other.orgId));
+    await sleep(300);
+    expect(streamX.messages.map((m) => m.raw)).toEqual([
+      '{"type":"org_review_items_changed"}',
+      '{"type":"org_review_items_changed"}',
+    ]);
+    expect((await overviewOf(y.event.id)).openReviewCount).toBe(1);
+    expect((await overviewOf(x.event.id)).openReviewCount).toBe(0);
   });
 });
 

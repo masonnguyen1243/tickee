@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 import type { EventSaleReason } from '@tickee/contracts';
 
 import { expect, test } from './fixtures';
-import { apiError, me, mockIdentityApi, unauthenticated, type Call, type Reply } from './identity-mock';
+import { apiError, me, mockIdentityApi, unauthenticated, type Call, type Handler, type Reply } from './identity-mock';
 import { fakeEventSource, setVisibility } from './live-mock';
 import { emptyOverview, mockOrganizerApi, organization, ORG_ID, saleStatus } from './organizer-mock';
 
@@ -87,7 +87,7 @@ const ORDERS: RecentOrder[] = [
   }),
   order({ code: 'TK1Q4Z8HAB', buyerName: 'Võ Minh Thư', totalAmount: 150_000, status: 'expired', createdAt: '2026-11-11T22:10:00+07:00' }),
 ];
-const OVERVIEW = { revenue: { amount: 450_000, paidOrders: 1 }, recentOrders: ORDERS };
+const OVERVIEW = { revenue: { amount: 450_000, paidOrders: 1 }, recentOrders: ORDERS, openReviewCount: 2 };
 
 const SALE_STATUS_PATH = `/orgs/${ORG_ID}/event-sale-status`;
 /** `GET …/event-sale-status` trả đúng một dòng cho Sự kiện của spec này. */
@@ -109,8 +109,15 @@ type State = {
   sale?: Reply;
 };
 
-/** Owner đã đăng nhập; Sự kiện `state.status`; `GET …/overview` trả `state.overview`; SSE `…/overview/live` mặc định 503. */
-async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ state: State; calls: Call[] }> {
+/**
+ * Owner đã đăng nhập; Sự kiện `state.status`; `GET …/overview` trả `state.overview`; SSE `…/overview/live` mặc định 503.
+ * `handlers` thêm (vd. trang Cần xử lý của Story 4.3).
+ */
+async function openApi(
+  page: Page,
+  initial: Partial<State> = {},
+  handlers: Record<string, Handler> = {},
+): Promise<{ state: State; calls: Call[] }> {
   const state: State = { status: 'published', overview: OVERVIEW, fail: 0, failReply: apiError(500, 'INTERNAL_ERROR'), ...initial };
   await mockIdentityApi(page, { 'GET /identity/me': () => (state.signedOut ? unauthenticated() : me(CONSENTED)) });
   const calls = await mockOrganizerApi(page, {
@@ -129,6 +136,7 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ stat
       }
       return { status: 200, body: state.overview };
     },
+    ...handlers,
   });
   return { state, calls };
 }
@@ -289,7 +297,11 @@ test.describe('Tổng quan tự cập nhật', () => {
 
     // Người mua đăng ký Sự kiện miễn phí: Đơn 0đ đã thanh toán hiện đầu khối.
     const fresh = order({ code: 'TK7M2P9XAB', buyerName: 'Đỗ Thị Lan', ticketCount: 2, totalAmount: 0 });
-    state.overview = { revenue: { amount: 450_000, paidOrders: 2 }, recentOrders: [fresh, ...ORDERS.slice(0, 4)] };
+    state.overview = {
+      revenue: { amount: 450_000, paidOrders: 2 },
+      recentOrders: [fresh, ...ORDERS.slice(0, 4)],
+      openReviewCount: 2,
+    };
     await sse.message('event_orders_changed');
     await expect(cards(page).nth(0)).toContainText('Đỗ Thị Lan', { timeout: 2_500 });
     await expect(cards(page).nth(0).locator('[data-slot="status-badge"]')).toHaveText('Đã thanh toán');
@@ -299,7 +311,7 @@ test.describe('Tổng quan tự cập nhật', () => {
 
     // IPN trả Đơn đang chờ (Lê Hoàng Nam, 150.000đ).
     const paid = [fresh, ...ORDERS.slice(0, 4)].map((o) => (o.code === 'TK3J6N4DAB' ? { ...o, status: 'paid' } : o));
-    state.overview = { revenue: { amount: 600_000, paidOrders: 3 }, recentOrders: paid };
+    state.overview = { revenue: { amount: 600_000, paidOrders: 3 }, recentOrders: paid, openReviewCount: 2 };
     await sse.message('event_orders_changed');
     await expect(statValue(page)).toHaveText('600.000đ', { timeout: 2_500 });
     await expect(cards(page).nth(3).locator('[data-slot="status-badge"]')).toHaveText('Đã thanh toán');
@@ -315,7 +327,7 @@ test.describe('Tổng quan tự cập nhật', () => {
     const start = overviewGets(calls).length;
     const startedAt = Date.now();
 
-    state.overview = { revenue: { amount: 750_000, paidOrders: 2 }, recentOrders: ORDERS };
+    state.overview = { revenue: { amount: 750_000, paidOrders: 2 }, recentOrders: ORDERS, openReviewCount: 2 };
     await page.waitForTimeout(7_000);
     // Không polling dày hơn 10 giây (vd. 2 giây của màn chờ thanh toán).
     expect(overviewGets(calls).length).toBe(start);
@@ -349,7 +361,7 @@ test.describe('Tổng quan tự cập nhật', () => {
     await expect(statValue(page)).toHaveText('450.000đ');
     const beforeOnline = overviewGets(calls).length;
 
-    state.overview = { revenue: { amount: 900_000, paidOrders: 2 }, recentOrders: ORDERS };
+    state.overview = { revenue: { amount: 900_000, paidOrders: 2 }, recentOrders: ORDERS, openReviewCount: 2 };
     // Toast vẫn đang hiện ngay trước khi có mạng lại (chưa tới hạn tự đóng 4 giây của sonner).
     await expect(offlineToasts(page)).toHaveCount(1);
     await page.context().setOffline(false);
@@ -382,7 +394,7 @@ test.describe('Tổng quan tự cập nhật', () => {
 
     // Mọi lần tải lại kế tiếp trả 500 (kể cả 2 lần thử lại).
     state.fail = 10;
-    state.overview = { revenue: { amount: 900_000, paidOrders: 2 }, recentOrders: ORDERS };
+    state.overview = { revenue: { amount: 900_000, paidOrders: 2 }, recentOrders: ORDERS, openReviewCount: 2 };
     await sse.message('event_orders_changed');
     await expect(updatedAt(page)).toHaveText('Cập nhật lúc 10:04', { timeout: 10_000 });
     await expect(statValue(page)).toHaveText('450.000đ');
@@ -417,6 +429,68 @@ test.describe('Tổng quan tự cập nhật', () => {
     await openApi(page, { expireOnOverview: true });
     await page.goto(base);
     await page.waitForURL(`**/dang-nhap?returnTo=${encodeURIComponent(base)}`);
+  });
+});
+
+test.describe('needs-action-card (Story 4.3)', () => {
+  const card = (page: Page) => page.locator('[data-slot="needs-action-card"]');
+  const REVIEW_PATH = `/orgs/${ORG_ID}/review-items`;
+
+  test('có mục: "2 mục Cần xử lý" + "Xem các mục Cần xử lý" → trang Cần xử lý lọc theo Sự kiện, chip "Sự kiện: {tên} · Bỏ lọc"', async ({
+    page,
+  }) => {
+    let filter: string | null = null;
+    await openApi(page, {}, {
+      [`GET ${REVIEW_PATH}`]: (request) => {
+        filter = new URL(request.url()).searchParams.get('eventId');
+        return {
+          status: 200,
+          body: { event: filter ? { id: EVENT_ID, name: 'Giải cầu lông Ba Đình 2026' } : null, items: [] },
+        };
+      },
+    });
+    await page.goto(base);
+    await expect(card(page)).toBeVisible();
+    await expect(card(page).getByRole('heading', { name: 'Cần xử lý' })).toBeVisible();
+    await expect(card(page).locator('[data-slot="needs-action-value"]')).toHaveText('2 mục Cần xử lý');
+    // Card nằm cạnh stat-card doanh thu, trên khối Đơn gần đây.
+    const cardBox = (await card(page).boundingBox())!;
+    const ordersBox = (await page.locator('[data-slot="recent-orders-block"]').boundingBox())!;
+    expect(cardBox.y + cardBox.height).toBeLessThanOrEqual(ordersBox.y);
+
+    const link = card(page).getByRole('link', { name: 'Xem các mục Cần xử lý' });
+    await expect(link).toHaveAttribute('href', `/btc/${ORG_ID}/can-xu-ly?suKien=${EVENT_ID}`);
+    await link.click();
+    await page.waitForURL(`**/btc/${ORG_ID}/can-xu-ly?suKien=${EVENT_ID}`);
+    const chip = page.locator('[data-slot="review-filter-chip"]');
+    await expect(chip).toContainText('Sự kiện: Giải cầu lông Ba Đình 2026');
+    await expect(chip.getByRole('link', { name: 'Bỏ lọc' })).toBeVisible();
+    expect(filter).toBe(EVENT_ID);
+  });
+
+  test('0 mục: "Không có gì cần xử lý.", không có liên kết', async ({ page }) => {
+    await openApi(page, { overview: { ...OVERVIEW, openReviewCount: 0 } });
+    await page.goto(base);
+    await expect(card(page).locator('[data-slot="needs-action-value"]')).toHaveText('Không có gì cần xử lý.');
+    await expect(card(page).getByRole('link')).toHaveCount(0);
+  });
+
+  test('stream Tổng quan báo org_review_items_changed → card tải lại số mục, không tải lại trang', async ({ page }) => {
+    const sse = await fakeEventSource(page, { url: OVERVIEW_LIVE_URL });
+    const { state } = await openApi(page, { overview: { ...OVERVIEW, openReviewCount: 0 } });
+    await page.goto(base);
+    await expect(card(page).locator('[data-slot="needs-action-value"]')).toHaveText('Không có gì cần xử lý.');
+    await expect.poll(sse.count).toBe(1);
+    await sse.open();
+    await page.evaluate(() => ((window as unknown as { __mark: boolean }).__mark = true));
+
+    state.overview = { ...OVERVIEW, openReviewCount: 3 };
+    await sse.message('org_review_items_changed');
+    await expect(card(page).locator('[data-slot="needs-action-value"]')).toHaveText('3 mục Cần xử lý', {
+      timeout: 2_500,
+    });
+    await expect(card(page).getByRole('link', { name: 'Xem các mục Cần xử lý' })).toBeVisible();
+    expect(await page.evaluate(() => (window as unknown as { __mark?: boolean }).__mark)).toBe(true);
   });
 });
 

@@ -5,6 +5,8 @@ import {
   DEFAULT_RETURN_TO,
   ErrorCode,
   organizationDashboardPath,
+  Permission,
+  roleHasPermission,
 } from "@tickee/contracts";
 import { ShieldX } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
@@ -21,12 +23,18 @@ import {
   organizationQueryKey,
 } from "@/lib/organizer/api";
 import { activeSection } from "@/lib/organizer/nav";
+import {
+  fetchReviewQueueSummary,
+  REVIEW_QUEUE_POLL_MS,
+  reviewQueueSummaryQueryKey,
+} from "@/lib/reporting/api";
 import { cn } from "@/lib/utils";
 
 import { BottomTabBar } from "./bottom-tab-bar";
 import { CurrentOrganizationProvider } from "./current-organization";
 import { DashboardSidebar } from "./dashboard-sidebar";
 import { EmptyState } from "./empty-state";
+import { OrganizationLiveProvider } from "./organization-live";
 import { RemovedFromOrganizationDialog } from "./removed-from-organization-dialog";
 import { SiteHeader } from "./site-header";
 import { StatusBanner } from "./status-banner";
@@ -131,9 +139,30 @@ function useRemovedMidSession(orgId: string, loaded: boolean): boolean {
 }
 
 /**
+ * Số mục Cần xử lý `open` của BTC cho badge ở sidebar và tab bar (Story 4.3). Chỉ tải khi vai có `review_queue.handle`.
+ * Tải lại theo tín hiệu `org_review_items_changed` của stream cấp BTC (`StatusBannerStack` invalidate khóa này); stream
+ * chưa kết nối (`live` `false`) thì polling 10 giây. Tải lần đầu lỗi → không badge; lần tải lại lỗi giữ số đã tải được
+ * gần nhất (401, 2FA, bị xóa khỏi BTC do khung xử lý).
+ */
+function useReviewBadgeCount(
+  orgId: string,
+  enabled: boolean,
+  live: boolean,
+): number | undefined {
+  return useQuery({
+    queryKey: reviewQueueSummaryQueryKey(orgId),
+    queryFn: ({ signal }) => fetchReviewQueueSummary(orgId, signal),
+    select: (summary) => summary.openCount,
+    enabled,
+    refetchInterval: live ? false : REVIEW_QUEUE_POLL_MS,
+  }).data;
+}
+
+/**
  * Khung dashboard của một BTC (UX-DR34). Tải BTC (vai lấy từ `GET /v1/orgs/:orgId`, guard api là nguồn sự thật) và
  * memberships (cho BTC switcher), rồi bọc trang con bằng sidebar (≥ `md`) hoặc `bottom-tab-bar` (< `md`), với dải
- * `status-banner` (thông báo trạng thái của BTC, UX-DR8) ở đầu vùng nội dung.
+ * `status-banner` (thông báo trạng thái của BTC, UX-DR8) ở đầu vùng nội dung. Mục "Cần xử lý" mang badge số mục `open`
+ * (Story 4.3), cập nhật theo stream cấp BTC của dải banner.
  * 401 → đăng nhập kèm `returnTo` là trang hiện tại; `NOT_A_MEMBER` khi mở BTC → `empty-state`, không render điều
  * hướng. `NOT_A_MEMBER` sau khi BTC đã tải (bị xóa giữa phiên) → `Dialog` không đóng được, "Đồng ý" chuyển sang BTC
  * đầu tiên còn lại, không còn BTC nào thì về trang chủ.
@@ -158,6 +187,14 @@ export function DashboardShell({
     // Tải được BTC nghĩa là đã đăng nhập và đã đồng ý NĐ 13.
     enabled: org.isSuccess,
   });
+
+  const [liveConnected, setLiveConnected] = useState(false);
+  const reviewCount = useReviewBadgeCount(
+    orgId,
+    org.data !== undefined &&
+      roleHasPermission(org.data.role, Permission.REVIEW_QUEUE_HANDLE),
+    liveConnected,
+  );
 
   const notAMember = hasErrorCode(org.error, ErrorCode.NOT_A_MEMBER);
   const removedMidSession = useRemovedMidSession(orgId, org.data !== undefined);
@@ -279,31 +316,40 @@ export function DashboardShell({
 
   return (
     <CurrentOrganizationProvider value={organization}>
-      <SkipToContent />
-      <div className="flex min-h-dvh">
-        <DashboardSidebar
-          organization={organization}
-          memberships={membershipsState}
-          active={active}
+      <OrganizationLiveProvider connected={liveConnected}>
+        <SkipToContent />
+        <div className="flex min-h-dvh">
+          <DashboardSidebar
+            organization={organization}
+            memberships={membershipsState}
+            active={active}
+            reviewCount={reviewCount}
+          />
+          <ContentColumn
+            withTabBar
+            banners={
+              <StatusBannerStack
+                orgId={orgId}
+                onConnectedChange={setLiveConnected}
+              />
+            }
+          >
+            {children}
+          </ContentColumn>
+          <BottomTabBar
+            organization={organization}
+            memberships={membershipsState}
+            active={active}
+            reviewCount={reviewCount}
+          />
+        </div>
+        <RemovedFromOrganizationDialog
+          open={removed}
+          organizationName={organization.name}
+          leaving={leaving}
+          onConfirm={() => void leave()}
         />
-        <ContentColumn
-          withTabBar
-          banners={<StatusBannerStack orgId={orgId} />}
-        >
-          {children}
-        </ContentColumn>
-        <BottomTabBar
-          organization={organization}
-          memberships={membershipsState}
-          active={active}
-        />
-      </div>
-      <RemovedFromOrganizationDialog
-        open={removed}
-        organizationName={organization.name}
-        leaving={leaving}
-        onConfirm={() => void leave()}
-      />
+      </OrganizationLiveProvider>
     </CurrentOrganizationProvider>
   );
 }

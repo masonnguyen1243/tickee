@@ -692,3 +692,12 @@ Spec 4.2 đầy đủ khoảng 5.500 token. Mason chọn tách ba ngày 13/11/20
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-2-d-tam-ngung-ban-khi-tingee-tu-choi-va.md`
   summary: Kiểm VA mặc định trước khi tắt cờ `payout_account_not_allowed`. Hiện "Kiểm tra lại" và đổi tài khoản mặc định tắt cờ mà không hỏi Tingee; nếu `get-va-paging` (`listAccounts`, chỉ trả VA `active`) không còn liệt kê VA bị từ chối thì có thể kiểm VA mặc định còn trong danh sách trước khi mở lại, tránh mất một Đơn của Người mua mỗi lần mở lại sai.
   evidence: Review 4.2-d #7 (BH, maybe-false; nếu đúng thì medium). Ca thật ở dev (Đơn `TKTDHEKF6W`): VA mặc định của BTC "test" được liên kết qua `listAccounts` mà `create-link` vẫn bị từ chối nhóm VA, nên nhiều khả năng `get-va-paging` không thấy lỗi này; fake 2023 chỉ mô phỏng. Cần UAT Tingee thật (E3-3): VA trả 2023 hoặc 1023/1045/1024/1072 ở `create-link` có còn trong `get-va-paging` `status: active` không. Phần đã khóa của 4.2-d cấm gọi Tingee ở hai đường này, nên đổi cần Mason chốt.
+
+## Deferred from: build of spec-4-3-hang-can-xu-ly-cua-btc.md (2026-11-16)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-3-hang-can-xu-ly-cua-btc.md`
+  summary: Phân trang hàng Cần xử lý khi một BTC có nhiều mục `open`. `GET …/review-items` trả mọi mục `open` (không phân trang, theo Design Notes), và `openReviewCount` của Tổng quan Sự kiện đọc mọi mục `open` của BTC rồi lọc theo Sự kiện của Đơn ở `reporting` (`review_items` không có `event_id`, `payment` không được join `orders`). Khi số liệu cho thấy BTC tích hàng trăm mục: thêm phân trang (con trỏ `created_at`, `id`) và một read model đếm theo Sự kiện (vd. `ordering` trả id Đơn theo lô, hoặc thêm `event_id` vào `review_items` bằng migration).
+  evidence: Build 4.3. `reporting/review-queue.service.ts` › `queue`, `reporting/event-overview.service.ts` › `openReviewCountOf`; index `review_items_organization_id_status_created_at_idx` đã có.
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-3-hang-can-xu-ly-cua-btc.md`
+  summary: `useLiveResource` không cho `onSignal` biết topic của tin SSE, nên trên stream cấp BTC mỗi `org_review_items_changed` cũng tải lại `notices`, tổng quan Tài khoản nhận tiền và trạng thái bán, và mỗi `org_status_changed` cũng tải lại badge và hàng Cần xử lý. Rẻ (vài GET mỗi tín hiệu, đã gom 1 giây); nếu thành nhiễu thì truyền `type` của tin vào `onSignal` và chỉ làm mới tài nguyên đúng topic.
+  evidence: Build 4.3. `components/tickee/status-banner-stack.tsx` › `refreshOnSignal`, `lib/realtime/use-live-resource.ts`.

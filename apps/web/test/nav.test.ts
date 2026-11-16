@@ -5,6 +5,8 @@ import {
   activeSection,
   isOwnerOnly,
   NAV_SECTIONS,
+  navAccessibleName,
+  navBadgeLabel,
   navSection,
   organizationInitial,
   visibleSections,
@@ -64,6 +66,23 @@ describe('điều hướng cấp BTC (UX-DR34)', () => {
     ['/tao-btc', null],
   ])('mục đang chọn của %s là %s', (pathname, expected) => {
     expect(activeSection(ORG, pathname)).toBe(expected);
+  });
+
+  it('badge "Cần xử lý" (Story 4.3): ẩn khi 0 hoặc chưa tải, số khi 1–99, "99+" khi trên 99', () => {
+    expect(navBadgeLabel(undefined)).toBeNull();
+    expect(navBadgeLabel(0)).toBeNull();
+    expect(navBadgeLabel(1)).toBe('1');
+    expect(navBadgeLabel(99)).toBe('99');
+    expect(navBadgeLabel(100)).toBe('99+');
+    expect(navBadgeLabel(120)).toBe('99+');
+  });
+
+  it('tên truy cập của mục có badge kèm số mục thật ("Cần xử lý, 3 mục"); không badge → chỉ tên mục', () => {
+    expect(navAccessibleName('Cần xử lý', 3)).toBe('Cần xử lý, 3 mục');
+    expect(navAccessibleName('Cần xử lý', 120)).toBe('Cần xử lý, 120 mục');
+    expect(navAccessibleName('Cần xử lý', 0)).toBe('Cần xử lý');
+    expect(navAccessibleName('Cần xử lý', undefined)).toBe('Cần xử lý');
+    expect(navSection('review-queue').permission).toBe(Permission.REVIEW_QUEUE_HANDLE);
   });
 
   it('avatar lấy chữ cái đầu, giữ dấu tiếng Việt', () => {
