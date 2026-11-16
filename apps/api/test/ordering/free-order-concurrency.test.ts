@@ -264,7 +264,7 @@ describe('markPaid đúng một lần', () => {
     // Đối soát bù (Story 4.1) đã làm: kiểm ở `test/payment/reconciliation.test.ts` và `mark-paid-ipn.test.ts`.
     // Duyệt tay (Story 4.4) chỉ cho Đơn `review`: kiểm đủ ở `mark-paid-ipn.test.ts` và `test/payment/review-actions.test.ts`.
     await expect(db.transaction((tx) => payments.markPaid(tx, orderId, 'manual', 0))).rejects.toThrow(/người duyệt/);
-    const manual = { organizationId: org.orgId, actorUserId: org.owner.userId };
+    const manual = { organizationId: org.orgId, actorUserId: org.owner.userId, from: ['review'] as const };
     expect(await db.transaction((tx) => payments.markPaid(tx, orderId, 'manual', 0, { manual }))).toEqual({
       outcome: 'lost_race',
     });

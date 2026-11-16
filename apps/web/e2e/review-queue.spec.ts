@@ -14,6 +14,9 @@ import { mockOrganizerApi, organization, ORG_ID, ORG_LIVE_URL } from './organize
  * Story 4.4-a: footer thao tác của `Sheet` (Duyệt tay, Từ chối, Đã hoàn tay, Bỏ qua) trên API giả có trạng thái: nút theo
  * `actions` của chi tiết, `Dialog` (Hủy không gọi API), `Idempotency-Key`, toast, lỗi hết chỗ, thua cuộc đua, focus khi
  * mục rời hàng, 320px.
+ *
+ * Story 4.4-b: "Ghép với Đơn" trên mục chưa khớp — `Dialog` chọn Đơn ứng viên (lọc Sự kiện, ứng viên bị chặn tắt kèm lý
+ * do, rỗng, bị cắt ở 100), ghép thành công, hết chỗ, Đơn vừa đổi trạng thái, thua cuộc đua, 320px.
  */
 
 test.use({ timezoneId: 'America/New_York' });
@@ -91,8 +94,12 @@ type Detail = {
   approveBlockedReason: string | null;
 } & Record<string, unknown>;
 
-/** Mục chỉ kết thúc bằng hoàn tay hoặc bỏ qua (không phát Vé). */
-const REFUND_ONLY = ['event_cancelled', 'duplicate_payment', 'unmatched'];
+/** Mục chỉ kết thúc bằng hoàn tay hoặc bỏ qua (không phát Vé); mục chưa khớp còn "Ghép với Đơn" đứng đầu (Story 4.4-b). */
+const REFUND_ONLY = ['event_cancelled', 'duplicate_payment'];
+
+/** Thao tác của mục `open` như api tính (Đơn `review`, mục chỉ hoàn, mục chưa khớp). */
+const actionsOf = (type: string): string[] =>
+  type === 'unmatched' ? ['match', 'refund', 'dismiss'] : REFUND_ONLY.includes(type) ? ['refund', 'dismiss'] : ['approve', 'reject'];
 
 /** `ReviewItemDetail` của một mục trong `ITEMS`; `actions` như api tính cho mục `open` (Đơn `review` hoặc mục chỉ hoàn). */
 function detailOf(item: Item, patch: Partial<Detail> = {}): Detail {
@@ -128,7 +135,7 @@ function detailOf(item: Item, patch: Partial<Detail> = {}): Detail {
       { kind: 'payment_received', at: '2026-11-16T08:11:30+07:00' },
       { kind: 'item_opened', at: item.createdAt },
     ],
-    actions: REFUND_ONLY.includes(item.type) ? ['refund', 'dismiss'] : ['approve', 'reject'],
+    actions: actionsOf(item.type),
     approveBlockedReason: null,
     ...patch,
   };
@@ -154,6 +161,63 @@ const resultOf = (detail: Detail, action: string) => ({
   amount: detail.transaction.receivedAmount,
 });
 
+/** Đơn ứng viên của "Ghép với Đơn" (`MatchCandidate`). */
+type Candidate = {
+  code: string;
+  buyerName: string;
+  event: { id: string; name: string };
+  status: string;
+  ticketCount: number;
+  createdAt: string;
+  blockedReason: string | null;
+};
+
+/** Ứng viên mặc định: mới nhất trước; Đơn cuối thuộc Sự kiện đã kết thúc (tắt kèm lý do). */
+const CANDIDATES: Candidate[] = [
+  {
+    code: 'TK7M4Q2HAB',
+    buyerName: 'Nguyễn Văn An',
+    event: EVENT_A,
+    status: 'expired',
+    ticketCount: 2,
+    createdAt: '2026-11-16T07:30:00+07:00',
+    blockedReason: null,
+  },
+  {
+    code: 'TK8P3R6KAB',
+    buyerName: 'Đỗ Minh Châu',
+    event: EVENT_B,
+    status: 'review',
+    ticketCount: 1,
+    createdAt: '2026-11-15T20:10:00+07:00',
+    blockedReason: null,
+  },
+  {
+    code: 'TK2W9X5ZAB',
+    buyerName: 'Hoàng Thị Lan',
+    event: EVENT_B,
+    status: 'expired',
+    ticketCount: 3,
+    createdAt: '2026-11-14T09:00:00+07:00',
+    blockedReason: 'event_ended',
+  },
+];
+
+/** Sự kiện của BTC (`GET /orgs/:id/events`): hai Sự kiện đã rời nháp và một bản nháp (không có trong ô chọn). */
+const eventSummary = (event: { id: string; name: string }, status: string) => ({
+  ...event,
+  slug: `su-kien-${event.id.slice(9, 13)}`,
+  status,
+  startsAt: '2026-11-20T18:00:00+07:00',
+  endsAt: '2026-11-20T22:00:00+07:00',
+  effectiveEndAt: '2026-11-20T22:00:00+07:00',
+});
+const ORG_EVENTS = [
+  eventSummary({ id: '019a3b2c-0d0d-7abc-8def-0123456789ab', name: 'Sự kiện nháp' }, 'draft'),
+  eventSummary(EVENT_B, 'hidden'),
+  eventSummary(EVENT_A, 'published'),
+];
+
 type State = {
   items: Item[];
   openCount: number;
@@ -169,6 +233,12 @@ type State = {
   failList: number;
   /** `eventId` của lần tải hàng gần nhất. */
   lastFilter?: string | null;
+  /** Đơn ứng viên của "Ghép với Đơn" (mọi mục chưa khớp dùng chung); API giả lọc theo `?eventId=`. */
+  candidates: Candidate[];
+  /** `truncated` của danh sách ứng viên. */
+  truncated: boolean;
+  /** `eventId` của mọi lần tải ứng viên, theo thứ tự (`null` = mọi Sự kiện). */
+  candidateFilters: (string | null)[];
 };
 
 /** Owner (hoặc `role`) đã đăng nhập; hàng `state.items`, lọc theo `?eventId=` như api; summary `state.openCount`. */
@@ -183,6 +253,9 @@ async function openApi(
     failList: 0,
     details: Object.fromEntries(ITEMS.map((item) => [item.id, detailOf(item)])),
     actions: [],
+    candidates: CANDIDATES,
+    truncated: false,
+    candidateFilters: [],
     ...initial,
   };
   await mockIdentityApi(page, { 'GET /identity/me': () => me(CONSENTED) });
@@ -203,12 +276,26 @@ async function openApi(
       if (!event) return apiError(404, 'EVENT_NOT_FOUND');
       return { status: 200, body: { event, items: state.items.filter((i) => i.event?.id === eventId) } };
     },
+    [`GET /orgs/${ORG_ID}/events`]: () => ({ status: 200, body: ORG_EVENTS }),
     ...Object.fromEntries(
       ITEMS.map((item) => [`GET ${REVIEW_PATH}/${item.id}`, () => ({ status: 200, body: state.details[item.id] })]),
     ),
     ...Object.fromEntries(
+      ITEMS.map((item) => [
+        `GET ${REVIEW_PATH}/${item.id}/match-candidates`,
+        (request: Request) => {
+          const eventId = new URL(request.url()).searchParams.get('eventId');
+          state.candidateFilters.push(eventId);
+          // Như api: mục không có "Ghép với Đơn" → danh sách rỗng.
+          if (!state.details[item.id]!.actions.includes('match')) return { status: 200, body: { candidates: [], truncated: false } };
+          const candidates = eventId ? state.candidates.filter((c) => c.event.id === eventId) : state.candidates;
+          return { status: 200, body: { candidates, truncated: state.truncated } };
+        },
+      ]),
+    ),
+    ...Object.fromEntries(
       ITEMS.flatMap((item) =>
-        ['approve', 'reject', 'refund', 'dismiss'].map((action) => [
+        ['approve', 'reject', 'refund', 'dismiss', 'match'].map((action) => [
           `POST ${REVIEW_PATH}/${item.id}/${action}`,
           (request: Request) => act(state, { action, itemId: item.id, key: request.headers()['idempotency-key'] ?? null, body: request.postDataJSON() as unknown }),
         ]),
@@ -260,6 +347,26 @@ async function act(state: State, call: ActionCall): Promise<Reply> {
       resolve('dismissed');
       log('dismissed', { note: (call.body as { reason: string }).reason });
       break;
+    case 'match': {
+      const { orderCode } = call.body as { orderCode: string };
+      const candidate = state.candidates.find((c) => c.code === orderCode);
+      if (!candidate) return apiError(409, 'MATCH_ORDER_NOT_ELIGIBLE');
+      if (candidate.blockedReason === 'event_ended') return apiError(409, 'EVENT_ALREADY_ENDED');
+      // Đơn ghép xong là Đơn của mục (qua liên kết giao dịch → Đơn), không còn là ứng viên.
+      state.candidates = state.candidates.filter((c) => c.code !== orderCode);
+      detail.order = {
+        code: candidate.code,
+        status: 'paid',
+        buyerName: candidate.buyerName,
+        ticketCount: candidate.ticketCount,
+        totalAmount: detail.transaction.receivedAmount ?? 0,
+        createdAt: candidate.createdAt,
+      };
+      detail.event = candidate.event;
+      resolve('approved');
+      log('matched', { note: candidate.code });
+      break;
+    }
   }
   return { status: 200, body: resultOf(detail, call.action) };
 }
@@ -803,6 +910,7 @@ test.describe('thao tác trên mục (Story 4.4-a)', () => {
     await footerOf(page).getByRole('button', { name: 'Đã hoàn tay' }).click();
     const refund = page.getByRole('dialog', { name: 'Ghi nhận đã hoàn tay?' });
     await expect(refund).toContainText('Bạn đã chuyển trả 300.000đ cho khách ngoài Tickee.');
+    await expect(refund).toContainText('Đơn TK9B2X7EAB chuyển "Đã hoàn tay", mục rời hàng Cần xử lý.');
     await expect(refund).toContainText('Không hoàn tác được.');
     await refund.getByRole('button', { name: 'Đã hoàn tay' }).click();
     await expect(toastOf(page, 'Đã ghi nhận hoàn tay 300.000đ.')).toBeVisible();
@@ -826,7 +934,7 @@ test.describe('thao tác trên mục (Story 4.4-a)', () => {
     await page.goto(queuePath);
     await cards(page).nth(1).click();
     const sheetDialog = page.getByRole('dialog', { name: 'Giao dịch chưa khớp' });
-    await expect(footerOf(page).getByRole('button')).toHaveText(['Đã hoàn tay', 'Bỏ qua']);
+    await expect(footerOf(page).getByRole('button')).toHaveText(['Ghép với Đơn', 'Đã hoàn tay', 'Bỏ qua']);
     await sheetDialog.getByRole('button', { name: 'Bỏ qua' }).click();
 
     const dismiss = page.getByRole('dialog', { name: 'Bỏ qua mục này?' });
@@ -969,8 +1077,305 @@ test.describe('thao tác trên mục (Story 4.4-a)', () => {
     await dismiss.getByRole('button', { name: 'Hủy' }).click();
     await footerOf(page).getByRole('button', { name: 'Đã hoàn tay' }).click();
     const refund = page.getByRole('dialog', { name: 'Ghi nhận đã hoàn tay?' });
+    // Mục chưa khớp không có Đơn: chỉ đóng mục.
+    await expect(refund).toContainText('Mục rời hàng Cần xử lý.');
     await settle(refund);
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     await within320(refund);
+  });
+});
+
+const matchDialog = (page: Page) => page.getByRole('dialog', { name: 'Ghép với Đơn' });
+const candidateRows = (page: Page) => matchDialog(page).locator('[data-slot="match-candidate"]');
+const radioOf = (page: Page, code: string) => matchDialog(page).getByRole('radio', { name: new RegExp(code) });
+const confirmMatch = (page: Page) => matchDialog(page).getByRole('button', { name: 'Ghép và phát Vé' });
+
+/** Mở `Sheet` của mục chưa khớp (`ITEMS[1]`, nhận 75.000đ) rồi mở `Dialog` "Ghép với Đơn". */
+async function openMatch(page: Page): Promise<void> {
+  await cards(page).nth(1).click();
+  await footerOf(page).getByRole('button', { name: 'Ghép với Đơn' }).click();
+  await expect(matchDialog(page)).toBeVisible();
+}
+
+test.describe('Ghép với Đơn (Story 4.4-b)', () => {
+  test('nút chính đứng đầu; Dialog: số tiền nhận, mã Đơn trong giao dịch, Sự kiện (không nháp), ứng viên (bị chặn tắt kèm lý do); chọn → spinner chặn bấm lặp; toast, hàng rời, focus về hàng kế tiếp', async ({
+    page,
+  }) => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { state } = await openApi(page, {
+      actionReply: async (call) => {
+        if (call.action === 'match') await gate;
+        return undefined;
+      },
+    });
+    await page.goto(queuePath);
+    await cards(page).nth(1).click();
+    await expect(footerOf(page).getByRole('button')).toHaveText(['Ghép với Đơn', 'Đã hoàn tay', 'Bỏ qua']);
+    // Nút đầu là nút chính; "Đã hoàn tay" lùi thành nút phụ.
+    await expect(footerOf(page).getByRole('button', { name: 'Ghép với Đơn' })).toHaveClass(/bg-btn-on-light/);
+    await expect(footerOf(page).getByRole('button', { name: 'Đã hoàn tay' })).not.toHaveClass(/bg-btn-on-light/);
+    await footerOf(page).getByRole('button', { name: 'Ghép với Đơn' }).click();
+
+    const dialog = matchDialog(page);
+    await expect(dialog.locator('[data-slot="match-transaction"]')).toContainText('Số tiền nhận75.000đ');
+    await expect(dialog.locator('[data-slot="match-transaction"]')).toContainText('Mã Đơn trong giao dịchTK0000ZZZZ');
+    const select = dialog.getByRole('combobox', { name: 'Sự kiện' });
+    await expect(select.locator('option')).toHaveText(['Mọi Sự kiện', EVENT_B.name, EVENT_A.name]);
+    await expect(select).toHaveValue('');
+    await expect(candidateRows(page)).toHaveCount(3);
+    await expect(candidateRows(page).nth(0)).toContainText('TK7M4Q2HAB');
+    await expect(candidateRows(page).nth(0).locator('[data-slot="status-badge"]')).toHaveText('Hết hạn');
+    await expect(candidateRows(page).nth(0)).toContainText('Nguyễn Văn An');
+    await expect(candidateRows(page).nth(0)).toContainText(EVENT_A.name);
+    await expect(candidateRows(page).nth(0)).toContainText('2 Vé · 07:30 16/11/2026');
+    await expect(candidateRows(page).nth(1).locator('[data-slot="status-badge"]')).toHaveText('Cần xử lý');
+    // Sự kiện đã kết thúc: tắt kèm lý do.
+    await expect(radioOf(page, 'TK2W9X5ZAB')).toBeDisabled();
+    await expect(candidateRows(page).nth(2).locator('[data-slot="match-candidate-blocked"]')).toHaveText('Sự kiện đã kết thúc');
+    await expect(radioOf(page, 'TK2W9X5ZAB')).toHaveAccessibleDescription('Sự kiện đã kết thúc');
+    await expect(dialog.locator('[data-slot="match-truncated"]')).toHaveCount(0);
+    expect(state.candidateFilters).toEqual([null]);
+
+    const confirm = confirmMatch(page);
+    await expect(confirm).toBeDisabled();
+    await radioOf(page, 'TK8P3R6KAB').check();
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+    await expect(confirm).toHaveAttribute('aria-busy', 'true');
+    await confirm.click();
+    release();
+
+    await expect(toastOf(page, 'Đã ghép giao dịch vào Đơn TK8P3R6KAB. Đã phát 1 Vé.')).toBeVisible();
+    await expect(dialog).toBeHidden();
+    await expect(sheet(page)).toHaveCount(0);
+    await expect(cards(page)).toHaveCount(3);
+    await expect(cards(page).nth(1)).toContainText('TK9B2X7EAB');
+    await expect(cards(page).nth(1)).toBeFocused();
+    await expect(tabBadge(page)).toHaveText('3');
+    expect(state.actions).toEqual([
+      { action: 'match', itemId: itemId(2), key: expect.stringMatching(UUID), body: { orderCode: 'TK8P3R6KAB' } },
+    ]);
+  });
+
+  test('lọc theo Sự kiện: tải lại ứng viên ?eventId=; Đơn đã chọn không còn trong danh sách → bỏ chọn; danh sách bị cắt → "Chỉ hiện 100 Đơn mới nhất."', async ({
+    page,
+  }) => {
+    const { state } = await openApi(page, { truncated: true });
+    await page.goto(queuePath);
+    await openMatch(page);
+    await expect(matchDialog(page).locator('[data-slot="match-truncated"]')).toHaveText(
+      'Chỉ hiện 100 Đơn mới nhất. Chọn Sự kiện để thu hẹp.',
+    );
+    await radioOf(page, 'TK7M4Q2HAB').check();
+    await expect(confirmMatch(page)).toBeEnabled();
+
+    await matchDialog(page).getByRole('combobox', { name: 'Sự kiện' }).selectOption(EVENT_B.id);
+    await expect(candidateRows(page)).toHaveCount(2);
+    await expect(candidateRows(page).nth(0)).toContainText('TK8P3R6KAB');
+    expect(state.candidateFilters.at(-1)).toBe(EVENT_B.id);
+    // Đơn đã chọn (Sự kiện khác) không còn trong danh sách: bỏ chọn, nút xác nhận tắt.
+    await expect(confirmMatch(page)).toBeDisabled();
+    await expect(matchDialog(page).getByRole('radio', { checked: true })).toHaveCount(0);
+
+    // Về "Mọi Sự kiện": danh sách đầy đủ (từ bộ nhớ đệm), không còn Đơn nào được chọn.
+    await matchDialog(page).getByRole('combobox', { name: 'Sự kiện' }).selectOption('');
+    await expect(candidateRows(page)).toHaveCount(3);
+    await expect(confirmMatch(page)).toBeDisabled();
+
+    // Hủy không gọi API; mở lại là một lần chọn mới (bộ lọc về "Mọi Sự kiện").
+    await radioOf(page, 'TK7M4Q2HAB').check();
+    await matchDialog(page).getByRole('button', { name: 'Hủy' }).click();
+    await expect(matchDialog(page)).toBeHidden();
+    await expect(footerOf(page).getByRole('button', { name: 'Ghép với Đơn' })).toBeFocused();
+    await footerOf(page).getByRole('button', { name: 'Ghép với Đơn' }).click();
+    await expect(matchDialog(page).getByRole('combobox', { name: 'Sự kiện' })).toHaveValue('');
+    await expect(confirmMatch(page)).toBeDisabled();
+    expect(state.actions).toEqual([]);
+  });
+
+  test('không có ứng viên: empty-state nêu số tiền, nút xác nhận tắt', async ({ page }) => {
+    const { state } = await openApi(page, { candidates: [] });
+    await page.goto(queuePath);
+    await openMatch(page);
+    await expect(matchDialog(page).locator('[data-slot="empty-state"]')).toHaveText(
+      'Không có Đơn hết hạn hay Cần xử lý nào cùng số tiền 75.000đ.',
+    );
+    await expect(candidateRows(page)).toHaveCount(0);
+    await expect(confirmMatch(page)).toBeDisabled();
+    expect(state.actions).toEqual([]);
+  });
+
+  test('hết chỗ (409 TICKET_TYPE_SOLD_OUT): Dialog ở lại, báo "Đơn {mã} không còn đủ chỗ.", ứng viên tải lại; nhật ký có dòng "không thành"; mục vẫn ở hàng; lần sau là khóa mới', async ({
+    page,
+  }) => {
+    let soldOut = true;
+    const { state } = await openApi(page, {
+      actionReply: (call, s) => {
+        if (call.action !== 'match' || !soldOut) return undefined;
+        soldOut = false;
+        s.details[call.itemId]!.log.push({ kind: 'match_sold_out', at: ACTION_AT, actorName: ACTOR });
+        return apiError(409, 'TICKET_TYPE_SOLD_OUT');
+      },
+    });
+    await page.goto(queuePath);
+    await openMatch(page);
+    await radioOf(page, 'TK7M4Q2HAB').check();
+    const loads = state.candidateFilters.length;
+    await confirmMatch(page).click();
+    await expect(matchDialog(page)).toContainText('Chưa ghép được');
+    await expect(matchDialog(page)).toContainText('Đơn TK7M4Q2HAB không còn đủ chỗ.');
+    await expect(matchDialog(page)).toBeVisible();
+    await expect.poll(() => state.candidateFilters.length).toBeGreaterThan(loads);
+    await expect(logOf(page).last()).toHaveText('09:00 16/11/2026Ghép với Đơn không thành · Hết chỗ · Lê Minh');
+    await expect(cards(page)).toHaveCount(4);
+
+    // Thử Đơn khác: lần gửi mới (khóa mới), thành công.
+    await radioOf(page, 'TK8P3R6KAB').check();
+    await confirmMatch(page).click();
+    await expect(toastOf(page, 'Đã ghép giao dịch vào Đơn TK8P3R6KAB. Đã phát 1 Vé.')).toBeVisible();
+    await expect(cards(page)).toHaveCount(3);
+    expect(state.actions.map((a) => (a.body as { orderCode: string }).orderCode)).toEqual(['TK7M4Q2HAB', 'TK8P3R6KAB']);
+    expect(state.actions[1]!.key).not.toBe(state.actions[0]!.key);
+  });
+
+  test('Đơn vừa đổi trạng thái (409 MATCH_ORDER_NOT_ELIGIBLE): báo "Chọn Đơn khác.", danh sách tải lại không còn Đơn đó, bỏ chọn', async ({
+    page,
+  }) => {
+    const { state } = await openApi(page, {
+      actionReply: (call, s) => {
+        if (call.action !== 'match') return undefined;
+        // Giao dịch khác vừa ghép vào Đơn này.
+        s.candidates = s.candidates.filter((c) => c.code !== (call.body as { orderCode: string }).orderCode);
+        return apiError(409, 'MATCH_ORDER_NOT_ELIGIBLE');
+      },
+    });
+    await page.goto(queuePath);
+    await openMatch(page);
+    await radioOf(page, 'TK7M4Q2HAB').check();
+    await confirmMatch(page).click();
+    await expect(matchDialog(page)).toContainText('Đơn này vừa đổi trạng thái. Chọn Đơn khác.');
+    await expect(candidateRows(page)).toHaveCount(2);
+    await expect(radioOf(page, 'TK7M4Q2HAB')).toHaveCount(0);
+    await expect(confirmMatch(page)).toBeDisabled();
+    await expect(matchDialog(page)).toBeVisible();
+    await expect(cards(page)).toHaveCount(4);
+    expect(state.actions).toHaveLength(1);
+  });
+
+  test('Sự kiện của Đơn vừa kết thúc (409 EVENT_ALREADY_ENDED): báo tại chỗ; thua cuộc đua (409 REVIEW_ACTION_NOT_ALLOWED): Dialog đóng, toast "Mục này vừa được xử lý."', async ({
+    page,
+  }) => {
+    const { state } = await openApi(page, {
+      actionReply: (call, s) => {
+        if (call.action !== 'match') return undefined;
+        const { orderCode } = call.body as { orderCode: string };
+        if (orderCode === 'TK7M4Q2HAB') {
+          s.candidates = s.candidates.map((c) => (c.code === orderCode ? { ...c, blockedReason: 'event_ended' } : c));
+          return apiError(409, 'EVENT_ALREADY_ENDED');
+        }
+        // Thành viên khác vừa bỏ qua mục này.
+        Object.assign(s.details[call.itemId]!, { status: 'resolved', resolution: 'dismissed', actions: [] });
+        leave(s, call.itemId);
+        return apiError(409, 'REVIEW_ACTION_NOT_ALLOWED');
+      },
+    });
+    await page.goto(queuePath);
+    await openMatch(page);
+    await radioOf(page, 'TK7M4Q2HAB').check();
+    await confirmMatch(page).click();
+    await expect(matchDialog(page)).toContainText('Đơn TK7M4Q2HAB: Sự kiện đã kết thúc.');
+    await expect(radioOf(page, 'TK7M4Q2HAB')).toBeDisabled();
+    await expect(confirmMatch(page)).toBeDisabled();
+
+    await radioOf(page, 'TK8P3R6KAB').check();
+    await confirmMatch(page).click();
+    await expect(toastOf(page, 'Mục này vừa được xử lý.')).toBeVisible();
+    await expect(matchDialog(page)).toBeHidden();
+    await expect(cards(page)).toHaveCount(3);
+    await expect(footerOf(page)).toHaveCount(0);
+    expect(state.actions).toHaveLength(2);
+  });
+
+  test('mục đã ghép: Đơn liên quan là Đơn được ghép, nhật ký "Đã ghép với Đơn {mã}"; mục lệch tiền của Đơn đã thanh toán nhờ ghép: chỉ "Đã hoàn tay"/"Bỏ qua", Dialog nêu Đơn giữ nguyên', async ({
+    page,
+  }) => {
+    const matched = detailOf(ITEMS[1]!, {
+      status: 'resolved',
+      resolution: 'approved',
+      actions: [],
+      order: {
+        code: 'TK8P3R6KAB',
+        status: 'paid',
+        buyerName: 'Đỗ Minh Châu',
+        ticketCount: 1,
+        totalAmount: 75_000,
+        createdAt: '2026-11-15T20:10:00+07:00',
+      },
+      event: EVENT_B,
+      log: [
+        { kind: 'payment_received', at: '2026-11-16T08:11:30+07:00' },
+        { kind: 'item_opened', at: ITEMS[1]!.createdAt },
+        { kind: 'match_sold_out', at: '2026-11-16T08:50:00+07:00', actorName: '' },
+        { kind: 'matched', at: ACTION_AT, actorName: ACTOR, note: 'TK8P3R6KAB' },
+      ],
+    });
+    const mismatchPaid = detailOf(ITEMS[0]!, { actions: ['refund', 'dismiss'] });
+    mismatchPaid.order!.status = 'paid';
+    const { state } = await openApi(page, { details: { [itemId(2)]: matched, [itemId(1)]: mismatchPaid } });
+    await page.goto(queuePath);
+    await cards(page).nth(1).click();
+    const order = sheet(page).locator('[data-slot="review-order"]');
+    await expect(order).toContainText('Mã ĐơnTK8P3R6KAB');
+    await expect(order.locator('[data-slot="status-badge"]')).toHaveText('Đã thanh toán');
+    await expect(order).toContainText(`Sự kiện${EVENT_B.name}`);
+    await expect(logOf(page)).toHaveText([
+      '08:11 16/11/2026Nhận tiền',
+      '08:20 16/11/2026Mở mục · Giao dịch chưa khớp',
+      '08:50 16/11/2026Ghép với Đơn không thành · Hết chỗ · Thành viên BTC',
+      '09:00 16/11/2026Đã ghép với Đơn TK8P3R6KAB · Lê Minh',
+    ]);
+    await expect(footerOf(page)).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(sheet(page)).toHaveCount(0);
+
+    await cards(page).nth(0).click();
+    await expect(footerOf(page).getByRole('button')).toHaveText(['Đã hoàn tay', 'Bỏ qua']);
+    await footerOf(page).getByRole('button', { name: 'Đã hoàn tay' }).click();
+    const refund = page.getByRole('dialog', { name: 'Ghi nhận đã hoàn tay?' });
+    await expect(refund).toContainText('Bạn đã chuyển trả 250.000đ cho khách ngoài Tickee.');
+    await expect(refund).toContainText('Đơn TK5R8W1CAB, Vé và doanh thu giữ nguyên.');
+    await refund.getByRole('button', { name: 'Đã hoàn tay' }).click();
+    await expect(toastOf(page, 'Đã ghi nhận hoàn tay 250.000đ.')).toBeVisible();
+    expect(state.details[itemId(1)]!.order!.status).toBe('paid');
+  });
+
+  test('320px: Dialog không cuộn ngang; danh sách dài cuộn bên trong, nút xác nhận luôn thấy', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    const many: Candidate[] = Array.from({ length: 30 }, (_, i) => ({
+      ...CANDIDATES[i % 2]!,
+      code: `TK${String(i).padStart(2, '0')}AAAAAA`,
+      buyerName: `Nguyễn Thị Phương Thảo Hoàng Bảo Ngọc ${i}`,
+      event: { id: EVENT_A.id, name: 'Giải cầu lông mở rộng Ba Đình — Hà Nội 2026 (vòng loại)' },
+    }));
+    await openApi(page, { candidates: many, truncated: true });
+    await page.goto(queuePath);
+    await openMatch(page);
+    await expect(candidateRows(page)).toHaveCount(30);
+    await matchDialog(page).evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    const box = (await matchDialog(page).boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(320);
+    const list = matchDialog(page).locator('[data-slot="match-candidates"]');
+    expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    await expect(confirmMatch(page)).toBeInViewport();
+    await expect(matchDialog(page).getByRole('button', { name: 'Hủy' })).toBeInViewport();
+
+    // Chọn Đơn cuối danh sách (cuộn trong danh sách): nút xác nhận vẫn thấy và bật.
+    await radioOf(page, 'TK29AAAAAA').check();
+    await expect(confirmMatch(page)).toBeEnabled();
+    await expect(confirmMatch(page)).toBeInViewport();
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
   });
 });

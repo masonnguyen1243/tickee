@@ -214,8 +214,14 @@ export const ErrorCode = {
    * thao tác không áp cho loại mục này. Không đổi gì.
    */
   REVIEW_ACTION_NOT_ALLOWED: 'REVIEW_ACTION_NOT_ALLOWED',
-  /** "Duyệt tay phát Vé" (Story 4.4) khi Sự kiện hoặc BTC đang bị khóa. Không đổi gì. */
+  /** "Duyệt tay phát Vé" hoặc "Ghép với Đơn" (Story 4.4) khi Sự kiện hoặc BTC đang bị khóa. Không đổi gì. */
   EVENT_LOCKED: 'EVENT_LOCKED',
+  /**
+   * "Ghép với Đơn" (Story 4.4-b): Đơn được chọn không ghép được — không có, thuộc BTC khác, không còn `expired`/`review`
+   * (kể cả khi giao dịch khác vừa ghép vào Đơn đó), hoặc `total_amount` khác số tiền nhận. Một mã cho mọi trường hợp để
+   * không dò được mã Đơn của BTC khác. Không đổi gì.
+   */
+  MATCH_ORDER_NOT_ELIGIBLE: 'MATCH_ORDER_NOT_ELIGIBLE',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

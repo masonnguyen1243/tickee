@@ -3,9 +3,11 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import type { AddressInfo } from 'node:net';
 import { BuyerOrderView, ErrorResponse } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
+import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { parsesAsJson } from '../../src/modules/identity/identity.module.js';
 import { tingeeTimestamp, type TingeeCredential } from '../../src/modules/tingee/index.js';
+import { databaseUrl, migrationDatabaseUrl } from '../helpers.js';
 import { createHarness, signUp, type Harness } from '../identity/harness.js';
 import {
   eventOnSale,
@@ -845,15 +847,20 @@ describe('lỗi xử lý và quyền DB', () => {
     expect(h.logs.text).not.toContain(MAIN.secretToken);
   });
 
-  it('payment_events chỉ INSERT/SELECT với tickee_app: UPDATE, DELETE, TRUNCATE → 42501', async () => {
+  it('payment_events với tickee_app: chỉ INSERT/SELECT và UPDATE order_id đang null (Story 4.4-b); cột khác, đổi order_id đã có, DELETE, TRUNCATE → 42501', async () => {
     const placed = await place(1);
     await send(paid(placed)).expect(200);
-    for (const statement of [
-      "UPDATE payment_events SET status = 'expired' WHERE provider_order_id = $1",
-      'UPDATE payment_events SET order_id = NULL WHERE provider_order_id = $1',
-      'DELETE FROM payment_events WHERE provider_order_id = $1',
-    ]) {
-      await expect(h.db.pool.query(statement, [placed.code])).rejects.toSatisfy((err) => pgCode(err) === '42501');
+    // Quyền (không phải trigger) chặn cột khác và DELETE: lỗi là "permission denied" (trigger cũng ra 42501).
+    for (const [statement, reason] of [
+      ["UPDATE payment_events SET status = 'expired' WHERE provider_order_id = $1", 'permission denied'],
+      ['UPDATE payment_events SET paid_amount = 1 WHERE provider_order_id = $1', 'permission denied'],
+      // Cột `order_id` được cấp UPDATE, nhưng trigger chặn đổi giá trị đã có.
+      ['UPDATE payment_events SET order_id = NULL WHERE provider_order_id = $1', 'đã gắn Đơn'],
+      ['DELETE FROM payment_events WHERE provider_order_id = $1', 'permission denied'],
+    ] as const) {
+      await expect(h.db.pool.query(statement, [placed.code]), statement).rejects.toSatisfy(
+        (err) => pgCode(err) === '42501' && String((err as { message?: string }).message).includes(reason),
+      );
     }
     // TRUNCATE trong transaction rồi rollback: lỡ có quyền thì cũng không xóa dữ liệu của test khác.
     const client = await h.db.pool.connect();
@@ -865,5 +872,62 @@ describe('lỗi xử lý và quyền DB', () => {
       client.release();
     }
     expect(await paymentEventsOf(h, org.orgId, placed.code)).toHaveLength(1);
+  });
+
+  it('liên kết giao dịch → Đơn (Story 4.4-b): gắn được một lần khi order_id đang null; đổi lần hai hoặc đổi cột khác bị trigger chặn, kể cả với role migrator (rollback sau cùng)', async () => {
+    const placed = await place(1);
+    // Mã không có Đơn → khoản tiền không gắn Đơn (`order_id` null).
+    const stray = paid({ code: 'TK0000ZZZZ', total: placed.total });
+    await send(stray).expect(200);
+    const message = (err: unknown) => (err as { message?: string }).message ?? '';
+    for (const url of [databaseUrl(), migrationDatabaseUrl()]) {
+      const client = new pg.Client({ connectionString: url });
+      await client.connect();
+      try {
+        await client.query('BEGIN');
+        const { rows } = await client.query<{ id: string }>(
+          'SELECT id FROM payment_events WHERE organization_id = $1 AND provider_transaction_code = $2',
+          [org.orgId, stray.providerTransactionCode],
+        );
+        const id = rows[0]!.id;
+        const attempt = async (statement: string, params: unknown[]): Promise<unknown> => {
+          await client.query('SAVEPOINT s');
+          try {
+            await client.query(statement, params);
+            await client.query('RELEASE SAVEPOINT s');
+            return null;
+          } catch (err) {
+            await client.query('ROLLBACK TO SAVEPOINT s');
+            return err;
+          }
+        };
+        // Đổi cột khác: tickee_app bị chặn ngay ở quyền ("permission denied"); migrator có quyền cột, trigger chặn.
+        const otherColumnReason = url === databaseUrl() ? 'permission denied' : 'chỉ được gắn order_id';
+        const other = await attempt("UPDATE payment_events SET status_code = '99' WHERE id = $1", [id]);
+        expect(pgCode(other), url).toBe('42501');
+        expect(message(other), url).toContain(otherColumnReason);
+        const both = await attempt("UPDATE payment_events SET order_id = $2, payment_method = 'x' WHERE id = $1", [
+          id,
+          placed.orderId,
+        ]);
+        expect(pgCode(both), url).toBe('42501');
+        expect(message(both), url).toContain(otherColumnReason);
+        // Gắn lần đầu: nhận.
+        expect(await attempt('UPDATE payment_events SET order_id = $2 WHERE id = $1', [id, placed.orderId]), url).toBeNull();
+        // Đổi sang Đơn khác hay về null: trigger chặn.
+        for (const value of [null, randomUUID()]) {
+          const err = await attempt('UPDATE payment_events SET order_id = $2 WHERE id = $1', [id, value]);
+          expect(pgCode(err), url).toBe('42501');
+          expect(message(err)).toContain('đã gắn Đơn');
+        }
+      } finally {
+        await client.query('ROLLBACK');
+        await client.end();
+      }
+    }
+    const { rows } = await h.db.pool.query('SELECT order_id FROM payment_events WHERE provider_transaction_code = $1', [
+      stray.providerTransactionCode,
+    ]);
+    expect(rows).toEqual([{ order_id: null }]);
   });
 });

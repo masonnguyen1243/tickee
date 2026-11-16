@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   REVIEW_QUEUE_POLL_MS,
+  reviewActionBody,
   reviewItemQueryKey,
+  reviewMatchCandidatesQueryKey,
   reviewQueueQueryKey,
   reviewQueueQueryPrefix,
   reviewQueueSummaryQueryKey,
@@ -17,14 +19,25 @@ import {
   dismissReasonError,
   EMPTY_VALUE,
   eventFilterLabel,
+  isPrimaryReviewAction,
   leftQueue,
+  MATCH_ALL_EVENTS,
+  MATCH_CONFIRM_LABEL,
+  MATCH_DIALOG_TITLE,
+  MATCH_ORDER_CHANGED,
+  MATCH_TRUNCATED_NOTE,
+  matchEmptyText,
+  matchSelection,
+  matchSoldOutMessage,
   nextFocusItemId,
   paymentMethodLabel,
+  REVIEW_ACTION_FAILURE_TITLE,
   REVIEW_ACTION_LABEL,
   REVIEW_ACTION_RACE_TOAST,
   REVIEW_ACTOR_FALLBACK,
   REVIEW_QUEUE_EMPTY,
   REVIEW_REASON_LABEL,
+  reviewActionSettledFailure,
   reviewActionToast,
   reviewActorName,
   reviewLogLabel,
@@ -110,6 +123,14 @@ describe('nhật ký: dòng thao tác (Story 4.4)', () => {
     expect(by('rejected', '')).toBe('Từ chối · Thành viên BTC');
     expect(by('refunded')).toBe('Đã hoàn tay · Thành viên BTC');
     expect(by('dismissed', 'An')).toBe('Bỏ qua · An');
+    // Story 4.4-b: "Ghép với Đơn" kèm mã Đơn (ở `note`), và dòng ghép không thành vì hết chỗ.
+    expect(reviewLogLabel({ kind: 'matched', actorName: 'Lê Minh', note: 'TK5R8W1CAB' }, 'unmatched')).toBe(
+      'Đã ghép với Đơn TK5R8W1CAB · Lê Minh',
+    );
+    expect(reviewLogLabel({ kind: 'matched', actorName: '' }, 'unmatched')).toBe('Đã ghép với Đơn · Thành viên BTC');
+    expect(reviewLogLabel({ kind: 'match_sold_out', actorName: 'An' }, 'unmatched')).toBe(
+      'Ghép với Đơn không thành · Hết chỗ · An',
+    );
   });
 
   it('dòng "Bỏ qua" kèm lý do; dòng khác không có dòng phụ', () => {
@@ -117,18 +138,64 @@ describe('nhật ký: dòng thao tác (Story 4.4)', () => {
     expect(reviewLogNote({ kind: 'dismissed' })).toBeNull();
     expect(reviewLogNote({ kind: 'refunded', note: 'x' })).toBeNull();
     expect(reviewLogNote({ kind: 'payment_received' })).toBeNull();
+    // Mã Đơn đã ghép nằm trong nhãn, không thành dòng phụ.
+    expect(reviewLogNote({ kind: 'matched', note: 'TK5R8W1CAB' })).toBeNull();
   });
 });
 
 describe('thao tác trên mục (Story 4.4)', () => {
-  it('nhãn nút cho cả 4 thao tác', () => {
+  it('nhãn nút cho cả 5 thao tác (4.4-b: "Ghép với Đơn"); tiêu đề lỗi tại chỗ của từng thao tác', () => {
     expect(Object.keys(REVIEW_ACTION_LABEL).sort()).toEqual([...REVIEW_ACTIONS].sort());
     expect(REVIEW_ACTION_LABEL).toEqual({
       approve: 'Duyệt tay phát Vé',
       reject: 'Từ chối',
       refund: 'Đã hoàn tay',
       dismiss: 'Bỏ qua',
+      match: 'Ghép với Đơn',
     });
+    expect(Object.keys(REVIEW_ACTION_FAILURE_TITLE).sort()).toEqual([...REVIEW_ACTIONS].sort());
+    expect(REVIEW_ACTION_FAILURE_TITLE.match).toBe('Chưa ghép được');
+    expect(REVIEW_ACTION_FAILURE_TITLE.approve).toBe('Chưa duyệt tay được');
+  });
+
+  it('nút chính là nút đầu của actions (máy chủ xếp thứ tự)', () => {
+    expect(isPrimaryReviewAction(['approve', 'reject'], 'approve')).toBe(true);
+    expect(isPrimaryReviewAction(['approve', 'reject'], 'reject')).toBe(false);
+    expect(isPrimaryReviewAction(['match', 'refund', 'dismiss'], 'match')).toBe(true);
+    expect(isPrimaryReviewAction(['match', 'refund', 'dismiss'], 'refund')).toBe(false);
+    expect(isPrimaryReviewAction(['refund', 'dismiss'], 'refund')).toBe(true);
+    expect(isPrimaryReviewAction(['refund'], 'refund')).toBe(true);
+  });
+
+  it('lỗi dứt khoát: hết chỗ, Sự kiện không còn cho phát Vé, Đơn vừa đổi trạng thái; lỗi khác → null (thử lại cùng khóa)', () => {
+    expect(reviewActionSettledFailure({ action: 'approve' }, ErrorCode.TICKET_TYPE_SOLD_OUT)).toEqual({
+      title: 'Duyệt tay không thành · Hết chỗ',
+      description: 'Hạng vé đã bán hết nên chưa phát được Vé. Đơn vẫn chờ xử lý: bạn có thể Từ chối rồi hoàn tiền cho khách.',
+    });
+    expect(reviewActionSettledFailure({ action: 'approve' }, ErrorCode.EVENT_LOCKED)).toEqual({
+      title: 'Chưa duyệt tay được',
+      description: 'Sự kiện đang bị khóa.',
+    });
+    const match = { action: 'match', orderCode: 'TK5R8W1CAB' } as const;
+    expect(reviewActionSettledFailure(match, ErrorCode.TICKET_TYPE_SOLD_OUT)).toEqual({
+      title: 'Chưa ghép được',
+      description: 'Đơn TK5R8W1CAB không còn đủ chỗ.',
+    });
+    expect(reviewActionSettledFailure(match, ErrorCode.MATCH_ORDER_NOT_ELIGIBLE)).toEqual({
+      title: 'Chưa ghép được',
+      description: 'Đơn này vừa đổi trạng thái. Chọn Đơn khác.',
+    });
+    expect(reviewActionSettledFailure(match, ErrorCode.EVENT_ALREADY_ENDED)).toEqual({
+      title: 'Chưa ghép được',
+      description: 'Đơn TK5R8W1CAB: Sự kiện đã kết thúc.',
+    });
+    for (const code of [ErrorCode.INTERNAL_ERROR, ErrorCode.VALIDATION_FAILED, ErrorCode.REVIEW_ACTION_NOT_ALLOWED]) {
+      expect(reviewActionSettledFailure(match, code), code).toBeNull();
+      expect(reviewActionSettledFailure({ action: 'approve' }, code), code).toBeNull();
+    }
+    // `MATCH_ORDER_NOT_ELIGIBLE` chỉ có nghĩa với "Ghép"; thao tác khác không có lỗi dứt khoát.
+    expect(reviewActionSettledFailure({ action: 'approve' }, ErrorCode.MATCH_ORDER_NOT_ELIGIBLE)).toBeNull();
+    expect(reviewActionSettledFailure({ action: 'reject' }, ErrorCode.TICKET_TYPE_SOLD_OUT)).toBeNull();
   });
 
   it('lý do tắt "Duyệt tay": đủ mọi lý do; lỗi 409 của Sự kiện → lý do tương ứng, lỗi khác → null', () => {
@@ -155,6 +222,7 @@ describe('thao tác trên mục (Story 4.4)', () => {
     expect(reviewActionToast({ ...base, action: 'refund' })).toBe('Đã ghi nhận hoàn tay 250.000đ.');
     expect(reviewActionToast({ ...base, action: 'refund', amount: null })).toBe('Đã ghi nhận hoàn tay.');
     expect(reviewActionToast({ ...base, action: 'dismiss', orderCode: null })).toBe('Đã bỏ qua mục.');
+    expect(reviewActionToast({ ...base, action: 'match' })).toBe('Đã ghép giao dịch vào Đơn TK5R8W1CAB. Đã phát 2 Vé.');
     expect(REVIEW_ACTION_RACE_TOAST).toBe('Mục này vừa được xử lý.');
   });
 
@@ -180,13 +248,58 @@ describe('thao tác trên mục (Story 4.4)', () => {
   });
 });
 
+describe('Ghép với Đơn (Story 4.4-b)', () => {
+  const candidate = (code: string, blockedReason: ReviewApproveBlockedReason | null = null) => ({
+    code,
+    buyerName: 'Phạm Thu Hà',
+    event: { id: '019a3b2c-0a0a-7abc-8def-0123456789ab', name: 'Giải cầu lông' },
+    status: 'expired' as const,
+    ticketCount: 2,
+    createdAt: '2026-11-16T00:58:00.000Z',
+    blockedReason,
+  });
+
+  it('nhãn Dialog, rỗng, bị cắt, hết chỗ, Đơn đổi trạng thái', () => {
+    expect(MATCH_DIALOG_TITLE).toBe('Ghép với Đơn');
+    expect(MATCH_CONFIRM_LABEL).toBe('Ghép và phát Vé');
+    expect(MATCH_ALL_EVENTS).toBe('Mọi Sự kiện');
+    expect(matchEmptyText(300_000)).toBe('Không có Đơn hết hạn hay Cần xử lý nào cùng số tiền 300.000đ.');
+    expect(matchEmptyText(null)).toBe('Không có Đơn hết hạn hay Cần xử lý nào cùng số tiền.');
+    expect(MATCH_TRUNCATED_NOTE).toBe('Chỉ hiện 100 Đơn mới nhất. Chọn Sự kiện để thu hẹp.');
+    expect(matchSoldOutMessage('TK5R8W1CAB')).toBe('Đơn TK5R8W1CAB không còn đủ chỗ.');
+    expect(MATCH_ORDER_CHANGED).toBe('Đơn này vừa đổi trạng thái. Chọn Đơn khác.');
+  });
+
+  it('Đơn đã chọn: giữ khi còn và chọn được; biến mất hoặc bị tắt sau khi tải lại → bỏ chọn', () => {
+    const list = [candidate('TK5R8W1CAB'), candidate('TK9B2X7EAB', 'event_ended')];
+    expect(matchSelection(list, 'TK5R8W1CAB')).toBe('TK5R8W1CAB');
+    expect(matchSelection(list, 'TK9B2X7EAB')).toBeNull();
+    expect(matchSelection(list, 'TK3J6N4DAB')).toBeNull();
+    expect(matchSelection(list, null)).toBeNull();
+    expect(matchSelection(undefined, 'TK5R8W1CAB')).toBeNull();
+  });
+
+  it('thân POST: "Ghép" gửi mã Đơn, "Bỏ qua" gửi lý do, thao tác khác không thân', () => {
+    expect(reviewActionBody({ action: 'match', orderCode: 'TK5R8W1CAB' })).toBe('{"orderCode":"TK5R8W1CAB"}');
+    expect(reviewActionBody({ action: 'dismiss', reason: 'x' })).toBe('{"reason":"x"}');
+    for (const action of ['approve', 'reject', 'refund'] as const) expect(reviewActionBody({ action })).toBeUndefined();
+  });
+});
+
 describe('tải và tự cập nhật', () => {
-  it('mọi khóa nằm dưới một gốc (tín hiệu làm mới cả badge, hàng, chi tiết); polling 10 giây', () => {
+  it('mọi khóa nằm dưới một gốc (tín hiệu làm mới cả badge, hàng, chi tiết, ứng viên của "Ghép"); polling 10 giây', () => {
     const prefix = reviewQueueQueryPrefix('o');
-    for (const key of [reviewQueueSummaryQueryKey('o'), reviewQueueQueryKey('o', null), reviewItemQueryKey('o', 'i')]) {
+    for (const key of [
+      reviewQueueSummaryQueryKey('o'),
+      reviewQueueQueryKey('o', null),
+      reviewItemQueryKey('o', 'i'),
+      reviewMatchCandidatesQueryKey('o', 'i', null),
+    ]) {
       expect(key.slice(0, prefix.length)).toEqual([...prefix]);
     }
     expect(reviewQueueQueryKey('o', 'e')).not.toEqual(reviewQueueQueryKey('o', null));
+    expect(reviewMatchCandidatesQueryKey('o', 'i', 'e')).not.toEqual(reviewMatchCandidatesQueryKey('o', 'i', null));
+    expect(reviewMatchCandidatesQueryKey('o', 'i', null)).not.toEqual(reviewItemQueryKey('o', 'i'));
     expect(reviewQueueQueryPrefix('o')).not.toEqual(reviewQueueQueryPrefix('p'));
     expect(REVIEW_QUEUE_POLL_MS).toBe(10_000);
   });

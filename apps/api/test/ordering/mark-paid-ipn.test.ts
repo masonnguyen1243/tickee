@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { JobQueue } from '@tickee/contracts';
 import type { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { markExpired, OrderPayments, orderForPayment } from '../../src/modules/ordering/index.js';
+import { markExpired, OrderPayments, orderForPayment, type ManualApproval } from '../../src/modules/ordering/index.js';
 import { DATABASE, type Database } from '../../src/platform/db/index.js';
 import { BOSS } from '../../src/platform/jobs/index.js';
 import { createHarness, signUp, type Harness } from '../identity/harness.js';
@@ -420,7 +420,7 @@ describe('markPaid nguồn manual (Story 4.4, duyệt tay)', () => {
     expect(await ipnPaid(order.id, order.total - 1_000)).toEqual({ outcome: 'mismatch' });
     return order;
   }
-  const approval = () => ({ organizationId: org.orgId, actorUserId: org.owner.userId });
+  const approval = (): ManualApproval => ({ organizationId: org.orgId, actorUserId: org.owner.userId, from: ['review'] });
   const manual = (orderId: string, amount: number, manualApproval = approval()) =>
     db.transaction((tx) => payments.markPaid(tx, orderId, 'manual', amount, { manual: manualApproval }));
 
@@ -453,7 +453,7 @@ describe('markPaid nguồn manual (Story 4.4, duyệt tay)', () => {
     const expired = await expiredOrder();
     expect(await manual(expired.id, expired.total)).toEqual({ outcome: 'lost_race' });
     const review = await reviewOrder();
-    expect(await manual(review.id, 1, { organizationId: randomUUID(), actorUserId: org.owner.userId })).toEqual({
+    expect(await manual(review.id, 1, { ...approval(), organizationId: randomUUID() })).toEqual({
       outcome: 'lost_race',
     });
     expect(await orderState(h, review.code)).toMatchObject({ status: 'review', tickets: 0 });
@@ -484,6 +484,61 @@ describe('markPaid nguồn manual (Story 4.4, duyệt tay)', () => {
     expect(await inventory(h, order.a)).toEqual({ capacity: 5, sold: 0, held: 0 });
     expect(await orderState(h, order.code)).toMatchObject({ status: 'review', tickets: 0 });
     expect(await buyerEmails(order.id)).toEqual([]);
+  });
+});
+
+describe('markPaid nguồn manual từ expired (Story 4.4-b, ghép giao dịch chưa khớp)', () => {
+  const matching = (totalAmount?: number): ManualApproval => ({
+    organizationId: org.orgId,
+    actorUserId: org.owner.userId,
+    from: ['review', 'expired'],
+    ...(totalAmount === undefined ? {} : { totalAmount }),
+  });
+  const manual = (orderId: string, amount: number, approval: ManualApproval) =>
+    db.transaction((tx) => payments.markPaid(tx, orderId, 'manual', amount, { manual: approval }));
+
+  it('Đơn expired còn chỗ → CAS expired → paid, bán lại sold += n (expired đã nhả held), N Vé, một email Vé', async () => {
+    const order = await expiredOrder();
+    expect(await inventory(h, order.a)).toEqual({ capacity: 5, sold: 0, held: 0 });
+    expect(await manual(order.id, order.total, matching(order.total))).toEqual({ outcome: 'paid' });
+    expect(await orderState(h, order.code)).toMatchObject({
+      status: 'paid',
+      paid_source: 'manual',
+      paid_amount: String(order.total),
+      tickets: 3,
+    });
+    expect(await inventory(h, order.a)).toEqual({ capacity: 5, sold: 2, held: 0 });
+    expect(await inventory(h, order.b)).toEqual({ capacity: 3, sold: 1, held: 0 });
+    expect(await buyerEmails(order.id)).toEqual([{ kind: 'tickets', orderId: order.id }]);
+    await expectInvariants(h, order.eventId);
+  });
+
+  it('Đơn expired không có trong from (duyệt tay), khác totalAmount, hay pending → lost_race, không đổi gì', async () => {
+    const order = await expiredOrder();
+    expect(await manual(order.id, order.total, { ...matching(), from: ['review'] })).toEqual({ outcome: 'lost_race' });
+    expect(await manual(order.id, order.total, matching(order.total + 1))).toEqual({ outcome: 'lost_race' });
+    const pending = await pendingOrder();
+    expect(await manual(pending.id, pending.total, matching(pending.total))).toEqual({ outcome: 'lost_race' });
+    expect(await orderState(h, order.code)).toMatchObject({ status: 'expired', tickets: 0 });
+    expect(await orderState(h, pending.code)).toMatchObject({ status: 'pending', tickets: 0 });
+    expect(await inventory(h, order.a)).toEqual({ capacity: 5, sold: 0, held: 0 });
+    await expectInvariants(h, order.eventId);
+  });
+
+  it('Đơn expired hết chỗ → orphan sold_out, Đơn vẫn expired (không sang review), không email', async () => {
+    const order = await expiredOrder();
+    await h.db.pool.query('UPDATE ticket_type_inventory SET capacity = 0 WHERE ticket_type_id = $1', [order.b]);
+    expect(await manual(order.id, order.total, matching(order.total))).toEqual({ outcome: 'orphan', reason: 'sold_out' });
+    expect(await orderState(h, order.code)).toMatchObject({ status: 'expired', tickets: 0 });
+    expect(await inventory(h, order.a)).toEqual({ capacity: 5, sold: 0, held: 0 });
+    expect(await buyerEmails(order.id)).toEqual([]);
+  });
+
+  it('Sự kiện đã kết thúc → orphan event_ended; Đơn vẫn expired', async () => {
+    const order = await expiredOrder();
+    await setEvent(order.eventId, ENDED);
+    expect(await manual(order.id, order.total, matching(order.total))).toEqual({ outcome: 'orphan', reason: 'event_ended' });
+    expect(await orderState(h, order.code)).toMatchObject({ status: 'expired', tickets: 0 });
   });
 });
 

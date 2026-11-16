@@ -94,6 +94,11 @@ export async function openReviewCountOf(db: DbExecutor, scope: ReviewScope): Pro
 export interface ReviewItemDetailRow {
   id: string;
   orderId: string | null;
+  /**
+   * Đơn được ghép (Story 4.4-b): `payment_events.order_id` của khoản tiền mục `unmatched` (liên kết ghi khi "Ghép với
+   * Đơn"); chưa ghép, hoặc mục loại khác → `null`.
+   */
+  matchedOrderId: string | null;
   type: ReviewItemType;
   reason: ReviewItemReason | null;
   status: ReviewItemStatus;
@@ -116,7 +121,7 @@ export interface ReviewItemDetailRow {
 
 /**
  * Mục `itemId` của BTC ở mọi trạng thái; id sai dạng, không tồn tại hoặc của BTC khác → `null` (sai dạng thì không chạm
- * DB).
+ * DB). Mục `unmatched` đã ghép kèm Đơn được ghép (`matchedOrderId`, Story 4.4-b).
  */
 export async function reviewItemDetailOf(
   db: DbExecutor,
@@ -128,6 +133,7 @@ export async function reviewItemDetailOf(
     .select({
       id: reviewItems.id,
       orderId: reviewItems.orderId,
+      matchedOrderId: sql<string | null>`CASE WHEN ${reviewItems.type} = 'unmatched' THEN ${paymentEvents.orderId} END`,
       type: reviewItems.type,
       reason: reviewItems.reason,
       status: reviewItems.status,

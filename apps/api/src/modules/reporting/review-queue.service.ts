@@ -2,10 +2,12 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   ErrorCode,
   EventStatus,
+  MATCH_CANDIDATES_LIMIT,
   ReviewAction,
   ReviewApproveBlockedReason,
   ReviewItemLogKind,
   ReviewItemType,
+  type MatchCandidates,
   type ReviewItemDetail,
   type ReviewItemEvent,
   type ReviewItemLogEntry,
@@ -23,7 +25,7 @@ import {
   ticketEventsByIds,
   type TicketEventRef,
 } from '../event/index.js';
-import { reviewOrdersOf } from '../ordering/index.js';
+import { matchCandidatesOf, reviewOrdersOf } from '../ordering/index.js';
 import { memberNamesOf } from '../organizer/index.js';
 import { openReviewCountOf, openReviewItemsOf, reviewActionsFor, reviewItemDetailOf } from '../payment/index.js';
 
@@ -38,31 +40,43 @@ const ACTION_LOG_KIND = {
   'review_item.reject': ReviewItemLogKind.REJECTED,
   'review_item.refund': ReviewItemLogKind.REFUNDED,
   'review_item.dismiss': ReviewItemLogKind.DISMISSED,
+  'review_item.match': ReviewItemLogKind.MATCHED,
+  'review_item.match_sold_out': ReviewItemLogKind.MATCH_SOLD_OUT,
 } as const satisfies Partial<Record<AuditAction, ReviewItemLogKind>>;
 const ITEM_ACTIONS = Object.keys(ACTION_LOG_KIND) as (keyof typeof ACTION_LOG_KIND)[];
 
 /**
- * Lý do tắt "Duyệt tay phát Vé", cùng thứ tự kiểm với `markPaid` nguồn `manual`: Sự kiện đã hủy → đã kết thúc (đồng hồ
- * DB quá `effective_end_at`, `ended` đọc từ `event`) → Sự kiện hoặc BTC bị khóa. Không có Sự kiện → `null` (API vẫn kiểm
- * lại khi bấm).
+ * Lý do Sự kiện không còn cho phát Vé tay ("Duyệt tay phát Vé", Đơn ứng viên của "Ghép với Đơn"), cùng thứ tự kiểm với
+ * `markPaid` nguồn `manual`: Sự kiện đã hủy → đã kết thúc (đồng hồ DB quá `effective_end_at`, `ended` đọc từ `event`) →
+ * Sự kiện hoặc BTC bị khóa (`organizationLocked` của BTC của Sự kiện). Không có Sự kiện → `null` (API vẫn kiểm lại khi
+ * bấm).
  */
+function blockedReasonOf(
+  event: TicketEventRef | undefined,
+  organizationLocked: boolean,
+): ReviewApproveBlockedReason | null {
+  if (!event) return null;
+  if (event.status === EventStatus.CANCELLED) return ReviewApproveBlockedReason.EVENT_CANCELLED;
+  if (event.ended) return ReviewApproveBlockedReason.EVENT_ENDED;
+  if (event.lockedAt !== null || organizationLocked) return ReviewApproveBlockedReason.EVENT_LOCKED;
+  return null;
+}
+
+/** `blockedReasonOf` kèm đọc khóa BTC của Sự kiện (chỉ khi cần). */
 async function approveBlockedReasonOf(
   db: DbExecutor,
   event: TicketEventRef | undefined,
 ): Promise<ReviewApproveBlockedReason | null> {
-  if (!event) return null;
-  if (event.status === EventStatus.CANCELLED) return ReviewApproveBlockedReason.EVENT_CANCELLED;
-  if (event.ended) return ReviewApproveBlockedReason.EVENT_ENDED;
-  if (event.lockedAt !== null || (await organizationLocked(db, { organizationId: event.organizationId }))) {
-    return ReviewApproveBlockedReason.EVENT_LOCKED;
-  }
-  return null;
+  const reason = blockedReasonOf(event, false);
+  if (reason !== null || !event) return reason;
+  return blockedReasonOf(event, await organizationLocked(db, { organizationId: event.organizationId }));
 }
 
 /**
  * Hàng Cần xử lý của BTC (Story 4.3, FR-21, AD-33): chỉ đọc qua read model của mô-đun sở hữu — `payment` (mục và khoản
- * tiền: `openReviewItemsOf`, `openReviewCountOf`, `reviewItemDetailOf`), `ordering` (Đơn theo lô: `reviewOrdersOf`) và
- * `event` (tên Sự kiện: `ticketEventsByIds`). Ghép ở đây vì `payment` không được gọi `event`. Mọi hàm đọc trong
+ * tiền: `openReviewItemsOf`, `openReviewCountOf`, `reviewItemDetailOf`), `ordering` (Đơn theo lô: `reviewOrdersOf`; Đơn
+ * ứng viên của "Ghép với Đơn", Story 4.4-b: `matchCandidatesOf`) và `event` (tên Sự kiện: `ticketEventsByIds`). Ghép ở
+ * đây vì `payment` không được gọi `event`. Mọi hàm đọc trong
  * `orgScope` của người gọi; không trả email, SĐT hay trường thô của `payment_events`. Chi tiết mục còn đọc audit của mục
  * (nhật ký thao tác, Story 4.4) và tên thành viên qua `organizer`; thao tác xử lý mục nằm ở `payment`.
  */
@@ -123,7 +137,9 @@ export class ReviewQueueService {
   async detail(ctx: AccessContext, itemId: string): Promise<ReviewItemDetail> {
     const row = await reviewItemDetailOf(this.db.orm, ctx, itemId);
     if (!row) throw reviewItemNotFound();
-    const order = row.orderId ? (await reviewOrdersOf(this.db.orm, ctx, [row.orderId])).get(row.orderId) : undefined;
+    // Mục `unmatched` đã ghép (Story 4.4-b): Đơn được ghép qua liên kết giao dịch → Đơn.
+    const orderId = row.orderId ?? row.matchedOrderId;
+    const order = orderId ? (await reviewOrdersOf(this.db.orm, ctx, [orderId])).get(orderId) : undefined;
     const event = order ? (await ticketEventsByIds(this.db.orm, [order.eventId])).get(order.eventId) : undefined;
     const actions = reviewActionsFor({
       type: row.type,
@@ -137,7 +153,10 @@ export class ReviewQueueService {
     const log: ReviewItemLogEntry[] = [
       { kind: ReviewItemLogKind.PAYMENT_RECEIVED, at: iso(row.paidAt ?? row.receivedAt) },
       { kind: ReviewItemLogKind.ITEM_OPENED, at: iso(row.createdAt) },
-      ...(await this.actionLogOf(ctx, row.id, row.dismissReason)),
+      ...(await this.actionLogOf(ctx, row.id, {
+        dismissReason: row.dismissReason,
+        matchedOrderCode: row.matchedOrderId ? (order?.code ?? null) : null,
+      })),
     ];
     // `sort` ổn định: cùng thời điểm thì giữ thứ tự trên ("Nhận tiền", "Mở mục", rồi thao tác theo thứ tự ghi).
     log.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
@@ -175,9 +194,14 @@ export class ReviewQueueService {
 
   /**
    * Dòng thao tác của mục từ audit (`review_item.*`, chỉ của BTC người xem), cũ trước, kèm tên thành viên đã làm (rỗng
-   * khi tài khoản không có tên hoặc không còn là thành viên: web hiện tên chung). Dòng "Bỏ qua" kèm lý do của mục.
+   * khi tài khoản không có tên hoặc không còn là thành viên: web hiện tên chung). Dòng "Bỏ qua" kèm lý do của mục; dòng
+   * "Đã ghép với Đơn" kèm mã Đơn được ghép (đọc qua liên kết, audit không chứa giá trị).
    */
-  private async actionLogOf(ctx: AccessContext, itemId: string, dismissReason: string | null): Promise<ReviewItemLogEntry[]> {
+  private async actionLogOf(
+    ctx: AccessContext,
+    itemId: string,
+    notes: { dismissReason: string | null; matchedOrderCode: string | null },
+  ): Promise<ReviewItemLogEntry[]> {
     const trail = await audit.trailOf(this.db.orm, {
       organizationId: ctx.organizationId,
       target: { type: 'review_item', id: itemId },
@@ -192,13 +216,61 @@ export class ReviewQueueService {
     return trail.map((entry) => {
       const kind = ACTION_LOG_KIND[entry.action as keyof typeof ACTION_LOG_KIND];
       const actorName = entry.actorUserId ? (names.get(entry.actorUserId) ?? '') : '';
-      return {
-        kind,
-        at: iso(entry.at),
-        actorName,
-        ...(kind === ReviewItemLogKind.DISMISSED && dismissReason !== null ? { note: dismissReason } : {}),
-      };
+      const note =
+        kind === ReviewItemLogKind.DISMISSED
+          ? notes.dismissReason
+          : kind === ReviewItemLogKind.MATCHED
+            ? notes.matchedOrderCode
+            : null;
+      return { kind, at: iso(entry.at), actorName, ...(note !== null ? { note } : {}) };
     });
+  }
+
+  /**
+   * Đơn ứng viên của "Ghép với Đơn" cho mục `itemId` (Story 4.4-b): Đơn `expired`/`review` của BTC có `total_amount`
+   * bằng số tiền nhận, tùy chọn chỉ Sự kiện `eventId`, mới nhất trước, tối đa `MATCH_CANDIDATES_LIMIT` (`truncated` khi
+   * còn Đơn khác). Mỗi Đơn kèm Sự kiện (tên hiện tại) và lý do tắt nếu Sự kiện không còn cho phát Vé (đã hủy / đã kết
+   * thúc theo đồng hồ DB / bị khóa). Mục lạ, sai dạng hoặc của BTC khác → `404 REVIEW_ITEM_NOT_FOUND`; Sự kiện lạ, sai
+   * dạng hoặc của BTC khác → `404 EVENT_NOT_FOUND`; mục không có `match` (đã xử lý, không phải `unmatched`) hoặc khoản
+   * tiền không ghi số tiền → danh sách rỗng.
+   */
+  async matchCandidates(ctx: AccessContext, itemId: string, eventId?: string): Promise<MatchCandidates> {
+    const row = await reviewItemDetailOf(this.db.orm, ctx, itemId);
+    if (!row) throw reviewItemNotFound();
+    if (eventId !== undefined) await assertEventOfOrganization(this.db.orm, ctx, eventId);
+    const actions = reviewActionsFor({ type: row.type, status: row.status, resolution: row.resolution, order: null });
+    if (!actions.includes(ReviewAction.MATCH) || row.receivedAmount === null) return { candidates: [], truncated: false };
+
+    const rows = await matchCandidatesOf(this.db.orm, ctx, {
+      amount: row.receivedAmount,
+      eventId: eventId?.toLowerCase(),
+      limit: MATCH_CANDIDATES_LIMIT + 1,
+    });
+    const page = rows.slice(0, MATCH_CANDIDATES_LIMIT);
+    const events = await ticketEventsByIds(
+      this.db.orm,
+      page.map((r) => r.eventId),
+    );
+    // Mọi Đơn ứng viên thuộc BTC người xem: đọc khóa BTC một lần.
+    const locked = page.length > 0 && (await organizationLocked(this.db.orm, ctx));
+    return {
+      candidates: page.flatMap((candidate) => {
+        const event = events.get(candidate.eventId);
+        if (!event) return [];
+        return [
+          {
+            code: candidate.code,
+            buyerName: candidate.buyerName,
+            event: { id: event.id, name: event.name },
+            status: candidate.status,
+            ticketCount: candidate.ticketCount,
+            createdAt: iso(candidate.createdAt),
+            blockedReason: blockedReasonOf(event, locked),
+          },
+        ];
+      }),
+      truncated: rows.length > MATCH_CANDIDATES_LIMIT,
+    };
   }
 
   /** Sự kiện đang lọc: lạ, sai dạng hoặc của BTC khác → `404 EVENT_NOT_FOUND`. */

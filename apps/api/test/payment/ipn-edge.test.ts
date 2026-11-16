@@ -694,6 +694,8 @@ describe('bảng review_items', () => {
           'unmatched bỏ qua',
           { type: 'unmatched', orderId: null, status: 'resolved', resolution: 'dismissed', dismissReason: 'Khách chuyển nhầm' },
         ],
+        // Story 4.4-b: "Ghép với Đơn" đóng mục `unmatched` bằng `approved`.
+        ['unmatched đã ghép', { type: 'unmatched', orderId: null, status: 'resolved', resolution: 'approved' }],
         [
           'duplicate_payment bỏ qua, lý do 300 ký tự',
           { type: 'duplicate_payment', status: 'resolved', resolution: 'dismissed', dismissReason: 'a'.repeat(300) },

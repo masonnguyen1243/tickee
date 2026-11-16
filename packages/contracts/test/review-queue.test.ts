@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { ErrorCode } from '../src/errors.js';
 import {
+  MATCH_CANDIDATES_LIMIT,
+  MatchCandidates,
+  MatchCandidatesQuery,
   REVIEW_BADGE_MAX,
   REVIEW_QUEUE_EVENT_PARAM,
   ReviewItemDetail,
@@ -10,6 +13,7 @@ import {
   ReviewQueueSummary,
   reviewItemActionApiPath,
   reviewItemApiPath,
+  reviewItemMatchCandidatesApiPath,
   reviewItemsApiPath,
   reviewItemsSummaryApiPath,
   reviewQueuePath,
@@ -154,7 +158,13 @@ describe('ReviewItemDetail', () => {
     const blocked = ReviewItemDetail.parse(detail({ approveBlockedReason: 'event_ended' }));
     expect(blocked).toMatchObject({ actions: ['approve', 'reject'], approveBlockedReason: 'event_ended' });
     expect(ReviewItemDetail.parse(detail({ status: 'resolved', resolution: 'approved', actions: [] })).actions).toEqual([]);
-    expect(ReviewItemDetail.safeParse(detail({ actions: ['match'] })).success).toBe(false);
+    expect(ReviewItemDetail.safeParse(detail({ actions: ['merge'] })).success).toBe(false);
+    // Story 4.4-b: mục `unmatched` có "Ghép với Đơn" đứng đầu.
+    expect(ReviewItemDetail.parse(detail({ actions: ['match', 'refund', 'dismiss'] })).actions).toEqual([
+      'match',
+      'refund',
+      'dismiss',
+    ]);
     expect(ReviewItemDetail.safeParse(detail({ approveBlockedReason: 'sold_out' })).success).toBe(false);
     expect(ReviewItemDetail.safeParse(detail({ actions: undefined })).success).toBe(false);
   });
@@ -171,6 +181,63 @@ describe('ReviewItemDetail', () => {
     const dismissed = [{ kind: 'dismissed', at: '2026-11-16T02:02:00.000Z', actorName: 'An', note: 'Khách chuyển nhầm' }];
     expect(ReviewItemDetail.parse(detail({ log: dismissed })).log).toEqual(dismissed);
     expect(ReviewItemDetail.parse(detail({ log: [{ kind: 'approved', at: '2026-11-16T02:00:00Z' }] })).log).toHaveLength(1);
+  });
+
+  it('Story 4.4-b: dòng "Đã ghép với Đơn" kèm mã Đơn, dòng ghép không thành vì hết chỗ', () => {
+    const log = [
+      { kind: 'match_sold_out', at: '2026-11-16T02:00:00.000Z', actorName: 'Lê Minh' },
+      { kind: 'matched', at: '2026-11-16T02:01:00.000Z', actorName: '', note: 'TK5R8W1CAB' },
+    ];
+    expect(ReviewItemDetail.parse(detail({ log })).log).toEqual(log);
+  });
+});
+
+describe('Đơn ứng viên của "Ghép với Đơn" (Story 4.4-b)', () => {
+  const candidate = (patch: Record<string, unknown> = {}) => ({
+    code: 'TK5R8W1CAB',
+    buyerName: 'Phạm Thu Hà',
+    event: { id: EVENT, name: 'Giải cầu lông Ba Đình 2026' },
+    status: 'expired',
+    ticketCount: 2,
+    createdAt: '2026-11-16T00:58:00.000Z',
+    blockedReason: null,
+    ...patch,
+  });
+
+  it('nhận Đơn expired/review, lý do tắt; truncated', () => {
+    const parsed = MatchCandidates.parse({
+      candidates: [candidate(), candidate({ status: 'review', blockedReason: 'event_ended' })],
+      truncated: true,
+    });
+    expect(parsed.candidates.map((c) => [c.status, c.blockedReason])).toEqual([
+      ['expired', null],
+      ['review', 'event_ended'],
+    ]);
+    expect(MatchCandidates.parse({ candidates: [], truncated: false })).toEqual({ candidates: [], truncated: false });
+  });
+
+  it('từ chối Đơn pending/paid/cancelled/refunded, lý do lạ, quá giới hạn', () => {
+    for (const status of ['pending', 'paid', 'cancelled', 'refunded']) {
+      expect(MatchCandidates.safeParse({ candidates: [candidate({ status })], truncated: false }).success, status).toBe(false);
+    }
+    expect(MatchCandidates.safeParse({ candidates: [candidate({ blockedReason: 'sold_out' })], truncated: false }).success).toBe(
+      false,
+    );
+    expect(MATCH_CANDIDATES_LIMIT).toBe(100);
+    const many = Array.from({ length: MATCH_CANDIDATES_LIMIT + 1 }, () => candidate());
+    expect(MatchCandidates.safeParse({ candidates: many, truncated: true }).success).toBe(false);
+  });
+
+  it('không có email, SĐT hay id nội bộ', () => {
+    expect(Object.keys(MatchCandidates.shape.candidates.element.shape).sort()).toEqual(
+      ['blockedReason', 'buyerName', 'code', 'createdAt', 'event', 'status', 'ticketCount'].sort(),
+    );
+  });
+
+  it('query eventId tùy chọn', () => {
+    expect(MatchCandidatesQuery.parse({})).toEqual({});
+    expect(MatchCandidatesQuery.parse({ eventId: EVENT })).toEqual({ eventId: EVENT });
+    expect(MatchCandidatesQuery.safeParse({ eventId: 'a'.repeat(201) }).success).toBe(false);
   });
 });
 
@@ -189,6 +256,17 @@ describe('đường API và trang web', () => {
       expect(reviewItemActionApiPath(ORG, ITEM, action)).toBe(`/orgs/${ORG}/review-items/${ITEM}/${action}`);
     }
     expect(reviewItemActionApiPath('a/b', 'c?d', 'approve')).toBe('/orgs/a%2Fb/review-items/c%3Fd/approve');
+    expect(reviewItemActionApiPath(ORG, ITEM, 'match')).toBe(`/orgs/${ORG}/review-items/${ITEM}/match`);
+  });
+
+  it('Story 4.4-b: GET Đơn ứng viên dưới đường của mục, lọc bằng ?eventId=', () => {
+    expect(reviewItemMatchCandidatesApiPath(ORG, ITEM)).toBe(`/orgs/${ORG}/review-items/${ITEM}/match-candidates`);
+    expect(reviewItemMatchCandidatesApiPath(ORG, ITEM, EVENT)).toBe(
+      `/orgs/${ORG}/review-items/${ITEM}/match-candidates?eventId=${EVENT}`,
+    );
+    expect(reviewItemMatchCandidatesApiPath(ORG, ITEM, 'a&b')).toBe(
+      `/orgs/${ORG}/review-items/${ITEM}/match-candidates?eventId=a%26b`,
+    );
   });
 
   it('trang web: /btc/{id}/can-xu-ly, lọc bằng ?suKien=', () => {

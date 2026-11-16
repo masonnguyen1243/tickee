@@ -2,11 +2,13 @@ import {
   EventOverview,
   eventOverviewApiPath,
   IDEMPOTENCY_KEY_HEADER,
+  MatchCandidates,
   ReviewAction,
   ReviewActionResult,
   ReviewItemDetail,
   reviewItemActionApiPath,
   reviewItemApiPath,
+  reviewItemMatchCandidatesApiPath,
   ReviewQueue,
   reviewItemsApiPath,
   reviewItemsSummaryApiPath,
@@ -67,6 +69,13 @@ export const reviewQueueQueryKey = (orgId: string, eventId: string | null) =>
 export const reviewItemQueryKey = (orgId: string, itemId: string) =>
   [...reviewQueueQueryPrefix(orgId), 'item', itemId] as const;
 
+/**
+ * Đơn ứng viên của "Ghép với Đơn" cho mục `itemId` (Story 4.4-b); `eventId` `null` = mọi Sự kiện. Nằm dưới gốc khóa của
+ * hàng nên tín hiệu `org_review_items_changed` (vd. thành viên khác vừa ghép một Đơn) cũng tải lại danh sách đang mở.
+ */
+export const reviewMatchCandidatesQueryKey = (orgId: string, itemId: string, eventId: string | null) =>
+  [...reviewQueueQueryPrefix(orgId), 'match-candidates', itemId, eventId] as const;
+
 /** Polling badge và hàng Cần xử lý khi stream cấp BTC chưa kết nối (AD-17: 10 giây ở dashboard, như `notices`). */
 export const REVIEW_QUEUE_POLL_MS = 10_000;
 
@@ -82,15 +91,38 @@ export const fetchReviewQueue = (orgId: string, eventId: string | null, signal?:
 export const fetchReviewItem = (orgId: string, itemId: string, signal?: AbortSignal) =>
   apiRequest(reviewItemApiPath(orgId, itemId), { schema: ReviewItemDetail, init: { signal } });
 
-/** Thao tác trên mục (Story 4.4) và phần thân của nó: chỉ "Bỏ qua" có lý do. */
+/**
+ * `GET /v1/orgs/:orgId/review-items/:itemId/match-candidates[?eventId=]` (Story 4.4-b): Đơn `expired`/`review` của BTC
+ * cùng số tiền nhận, mới nhất trước, tối đa 100 (`truncated` khi còn nữa).
+ */
+export const fetchMatchCandidates = (orgId: string, itemId: string, eventId: string | null, signal?: AbortSignal) =>
+  apiRequest(reviewItemMatchCandidatesApiPath(orgId, itemId, eventId ?? undefined), {
+    schema: MatchCandidates,
+    init: { signal },
+  });
+
+/** Thao tác trên mục (Story 4.4) và phần thân của nó: "Bỏ qua" có lý do, "Ghép với Đơn" có mã Đơn. */
 export type ReviewActionInput =
   | { action: typeof ReviewAction.APPROVE | typeof ReviewAction.REJECT | typeof ReviewAction.REFUND }
-  | { action: typeof ReviewAction.DISMISS; reason: string };
+  | { action: typeof ReviewAction.DISMISS; reason: string }
+  | { action: typeof ReviewAction.MATCH; orderCode: string };
+
+/** Thân JSON của thao tác: `{ reason }` ("Bỏ qua"), `{ orderCode }` ("Ghép với Đơn"); thao tác khác không có thân. */
+export function reviewActionBody(input: ReviewActionInput): string | undefined {
+  switch (input.action) {
+    case ReviewAction.DISMISS:
+      return JSON.stringify({ reason: input.reason });
+    case ReviewAction.MATCH:
+      return JSON.stringify({ orderCode: input.orderCode });
+    default:
+      return undefined;
+  }
+}
 
 /**
- * `POST /v1/orgs/:orgId/review-items/:itemId/{approve,reject,refund,dismiss}` (Story 4.4) với header `Idempotency-Key`:
- * nơi gọi sinh một khóa mỗi lần mở thao tác và giữ nguyên khi thử lại. Máy chủ xử lý theo trạng thái: gửi lại sau khi đã
- * thắng trả `200` trạng thái hiện tại, không làm lại. "Bỏ qua" gửi `{ reason }`; ba thao tác còn lại không có thân.
+ * `POST /v1/orgs/:orgId/review-items/:itemId/{approve,reject,refund,dismiss,match}` (Story 4.4) với header
+ * `Idempotency-Key`: nơi gọi sinh một khóa mỗi lần mở thao tác và giữ nguyên khi thử lại. Máy chủ xử lý theo trạng thái:
+ * gửi lại sau khi đã thắng trả `200` trạng thái hiện tại, không làm lại. Thân theo `reviewActionBody`.
  */
 export function postReviewAction(
   orgId: string,
@@ -98,12 +130,13 @@ export function postReviewAction(
   idempotencyKey: string,
   input: ReviewActionInput,
 ): Promise<ReviewActionResult> {
+  const body = reviewActionBody(input);
   return apiRequest(reviewItemActionApiPath(orgId, itemId, input.action), {
     schema: ReviewActionResult,
     init: {
       method: 'POST',
       headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
-      ...(input.action === ReviewAction.DISMISS ? { body: JSON.stringify({ reason: input.reason }) } : {}),
+      ...(body === undefined ? {} : { body }),
     },
   });
 }

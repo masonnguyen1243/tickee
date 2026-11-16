@@ -143,6 +143,10 @@ export const orders = pgTable(
     uniqueIndex('orders_one_pending_per_buyer_event_key').on(t.userId, t.eventId).where(sql`${t.status} = 'pending'`),
     index('orders_user_id_created_at_idx').on(t.userId, t.createdAt),
     index('orders_event_id_created_at_idx').on(t.eventId, t.createdAt),
+    // Đơn ứng viên của "Ghép với Đơn" (Story 4.4-b): Đơn `expired`/`review` của BTC theo số tiền.
+    index('orders_match_candidates_idx')
+      .on(t.organizationId, t.totalAmount)
+      .where(sql`${t.status} IN ('expired', 'review')`),
     check(
       'orders_status_check',
       sql`${t.status} IN ('pending', 'paid', 'expired', 'review', 'cancelled', 'refunded')`,

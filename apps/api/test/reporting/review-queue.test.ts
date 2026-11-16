@@ -1,6 +1,7 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import {
   ErrorResponse,
+  MatchCandidates,
   ORDER_CODE_ALPHABET,
   organizationLiveApiPath,
   ReviewItemDetail,
@@ -28,11 +29,20 @@ import {
 } from '../ordering/order-fixtures.js';
 import { orderState, postIpn } from '../payment/ipn-fixtures.js';
 import { listen, openSse, type SseClient } from '../platform/sse-client.js';
-import { fakeAccount, fakeIpnPayload, signIpn, startTingeeFake, type FakeIpnPayload, type TingeeFake } from '../tingee-fake/server.js';
+import {
+  fakeAccount,
+  fakeIpnPayload,
+  fakeStatusIpnPayload,
+  signIpn,
+  startTingeeFake,
+  type FakeIpnPayload,
+  type TingeeFake,
+} from '../tingee-fake/server.js';
 
 /*
  * Story 4.3: hàng Cần xử lý của BTC — `GET /v1/orgs/:orgId/review-items[?eventId=]`, `…/summary`, `…/:itemId` (`reporting`
- * ghép read model của `payment`, `ordering`, `event`) trên Postgres thật và Tingee fake. Mục tạo bằng IPN thật (lệch số
+ * ghép read model của `payment`, `ordering`, `event`) trên Postgres thật và Tingee fake. Story 4.4-b: Đơn ứng viên của
+ * "Ghép với Đơn" (`GET …/:itemId/match-candidates[?eventId=]`); thao tác ghép ở `test/payment/review-actions.test.ts`. Mục tạo bằng IPN thật (lệch số
  * tiền, trả trùng, mồ côi, chưa khớp); ca cần nhiều mục chèn thẳng bằng SQL. Tín hiệu `org_review_items_changed` khi tạo mục:
  * `ipn-edge.test.ts` (commit, rollback) và `organization-live.test.ts` (stream cấp BTC).
  */
@@ -477,5 +487,161 @@ describe('quyền: không phải thành viên', () => {
     for (const path of [listPath(org.orgId), summaryPath(org.orgId), itemPath(org.orgId, itemId!)]) {
       await h.http.get(path).expect(401);
     }
+  });
+});
+
+describe('GET …/review-items/:itemId/match-candidates: Đơn ứng viên của "Ghép với Đơn" (Story 4.4-b)', () => {
+  const candidatesPath = (orgId: string, itemId: string, eventId?: string) =>
+    `${itemPath(orgId, itemId)}/match-candidates${eventId === undefined ? '' : `?eventId=${encodeURIComponent(eventId)}`}`;
+
+  async function candidatesOf(org: Org, itemId: string, eventId?: string, cookie = org.owner.cookie) {
+    const res = await h.http.get(candidatesPath(org.orgId, itemId, eventId)).set('cookie', cookie);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-store');
+    return MatchCandidates.parse(res.body);
+  }
+
+  /** Đơn mới của `sale` đã hết hạn (IPN trạng thái `expired`). */
+  async function expired(org: Org & { ipnKey: string }, sale: SaleEvent, name: string): Promise<Placed> {
+    const placed = await place(sale, name);
+    const payload = fakeStatusIpnPayload(placed.code, placed.total, 'expired');
+    await postIpn(h, org.ipnKey, signIpn(MAIN.secretToken, payload)).expect(200);
+    expect((await orderState(h, placed.code)).status).toBe('expired');
+    return placed;
+  }
+
+  /** Mục `unmatched` mới nhận `amount`. */
+  const unmatched = async (org: { ipnKey: string }, amount: number) => itemIdOf(await ipn(org, strayCode(), amount));
+
+  it('Đơn expired/review cùng BTC, cùng số tiền, mới nhất trước; không có pending, paid, khác số tiền, BTC khác; kèm Sự kiện, số Vé, trạng thái; lọc theo Sự kiện; Admin như Owner', async () => {
+    const org = await freshOrg();
+    const admin = await addAdmin(org);
+    const a = await saleEvent(org, 'Giải bóng rổ 3x3 Tân Bình');
+    const b = await saleEvent(org, 'Đêm nhạc gây quỹ');
+    const oldest = await expired(org, a, 'Phạm Thu Hà');
+    // Đơn `review` (lệch tiền) ở Sự kiện B.
+    const review = await place(b, 'Trần Minh Khoa');
+    await ipn(org, review.code, 120_000);
+    expect((await orderState(h, review.code)).status).toBe('review');
+    const newest = await expired(org, b, 'Lê Văn Tâm');
+    // Không phải ứng viên: Đơn pending, Đơn paid, Đơn khác số tiền (2 Vé), Đơn của BTC khác.
+    await place(a, 'Đơn đang chờ');
+    const paid = await place(a, 'Đơn đã trả');
+    await ipn(org, paid.code, paid.total);
+    const twoTickets = await postOrder(
+      h,
+      await signUp(h),
+      a.event.slug,
+      orderBody([{ ticketTypeId: a.tiers[0]!.id, quantity: 2 }], { buyer: { name: 'Hai Vé', phone: BUYER_PHONE } }),
+    );
+    expect(twoTickets.status).toBe(201);
+    const other = await freshOrg('CLB khác');
+    await expired(other, await saleEvent(other, 'Sự kiện BTC khác'), 'Người BTC khác');
+    // Khoản thứ hai của Đơn đã trả → mục `duplicate_payment`, không có "Ghép".
+    const duplicate = await itemIdOf(await ipn(org, paid.code, paid.total));
+
+    const itemId = await unmatched(org, PRICE);
+    const list = await candidatesOf(org, itemId);
+    expect(list.truncated).toBe(false);
+    expect(list.candidates).toEqual([
+      {
+        code: newest.code,
+        buyerName: 'Lê Văn Tâm',
+        event: { id: b.event.id, name: 'Đêm nhạc gây quỹ' },
+        status: 'expired',
+        ticketCount: 1,
+        createdAt: expect.any(String),
+        blockedReason: null,
+      },
+      expect.objectContaining({ code: review.code, status: 'review', buyerName: 'Trần Minh Khoa', ticketCount: 1 }),
+      expect.objectContaining({ code: oldest.code, status: 'expired', event: { id: a.event.id, name: 'Giải bóng rổ 3x3 Tân Bình' } }),
+    ]);
+    const body = JSON.stringify(list);
+    for (const leaked of [BUYER_PHONE, '@', oldest.orderId, oldest.buyer.userId]) expect(body).not.toContain(leaked);
+    expect(await candidatesOf(org, itemId, undefined, admin.cookie)).toEqual(list);
+    // Lọc theo Sự kiện (id viết HOA vẫn khớp).
+    expect((await candidatesOf(org, itemId, a.event.id)).candidates.map((c) => c.code)).toEqual([oldest.code]);
+    expect((await candidatesOf(org, itemId, b.event.id.toUpperCase())).candidates.map((c) => c.code)).toEqual([
+      newest.code,
+      review.code,
+    ]);
+    // Số tiền khác → không ứng viên.
+    expect(await candidatesOf(org, await unmatched(org, PRICE + 1))).toEqual({ candidates: [], truncated: false });
+    // Mục không có "Ghép" (lệch tiền, trùng) → danh sách rỗng.
+    expect(await candidatesOf(org, duplicate)).toEqual({ candidates: [], truncated: false });
+    const mismatch = (await queueOf(org)).items.find((i) => i.type === 'amount_mismatch')!;
+    expect(await candidatesOf(org, mismatch.id)).toEqual({ candidates: [], truncated: false });
+  });
+
+  it('Sự kiện đã hủy / đã kết thúc (đồng hồ DB) / bị khóa → ứng viên kèm lý do tắt', async () => {
+    const org = await freshOrg();
+    const sales = [
+      await saleEvent(org, 'Sự kiện còn bán'),
+      await saleEvent(org, 'Sự kiện đã hủy'),
+      await saleEvent(org, 'Sự kiện đã kết thúc'),
+      await saleEvent(org, 'Sự kiện bị khóa'),
+    ];
+    const orders = [];
+    for (const sale of sales) orders.push(await expired(org, sale, 'Người mua'));
+    await h.db.pool.query("UPDATE events SET status = 'cancelled' WHERE id = $1", [sales[1]!.event.id]);
+    await setEnded(sales[2]!.event.id);
+    await h.db.pool.query("UPDATE events SET locked_at = now(), lock_reason = 'test' WHERE id = $1", [sales[3]!.event.id]);
+    const list = await candidatesOf(org, await unmatched(org, PRICE));
+    expect(list.candidates.map((c) => [c.code, c.blockedReason])).toEqual([
+      [orders[3]!.code, 'event_locked'],
+      [orders[2]!.code, 'event_ended'],
+      [orders[1]!.code, 'event_cancelled'],
+      [orders[0]!.code, null],
+    ]);
+  });
+
+  it('nhiều hơn 100 Đơn → 100 Đơn mới nhất kèm truncated; lọc theo Sự kiện thu hẹp', async () => {
+    const org = await freshOrg();
+    const a = await saleEvent(org, 'Sự kiện đông');
+    const b = await saleEvent(org, 'Sự kiện vắng');
+    const target = await expired(org, b, 'Người ở Sự kiện vắng');
+    // 101 Đơn hết hạn cùng số tiền ở Sự kiện A, chèn bằng SQL (mỗi Đơn cũ hơn Đơn sau một giây, đều mới hơn `target`).
+    const prefix = Array.from({ length: 3 }, () => ORDER_CODE_ALPHABET[randomInt(ORDER_CODE_ALPHABET.length)]).join('');
+    await h.db.pool.query(
+      `INSERT INTO orders (code, user_id, event_id, organization_id, status, total_amount, buyer_name, buyer_phone,
+                           buyer_email, idempotency_key, expires_at, created_at)
+       SELECT 'TK' || $4 || lpad(g::text, 5, '0'), $5, $1, $2, 'expired', $3, 'Người mua ' || g, '0912345678',
+              'nguoi-mua@vidu.vn', gen_random_uuid(), now(), now() + make_interval(secs => g)
+         FROM generate_series(1, 101) AS g`,
+      [a.event.id, org.orgId, PRICE, prefix, target.buyer.userId],
+    );
+    const itemId = await unmatched(org, PRICE);
+    const list = await candidatesOf(org, itemId);
+    expect(list.truncated).toBe(true);
+    expect(list.candidates).toHaveLength(100);
+    expect(list.candidates[0]).toMatchObject({ code: `TK${prefix}00101`, buyerName: 'Người mua 101', ticketCount: 0 });
+    expect(list.candidates.at(-1)!.code).toBe(`TK${prefix}00002`);
+    expect(list.candidates.map((c) => c.code)).not.toContain(target.code);
+    expect(await candidatesOf(org, itemId, b.event.id)).toEqual({
+      candidates: [expect.objectContaining({ code: target.code })],
+      truncated: false,
+    });
+  });
+
+  it('mục của BTC khác, id ngẫu nhiên, sai dạng → 404 REVIEW_ITEM_NOT_FOUND; Sự kiện của BTC khác, lạ, sai dạng → 404 EVENT_NOT_FOUND; người ngoài, Owner BTC khác → 403; chưa đăng nhập → 401', async () => {
+    const org = await freshOrg();
+    const other = await freshOrg('CLB khác');
+    const otherSale = await saleEvent(other, 'Sự kiện BTC khác');
+    const [itemId] = await insertUnmatched(org.orgId, 1);
+    const [foreign] = await insertUnmatched(other.orgId, 1);
+    for (const id of [foreign!, randomUUID(), 'khong-phai-uuid']) {
+      const res = await h.http.get(candidatesPath(org.orgId, id)).set('cookie', org.owner.cookie).expect(404);
+      expect(ErrorResponse.parse(res.body).error.code, id).toBe('REVIEW_ITEM_NOT_FOUND');
+    }
+    for (const eventId of [otherSale.event.id, randomUUID(), 'khong-phai-uuid', '']) {
+      const res = await h.http.get(candidatesPath(org.orgId, itemId!, eventId)).set('cookie', org.owner.cookie).expect(404);
+      expect(ErrorResponse.parse(res.body).error.code, eventId).toBe('EVENT_NOT_FOUND');
+    }
+    const stranger = await signUp(h);
+    for (const cookie of [stranger.cookie, other.owner.cookie]) {
+      const res = await h.http.get(candidatesPath(org.orgId, itemId!)).set('cookie', cookie).expect(403);
+      expect(ErrorResponse.parse(res.body).error.code).toBe('NOT_A_MEMBER');
+    }
+    await h.http.get(candidatesPath(org.orgId, itemId!)).expect(401);
   });
 });

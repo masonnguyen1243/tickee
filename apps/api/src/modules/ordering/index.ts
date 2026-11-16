@@ -25,11 +25,19 @@ export {
   orderForPayment,
   type GatewaySource,
   type ManualApproval,
+  type ManualSourceStatus,
   type MarkPaidOptions,
   type MarkPaidOutcome,
   type MarkPaidResult,
   type OrderForPayment,
 } from './mark-paid.js';
+export {
+  matchableOrderOf,
+  matchCandidatesOf,
+  type MatchableOrder,
+  type MatchCandidateRow,
+  type MatchScope,
+} from './match-read.js';
 export { notifyEventOrdersChanged } from './order-changed.js';
 export { ORDER_CODE_GENERATOR, type OrderCodeGenerator } from './order-code.js';
 export { markExpired, OrderingJobsModule, type MarkExpiredResult } from './order-jobs.js';

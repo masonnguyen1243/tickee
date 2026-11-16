@@ -4,6 +4,7 @@ import { useLayoutEffect, useRef, type ComponentProps, type ReactNode } from 're
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { cn } from '@/lib/utils';
 
 import { StatusBanner } from './status-banner';
 
@@ -40,6 +41,11 @@ type ConfirmDialogProps = {
    * khi `confirmDisabled` hoặc đang `pending`).
    */
   asForm?: boolean;
+  /**
+   * Lớp thêm cho `<form>` của `asForm` (vd. `min-h-0` để một danh sách cuộn bên trong co lại, giữ nút xác nhận luôn
+   * thấy khi `Dialog` chạm chiều cao tối đa).
+   */
+  formClassName?: string;
   onCloseAutoFocus?: ComponentProps<typeof DialogContent>['onCloseAutoFocus'];
 };
 
@@ -63,6 +69,7 @@ export function ConfirmDialog({
   confirmVariant = 'destructive',
   failureTitle,
   asForm = false,
+  formClassName,
   onCloseAutoFocus,
   failure,
   ...content
@@ -115,7 +122,7 @@ export function ConfirmDialog({
         {asForm ? (
           <form
             noValidate
-            className="flex flex-col gap-stack"
+            className={cn('flex flex-col gap-stack', formClassName)}
             onSubmit={(event) => {
               event.preventDefault();
               if (!confirmDisabled && !pending) onConfirm();
