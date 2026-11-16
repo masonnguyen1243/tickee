@@ -22,6 +22,8 @@ export {
   type PaymentServiceSuspension,
   type SuspensionInput,
 } from './payment-service.js';
+// Cảnh báo Token (Story 4.5-b): read model cho `reporting.notices` (banner Token dưới ngưỡng).
+export { tokenAlertStateOf, type TokenAlertRow } from './token-alert.js';
 // Portal Tingee của môi trường api đang gọi (`reporting`: link "Mua thêm Token" của banner hết Token, Story 4.2).
 export { tingeePortalUrl } from '../tingee/index.js';
 export {

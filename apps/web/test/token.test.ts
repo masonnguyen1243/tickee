@@ -1,10 +1,20 @@
-import { tokenApiPath } from '@tickee/contracts';
+import { tokenAlertThresholdApiPath, tokenApiPath } from '@tickee/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { tokenQueryKey } from '@/lib/organizer/api';
 import {
   canLinkPayoutAccount,
+  canManageTokenAlert,
   formatTokenCount,
+  parseTokenAlertThreshold,
+  TOKEN_ALERT_DISABLED,
+  TOKEN_ALERT_INVALID,
+  TOKEN_ALERT_NOT_SET,
+  TOKEN_ALERT_OWNER_ONLY,
+  TOKEN_ALERT_SAVED,
+  TOKEN_BELOW_THRESHOLD_TITLE,
+  tokenAlertInputOf,
+  tokenAlertThresholdLabel,
   TOKEN_NO_PAYOUT_ACCOUNT_ADMIN,
   TOKEN_PURCHASE_ADMIN,
   TOKEN_PURCHASE_LABEL,
@@ -72,6 +82,58 @@ describe('nội dung theo vai', () => {
 describe('API', () => {
   it('đường dẫn và khóa query', () => {
     expect(tokenApiPath(ORG_ID)).toBe(`/orgs/${ORG_ID}/token`);
+    expect(tokenAlertThresholdApiPath(ORG_ID)).toBe(`/orgs/${ORG_ID}/token/alert-threshold`);
     expect(tokenQueryKey(ORG_ID)).toEqual(['organizer', 'token', ORG_ID]);
+  });
+});
+
+describe('ngưỡng cảnh báo (Story 4.5-b)', () => {
+  it('ô số: số liền hoặc dấu chấm phân cách nghìn, 1…10^12; còn lại không hợp lệ', () => {
+    expect(parseTokenAlertThreshold('500')).toBe(500);
+    expect(parseTokenAlertThreshold(' 1.000 ')).toBe(1_000);
+    expect(parseTokenAlertThreshold('1.000.000')).toBe(1_000_000);
+    expect(parseTokenAlertThreshold('1000000000000')).toBe(10 ** 12);
+    expect(parseTokenAlertThreshold('1.000.000.000.000')).toBe(10 ** 12);
+    expect(parseTokenAlertThreshold('1')).toBe(1);
+    for (const text of [
+      '',
+      '   ',
+      '0',
+      '-1',
+      '1.5',
+      '1,5',
+      '1,000',
+      'abc',
+      '1.00',
+      '10.000.00',
+      '.500',
+      '500.',
+      '1.000.000.000.001',
+      '99999999999999999999',
+      '1e3',
+    ]) {
+      expect(parseTokenAlertThreshold(text), JSON.stringify(text)).toBeNull();
+    }
+  });
+
+  it('giá trị đầu của ô: ngưỡng đã lưu có dấu chấm; chưa đặt → trống', () => {
+    expect(tokenAlertInputOf(1_000)).toBe('1.000');
+    expect(tokenAlertInputOf(null)).toBe('');
+    expect(parseTokenAlertThreshold(tokenAlertInputOf(123_456_789))).toBe(123_456_789);
+  });
+
+  it('chỉ Owner đặt ngưỡng; Admin xem ngưỡng hoặc "Chưa đặt ngưỡng cảnh báo."', () => {
+    expect(canManageTokenAlert('owner')).toBe(true);
+    expect(canManageTokenAlert('admin')).toBe(false);
+    expect(tokenAlertThresholdLabel(1_000)).toBe('Ngưỡng cảnh báo: 1.000 Token');
+    expect(TOKEN_ALERT_NOT_SET).toBe('Chưa đặt ngưỡng cảnh báo.');
+    expect(TOKEN_ALERT_OWNER_ONLY).toBe('Chỉ Owner đặt ngưỡng cảnh báo.');
+  });
+
+  it('câu chữ chốt trong spec', () => {
+    expect(TOKEN_ALERT_INVALID).toBe('Nhập số Token nguyên từ 1 đến 1.000.000.000.000.');
+    expect(TOKEN_ALERT_SAVED).toBe('Đã lưu ngưỡng cảnh báo.');
+    expect(TOKEN_ALERT_DISABLED).toBe('Đã tắt cảnh báo Token.');
+    expect(TOKEN_BELOW_THRESHOLD_TITLE).toBe('Token khả dụng dưới ngưỡng cảnh báo.');
   });
 });

@@ -116,6 +116,12 @@ export const STATUS_NOTICE_CONTENT: Readonly<Record<StatusNoticeCode, StatusNoti
     },
     admin: { title: NOT_LINKED_TITLE, description: 'Nhờ Owner liên kết tài khoản nhận tiền.' },
   },
+  // Story 4.5-b: chỉ Owner thấy (api lọc theo danh mục thông báo); warning, đóng được.
+  token_below_threshold: {
+    title: 'Token khả dụng dưới ngưỡng cảnh báo.',
+    description: 'Mua thêm Token trước khi Sự kiện có phí bị Tạm ngừng bán.',
+    action: { label: 'Mua thêm Token', urlKey: 'tingeePortalUrl' },
+  },
 };
 
 /** Nội dung của một mã cho vai người xem. */
@@ -156,22 +162,27 @@ export function statusNoticeLink(
 
 const DISMISSED_PREFIX = 'tickee:thong-bao-da-dong:';
 
-/** Khóa `sessionStorage` của một banner đã đóng: theo `code` + `version`, nên trạng thái đổi thì banner hiện lại. */
-export const statusNoticeDismissKey = (notice: Pick<StatusNotice, 'code' | 'version'>): string =>
-  `${DISMISSED_PREFIX}${notice.code}:${notice.version}`;
+type DismissibleNotice = Pick<StatusNotice, 'code' | 'version'>;
+
+/**
+ * Khóa `sessionStorage` của một banner đã đóng: theo BTC `orgId` + `code` + `version`, nên trạng thái đổi thì banner hiện
+ * lại, và đóng banner của BTC này không ẩn banner cùng mã, cùng `version` của BTC khác (Story 4.5-b).
+ */
+export const statusNoticeDismissKey = (orgId: string, notice: DismissibleNotice): string =>
+  `${DISMISSED_PREFIX}${orgId}:${notice.code}:${notice.version}`;
 
 /** Đã đóng trong phiên trình duyệt này chưa; storage bị chặn thì coi như chưa (banner vẫn hiện). */
-export function isStatusNoticeDismissed(notice: Pick<StatusNotice, 'code' | 'version'>): boolean {
+export function isStatusNoticeDismissed(orgId: string, notice: DismissibleNotice): boolean {
   try {
-    return window.sessionStorage.getItem(statusNoticeDismissKey(notice)) === '1';
+    return window.sessionStorage.getItem(statusNoticeDismissKey(orgId, notice)) === '1';
   } catch {
     return false;
   }
 }
 
-export function saveStatusNoticeDismissed(notice: Pick<StatusNotice, 'code' | 'version'>): void {
+export function saveStatusNoticeDismissed(orgId: string, notice: DismissibleNotice): void {
   try {
-    window.sessionStorage.setItem(statusNoticeDismissKey(notice), '1');
+    window.sessionStorage.setItem(statusNoticeDismissKey(orgId, notice), '1');
   } catch {
     // Không lưu được: banner chỉ ẩn tới khi tải lại trang.
   }

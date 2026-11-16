@@ -1,33 +1,56 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  ErrorCode,
   OrganizationSection,
   organizationSectionPath,
   TokenReadingStatus,
   type Role,
+  type TokenAlert,
   type TokenBalanceReading,
   type TokenOverview,
 } from '@tickee/contracts';
 import { Landmark } from 'lucide-react';
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { toast } from 'sonner';
 
 import { useCurrentOrganization } from '@/components/tickee/current-organization';
 import { EmptyState } from '@/components/tickee/empty-state';
+import { FieldError } from '@/components/tickee/field-error';
 import { PageHeading } from '@/components/tickee/page-heading';
 import { StatCard } from '@/components/tickee/stat-card';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { TingeeLink } from '@/components/tickee/tingee-link';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { handledElsewhere } from '@/lib/api/handled-elsewhere';
 import { messageOf } from '@/lib/api/message-of';
+import { hasErrorCode } from '@/lib/auth/api';
+import { useGoToLogin } from '@/lib/auth/use-go-to-login';
 import { navSection } from '@/lib/organizer/nav';
-import { fetchToken, tokenQueryKey } from '@/lib/organizer/api';
+import { fetchToken, setTokenAlertThreshold, tokenQueryKey } from '@/lib/organizer/api';
 import {
   canLinkPayoutAccount,
+  canManageTokenAlert,
   formatTokenCount,
+  parseTokenAlertThreshold,
+  TOKEN_ALERT_DISABLE,
+  TOKEN_ALERT_DISABLED,
+  TOKEN_ALERT_HINT,
+  TOKEN_ALERT_INPUT_LABEL,
+  TOKEN_ALERT_INVALID,
+  TOKEN_ALERT_NOT_SET,
+  TOKEN_ALERT_OWNER_ONLY,
+  TOKEN_ALERT_SAVE,
+  TOKEN_ALERT_SAVED,
+  TOKEN_ALERT_TITLE,
+  TOKEN_BELOW_THRESHOLD_TITLE,
+  tokenAlertInputOf,
+  tokenAlertThresholdLabel,
   TOKEN_AVAILABLE_CAPTION,
   TOKEN_AVAILABLE_LABEL,
   TOKEN_BALANCE_LABEL,
@@ -54,6 +77,11 @@ import {
  * chưa có tài khoản nhận tiền mặc định → `empty-state` theo vai. Khối "Mua thêm Token" hiện ở mọi trạng thái đã tải
  * (kể cả chưa đọc được): Owner có link portal Tingee (tab mới), Admin thấy "Chỉ Owner mua thêm Token.". Lỗi của chính
  * api (không tự thử lại) → banner "Chưa tải được Token" + "Thử lại", nằm trên số cũ nếu đã có.
+ *
+ * Cảnh báo Token (Story 4.5-b): khối "Ngưỡng cảnh báo" hiện ở mọi trạng thái đã tải. Owner có ô số (nhận dấu chấm phân
+ * cách) + "Lưu", và "Tắt cảnh báo" khi đã có ngưỡng; lưu xong thì toast và đọc lại Token (lần đọc đó đánh giá ngưỡng
+ * mới). Admin chỉ xem ngưỡng kèm "Chỉ Owner đặt ngưỡng cảnh báo.". Token khả dụng đang dưới ngưỡng
+ * (`alert.belowThresholdSince`) → `StatusBanner` warning ngay trên số, cho cả hai vai.
  */
 
 const cardClass = 'flex min-w-0 flex-col gap-1 rounded-lg bg-card p-card-padding shadow-card';
@@ -134,6 +162,120 @@ function NoPayoutAccount({ role, orgId }: { role: Role; orgId: string }) {
         ) : undefined
       }
     />
+  );
+}
+
+/**
+ * Form ngưỡng cảnh báo của Owner. Ô nhận số liền hoặc có dấu chấm phân cách (`1.000`); sai thì lỗi tại ô, không gọi api.
+ * "Lưu" và "Tắt cảnh báo" dùng chung một mutation (spinner trên nút đang chạy, chặn bấm lặp). Lưu xong: ghi trạng thái
+ * cảnh báo mới vào cache rồi đọc lại Token.
+ */
+function TokenAlertForm({ orgId, alert }: { orgId: string; alert: TokenAlert }) {
+  const ids = useId();
+  const inputId = `${ids}-threshold`;
+  const hintId = `${inputId}-hint`;
+  const errorId = `${inputId}-error`;
+  const queryClient = useQueryClient();
+  const goToLogin = useGoToLogin();
+  const [value, setValue] = useState(() => tokenAlertInputOf(alert.threshold));
+  const [error, setError] = useState<string | undefined>();
+
+  const save = useMutation({
+    mutationFn: (threshold: number | null) => setTokenAlertThreshold(orgId, threshold),
+    onSuccess: (saved, threshold) => {
+      queryClient.setQueryData<TokenOverview>(tokenQueryKey(orgId), (old) => (old ? { ...old, alert: saved } : old));
+      setValue(tokenAlertInputOf(saved.threshold));
+      toast.success(threshold === null ? TOKEN_ALERT_DISABLED : TOKEN_ALERT_SAVED);
+      // Đọc lại Token: lần đọc này đánh giá ngưỡng vừa lưu (warning trên số đổi theo).
+      void queryClient.invalidateQueries({ queryKey: tokenQueryKey(orgId), exact: true });
+    },
+    onError: (err) => {
+      if (hasErrorCode(err, ErrorCode.UNAUTHENTICATED)) goToLogin();
+      else if (hasErrorCode(err, ErrorCode.VALIDATION_FAILED)) setError(TOKEN_ALERT_INVALID);
+    },
+  });
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (save.isPending) return;
+    const threshold = parseTokenAlertThreshold(value);
+    if (threshold === null) {
+      setError(TOKEN_ALERT_INVALID);
+      save.reset();
+      return;
+    }
+    setError(undefined);
+    save.mutate(threshold);
+  };
+
+  const disable = () => {
+    if (save.isPending) return;
+    setError(undefined);
+    save.mutate(null);
+  };
+
+  const failure =
+    save.error && !handledElsewhere(save.error) && !hasErrorCode(save.error, ErrorCode.VALIDATION_FAILED)
+      ? save.error
+      : null;
+
+  return (
+    <form noValidate onSubmit={submit} className="flex min-w-0 flex-col gap-stack">
+      <Label htmlFor={inputId}>{TOKEN_ALERT_INPUT_LABEL}</Label>
+      <div className="flex min-w-0 flex-wrap items-start gap-stack">
+        <Input
+          id={inputId}
+          name="threshold"
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder="Vd. 1.000"
+          className="w-full max-w-48 min-w-0 flex-1 tabular-nums"
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            if (error) setError(undefined);
+          }}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={`${hintId} ${errorId}`}
+        />
+        <Button type="submit" variant="secondary" loading={save.isPending && save.variables !== null}>
+          {TOKEN_ALERT_SAVE}
+        </Button>
+        {alert.threshold !== null ? (
+          <Button type="button" variant="ghost" loading={save.isPending && save.variables === null} onClick={disable}>
+            {TOKEN_ALERT_DISABLE}
+          </Button>
+        ) : null}
+      </div>
+      <p id={hintId} className="text-meta text-muted-foreground">
+        {TOKEN_ALERT_HINT}
+      </p>
+      <FieldError id={errorId} message={error} />
+      {failure ? <StatusBanner tone="danger" title="Chưa lưu được" description={messageOf(failure)} /> : null}
+    </form>
+  );
+}
+
+/** Khối "Ngưỡng cảnh báo": Owner đặt/tắt (`TokenAlertForm`), Admin chỉ xem. */
+function TokenAlertBlock({ role, orgId, alert }: { role: Role; orgId: string; alert: TokenAlert }) {
+  const titleId = `${useId()}-title`;
+  return (
+    <section aria-labelledby={titleId} data-slot="token-alert" className={`${cardClass} gap-stack`}>
+      <h2 id={titleId} className="text-title">
+        {TOKEN_ALERT_TITLE}
+      </h2>
+      {canManageTokenAlert(role) ? (
+        // Ngưỡng đổi (lưu xong, hay tab khác vừa lưu) → ô nhận lại giá trị đã lưu.
+        <TokenAlertForm key={String(alert.threshold)} orgId={orgId} alert={alert} />
+      ) : (
+        <>
+          <p data-slot="token-alert-threshold" className="text-body tabular-nums">
+            {alert.threshold === null ? TOKEN_ALERT_NOT_SET : tokenAlertThresholdLabel(alert.threshold)}
+          </p>
+          <p className="text-meta text-muted-foreground">{TOKEN_ALERT_OWNER_ONLY}</p>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -218,7 +360,13 @@ export function TokenView() {
     body = (
       <>
         {loadError}
+        {data.alert.belowThresholdSince !== null ? (
+          <div data-slot="token-below-threshold">
+            <StatusBanner tone="warning" title={TOKEN_BELOW_THRESHOLD_TITLE} />
+          </div>
+        ) : null}
         {readingBody}
+        <TokenAlertBlock role={organization.role} orgId={orgId} alert={data.alert} />
         <TokenPurchaseBlock role={organization.role} overview={data} />
       </>
     );

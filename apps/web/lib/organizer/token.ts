@@ -1,8 +1,16 @@
-import { Permission, roleHasPermission, toEventIso, type Role } from '@tickee/contracts';
+import {
+  Permission,
+  roleHasPermission,
+  toEventIso,
+  TOKEN_ALERT_THRESHOLD_MAX,
+  TOKEN_ALERT_THRESHOLD_MIN,
+  TokenAlertThreshold,
+  type Role,
+} from '@tickee/contracts';
 
 /*
- * Trang Token (Story 4.5-a, FR-34): định dạng số, giờ đọc và nội dung theo vai. Hàm thuần, kiểm bằng Vitest môi trường
- * node; giờ luôn theo giờ Việt Nam (không theo múi giờ máy).
+ * Trang Token (Story 4.5-a, 4.5-b, FR-34): định dạng số, giờ đọc, ô ngưỡng cảnh báo và nội dung theo vai. Hàm thuần,
+ * kiểm bằng Vitest môi trường node; giờ luôn theo giờ Việt Nam (không theo múi giờ máy).
  */
 
 export const TOKEN_AVAILABLE_LABEL = 'Token khả dụng';
@@ -54,3 +62,43 @@ export function tokenPurchaseOf(role: Role, tingeePortalUrl: string | undefined)
 
 /** BTC chưa có tài khoản nhận tiền mặc định: vai liên kết được tài khoản (Owner) có nút tới trang Tài khoản nhận tiền. */
 export const canLinkPayoutAccount = (role: Role): boolean => roleHasPermission(role, Permission.PAYOUT_ACCOUNT_MANAGE);
+
+// ---------------------------------------------------------------------------------------------------------------
+// Ngưỡng cảnh báo (Story 4.5-b)
+// ---------------------------------------------------------------------------------------------------------------
+
+export const TOKEN_ALERT_TITLE = 'Ngưỡng cảnh báo';
+export const TOKEN_ALERT_INPUT_LABEL = 'Báo khi Token khả dụng dưới';
+export const TOKEN_ALERT_HINT = 'Token khả dụng xuống dưới ngưỡng thì Owner nhận email và banner trên dashboard.';
+export const TOKEN_ALERT_SAVE = 'Lưu';
+export const TOKEN_ALERT_DISABLE = 'Tắt cảnh báo';
+export const TOKEN_ALERT_SAVED = 'Đã lưu ngưỡng cảnh báo.';
+export const TOKEN_ALERT_DISABLED = 'Đã tắt cảnh báo Token.';
+export const TOKEN_ALERT_NOT_SET = 'Chưa đặt ngưỡng cảnh báo.';
+export const TOKEN_ALERT_OWNER_ONLY = 'Chỉ Owner đặt ngưỡng cảnh báo.';
+/** Lỗi tại ô: "Nhập số Token nguyên từ 1 đến 1.000.000.000.000.". */
+export const TOKEN_ALERT_INVALID = `Nhập số Token nguyên từ ${formatTokenCount(TOKEN_ALERT_THRESHOLD_MIN)} đến ${formatTokenCount(TOKEN_ALERT_THRESHOLD_MAX)}.`;
+/** Warning trên số của trang Token (cả hai vai) khi Token khả dụng đang dưới ngưỡng. */
+export const TOKEN_BELOW_THRESHOLD_TITLE = 'Token khả dụng dưới ngưỡng cảnh báo.';
+
+/** Admin xem ngưỡng: "Ngưỡng cảnh báo: 1.000 Token". */
+export const tokenAlertThresholdLabel = (threshold: number): string =>
+  `Ngưỡng cảnh báo: ${formatTokenCount(threshold)} Token`;
+
+/** Vai đặt được ngưỡng cảnh báo (Owner, `token_alert.manage`). */
+export const canManageTokenAlert = (role: Role): boolean => roleHasPermission(role, Permission.TOKEN_ALERT_MANAGE);
+
+/**
+ * Ô ngưỡng cảnh báo → số Token, hoặc `null` khi không hợp lệ. Nhận số nguyên viết liền (`1000`) hoặc có dấu chấm phân
+ * cách nghìn kiểu Việt Nam (`1.000`, `1.000.000`), bỏ khoảng trắng hai đầu; phải trong khoảng 1…10^12.
+ */
+export function parseTokenAlertThreshold(text: string): number | null {
+  const trimmed = text.trim();
+  if (!/^\d+$/.test(trimmed) && !/^\d{1,3}(?:\.\d{3})+$/.test(trimmed)) return null;
+  const parsed = TokenAlertThreshold.safeParse(Number(trimmed.replaceAll('.', '')));
+  return parsed.success ? parsed.data : null;
+}
+
+/** Giá trị đầu của ô ngưỡng: ngưỡng đã lưu có dấu chấm phân cách, hoặc trống khi chưa đặt. */
+export const tokenAlertInputOf = (threshold: number | null): string =>
+  threshold === null ? '' : formatTokenCount(threshold);

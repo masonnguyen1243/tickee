@@ -17,8 +17,8 @@ import { createLoggerModule } from './platform/logging/index.js';
  * email tiền về muộn và email đổi giờ/địa điểm cho Người mua), job revalidate trang Sự kiện công khai (gọi
  * `<WEB_ORIGIN>/api/revalidate`), job hết hạn Giữ chỗ của Đơn và job Đối soát bù (Story 4.1: tra Tingee khi IPN trễ
  * hoặc mất, đi cùng đường xử lý với IPN qua `IpnProcessor` và `OrderPayments`; cờ `TINGEE_ORDER_STATUS_QUERY`), job
- * cron dò dịch vụ thanh toán của BTC bị ngắt và job "đã mở lại" (Story 4.2: Đối soát bù mọi Đơn còn mở của BTC). Có sẵn
- * adapter Tingee và Vé (khóa QR).
+ * cron dò dịch vụ thanh toán của BTC bị ngắt và job "đã mở lại" (Story 4.2: Đối soát bù mọi Đơn còn mở của BTC), job
+ * cron dò Token mỗi giờ và email cảnh báo Token dưới ngưỡng (Story 4.5-b). Có sẵn adapter Tingee và Vé (khóa QR).
  */
 @Module({})
 export class WorkerModule {
@@ -40,6 +40,7 @@ export class WorkerModule {
         OrganizerJobsModule.forRoot({
           WEB_ORIGIN: config.WEB_ORIGIN,
           TINGEE_CREDENTIAL_KEYS: config.TINGEE_CREDENTIAL_KEYS,
+          TINGEE_BASE_URL: config.TINGEE_BASE_URL,
         }),
         EventJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN, REVALIDATE_SECRET: config.REVALIDATE_SECRET }),
         OrderingJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN }),

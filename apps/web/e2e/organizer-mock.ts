@@ -15,7 +15,8 @@ import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
  * BTC `GET /orgs/:id/live` (khung dashboard luôn mở, Story 4.2-b) → 503 (dải banner polling 10 giây),
  * `GET /orgs/:id/review-items/summary` (badge "Cần xử lý" của khung, Story 4.3) → `{ openCount: 0 }`,
  * `GET /orgs/:id/review-items` (trang Cần xử lý) → hàng trống không lọc, `GET /orgs/:id/token` (trang Token, Story 4.5-a)
- * → BTC chưa có tài khoản nhận tiền mặc định, không có link portal; lời gọi không có handler → 500.
+ * → BTC chưa có tài khoản nhận tiền mặc định, không có link portal, chưa đặt ngưỡng cảnh báo (Story 4.5-b); lời gọi
+ * không có handler → 500.
  */
 
 export const ORG_ID = '019a3b2c-5678-7abc-8def-0123456789ab';
@@ -50,10 +51,24 @@ export const tokenReading = (balance: number, creditLimit: number, readAt = '202
   readAt,
 });
 
-/** `TokenOverview` (Story 4.5-a): `tingeePortalUrl` chỉ khi truyền (api chỉ trả cho Owner). */
-export const tokenOverview = (reading: unknown = { status: 'no_payout_account' }, tingeePortalUrl?: string) => ({
+/** Trạng thái cảnh báo Token (`TokenAlert`, Story 4.5-b): mặc định chưa đặt ngưỡng, không dưới ngưỡng. */
+export const tokenAlert = (threshold: number | null = null, belowThresholdSince: string | null = null) => ({
+  threshold,
+  belowThresholdSince,
+});
+
+/**
+ * `TokenOverview` (Story 4.5-a): `tingeePortalUrl` chỉ khi truyền (api chỉ trả cho Owner); `alert` (Story 4.5-b) mặc
+ * định chưa đặt ngưỡng.
+ */
+export const tokenOverview = (
+  reading: unknown = { status: 'no_payout_account' },
+  tingeePortalUrl?: string,
+  alert: ReturnType<typeof tokenAlert> = tokenAlert(),
+) => ({
   reading,
   ...(tingeePortalUrl === undefined ? {} : { tingeePortalUrl }),
+  alert,
 });
 
 /** Bốn điều kiện mở bán luôn có (Story 2.10). */
@@ -108,6 +123,7 @@ const NOTICE_DEFAULTS: Record<string, { severity: string; blocking: boolean }> =
   PAYMENT_SERVICE_SUSPENDED_GATEWAY_PERMISSION_MISSING: { severity: 'danger', blocking: true },
   PAYMENT_SERVICE_SUSPENDED_PAYOUT_ACCOUNT_NOT_ALLOWED: { severity: 'danger', blocking: true },
   PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED: { severity: 'danger', blocking: true },
+  token_below_threshold: { severity: 'warning', blocking: false },
 };
 
 /** Mã notice theo lý do ngắt dịch vụ thanh toán (như `PAYMENT_SERVICE_NOTICE_CODES` của contracts). */

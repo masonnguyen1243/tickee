@@ -64,6 +64,17 @@ describe('PermissionGuard', () => {
     expect(errorOf(post.body).code).toBe('FORBIDDEN_ROLE');
   });
 
+  it('quyền chỉ Owner thật (`token_alert.manage`, Story 4.5-b): Admin → 403 FORBIDDEN_ROLE trước khi đọc body', async () => {
+    const res = await h.http
+      .put(`/v1/orgs/${orgId}/token/alert-threshold`)
+      .set('cookie', admin.cookie)
+      .send({ threshold: 500 });
+    expect(res.status).toBe(403);
+    expect(errorOf(res.body).code).toBe('FORBIDDEN_ROLE');
+    const invalid = await h.http.put(`/v1/orgs/${orgId}/token/alert-threshold`).set('cookie', admin.cookie).send({});
+    expect(errorOf(invalid.body).code).toBe('FORBIDDEN_ROLE');
+  });
+
   it('Admin qua route Owner/Admin cùng dùng; GET /v1/orgs/:orgId trả vai admin', async () => {
     const res = await h.http.get(`/v1/orgs/${orgId}/test-events`).set('cookie', admin.cookie).expect(200);
     expect(res.body).toMatchObject({ userId: admin.userId, organizationId: orgId, role: 'admin' });

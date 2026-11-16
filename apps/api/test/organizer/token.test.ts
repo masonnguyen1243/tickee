@@ -96,6 +96,8 @@ async function overviewOf(org: Pick<Org, 'orgId'>, cookie: string) {
 }
 
 const unavailable = { status: 'unavailable' };
+/** BTC chưa đặt ngưỡng cảnh báo (Story 4.5-b): `GET …/token` luôn trả `alert`, đọc Token không ghi DB. */
+const NO_ALERT = { threshold: null, belowThresholdSince: null };
 
 /** Dòng audit của BTC (đọc Token không ghi audit). */
 async function auditCount(orgId: string): Promise<number> {
@@ -122,6 +124,7 @@ describe('Trang Token: đọc số dư và hạn mức (Story 4.5-a)', () => {
     expect(body).toEqual({
       reading: { status: 'ok', balance: 1_200, creditLimit: 500, available: 1_700, readAt: expect.any(String) },
       tingeePortalUrl: PORTAL,
+      alert: NO_ALERT,
     });
     const readAt = Date.parse(body.reading.status === 'ok' ? body.reading.readAt : '');
     expect(readAt).toBeGreaterThanOrEqual(before - 1_000);
@@ -153,6 +156,7 @@ describe('Trang Token: đọc số dư và hạn mức (Story 4.5-a)', () => {
     const body = await overviewOf(org, org.admin.cookie);
     expect(body).toEqual({
       reading: { status: 'ok', balance: 1_200, creditLimit: 500, available: 1_700, readAt: expect.any(String) },
+      alert: NO_ALERT,
     });
     expect(body).not.toHaveProperty('tingeePortalUrl');
   });
@@ -163,7 +167,7 @@ describe('Trang Token: đọc số dư và hạn mức (Story 4.5-a)', () => {
     const started = Date.now();
     const body = await overviewOf(org, org.owner.cookie);
     const elapsed = Date.now() - started;
-    expect(body).toEqual({ reading: unavailable, tingeePortalUrl: PORTAL });
+    expect(body).toEqual({ reading: unavailable, tingeePortalUrl: PORTAL, alert: NO_ALERT });
     expect(elapsed).toBeGreaterThanOrEqual(2_900);
     expect(elapsed).toBeLessThan(6_000);
     expect(fake.calls(TOKEN_BALANCE_PATH)).toHaveLength(1);
@@ -187,7 +191,7 @@ describe('Trang Token: đọc số dư và hạn mức (Story 4.5-a)', () => {
 
     const broken = await newOrg(BROKEN);
     fake.reset();
-    expect(await overviewOf(broken, broken.admin.cookie)).toEqual({ reading: unavailable });
+    expect(await overviewOf(broken, broken.admin.cookie)).toEqual({ reading: unavailable, alert: NO_ALERT });
     expect(fake.calls(TOKEN_BALANCE_PATH)).toHaveLength(1);
   });
 
@@ -226,7 +230,11 @@ describe('Trang Token: đọc số dư và hạn mức (Story 4.5-a)', () => {
     await h.db.orm.execute(
       sql`UPDATE tingee_credentials SET secret_token_ciphertext = ${broken} WHERE organization_id = ${org.orgId}`,
     );
-    expect(await overviewOf(org, org.owner.cookie)).toEqual({ reading: unavailable, tingeePortalUrl: PORTAL });
+    expect(await overviewOf(org, org.owner.cookie)).toEqual({
+      reading: unavailable,
+      tingeePortalUrl: PORTAL,
+      alert: NO_ALERT,
+    });
     expect(fake.calls(TOKEN_BALANCE_PATH)).toEqual([]);
     expect(
       h.logs.lines.find((l) => l.organizationId === org.orgId && l.status === 'unavailable' && l.error === 'SecretBoxError'),
@@ -239,8 +247,12 @@ describe('Trang Token: đọc số dư và hạn mức (Story 4.5-a)', () => {
     expect(await overviewOf(never, never.owner.cookie)).toEqual({
       reading: { status: 'no_payout_account' },
       tingeePortalUrl: PORTAL,
+      alert: NO_ALERT,
     });
-    expect(await overviewOf(never, never.admin.cookie)).toEqual({ reading: { status: 'no_payout_account' } });
+    expect(await overviewOf(never, never.admin.cookie)).toEqual({
+      reading: { status: 'no_payout_account' },
+      alert: NO_ALERT,
+    });
 
     // Có key nhưng không còn tài khoản mặc định (vd. đã hủy liên kết hết).
     const unlinked = await newOrg();
@@ -269,7 +281,11 @@ describe('Trang Token: đọc số dư và hạn mức (Story 4.5-a)', () => {
     const org = await newOrg();
     fake.merchant(MAIN.clientId).token = { balance: Number.MAX_SAFE_INTEGER, creditLimit: 1 };
     const firstLine = h.logs.lines.length;
-    expect(await overviewOf(org, org.owner.cookie)).toEqual({ reading: unavailable, tingeePortalUrl: PORTAL });
+    expect(await overviewOf(org, org.owner.cookie)).toEqual({
+      reading: unavailable,
+      tingeePortalUrl: PORTAL,
+      alert: NO_ALERT,
+    });
     expect(fake.calls(TOKEN_BALANCE_PATH)).toHaveLength(1);
 
     const lines = h.logs.lines.slice(firstLine);

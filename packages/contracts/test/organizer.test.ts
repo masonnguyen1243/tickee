@@ -25,9 +25,9 @@ describe('ma trận quyền FR-4', () => {
     expect([...ROLE_PERMISSIONS.owner].sort()).toEqual(Object.values(Permission).sort());
   });
 
-  it('Admin thiếu đúng members.manage, payout_account.manage, token.purchase', () => {
+  it('Admin thiếu đúng members.manage, payout_account.manage, token.purchase, token_alert.manage', () => {
     const missing = Object.values(Permission).filter((p) => !ROLE_PERMISSIONS.admin.includes(p));
-    expect(missing.sort()).toEqual(['members.manage', 'payout_account.manage', 'token.purchase']);
+    expect(missing.sort()).toEqual(['members.manage', 'payout_account.manage', 'token.purchase', 'token_alert.manage']);
     expect(roleHasPermission('admin', Permission.TOKEN_VIEW)).toBe(true);
     expect(roleHasPermission('admin', Permission.EVENTS_MANAGE)).toBe(true);
     expect(roleHasPermission('admin', Permission.MEMBERS_MANAGE)).toBe(false);
@@ -41,6 +41,7 @@ describe('ma trận quyền FR-4', () => {
         'payout_account.manage',
         'token.view',
         'token.purchase',
+        'token_alert.manage',
         'events.manage',
         'orders.view',
         'review_queue.handle',

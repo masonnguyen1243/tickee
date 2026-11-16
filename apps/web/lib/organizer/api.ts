@@ -12,6 +12,8 @@ import {
   PayoutAccountOptions,
   PayoutAccountOverview,
   TingeeKeyPreview,
+  TokenAlert,
+  tokenAlertThresholdApiPath,
   TokenOverview,
   tokenApiPath,
   type ConnectTingeeRequest,
@@ -41,7 +43,7 @@ export const payoutAccountOptionsQueryKey = (orgId: string, credentialId: string
 /** Một lần đọc Token của BTC từ Tingee (Story 4.5-a; mỗi lần tải là một lời gọi Tingee). */
 export const tokenQueryKey = (orgId: string) => ['organizer', 'token', orgId] as const;
 
-const json = (method: 'POST', body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
+const json = (method: 'POST' | 'PUT', body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 const orgPath = (orgId: string) => `/orgs/${encodeURIComponent(orgId)}`;
 
 export const createOrganization = (body: CreateOrganizationRequest) =>
@@ -106,6 +108,13 @@ export const checkPaymentService = (orgId: string) =>
  */
 export const fetchToken = (orgId: string, signal?: AbortSignal) =>
   apiRequest(tokenApiPath(orgId), { schema: TokenOverview, init: { signal } });
+
+/**
+ * Đặt ngưỡng cảnh báo Token (Story 4.5-b, chỉ Owner), hoặc `null` để tắt cảnh báo; trả trạng thái cảnh báo sau khi lưu.
+ * Không gọi Tingee.
+ */
+export const setTokenAlertThreshold = (orgId: string, threshold: number | null) =>
+  apiRequest(tokenAlertThresholdApiPath(orgId), { schema: TokenAlert, init: json('PUT', { threshold }) });
 
 /** Kết nối API key Tingee của BTC: key đúng thì api lưu credential và trả danh sách tài khoản. */
 export const connectTingee = (orgId: string, body: ConnectTingeeRequest) =>

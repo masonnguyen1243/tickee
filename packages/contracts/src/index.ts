@@ -7,6 +7,7 @@ export * from './identity.js';
 export * from './jobs.js';
 export * from './money.js';
 export * from './my-tickets.js';
+export * from './notifications.js';
 export * from './order.js';
 export * from './organizer.js';
 export * from './payment.js';

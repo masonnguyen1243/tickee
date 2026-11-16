@@ -85,6 +85,21 @@ export const JobQueue = {
   PAYMENT_SERVICE_RESUMED: 'payment.service-resumed',
   /** Dead-letter của `PAYMENT_SERVICE_RESUMED`: job hết lượt retry (lỗi DB) được chép sang đây. */
   PAYMENT_SERVICE_RESUMED_DEAD_LETTER: 'payment.service-resumed.dead-letter',
+  /**
+   * Dò Token của các BTC có ngưỡng cảnh báo (`organizer`, Story 4.5-b): job cron `TOKEN_ALERT_SCAN_CRON` (mỗi giờ), chỉ
+   * vai worker lên lịch. Không payload, không retry, không dead-letter (lần chạy kế làm lại); tuần tự qua các BTC có
+   * ngưỡng và dịch vụ thanh toán `active`, mỗi BTC đọc Token như `GET …/token` rồi đánh giá ngưỡng.
+   */
+  TOKEN_ALERT_SCAN: 'organizer.token-alert-scan',
+  /**
+   * Email cảnh báo Token dưới ngưỡng gửi Owner (`organizer`, Story 4.5-b), payload `TokenAlertEmailPayload` (id BTC và
+   * mốc vượt ngưỡng; không số dư). Lần đánh giá vừa đặt `token_below_threshold_since` enqueue bằng chính `tx` đó, id
+   * job cố định theo (BTC, mốc). Handler bỏ qua khi mốc hiện tại của BTC khác payload (đã về trên ngưỡng, Owner tắt
+   * cảnh báo, hay đã vượt lần mới).
+   */
+  TOKEN_ALERT_EMAIL: 'organizer.token-alert-email',
+  /** Dead-letter của `TOKEN_ALERT_EMAIL`: job hết lượt retry được chép sang đây. */
+  TOKEN_ALERT_EMAIL_DEAD_LETTER: 'organizer.token-alert-email.dead-letter',
 } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];
 
@@ -120,3 +135,13 @@ export type SendEventChangeEmailPayload = z.infer<typeof SendEventChangeEmailPay
 /** Payload của job `payment.service-resumed` (Story 4.2): chỉ id BTC vừa được mở lại dịch vụ thanh toán. */
 export const PaymentServiceResumedPayload = z.object({ organizationId: z.uuid() });
 export type PaymentServiceResumedPayload = z.infer<typeof PaymentServiceResumedPayload>;
+
+/**
+ * Payload của job `organizer.token-alert-email` (Story 4.5-b): id BTC và lần vượt ngưỡng (`token_below_threshold_since`,
+ * ISO) — cũng là khóa chống gửi lặp của danh mục thông báo. Không số dư, hạn mức hay Token khả dụng.
+ */
+export const TokenAlertEmailPayload = z.object({
+  organizationId: z.uuid(),
+  belowThresholdSince: z.iso.datetime(),
+});
+export type TokenAlertEmailPayload = z.infer<typeof TokenAlertEmailPayload>;

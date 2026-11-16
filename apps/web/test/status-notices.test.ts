@@ -120,27 +120,34 @@ describe('chưa liên kết tài khoản nhận tiền: câu theo vai (Story 2.6
   });
 });
 
-describe('đóng banner theo code + version', () => {
+describe('đóng banner theo BTC + code + version (Story 4.5-b thêm orgId)', () => {
+  const ORG = '019a3b2c-5678-7abc-8def-0123456789ab';
+  const OTHER_ORG = '019a3b2c-9999-7abc-8def-0123456789ab';
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it('khóa đổi khi version đổi', () => {
-    const a = statusNoticeDismissKey({ code: 'CLOSED_BETA_PENDING', version: 'v1' });
-    expect(a).not.toBe(statusNoticeDismissKey({ code: 'CLOSED_BETA_PENDING', version: 'v2' }));
-    expect(a).not.toBe(statusNoticeDismissKey({ code: 'CLOSED_BETA_REVOKED', version: 'v1' }));
+  it('khóa đổi khi version, code hay BTC đổi', () => {
+    const a = statusNoticeDismissKey(ORG, { code: 'CLOSED_BETA_PENDING', version: 'v1' });
+    expect(a).toBe(`tickee:thong-bao-da-dong:${ORG}:CLOSED_BETA_PENDING:v1`);
+    expect(a).not.toBe(statusNoticeDismissKey(ORG, { code: 'CLOSED_BETA_PENDING', version: 'v2' }));
+    expect(a).not.toBe(statusNoticeDismissKey(ORG, { code: 'CLOSED_BETA_REVOKED', version: 'v1' }));
+    expect(a).not.toBe(statusNoticeDismissKey(OTHER_ORG, { code: 'CLOSED_BETA_PENDING', version: 'v1' }));
   });
 
-  it('lưu vào sessionStorage; storage bị chặn thì coi như chưa đóng, không ném lỗi', () => {
+  it('lưu vào sessionStorage theo BTC; storage bị chặn thì coi như chưa đóng, không ném lỗi', () => {
     const store = new Map<string, string>();
     vi.stubGlobal('window', {
       sessionStorage: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v) },
     });
-    const notice = { code: 'CLOSED_BETA_PENDING', version: 'v1' } as const;
-    expect(isStatusNoticeDismissed(notice)).toBe(false);
-    saveStatusNoticeDismissed(notice);
-    expect(isStatusNoticeDismissed(notice)).toBe(true);
-    expect(isStatusNoticeDismissed({ ...notice, version: 'v2' })).toBe(false);
+    const notice = { code: 'token_below_threshold', version: '2026-11-16T03:04:05.123Z' } as const;
+    expect(isStatusNoticeDismissed(ORG, notice)).toBe(false);
+    saveStatusNoticeDismissed(ORG, notice);
+    expect(isStatusNoticeDismissed(ORG, notice)).toBe(true);
+    // Lần vượt ngưỡng mới (version mới) hiện lại; BTC khác cùng mã, cùng version không bị ẩn theo.
+    expect(isStatusNoticeDismissed(ORG, { ...notice, version: '2026-11-16T05:00:00.000Z' })).toBe(false);
+    expect(isStatusNoticeDismissed(OTHER_ORG, notice)).toBe(false);
 
     vi.stubGlobal('window', {
       sessionStorage: {
@@ -152,8 +159,43 @@ describe('đóng banner theo code + version', () => {
         },
       },
     });
-    expect(isStatusNoticeDismissed(notice)).toBe(false);
-    expect(() => saveStatusNoticeDismissed(notice)).not.toThrow();
+    expect(isStatusNoticeDismissed(ORG, notice)).toBe(false);
+    expect(() => saveStatusNoticeDismissed(ORG, notice)).not.toThrow();
+  });
+});
+
+describe('Token dưới ngưỡng cảnh báo (Story 4.5-b)', () => {
+  const ORG = '019a3b2c-5678-7abc-8def-0123456789ab';
+
+  it('câu chốt trong spec; "Mua thêm Token" mở portal Tingee (liên kết ngoài, tab mới)', () => {
+    const content = statusNoticeContent('token_below_threshold', 'owner');
+    expect(content).toEqual({
+      title: 'Token khả dụng dưới ngưỡng cảnh báo.',
+      description: 'Mua thêm Token trước khi Sự kiện có phí bị Tạm ngừng bán.',
+      action: { label: 'Mua thêm Token', urlKey: 'tingeePortalUrl' },
+    });
+    expect(statusNoticeLink(content.action!, { data: { tingeePortalUrl: 'https://baas.tingee.vn' } }, ORG)).toEqual({
+      label: 'Mua thêm Token',
+      href: 'https://baas.tingee.vn',
+      external: true,
+    });
+    expect(statusNoticeLink(content.action!, { data: {} }, ORG)).toBeNull();
+  });
+
+  it('thông báo api trả được web nhận (mã mới có trong contracts)', () => {
+    const parsed = StatusNoticesResponse.parse([
+      {
+        code: 'token_below_threshold',
+        severity: 'warning',
+        blocking: false,
+        dismissible: true,
+        scope: 'organization',
+        audience: ['owner'],
+        data: { tingeePortalUrl: 'https://baas.tingee.vn' },
+        version: '2026-11-16T03:04:05.123Z',
+      },
+    ]);
+    expect(parsed.map((n) => n.code)).toEqual(['token_below_threshold']);
   });
 });
 

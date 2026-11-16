@@ -20,6 +20,8 @@ export const Permission = {
   PAYOUT_ACCOUNT_MANAGE: 'payout_account.manage',
   TOKEN_VIEW: 'token.view',
   TOKEN_PURCHASE: 'token.purchase',
+  /** Đặt hoặc tắt ngưỡng cảnh báo Token (Story 4.5-b): chỉ Owner. */
+  TOKEN_ALERT_MANAGE: 'token_alert.manage',
   EVENTS_MANAGE: 'events.manage',
   ORDERS_VIEW: 'orders.view',
   REVIEW_QUEUE_HANDLE: 'review_queue.handle',
@@ -32,7 +34,7 @@ export const permissionSchema = z.enum(Permission);
 
 /**
  * Ma trận quyền FR-4: vai → các quyền có. Owner có mọi quyền. Admin liệt kê tường minh (thiếu liên kết/đổi tài khoản
- * nhận tiền, mời/xóa thành viên, mua Token), để quyền mới thêm sau không tự thuộc về Admin.
+ * nhận tiền, mời/xóa thành viên, mua Token, đặt ngưỡng cảnh báo Token), để quyền mới thêm sau không tự thuộc về Admin.
  */
 export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   owner: Object.values(Permission),
@@ -554,16 +556,63 @@ export const TokenReading = z.discriminatedUnion('status', [
 ]);
 export type TokenReading = z.infer<typeof TokenReading>;
 
+// ---------------------------------------------------------------------------------------------------------------
+// Cảnh báo Token (Story 4.5-b): Owner đặt ngưỡng; Token khả dụng xuống dưới ngưỡng thì email + banner cho Owner
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Ngưỡng cảnh báo Token nhỏ nhất và lớn nhất (số Token nguyên; CHECK của DB cùng khoảng này). */
+export const TOKEN_ALERT_THRESHOLD_MIN = 1;
+export const TOKEN_ALERT_THRESHOLD_MAX = 1_000_000_000_000;
+
+/** Ngưỡng cảnh báo Token: số nguyên từ `TOKEN_ALERT_THRESHOLD_MIN` tới `TOKEN_ALERT_THRESHOLD_MAX`. */
+export const TokenAlertThreshold = z.number().int().min(TOKEN_ALERT_THRESHOLD_MIN).max(TOKEN_ALERT_THRESHOLD_MAX);
+
+/**
+ * `PUT /v1/orgs/:orgId/token/alert-threshold` (chỉ Owner, `token_alert.manage`): đặt ngưỡng, hoặc `null` để tắt cảnh
+ * báo. Trường bắt buộc (thiếu → 400); số lẻ, chuỗi, ngoài khoảng → 400. Trả `TokenAlert` sau khi lưu.
+ */
+export const TokenAlertThresholdInput = z.object({ threshold: TokenAlertThreshold.nullable() });
+export type TokenAlertThresholdInput = z.infer<typeof TokenAlertThresholdInput>;
+
+/**
+ * Trạng thái cảnh báo Token của BTC: `threshold` ngưỡng Owner đặt (`null`: chưa đặt / đã tắt), `belowThresholdSince`
+ * lúc Token khả dụng xuống dưới ngưỡng lần gần nhất (đồng hồ DB; `null`: không dưới ngưỡng). Mỗi lần vượt ngưỡng là một
+ * mốc mới: khóa chống gửi lặp email và `version` của banner. `belowThresholdSince` chỉ khác `null` khi có ngưỡng.
+ */
+export const TokenAlert = z
+  .object({
+    threshold: TokenAlertThreshold.nullable(),
+    belowThresholdSince: z.iso.datetime().nullable(),
+  })
+  .refine((alert) => alert.belowThresholdSince === null || alert.threshold !== null, {
+    message: 'belowThresholdSince chỉ có khi đã đặt ngưỡng',
+    path: ['belowThresholdSince'],
+  });
+export type TokenAlert = z.infer<typeof TokenAlert>;
+
+/**
+ * Lịch job dò Token của vai worker (cron, UTC): đầu mỗi giờ, tuần tự qua các BTC có ngưỡng và dịch vụ thanh toán
+ * `active`; mỗi BTC đọc Token như `GET …/token` rồi đánh giá ngưỡng.
+ */
+export const TOKEN_ALERT_SCAN_CRON = '0 * * * *';
+
 /**
  * `GET /v1/orgs/:orgId/token` (Owner và Admin, `token.view`): một lần đọc Token bằng key của tài khoản nhận tiền mặc
  * định (timeout 3 giây, không retry, không lưu). `tingeePortalUrl` (portal Tingee nơi mua Token, ứng với môi trường
- * Tingee mà api đang gọi) chỉ có khi người gọi có `token.purchase` (Owner); Tickee không bán Token.
+ * Tingee mà api đang gọi) chỉ có khi người gọi có `token.purchase` (Owner); Tickee không bán Token. `alert` (Story
+ * 4.5-b): trạng thái cảnh báo sau lần đánh giá ngưỡng của chính request này (đọc `ok` mới đánh giá; đọc không được thì
+ * giữ nguyên trạng thái đã lưu).
  */
 export const TokenOverview = z.object({
   reading: TokenReading,
   tingeePortalUrl: z.string().optional(),
+  alert: TokenAlert,
 });
 export type TokenOverview = z.infer<typeof TokenOverview>;
 
 /** Đường API (sau `/v1`) của Token của BTC (GET): trả `TokenOverview`. */
 export const tokenApiPath = (organizationId: string): string => `/orgs/${encodeURIComponent(organizationId)}/token`;
+
+/** Đường API (sau `/v1`) của ngưỡng cảnh báo Token (PUT, chỉ Owner): nhận `TokenAlertThresholdInput`, trả `TokenAlert`. */
+export const tokenAlertThresholdApiPath = (organizationId: string): string =>
+  `${tokenApiPath(organizationId)}/alert-threshold`;

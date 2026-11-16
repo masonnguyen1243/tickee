@@ -3,7 +3,15 @@ import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
 import { apiError, me, mockIdentityApi, type Call, type Handler } from './identity-mock';
 import { fakeEventSource } from './live-mock';
-import { mockOrganizerApi, organization, ORG_ID, ORG_LIVE_URL, saleStatus, statusNotice } from './organizer-mock';
+import {
+  mockOrganizerApi,
+  organization,
+  ORG_ID,
+  ORG_LIVE_URL,
+  OTHER_ORG_ID,
+  saleStatus,
+  statusNotice,
+} from './organizer-mock';
 
 /*
  * Dải `status-banner` đầu vùng nội dung dashboard (Story 2.5, UX-DR8, AD-34) với API giả: web chỉ ánh xạ `code` sang
@@ -11,6 +19,8 @@ import { mockOrganizerApi, organization, ORG_ID, ORG_LIVE_URL, saleStatus, statu
  * Story 4.2-b: bốn banner dịch vụ thanh toán theo vai (liên kết ngoài mở tab mới), tự cập nhật qua stream cấp BTC
  * `…/live` (giả bằng `EventSource` điều khiển được) hoặc polling 10 giây khi không có SSE. Story 4.2-c: nhãn trạng thái
  * bán của thẻ Sự kiện (`GET …/event-sale-status`) đổi theo cùng tín hiệu, dự phòng bằng nhãn tính ở máy khách.
+ * Story 4.5-b: banner warning "Token khả dụng dưới ngưỡng cảnh báo." đóng được (khóa đóng theo BTC + `code` + `version`),
+ * hiện lại ở lần vượt ngưỡng mới.
  */
 
 const CONSENTED = '2026-10-29T01:02:03.000Z';
@@ -525,3 +535,72 @@ for (const [label, notice, title] of [
     expect(saleGets(calls).length).toBeGreaterThan(before);
   });
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Token dưới ngưỡng cảnh báo (Story 4.5-b)
+// ---------------------------------------------------------------------------------------------------------------
+
+const BELOW_TITLE = 'Token khả dụng dưới ngưỡng cảnh báo.';
+const BELOW_TEXT = 'Mua thêm Token trước khi Sự kiện có phí bị Tạm ngừng bán.';
+const belowNotice = (version: string) =>
+  statusNotice('token_below_threshold', {
+    dismissible: true,
+    audience: ['owner'],
+    data: { tingeePortalUrl: PORTAL },
+    version,
+  });
+
+test('Token dưới ngưỡng (Owner): warning đóng được, "Mua thêm Token" mở portal ở tab mới; đóng thì ẩn tới hết phiên, lần vượt mới hiện lại', async ({
+  page,
+}) => {
+  let version = '2026-11-16T03:04:05.123Z';
+  await openDashboard(page, () => [belowNotice(version)]);
+  await expect(banners(page)).toHaveCount(1);
+  const banner = banners(page).first();
+  await expect(banner).toHaveAttribute('data-tone', 'warning');
+  await expect(banner).toContainText(BELOW_TITLE);
+  await expect(banner).toContainText(BELOW_TEXT);
+  const action = banner.getByRole('link', { name: 'Mua thêm Token' });
+  await expect(action).toHaveAttribute('href', PORTAL);
+  await expect(action).toHaveAttribute('target', '_blank');
+  await expect(action).toHaveAttribute('rel', 'noopener noreferrer');
+
+  await closeButtons(page).click();
+  await expect(banners(page)).toHaveCount(0);
+  // Khóa đóng có id BTC.
+  expect(await page.evaluate(() => Object.keys(window.sessionStorage))).toContain(
+    `tickee:thong-bao-da-dong:${ORG_ID}:token_below_threshold:${version}`,
+  );
+
+  await page.reload();
+  await expect(heading(page)).toBeVisible();
+  await expect(banners(page)).toHaveCount(0);
+
+  // Về trên ngưỡng rồi xuống lại: mốc mới → hiện lại dù đã đóng.
+  version = '2026-11-16T05:06:07.890Z';
+  await page.reload();
+  await expect(heading(page)).toBeVisible();
+  await expect(banners(page)).toHaveCount(1);
+  await expect(banners(page).first()).toContainText(BELOW_TITLE);
+});
+
+test('Token dưới ngưỡng: đóng ở BTC khác (cùng mã, cùng version) không ẩn banner của BTC này; xếp sau banner chặn bán', async ({
+  page,
+}) => {
+  const version = '2026-11-16T03:04:05.123Z';
+  // Khóa đã đóng của BTC khác, và khóa dạng cũ không có id BTC (cùng mã, cùng version): không khóa nào ẩn banner này.
+  await page.addInitScript(
+    (keys) => {
+      for (const key of keys) window.sessionStorage.setItem(key, '1');
+    },
+    [
+      `tickee:thong-bao-da-dong:${OTHER_ORG_ID}:token_below_threshold:${version}`,
+      `tickee:thong-bao-da-dong:token_below_threshold:${version}`,
+    ],
+  );
+  await openDashboard(page, () => [statusNotice('PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED'), belowNotice(version)]);
+  await expect(banners(page)).toHaveCount(2);
+  await expect(banners(page).nth(0)).toHaveAttribute('data-tone', 'danger');
+  await expect(banners(page).nth(1)).toContainText(BELOW_TITLE);
+  await expect(closeButtons(page)).toHaveCount(1);
+});
