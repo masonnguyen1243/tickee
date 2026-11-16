@@ -12,6 +12,8 @@ export {
   TINGEE_PAYMENT_LINK_TIMEOUT_MS,
   TINGEE_SERVICE_STATUS_TIMEOUT_MS,
   TINGEE_TIMEOUT_MS,
+  TINGEE_TOKEN_BALANCE_PATH,
+  TINGEE_TOKEN_BALANCE_TIMEOUT_MS,
   tingeeError,
   type CreateLinkAmbiguousReason,
   type MerchantServiceStatus,
@@ -20,6 +22,7 @@ export {
   type TingeeClient,
   type TingeeClientOptions,
   type TingeeCredential,
+  type TokenBalance,
 } from './tingee.client.js';
 export {
   createLinkServiceReasonOf,

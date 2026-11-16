@@ -14,7 +14,8 @@ import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
  * (`emptyOverview`), SSE `GET /orgs/:id/events/:eventId/overview/live` → 503 (không realtime: polling 10 giây), SSE cấp
  * BTC `GET /orgs/:id/live` (khung dashboard luôn mở, Story 4.2-b) → 503 (dải banner polling 10 giây),
  * `GET /orgs/:id/review-items/summary` (badge "Cần xử lý" của khung, Story 4.3) → `{ openCount: 0 }`,
- * `GET /orgs/:id/review-items` (trang Cần xử lý) → hàng trống không lọc; lời gọi không có handler → 500.
+ * `GET /orgs/:id/review-items` (trang Cần xử lý) → hàng trống không lọc, `GET /orgs/:id/token` (trang Token, Story 4.5-a)
+ * → BTC chưa có tài khoản nhận tiền mặc định, không có link portal; lời gọi không có handler → 500.
  */
 
 export const ORG_ID = '019a3b2c-5678-7abc-8def-0123456789ab';
@@ -32,12 +33,28 @@ const ORG_LIVE_KEY = /^GET \/orgs\/[^/]+\/live$/;
 const SALE_STATUS_KEY = /^GET \/orgs\/[^/]+\/event-sale-status$/;
 const REVIEW_SUMMARY_KEY = /^GET \/orgs\/[^/]+\/review-items\/summary$/;
 const REVIEW_ITEMS_KEY = /^GET \/orgs\/[^/]+\/review-items$/;
+const TOKEN_KEY = /^GET \/orgs\/[^/]+\/token$/;
 
 /** Đường SSE cấp BTC (Story 4.2-b), để `fakeEventSource` chọn đúng stream giữa stream của khung và stream của trang. */
 export const ORG_LIVE_URL = /\/v1\/orgs\/[^/]+\/live$/;
 
 /** `EventOverview` của Sự kiện chưa có Đơn nào (Story 3.11), không có mục Cần xử lý (Story 4.3). */
 export const emptyOverview = () => ({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: [], openReviewCount: 0 });
+
+/** Một lần đọc Token được (`TokenReading` `ok`, Story 4.5-a): khả dụng = số dư + hạn mức như api. */
+export const tokenReading = (balance: number, creditLimit: number, readAt = '2026-11-16T03:04:05.000Z') => ({
+  status: 'ok',
+  balance,
+  creditLimit,
+  available: balance + creditLimit,
+  readAt,
+});
+
+/** `TokenOverview` (Story 4.5-a): `tingeePortalUrl` chỉ khi truyền (api chỉ trả cho Owner). */
+export const tokenOverview = (reading: unknown = { status: 'no_payout_account' }, tingeePortalUrl?: string) => ({
+  reading,
+  ...(tingeePortalUrl === undefined ? {} : { tingeePortalUrl }),
+});
 
 /** Bốn điều kiện mở bán luôn có (Story 2.10). */
 export const ALWAYS_CONDITIONS = ['REFUND_POLICY', 'HAS_TICKET_TYPE', 'EVENT_NOT_ENDED', 'ORGANIZATION_NOT_LOCKED'];
@@ -69,6 +86,8 @@ function defaultHandler(key: string): Handler | undefined {
   // Khung dashboard luôn tải số mục Cần xử lý cho badge (Story 4.3): mặc định 0 (không badge).
   if (REVIEW_SUMMARY_KEY.test(key)) return () => ({ status: 200, body: { openCount: 0 } });
   if (REVIEW_ITEMS_KEY.test(key)) return () => ({ status: 200, body: { event: null, items: [] } });
+  // Trang Token (Story 4.5-a): mặc định chưa có tài khoản nhận tiền mặc định (api không gọi Tingee), không link portal.
+  if (TOKEN_KEY.test(key)) return () => ({ status: 200, body: tokenOverview() });
   return undefined;
 }
 

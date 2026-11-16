@@ -19,6 +19,8 @@ import {
   TINGEE_PAYMENT_LINK_TIMEOUT_MS,
   TINGEE_SERVICE_STATUS_TIMEOUT_MS,
   TINGEE_TIMEOUT_MS,
+  TINGEE_TOKEN_BALANCE_PATH,
+  TINGEE_TOKEN_BALANCE_TIMEOUT_MS,
   tingeePortalUrl,
   type PaymentLinkInput,
   type TingeeCredential,
@@ -27,10 +29,12 @@ import { AppError } from '../../src/platform/http/index.js';
 import {
   ACCOUNTS_PATH,
   CREATE_LINK_PATH,
+  FAKE_TOKEN_BALANCE,
   fakeAccount,
   GET_ORDER_PATH,
   ORDER_NOT_FOUND_CODE,
   startTingeeFake,
+  TOKEN_BALANCE_PATH,
   type FakeAccount,
   type TingeeFake,
 } from '../tingee-fake/server.js';
@@ -629,6 +633,96 @@ describe('dịch vụ thanh toán của BTC (Story 4.2, hợp đồng tạm)', (
     const started = Date.now();
     expect(await quick.getMerchantServiceStatus(A)).toEqual({ status: 'unknown' });
     expect(Date.now() - started).toBeLessThan(3_000);
+  });
+});
+
+describe('HttpTingeeClient.getTokenBalance (Story 4.5-a, hợp đồng tạm)', () => {
+  beforeEach(() => {
+    const merchant = fake.merchant(A.clientId);
+    merchant.tokenReplies = [];
+    merchant.token = undefined;
+  });
+
+  it('đúng đường dẫn, body {} (không merchantId), ký bằng key của BTC; 00 → số dư và hạn mức (mặc định của fake 1.200 / 500)', async () => {
+    expect(TINGEE_TOKEN_BALANCE_PATH).toBe(TOKEN_BALANCE_PATH);
+    expect(await client.getTokenBalance(A)).toEqual({ status: 'ok', ...FAKE_TOKEN_BALANCE });
+    expect(FAKE_TOKEN_BALANCE).toEqual({ balance: 1_200, creditLimit: 500 });
+    const [req] = fake.calls(TOKEN_BALANCE_PATH);
+    expect(req).toMatchObject({ clientId: A.clientId, signatureValid: true, body: {} });
+    expect(req!.timestamp).toMatch(/^\d{17}$/);
+    // Mỗi merchant một số dư; số dư âm được, hạn mức 0 được.
+    fake.merchant(A.clientId).token = { balance: -200, creditLimit: 500 };
+    expect(await client.getTokenBalance(A)).toEqual({ status: 'ok', balance: -200, creditLimit: 500 });
+    fake.merchant(B.clientId).token = { balance: 0, creditLimit: 0 };
+    expect(await client.getTokenBalance(B)).toEqual({ status: 'ok', balance: 0, creditLimit: 0 });
+  });
+
+  it('mọi mã key sai và mã từ chối khác → unavailable, không ném (không phải lỗi miền)', async () => {
+    expect(await client.getTokenBalance({ clientId: 'khong-co', secretToken: 'x' })).toEqual({ status: 'unavailable' });
+    expect(await client.getTokenBalance({ clientId: A.clientId, secretToken: 'sai-secret' })).toEqual({
+      status: 'unavailable',
+    });
+    expect(await client.getTokenBalance(FORBIDDEN)).toEqual({ status: 'unavailable' });
+    expect(await client.getTokenBalance(SUSPENDED)).toEqual({ status: 'unavailable' });
+    for (const code of ['1133', '1009', '1033', '402', '1006']) {
+      fake.merchant(A.clientId).tokenReplies = [{ code }];
+      expect(await client.getTokenBalance(A), code).toEqual({ status: 'unavailable' });
+    }
+  });
+
+  it('HTTP lỗi (kể cả 00 kèm HTTP lỗi), lỗi mạng, JSON hỏng, sai dạng (thiếu trường, số lẻ, chuỗi, hạn mức âm) → unavailable', async () => {
+    expect(await client.getTokenBalance(BROKEN)).toEqual({ status: 'unavailable' });
+    const ok = { balance: 1_200, creditLimit: 500 };
+    fake.merchant(A.clientId).tokenReplies = [
+      { code: '00', httpStatus: 500, data: ok },
+      { code: '00', data: { balance: 1_200 } },
+      { code: '00', data: { creditLimit: 500 } },
+      { code: '00', data: { balance: 1_200.5, creditLimit: 500 } },
+      { code: '00', data: { balance: '1200', creditLimit: 500 } },
+      { code: '00', data: { balance: 1_200, creditLimit: -1 } },
+      { code: '00', data: null },
+    ];
+    for (let i = 0; i < 7; i++) expect(await client.getTokenBalance(A), String(i)).toEqual({ status: 'unavailable' });
+    expect(await new HttpTingeeClient({ baseUrl: 'http://127.0.0.1:1' }).getTokenBalance(A)).toEqual({
+      status: 'unavailable',
+    });
+    await withServerOnce(200, '<html>lỗi</html>', async (c) => {
+      expect(await c.getTokenBalance(A)).toEqual({ status: 'unavailable' });
+    });
+    await withServerOnce(200, JSON.stringify({ message: 'thiếu code', data: ok }), async (c) => {
+      expect(await c.getTokenBalance(A)).toEqual({ status: 'unavailable' });
+    });
+  });
+
+  it('timeout riêng 3 giây (mặc định): treo → unavailable theo timeout đọc Token', async () => {
+    expect(TINGEE_TOKEN_BALANCE_TIMEOUT_MS).toBe(3_000);
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    await new HttpTingeeClient({ baseUrl: fake.url }).getTokenBalance(A);
+    expect(timeout).toHaveBeenCalledTimes(1);
+    expect(timeout).toHaveBeenCalledWith(3_000);
+    timeout.mockRestore();
+
+    const quick = new HttpTingeeClient({ baseUrl: fake.url, timeoutMs: 60_000, tokenBalanceTimeoutMs: 300 });
+    fake.merchant(A.clientId).tokenReplies = ['hang'];
+    let started = Date.now();
+    expect(await quick.getTokenBalance(A)).toEqual({ status: 'unavailable' });
+    expect(Date.now() - started).toBeLessThan(3_000);
+    started = Date.now();
+    expect(await quick.getTokenBalance(HANGING)).toEqual({ status: 'unavailable' });
+    expect(Date.now() - started).toBeLessThan(3_000);
+  });
+
+  it('log không có số dư, hạn mức hay secret', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    const log = vi.spyOn(Logger.prototype, 'log');
+    fake.merchant(A.clientId).token = { balance: 987_654, creditLimit: 123_457 };
+    fake.merchant(A.clientId).tokenReplies = [{ code: '00', data: { balance: 987_654.5, creditLimit: 123_457 } }, { code: '1133' }];
+    expect(await client.getTokenBalance(A)).toEqual({ status: 'unavailable' });
+    expect(await client.getTokenBalance(A)).toEqual({ status: 'unavailable' });
+    expect(await client.getTokenBalance(A)).toEqual({ status: 'ok', balance: 987_654, creditLimit: 123_457 });
+    const logged = JSON.stringify([...warn.mock.calls, ...log.mock.calls]);
+    expect(warn).toHaveBeenCalled();
+    for (const value of ['987654', '123457', A.secretToken]) expect(logged).not.toContain(value);
   });
 });
 

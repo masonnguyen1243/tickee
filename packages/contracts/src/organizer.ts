@@ -509,3 +509,61 @@ export const PayoutAccountOverview = z.object({
   paymentService: PaymentServiceState,
 });
 export type PayoutAccountOverview = z.infer<typeof PayoutAccountOverview>;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Token của BTC (Story 4.5-a): số dư và hạn mức đọc thẳng từ Tingee bằng key của BTC mỗi lần xem, không lưu
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Kết quả một lần đọc Token của BTC (`TokenReading.status`):
+ * - `ok`: Tingee trả số dư và hạn mức;
+ * - `unavailable`: chưa đọc được (Tingee quá 3 giây, lỗi, phản hồi sai dạng, từ chối key; không giải mã được key);
+ * - `no_payout_account`: BTC chưa có tài khoản nhận tiền mặc định (không có key để đọc), api không gọi Tingee.
+ */
+export const TokenReadingStatus = {
+  OK: 'ok',
+  UNAVAILABLE: 'unavailable',
+  NO_PAYOUT_ACCOUNT: 'no_payout_account',
+} as const;
+export type TokenReadingStatus = (typeof TokenReadingStatus)[keyof typeof TokenReadingStatus];
+
+/**
+ * Token của BTC đọc được từ Tingee: `balance` số dư (số nguyên, âm khi đã dùng vào hạn mức), `creditLimit` hạn mức trả
+ * sau (số nguyên ≥ 0), `available` Token khả dụng = `balance + creditLimit` (api tính), `readAt` lúc api đọc (đồng hồ
+ * server). Không lưu ở đâu cả: mỗi lần xem là một lần đọc mới.
+ */
+export const TokenBalanceReading = z
+  .object({
+    status: z.literal(TokenReadingStatus.OK),
+    balance: z.number().int(),
+    creditLimit: z.number().int().nonnegative(),
+    available: z.number().int(),
+    readAt: z.iso.datetime(),
+  })
+  .refine((reading) => reading.available === reading.balance + reading.creditLimit, {
+    message: 'available = balance + creditLimit',
+    path: ['available'],
+  });
+export type TokenBalanceReading = z.infer<typeof TokenBalanceReading>;
+
+/** Kết quả đọc Token (`TokenReadingStatus`): số đọc được, hoặc lý do không có số. */
+export const TokenReading = z.discriminatedUnion('status', [
+  TokenBalanceReading,
+  z.object({ status: z.literal(TokenReadingStatus.UNAVAILABLE) }),
+  z.object({ status: z.literal(TokenReadingStatus.NO_PAYOUT_ACCOUNT) }),
+]);
+export type TokenReading = z.infer<typeof TokenReading>;
+
+/**
+ * `GET /v1/orgs/:orgId/token` (Owner và Admin, `token.view`): một lần đọc Token bằng key của tài khoản nhận tiền mặc
+ * định (timeout 3 giây, không retry, không lưu). `tingeePortalUrl` (portal Tingee nơi mua Token, ứng với môi trường
+ * Tingee mà api đang gọi) chỉ có khi người gọi có `token.purchase` (Owner); Tickee không bán Token.
+ */
+export const TokenOverview = z.object({
+  reading: TokenReading,
+  tingeePortalUrl: z.string().optional(),
+});
+export type TokenOverview = z.infer<typeof TokenOverview>;
+
+/** Đường API (sau `/v1`) của Token của BTC (GET): trả `TokenOverview`. */
+export const tokenApiPath = (organizationId: string): string => `/orgs/${encodeURIComponent(organizationId)}/token`;

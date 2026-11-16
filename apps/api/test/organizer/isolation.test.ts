@@ -121,6 +121,8 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('POST /v1/orgs/:orgId/review-items/:itemId/match');
     // Story 4.4-b: Đơn ứng viên của "Ghép với Đơn" (`reporting`).
     expect(guarded).toContain('GET /v1/orgs/:orgId/review-items/:itemId/match-candidates');
+    // Story 4.5-a: trang Token của `organizer` (Owner và Admin, `token.view`).
+    expect(guarded).toContain('GET /v1/orgs/:orgId/token');
     const permissionOf = (path: string, method = 'GET') =>
       routes.find((r) => r.method === method && r.path === path)?.permission;
     for (const path of ['', '/summary', '/:itemId', '/:itemId/match-candidates']) {
@@ -137,6 +139,7 @@ describe('cách ly BTC', () => {
     expect(permissionOf('/v1/orgs/:orgId/live')).toBe(Permission.ORG_READ);
     expect(permissionOf('/v1/orgs/:orgId/notices')).toBe(Permission.ORG_READ);
     expect(permissionOf('/v1/orgs/:orgId/event-sale-status')).toBe(Permission.EVENTS_MANAGE);
+    expect(permissionOf('/v1/orgs/:orgId/token')).toBe(Permission.TOKEN_VIEW);
     expect(routes.find((r) => r.method === 'POST' && r.path === '/v1/orgs/:orgId/payment-service/check')?.permission).toBe(
       Permission.PAYOUT_ACCOUNT_MANAGE,
     );

@@ -402,20 +402,22 @@ test('danh sách Sự kiện trống: "Tạo Sự kiện" → wizard bước 1, 
   await expect(tabBar(page).getByRole('link', { name: 'Sự kiện' })).toHaveAttribute('aria-current', 'page');
 });
 
-test('mục chưa có trang: trang tạm "Sắp có" trong khung, mục đang chọn có aria-current; Cần xử lý là trang thật', async ({
+test('mục chưa có trang: trang tạm "Sắp có" trong khung, mục đang chọn có aria-current; Cần xử lý và Token là trang thật', async ({
   page,
 }) => {
   await page.setViewportSize(DESKTOP);
-  await openDashboard(page, { path: `${base}/token` });
-  await expect(page.getByRole('heading', { name: 'Token' })).toBeVisible();
-  await expect(page.getByText('Sắp có', { exact: true })).toBeVisible();
-  await expect(sidebar(page).getByRole('link', { name: 'Token' })).toHaveAttribute('aria-current', 'page');
-
-  await sidebar(page).getByRole('link', { name: 'Cài đặt', exact: true }).click();
-  await page.waitForURL(`**${base}/cai-dat`);
+  await openDashboard(page, { path: `${base}/cai-dat` });
   await expect(page.getByRole('heading', { name: 'Cài đặt', exact: true })).toBeVisible();
   await expect(page.getByText('Sắp có', { exact: true })).toBeVisible();
   await expect(sidebar(page).getByRole('link', { name: 'Cài đặt', exact: true })).toHaveAttribute('aria-current', 'page');
+
+  // Story 4.5-a: "Token" là trang thật (API giả mặc định: BTC chưa có tài khoản nhận tiền mặc định), không còn "Sắp có".
+  await sidebar(page).getByRole('link', { name: 'Token', exact: true }).click();
+  await page.waitForURL(`**${base}/token`);
+  await expect(page.getByRole('heading', { name: 'Token', exact: true, level: 1 })).toBeVisible();
+  await expect(page.getByText('Chưa có tài khoản nhận tiền mặc định')).toBeVisible();
+  await expect(page.getByText('Sắp có', { exact: true })).toHaveCount(0);
+  await expect(sidebar(page).getByRole('link', { name: 'Token' })).toHaveAttribute('aria-current', 'page');
 
   // Story 4.3: "Cần xử lý" là trang thật (hàng trống), không còn "Sắp có".
   await sidebar(page).getByRole('link', { name: 'Cần xử lý', exact: true }).click();
@@ -567,7 +569,7 @@ test('401 ở trang con → đăng nhập kèm returnTo là trang đang mở (gi
   await page.waitForURL(`**/dang-nhap?returnTo=${encodeURIComponent(`${base}/cai-dat?muc=lien-he#sdt`)}`);
 });
 
-test('320px không cuộn ngang: trang Sự kiện, Sheet "Thêm" + switcher, trang tạm và trang chặn Admin', async ({ page }) => {
+test('320px không cuộn ngang: trang Sự kiện, Sheet "Thêm" + switcher, trang tạm, Token và trang chặn Admin', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 640 });
   await openDashboard(page, {
     role: 'admin',
@@ -586,7 +588,7 @@ test('320px không cuộn ngang: trang Sự kiện, Sheet "Thêm" + switcher, tr
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
 
-  for (const path of [`${base}/token`, `${base}/thanh-vien`]) {
+  for (const path of [`${base}/cai-dat`, `${base}/token`, `${base}/thanh-vien`]) {
     await page.goto(path);
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);

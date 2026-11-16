@@ -12,6 +12,8 @@ import {
   PayoutAccountOptions,
   PayoutAccountOverview,
   TingeeKeyPreview,
+  TokenOverview,
+  tokenApiPath,
   type ConnectTingeeRequest,
   type CreateOrganizationRequest,
   type InviteAdminRequest,
@@ -36,6 +38,8 @@ export const payoutAccountQueryKey = (orgId: string) => ['organizer', 'payout-ac
  */
 export const payoutAccountOptionsQueryKey = (orgId: string, credentialId: string) =>
   ['organizer', 'payout-account', orgId, 'options', credentialId] as const;
+/** Một lần đọc Token của BTC từ Tingee (Story 4.5-a; mỗi lần tải là một lời gọi Tingee). */
+export const tokenQueryKey = (orgId: string) => ['organizer', 'token', orgId] as const;
 
 const json = (method: 'POST', body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 const orgPath = (orgId: string) => `/orgs/${encodeURIComponent(orgId)}`;
@@ -95,6 +99,13 @@ export const fetchPayoutAccount = (orgId: string, signal?: AbortSignal) =>
  */
 export const checkPaymentService = (orgId: string) =>
   apiRequest(paymentServiceCheckApiPath(orgId), { schema: PaymentServiceCheckResult, init: { method: 'POST' } });
+
+/**
+ * Token của BTC (Story 4.5-a, Owner và Admin): api đọc số dư và hạn mức từ Tingee bằng key của tài khoản nhận tiền mặc
+ * định (không lưu); link portal Tingee chỉ có với Owner.
+ */
+export const fetchToken = (orgId: string, signal?: AbortSignal) =>
+  apiRequest(tokenApiPath(orgId), { schema: TokenOverview, init: { signal } });
 
 /** Kết nối API key Tingee của BTC: key đúng thì api lưu credential và trả danh sách tài khoản. */
 export const connectTingee = (orgId: string, body: ConnectTingeeRequest) =>

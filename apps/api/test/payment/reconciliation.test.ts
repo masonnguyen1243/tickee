@@ -97,6 +97,7 @@ function workerWith(enabled: boolean, secretBox?: SecretBox): ReconciliationWork
     listAccounts: (credential) => http.listAccounts(credential),
     createPaymentLink: (credential, input) => http.createPaymentLink(credential, input),
     getMerchantServiceStatus: (credential) => http.getMerchantServiceStatus(credential),
+    getTokenBalance: (credential) => http.getTokenBalance(credential),
     async getGatewayOrder(credential, orderId) {
       try {
         return await http.getGatewayOrder(credential, orderId);

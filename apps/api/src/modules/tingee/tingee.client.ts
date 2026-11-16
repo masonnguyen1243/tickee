@@ -56,6 +56,35 @@ export type MerchantServiceStatus =
   | { status: 'suspended'; reason: PaymentServiceReason }
   | { status: 'unknown' };
 
+/*
+ * Đọc Token của BTC (Story 4.5-a). HỢP ĐỒNG TẠM (quyết định của Mason 16/11/2026): Tingee chưa có API đọc Token bằng key
+ * merchant, nên đường dẫn, body và schema dưới đây là giả định, gom ở đúng một chỗ này (cùng route của Tingee fake):
+ * `POST TINGEE_TOKEN_BALANCE_PATH`, body `{}`, trả `{ code: '00', data: { balance, creditLimit } }` (`TokenBalanceData`).
+ * Trên UAT/PROD lời gọi này hiện luôn `unavailable` (trang Token hiện "Chưa đọc được số dư") tới khi Tingee xác nhận API
+ * và đổi adapter.
+ */
+
+/** Đường dẫn đọc Token (hợp đồng tạm của Story 4.5-a). */
+export const TINGEE_TOKEN_BALANCE_PATH = '/v1/merchant/get-token-balance';
+
+/** Timeout của lời gọi đọc Token: BTC đang chờ ở trang Token. */
+export const TINGEE_TOKEN_BALANCE_TIMEOUT_MS = 3_000;
+
+/**
+ * `data` của phản hồi đọc Token (hợp đồng tạm): `balance` số dư (số nguyên, có thể âm), `creditLimit` hạn mức âm hay
+ * trả sau (số nguyên ≥ 0). Số lẻ, chuỗi, thiếu trường → sai dạng.
+ */
+const TokenBalanceData = z.object({
+  balance: z.number().int(),
+  creditLimit: z.number().int().nonnegative(),
+});
+
+/**
+ * Kết quả đọc Token của BTC bằng key `credential` (Story 4.5-a): `ok` kèm số dư và hạn mức, hoặc `unavailable` (timeout,
+ * lỗi mạng, HTTP lỗi, `code` ≠ `'00'` kể cả mọi mã key sai, phản hồi sai dạng). Không lưu, không log số.
+ */
+export type TokenBalance = { status: 'ok'; balance: number; creditLimit: number } | { status: 'unavailable' };
+
 /**
  * API key của một BTC trên Tingee (`organizer` giải mã ngay trước khi gọi). Không bao giờ log, không giữ lâu hơn lời gọi.
  */
@@ -183,6 +212,12 @@ export interface TingeeClient {
    * → `unknown`. Không bao giờ ném. Có API thật thì chỉ sửa hàm này và Tingee fake.
    */
   getMerchantServiceStatus(credential: TingeeCredential): Promise<MerchantServiceStatus>;
+  /**
+   * Đọc số dư và hạn mức Token của BTC bằng key `credential` (Story 4.5-a, hợp đồng tạm `TINGEE_TOKEN_BALANCE_PATH`, body
+   * `{}`; timeout `TINGEE_TOKEN_BALANCE_TIMEOUT_MS`). Không bao giờ ném: lỗi nào cũng là `unavailable`, kể cả mã key sai
+   * (không phải lỗi miền: bên gọi không bật cờ dịch vụ thanh toán theo lời gọi này). Chỉ đọc, không retry.
+   */
+  getTokenBalance(credential: TingeeCredential): Promise<TokenBalance>;
 }
 
 export interface TingeeClientOptions {
@@ -195,6 +230,8 @@ export interface TingeeClientOptions {
   orderStatusTimeoutMs?: number;
   /** Timeout của lời gọi dò dịch vụ thanh toán; mặc định `TINGEE_SERVICE_STATUS_TIMEOUT_MS`. */
   serviceStatusTimeoutMs?: number;
+  /** Timeout của lời gọi đọc Token; mặc định `TINGEE_TOKEN_BALANCE_TIMEOUT_MS`. */
+  tokenBalanceTimeoutMs?: number;
   now?: () => Date;
 }
 
@@ -250,6 +287,7 @@ export class HttpTingeeClient implements TingeeClient {
   private readonly paymentLinkTimeoutMs: number;
   private readonly orderStatusTimeoutMs: number;
   private readonly serviceStatusTimeoutMs: number;
+  private readonly tokenBalanceTimeoutMs: number;
   private readonly now: () => Date;
 
   constructor(private readonly options: TingeeClientOptions) {
@@ -257,6 +295,7 @@ export class HttpTingeeClient implements TingeeClient {
     this.paymentLinkTimeoutMs = options.paymentLinkTimeoutMs ?? TINGEE_PAYMENT_LINK_TIMEOUT_MS;
     this.orderStatusTimeoutMs = options.orderStatusTimeoutMs ?? TINGEE_ORDER_STATUS_TIMEOUT_MS;
     this.serviceStatusTimeoutMs = options.serviceStatusTimeoutMs ?? TINGEE_SERVICE_STATUS_TIMEOUT_MS;
+    this.tokenBalanceTimeoutMs = options.tokenBalanceTimeoutMs ?? TINGEE_TOKEN_BALANCE_TIMEOUT_MS;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -371,6 +410,35 @@ export class HttpTingeeClient implements TingeeClient {
         : paymentServiceReasonOf(envelope.code);
     this.logger.warn({ path, httpStatus, tingeeCode: envelope.code, serviceReason: reason }, 'Dò dịch vụ: Tingee từ chối');
     return reason ? { status: 'suspended', reason } : { status: 'unknown' };
+  }
+
+  /**
+   * Hợp đồng tạm (Story 4.5-a): `TINGEE_TOKEN_BALANCE_PATH`, body `{}`, `data` theo `TokenBalanceData`. Chỉ log đường
+   * dẫn, loại lỗi, HTTP status và mã Tingee; không bao giờ log credential, `message`, `data` hay số dư.
+   */
+  async getTokenBalance(credential: TingeeCredential): Promise<TokenBalance> {
+    const path = TINGEE_TOKEN_BALANCE_PATH;
+    const unavailable = { status: 'unavailable' } as const;
+    const sent = await this.send(credential, path, {}, this.tokenBalanceTimeoutMs);
+    if (sent.kind === 'failed') {
+      this.logger.warn({ path, reason: sent.reason, httpStatus: sent.httpStatus }, 'Đọc Token: không gọi được Tingee');
+      return unavailable;
+    }
+    const { envelope, httpStatus } = sent;
+    if (!envelope || httpStatus < 200 || httpStatus >= 300) {
+      this.logger.warn({ path, httpStatus, tingeeCode: envelope?.code ?? null }, 'Đọc Token: Tingee trả lỗi HTTP');
+      return unavailable;
+    }
+    if (envelope.code !== '00') {
+      this.logger.warn({ path, httpStatus, tingeeCode: envelope.code }, 'Đọc Token: Tingee từ chối');
+      return unavailable;
+    }
+    const data = TokenBalanceData.safeParse(envelope.data);
+    if (!data.success) {
+      this.logger.warn({ path }, 'Đọc Token: dữ liệu Tingee sai dạng');
+      return unavailable;
+    }
+    return { status: 'ok', balance: data.data.balance, creditLimit: data.data.creditLimit };
   }
 
   /** Gửi một request ký bằng credential của BTC; trả `data` khi `code === '00'`, không thì ném lỗi miền. */

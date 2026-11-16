@@ -22,6 +22,8 @@ import {
 import { PayoutAccountController } from './payout-account.controller.js';
 import { PAYOUT_ACCOUNT_SETTINGS, PayoutAccountService, payoutAccountSettings } from './payout-account.service.js';
 import { DefaultPayoutQueues } from './payout-default-jobs.js';
+import { TokenController } from './token.controller.js';
+import { TOKEN_SETTINGS, TokenService, tokenSettings } from './token.service.js';
 
 /**
  * Cấu hình của `organizer` (env vai api): gốc URL IPN, môi trường Tingee (link portal) và khóa mã hóa Secret Token
@@ -34,7 +36,7 @@ export type OrganizerConfig = Pick<ApiConfig, 'API_PUBLIC_URL' | 'TINGEE_BASE_UR
  * phải import sau `IdentityModule` để chạy sau `SessionGuard` và `ConsentGuard`. Cần `DbModule` và `JobsModule`
  * (enqueue email mời Admin, Story 2.4; email cảnh báo đổi tài khoản nhận tiền mặc định, Story 2.13-a; email báo chuyển
  * quyền Owner, Story 2.14; job "đã mở lại" dịch vụ thanh toán, Story 4.2) và `TingeeModule` (đọc danh sách tài khoản
- * Tingee của BTC, Story 2.6; dò dịch vụ thanh toán, Story 4.2) ở gốc DI.
+ * Tingee của BTC, Story 2.6; dò dịch vụ thanh toán, Story 4.2; đọc Token, Story 4.5-a) ở gốc DI.
  */
 @Module({})
 export class OrganizerModule {
@@ -48,6 +50,7 @@ export class OrganizerModule {
         InvitationsController,
         PayoutAccountController,
         PaymentServiceController,
+        TokenController,
       ],
       providers: [
         OrganizerService,
@@ -62,6 +65,9 @@ export class OrganizerModule {
         PaymentServiceProber,
         PaymentServiceService,
         { provide: PAYMENT_SERVICE_SETTINGS, useFactory: () => paymentServiceSettings(config) },
+        // Trang Token (Story 4.5-a): đọc số dư và hạn mức từ Tingee mỗi lần xem.
+        TokenService,
+        { provide: TOKEN_SETTINGS, useFactory: () => tokenSettings(config) },
         { provide: ACCESS_RESOLVER, useClass: MemberAccessResolver },
         { provide: APP_GUARD, useClass: PermissionGuard },
       ],
