@@ -5,3 +5,4 @@ export * from './ops-alert-jobs.js';
 export * from './ops-alert-scan.js';
 export * from './ops-alerts.js';
 export * from './schema.js';
+export * from './sliding-window.js';

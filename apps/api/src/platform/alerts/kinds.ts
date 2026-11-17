@@ -1,8 +1,10 @@
 /**
  * Loại cảnh báo vận hành (Story 4.6-b). Ba loại đầu trùng marker `alert` của dòng log `error` có sẵn ở mô-đun miền
  * (`PAYMENT_UNMATCHED_ALERT`, `PAYMENT_RECONCILIATION_STOPPED_ALERT`, `TICKET_QR_KEY_MISSING_ALERT`); hai loại kế do luật
- * pg-boss của job quét báo; hai loại cuối do lưới an toàn định kỳ của `ordering` báo (Story 4.6-c). Story 4.6-e thêm loại
- * nghiệp vụ.
+ * pg-boss của job quét báo; hai loại kế do lưới an toàn định kỳ của `ordering` báo (Story 4.6-c); ba loại cuối là luật
+ * nghiệp vụ (Story 4.6-e): hai loại vai api đếm trong bộ nhớ của tiến trình (IPN lỗi, p95 tạo link), một loại do luật của
+ * `ordering` trong job quét báo (tỉ lệ phát Vé giảm). Ba loại nghiệp vụ có một subject cố định
+ * (`OPS_ALERT_SYSTEM_SUBJECT`): một email mỗi `OPS_ALERT_COOLDOWN_MINUTES` cho cả hệ thống.
  */
 export const OpsAlertKind = {
   /** Tiền về tài khoản của BTC mà không khớp Đơn nào của BTC (IPN hay Đối soát bù). Subject: id `payment_events`. */
@@ -25,10 +27,31 @@ export const OpsAlertKind = {
    * `<ticketTypeId>:held=<held>/<tổng Vé của Đơn pending>:sold=<sold>/<số Vé đã phát>` (số liệu đổi thì là subject mới).
    */
   INVENTORY_DRIFT: 'inventory_drift',
+  /**
+   * Một instance api thấy từ `OPS_ALERT_IPN_FAILURES` IPN lỗi trong 5 phút (401 chữ ký/timestamp sai hay key cũ không
+   * ràng được Đơn, 400 chữ ký đúng mà body hỏng, 5xx). Subject: `OPS_ALERT_SYSTEM_SUBJECT`.
+   */
+  IPN_FAILURES: 'ipn_failures',
+  /**
+   * Một instance api thấy p95 thời lượng `create_link` trong 5 phút vượt `OPS_ALERT_LINK_P95_MS` (khi có từ
+   * `OPS_ALERT_LINK_MIN_SAMPLES` lần gọi). Subject: `OPS_ALERT_SYSTEM_SUBJECT`.
+   */
+  PAYMENT_LINK_SLOW: 'payment_link_slow',
+  /**
+   * Tỉ lệ Đơn có link được trả tiền (`paid_source`) trong khung 75 → 15 phút trước dưới `OPS_ALERT_ISSUANCE_RATIO` lần
+   * tỉ lệ của cùng khung 7 ngày trước (luật `ordering` trong job quét). Subject: `OPS_ALERT_SYSTEM_SUBJECT`.
+   */
+  TICKET_ISSUANCE_DROP: 'ticket_issuance_drop',
 } as const;
 export type OpsAlertKind = (typeof OpsAlertKind)[keyof typeof OpsAlertKind];
 
 export const OPS_ALERT_KIND_VALUES = Object.values(OpsAlertKind) as [OpsAlertKind, ...OpsAlertKind[]];
+
+/**
+ * Subject duy nhất của loại cảnh báo theo tỉ lệ toàn hệ thống (Story 4.6-e: `ipn_failures`, `payment_link_slow`,
+ * `ticket_issuance_drop`): cùng `cooldown`, mỗi loại báo tối đa một email mỗi `OPS_ALERT_COOLDOWN_MINUTES`.
+ */
+export const OPS_ALERT_SYSTEM_SUBJECT = 'toan-he-thong';
 
 /**
  * Kiểu chống lặp theo `(kind, subject)`:
@@ -97,5 +120,26 @@ export const OPS_ALERT_KINDS: Readonly<Record<OpsAlertKind, OpsAlertKindSpec>> =
       'Số đang giữ (held) hoặc đã bán (sold) của Hạng vé dưới đây khác với tổng Vé của Đơn đang chờ hoặc số Vé đã phát. Hệ thống không tự sửa tồn kho; tìm nguyên nhân rồi sửa bằng tay.',
     subjectLabel: 'Hạng vé:held=<held>/<tổng Vé của Đơn pending>:sold=<sold>/<số Vé đã phát>',
     dedupe: 'once',
+  },
+  ipn_failures: {
+    title: 'IPN lỗi tăng',
+    summary:
+      'Một instance api nhận nhiều IPN lỗi trong 5 phút: chữ ký hoặc timestamp sai (Tingee đổi cách ký, lệch đồng hồ, BTC đổi key), body đúng chữ ký mà sai dạng (Tingee đổi định dạng IPN), hoặc lỗi xử lý 5xx. Tingee sẽ gửi lại IPN lỗi; kiểm tra log của TingeeIpnController theo lý do dưới đây và đối chiếu với Tingee.',
+    subjectLabel: 'Phạm vi',
+    dedupe: 'cooldown',
+  },
+  payment_link_slow: {
+    title: 'Tạo link thanh toán chậm',
+    summary:
+      'p95 thời gian gọi create-link của Tingee trong 5 phút gần nhất ở một instance api vượt ngưỡng: Người mua chờ lâu ở Checkout, có thể gặp lỗi hết thời gian. Kiểm tra tình trạng Tingee và mạng từ api tới Tingee.',
+    subjectLabel: 'Phạm vi',
+    dedupe: 'cooldown',
+  },
+  ticket_issuance_drop: {
+    title: 'Tỉ lệ phát Vé giảm bất thường',
+    summary:
+      'Tỉ lệ Đơn có link thanh toán được trả tiền (IPN, Đối soát bù hay duyệt tay) trong khung 75 tới 15 phút trước giảm mạnh so với cùng khung 7 ngày trước. Kiểm tra IPN (lỗi, có tới không), Đối soát bù và trang thanh toán của Tingee.',
+    subjectLabel: 'Phạm vi',
+    dedupe: 'cooldown',
   },
 };

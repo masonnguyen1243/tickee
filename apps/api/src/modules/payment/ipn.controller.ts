@@ -7,6 +7,7 @@ import { AppError, Public } from '../../platform/http/index.js';
 import { orderForPayment } from '../ordering/index.js';
 import { ipnRecipientOf, payoutAccountCredentialOf, type IpnCredential } from '../organizer/index.js';
 import { parseTingeeTimestamp, verifySignature } from '../tingee/index.js';
+import { IpnFailureMonitor, isServerError } from './ipn-failure-alert.js';
 import { IpnProcessor, TingeeIpn } from './ipn-processor.js';
 
 /*
@@ -14,7 +15,8 @@ import { IpnProcessor, TingeeIpn } from './ipn-processor.js';
  * dùng. Thứ tự: tra BTC theo `ipnKey` (lạ → 404, chưa đọc byte body nào) → đọc byte thô tối đa 64 KB (parser JSON toàn
  * cục bỏ qua tiền tố `TINGEE_IPN_PATH`) → kiểm `x-request-timestamp` và `x-signature` trên đúng byte nhận được → parse
  * JSON + schema → (chỉ khớp secret của credential đã thay: ràng với Đơn của credential đó) → lõi xử lý (`IpnProcessor`).
- * Không bao giờ log secret, chữ ký, raw body hay `customerEmail`.
+ * Không bao giờ log secret, chữ ký, raw body hay `customerEmail`. Request kết thúc bằng 401, 400 body hỏng hay 5xx được
+ * ghi nhận cho luật cảnh báo `ipn_failures` (Story 4.6-e, `IpnFailureMonitor`); ghi nhận không đổi mã trả về hay log.
  */
 
 /** Token DI của cấu hình IPN. */
@@ -170,6 +172,11 @@ export function readRawBody(req: IncomingMessage, limit: number): Promise<Buffer
   });
 }
 
+/** Request IPN đang ở bước nào (để không đếm client ngắt kết nối khi đang gửi body là IPN lỗi). */
+interface ReceiveProgress {
+  readingBody: boolean;
+}
+
 const headerOf = (req: IncomingMessage, name: string): string | undefined => {
   const value = req.headers[name];
   return typeof value === 'string' ? value : undefined;
@@ -184,6 +191,7 @@ export class TingeeIpnController {
     @Inject(DATABASE) private readonly db: Database,
     @Inject(IPN_SETTINGS) private readonly settings: IpnSettings,
     @Inject(IpnProcessor) private readonly processor: IpnProcessor,
+    @Inject(IpnFailureMonitor) private readonly failures: IpnFailureMonitor,
   ) {}
 
   /**
@@ -191,10 +199,24 @@ export class TingeeIpnController {
    * `413` body > 64 KB; `401 IPN_SIGNATURE_INVALID` timestamp hoặc chữ ký sai, hoặc chỉ khớp secret của credential đã
    * thay mà không ràng được với Đơn có link tạo bằng credential đó (không lưu gì); `400 VALIDATION_FAILED` chữ ký đúng
    * nhưng JSON/schema hỏng (Tingee gửi lại).
+   * Luật `ipn_failures` (Story 4.6-e): 401 đếm `signature`, 400 body hỏng đếm `invalid_body`, mọi lỗi thành 5xx đếm
+   * `server_error`; không đếm 404, 413 hay client ngắt kết nối khi đang gửi body.
    */
   @Post(':ipnKey')
   @HttpCode(200)
   async receive(@Param('ipnKey') ipnKey: string, @Req() req: IncomingMessage): Promise<typeof IPN_ACK> {
+    const progress: ReceiveProgress = { readingBody: false };
+    try {
+      return await this.handle(ipnKey, req, progress);
+    } catch (err) {
+      // Lỗi stream khi đang đọc body mà request chưa nhận đủ: client ngắt kết nối, không phải lỗi của Tickee.
+      const clientGone = progress.readingBody && !req.complete;
+      if (isServerError(err) && !clientGone) await this.failures.record('server_error');
+      throw err;
+    }
+  }
+
+  private async handle(ipnKey: string, req: IncomingMessage, progress: ReceiveProgress): Promise<typeof IPN_ACK> {
     const recipient = IPN_KEY_PATTERN.test(ipnKey)
       ? await ipnRecipientOf(this.db.orm, this.settings.secretBox, ipnKey)
       : null;
@@ -204,7 +226,9 @@ export class TingeeIpnController {
     }
     const { organizationId } = recipient;
 
+    progress.readingBody = true;
     const body = (await readRawBody(req, IPN_MAX_BODY_BYTES)).toString('utf8');
+    progress.readingBody = false;
     const signature = checkIpnSignature({
       timestamp: headerOf(req, 'x-request-timestamp'),
       signature: headerOf(req, 'x-signature'),
@@ -212,13 +236,13 @@ export class TingeeIpnController {
       credentials: recipient.credentials,
       now: Date.now(),
     });
-    if (!signature.ok) throw this.rejected(organizationId, signature.reason);
+    if (!signature.ok) throw await this.rejected(organizationId, signature.reason);
 
     const payload = parseIpnBody(body);
     if (!signature.current) {
       // Secret cũ (có thể đã lộ: lý do thường gặp để đổi key) chỉ có hiệu lực với Đơn có link tạo trước khi đổi key.
       const unbound = await this.retiredKeyRejection(organizationId, payload, signature.retiredCredentialIds);
-      if (unbound) throw this.rejected(organizationId, unbound);
+      if (unbound) throw await this.rejected(organizationId, unbound);
     }
     if (!payload.ok) {
       // Chỉ log tên trường lỗi, không log giá trị.
@@ -226,6 +250,7 @@ export class TingeeIpnController {
         { organizationId, reason: payload.reason, fields: payload.fields },
         'IPN Tingee đúng chữ ký nhưng body không phải JSON hoặc sai schema',
       );
+      await this.failures.record('invalid_body');
       throw new AppError(
         ErrorCode.VALIDATION_FAILED,
         payload.reason === 'invalid_json' ? 'Body IPN không phải JSON.' : 'Body IPN không hợp lệ.',
@@ -236,14 +261,15 @@ export class TingeeIpnController {
     return IPN_ACK;
   }
 
-  /** Log warn `{organizationId, reason}` rồi trả lỗi 401 để ném. Không lưu gì. */
-  private rejected(organizationId: string, reason: IpnSignatureRejection | RetiredKeyRejection): AppError {
+  /** Log warn `{organizationId, reason}`, ghi nhận IPN lỗi `signature`, rồi trả lỗi 401 để ném. Không lưu gì. */
+  private async rejected(organizationId: string, reason: IpnSignatureRejection | RetiredKeyRejection): Promise<AppError> {
     this.logger.warn(
       { organizationId, reason },
       reason.startsWith('retired_key_')
         ? 'Từ chối IPN Tingee: ký bằng key cũ nhưng không thuộc Đơn có link tạo bằng key đó'
         : 'Từ chối IPN Tingee: chữ ký hoặc timestamp không hợp lệ',
     );
+    await this.failures.record('signature');
     return new AppError(ErrorCode.IPN_SIGNATURE_INVALID, 'Chữ ký IPN không hợp lệ.');
   }
 

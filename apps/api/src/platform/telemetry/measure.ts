@@ -52,11 +52,17 @@ export interface MeasuredCall<T> {
   /** Thuộc tính của cả span lẫn metric: chỉ giá trị ít (không id, không PII). */
   attributes: Attributes;
   outcome: (result: T) => MeasuredOutcome;
+  /**
+   * Nhận đúng số đo (giây) và `outcome` vừa ghi vào histogram, ngay sau khi ghi (cả khi telemetry tắt), vd. cửa sổ p95 của
+   * cảnh báo tạo link chậm (Story 4.6-e). Lỗi của callback bị bỏ qua: không bao giờ đổi kết quả của lời gọi (bên nhận tự
+   * log).
+   */
+  onRecorded?: (seconds: number, outcome: string) => void;
 }
 
 /**
- * Chạy `fn` trong một span (con của span đang chạy) rồi ghi thời gian vào histogram kèm `outcome`. Telemetry tắt thì span và
- * histogram là no-op. `fn` ném lỗi: span `ERROR`, không ghi histogram, ném lại.
+ * Chạy `fn` trong một span (con của span đang chạy) rồi ghi thời gian vào histogram kèm `outcome` (và đưa cùng số đo cho
+ * `onRecorded`). Telemetry tắt thì span và histogram là no-op. `fn` ném lỗi: span `ERROR`, không ghi histogram, ném lại.
  */
 export function measured<T>(call: MeasuredCall<T>, fn: () => Promise<T>): Promise<T> {
   const tracer = trace.getTracer(TICKEE_SCOPE);
@@ -67,10 +73,15 @@ export function measured<T>(call: MeasuredCall<T>, fn: () => Promise<T>): Promis
       const { outcome, error } = call.outcome(result);
       span.setAttribute('outcome', outcome);
       if (error) span.setStatus({ code: SpanStatusCode.ERROR });
-      histogramOf(call.metric, call.description).record((performance.now() - startedAt) / 1000, {
-        ...call.attributes,
-        outcome,
-      });
+      const seconds = (performance.now() - startedAt) / 1000;
+      histogramOf(call.metric, call.description).record(seconds, { ...call.attributes, outcome });
+      if (call.onRecorded) {
+        try {
+          call.onRecorded(seconds, outcome);
+        } catch {
+          // Bên nhận số đo lỗi không làm hỏng lời gọi đã đo.
+        }
+      }
       return result;
     } catch (err) {
       markSpanFailed(span, errorType(err));

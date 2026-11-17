@@ -149,6 +149,10 @@ export const orders = pgTable(
       .where(sql`${t.status} IN ('expired', 'review')`),
     // Lưới an toàn (Story 4.6-c): Đơn `pending` đã quá hạn, theo `expires_at` tăng dần.
     index('orders_pending_expires_at_idx').on(t.expiresAt).where(sql`${t.status} = 'pending'`),
+    // Luật cảnh báo tỉ lệ phát Vé giảm (Story 4.6-e): Đơn có lượt tạo link trong một khoảng `payment_link_attempt_at`.
+    index('orders_payment_link_attempt_at_idx')
+      .on(t.paymentLinkAttemptAt)
+      .where(sql`${t.paymentLinkAttemptAt} IS NOT NULL`),
     check(
       'orders_status_check',
       sql`${t.status} IN ('pending', 'paid', 'expired', 'review', 'cancelled', 'refunded')`,

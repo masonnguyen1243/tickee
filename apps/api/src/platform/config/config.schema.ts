@@ -139,8 +139,26 @@ const emailList = z.string().transform((raw, ctx) => {
  * khóa QR, tiền về không khớp Đơn; worker: Đối soát bù dừng, luật của job quét).
  */
 const opsAlerts = {
-  /** Loại cảnh báo `cooldown` (thiếu khóa QR, hàng đợi ùn): cùng subject báo lại sau chừng này phút. */
+  /**
+   * Loại cảnh báo `cooldown` (thiếu khóa QR, hàng đợi ùn, IPN lỗi tăng, tạo link chậm, tỉ lệ phát Vé giảm): cùng subject
+   * báo lại sau chừng này phút.
+   */
   OPS_ALERT_COOLDOWN_MINUTES: z.coerce.number().int().min(1).max(1_440).default(30),
+};
+
+/** Ngưỡng cảnh báo: số nguyên ≥ 1. */
+const alertThreshold = (fallback: number) => z.coerce.number().int().min(1).default(fallback);
+
+/**
+ * Luật cảnh báo nghiệp vụ đếm trong bộ nhớ của vai api (Story 4.6-e): cửa sổ 5 phút, mỗi instance api đếm riêng.
+ */
+const opsAlertApiRules = {
+  /** Luật `ipn_failures`: số IPN lỗi (401, 400 body hỏng, 5xx) trong 5 phút để báo. */
+  OPS_ALERT_IPN_FAILURES: alertThreshold(5),
+  /** Luật `payment_link_slow`: p95 thời lượng `create-link` trong 5 phút phải vượt chừng này mili giây để báo. */
+  OPS_ALERT_LINK_P95_MS: alertThreshold(2_000),
+  /** Luật `payment_link_slow`: chỉ xét khi có từ chừng này lời gọi `create-link` trong 5 phút. */
+  OPS_ALERT_LINK_MIN_SAMPLES: alertThreshold(20),
 };
 
 /** Cảnh báo vận hành, chỉ vai worker: gửi email và job quét mỗi phút. */
@@ -152,6 +170,16 @@ const opsAlertDelivery = {
   OPS_ALERT_EMAILS: emailList.optional(),
   /** Luật `queue_backlog`: job tới hạn (`start_after`) quá chừng này phút mà chưa chạy thì báo hàng đợi ùn. */
   OPS_ALERT_QUEUE_WAIT_MINUTES: z.coerce.number().int().min(1).max(1_440).default(5),
+  /**
+   * Luật `ticket_issuance_drop` (Story 4.6-e): chỉ xét khi khung 75 → 15 phút trước có từ chừng này Đơn có link thanh
+   * toán.
+   */
+  OPS_ALERT_ISSUANCE_MIN_ORDERS: alertThreshold(10),
+  /**
+   * Luật `ticket_issuance_drop`: báo khi tỉ lệ Đơn có link được trả tiền dưới chừng này lần tỉ lệ của cùng khung 7 ngày
+   * trước. Số trong (0, 1].
+   */
+  OPS_ALERT_ISSUANCE_RATIO: z.coerce.number().gt(0).max(1).default(0.5),
 };
 
 export const apiConfigSchema = z.object({
@@ -185,6 +213,7 @@ export const apiConfigSchema = z.object({
   ...tingeeAndTickets,
   ...telemetry,
   ...opsAlerts,
+  ...opsAlertApiRules,
 });
 
 export const workerConfigSchema = z.object({

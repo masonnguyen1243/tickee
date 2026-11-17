@@ -49,6 +49,10 @@ export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
   OTEL_METRIC_EXPORT_INTERVAL: 60_000,
   // Cảnh báo vận hành (Story 4.6-b): mặc định của schema.
   OPS_ALERT_COOLDOWN_MINUTES: 30,
+  // Luật cảnh báo nghiệp vụ của vai api (Story 4.6-e): mặc định của schema.
+  OPS_ALERT_IPN_FAILURES: 5,
+  OPS_ALERT_LINK_P95_MS: 2_000,
+  OPS_ALERT_LINK_MIN_SAMPLES: 20,
   ...overrides,
 });
 
@@ -79,6 +83,9 @@ export const workerConfig = (overrides: Partial<WorkerConfig> = {}): WorkerConfi
     // Cảnh báo vận hành (Story 4.6-b): mặc định của schema, không có người nhận (chỉ log).
     OPS_ALERT_COOLDOWN_MINUTES: api.OPS_ALERT_COOLDOWN_MINUTES,
     OPS_ALERT_QUEUE_WAIT_MINUTES: 5,
+    // Luật `ticket_issuance_drop` (Story 4.6-e): mặc định của schema.
+    OPS_ALERT_ISSUANCE_MIN_ORDERS: 10,
+    OPS_ALERT_ISSUANCE_RATIO: 0.5,
     ...overrides,
   };
 };

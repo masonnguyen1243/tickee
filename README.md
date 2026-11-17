@@ -193,13 +193,23 @@ Kênh `platform/alerts` (Story 4.6-b) gửi email `[Tickee vận hành] <tiêu �
 | `ticket_qr_key_missing` | link chia sẻ Vé trả 404 vì `TICKET_QR_KEYS` của instance thiếu khóa của Vé | mỗi cặp phiên bản khóa, `OPS_ALERT_COOLDOWN_MINUTES` |
 | `queue_backlog` | queue pg-boss có job tới hạn quá `OPS_ALERT_QUEUE_WAIT_MINUTES` mà chưa chạy | mỗi queue, `OPS_ALERT_COOLDOWN_MINUTES` |
 | `dead_letter` | có job mới trong một queue `*.dead-letter` (một email mỗi queue mỗi lượt quét) | một lần mỗi job |
+| `pending_order_overdue` | lưới an toàn `ordering.safety-sweep` (mỗi phút) cho hết hạn Đơn `pending` quá hạn hơn 2 phút mà job hết hạn chưa xử lý | một lần mỗi mã Đơn |
+| `inventory_drift` | đối chiếu tồn kho `ordering.inventory-check` (mỗi 10 phút) thấy `held`/`sold` của Hạng vé lệch với Đơn `pending`/Vé đã phát | một lần mỗi bộ số liệu lệch của Hạng vé |
+| `ipn_failures` | một instance api nhận từ `OPS_ALERT_IPN_FAILURES` IPN lỗi trong 5 phút: 401 (chữ ký/timestamp sai, kể cả key cũ không ràng được Đơn), 400 chữ ký đúng mà body hỏng, 5xx; email nêu số lần theo lý do `signature` / `invalid_body` / `server_error`. Không đếm `ipnKey` lạ (404), body quá lớn (413), client ngắt kết nối | cả hệ thống, `OPS_ALERT_COOLDOWN_MINUTES` |
+| `payment_link_slow` | một instance api có p95 (nearest-rank) thời gian `create-link` trong 5 phút vượt `OPS_ALERT_LINK_P95_MS`, khi có từ `OPS_ALERT_LINK_MIN_SAMPLES` lần gọi (mọi kết quả, kể cả timeout) | cả hệ thống, `OPS_ALERT_COOLDOWN_MINUTES` |
+| `ticket_issuance_drop` | Đơn có lượt tạo link trong khung (75 → 15 phút trước) có từ `OPS_ALERT_ISSUANCE_MIN_ORDERS` Đơn mà tỉ lệ đã được trả tiền dưới `OPS_ALERT_ISSUANCE_RATIO` lần tỉ lệ của cùng khung 7 ngày trước (khung nền không có Đơn thì bỏ qua) | cả hệ thống, `OPS_ALERT_COOLDOWN_MINUTES` |
 
-Ba loại đầu đi cùng dòng log `error` có `alert` sẵn có; hai loại sau do job cron `platform.ops-alert-scan` của worker quét
-mỗi phút. Mỗi lần có đối tượng mới còn có một dòng log `error` kèm `alert: <loại>`. Email chỉ có loại, id, mã Đơn, tên
-queue, số đếm và lý do. Không đặt `OPS_ALERT_EMAILS` thì chỉ có log (worker log `warn`); cảnh báo phát hiện trong lúc
-đó vẫn được ghi dấu, nên đặt người nhận sau sẽ không được gửi email lại. Email gửi lỗi thì retry 8 lần rồi vào
-`platform.ops-alert.dead-letter`; job quét chỉ log `error` cho queue này, và cho chính `platform.ops-alert` khi nó ùn.
-Worker chết thì không có lượt quét nào.
+Ba loại đầu đi cùng dòng log `error` có `alert` sẵn có; `queue_backlog`, `dead_letter` và `ticket_issuance_drop` do job
+cron `platform.ops-alert-scan` của worker quét mỗi phút (`ticket_issuance_drop` là luật `ordering` đăng ký vào job
+quét); `pending_order_overdue`, `inventory_drift` do lưới an toàn của `ordering` báo (Story 4.6-c). `ipn_failures` và
+`payment_link_slow` (Story 4.6-e) đếm trong bộ nhớ của từng instance api và xét ngay khi có lần mới: không cộng giữa các
+instance, nên lỗi rải đều qua load balancer có thể báo chậm hơn. Ba loại của Story 4.6-e có một đối tượng chung cho cả
+hệ thống: tối đa một email mỗi loại mỗi `OPS_ALERT_COOLDOWN_MINUTES`. Mỗi lần có đối tượng mới còn có một dòng log
+`error` kèm `alert: <loại>`. Email chỉ có loại, id, mã Đơn, tên queue, số đếm, lý do, và với ba loại của Story 4.6-e
+thêm số đo và ngưỡng (`p95Ms`, `thresholdMs`, `thresholdRatio`, `windowMinutes`, `threshold`). Không đặt
+`OPS_ALERT_EMAILS` thì chỉ có log (worker log `warn`); cảnh báo phát hiện trong lúc đó vẫn được ghi dấu, nên đặt người
+nhận sau sẽ không được gửi email lại. Email gửi lỗi thì retry 8 lần rồi vào `platform.ops-alert.dead-letter`; job quét
+chỉ log `error` cho queue này, và cho chính `platform.ops-alert` khi nó ùn. Worker chết thì không có lượt quét nào.
 
 Thử ở local: đặt `OPS_ALERT_EMAILS=van-hanh@tickee.local` trong `.env`, chạy `pnpm dev`, rồi chép tay một job vào
 dead-letter (job thật chỉ vào đó sau 8 lần retry, mất vài giờ):
@@ -326,8 +336,13 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `TINGEE_ORDER_STATUS_QUERY` | worker   | mặc định tắt; `true` bật Đối soát bù (Story 4.1): worker tra trạng thái đơn Gateway khi IPN trễ hoặc mất, kết quả đi cùng đường xử lý IPN. Tingee chưa công bố API tra đơn: adapter theo hợp đồng tạm mà chỉ Tingee fake hiểu, nên chỉ bật ở local (`.env.example`) và test; staging bật khi đã thay bằng hợp đồng thật. Tắt: job tra xong ngay, không gọi Tingee |
 | `TICKET_QR_KEYS`         | api, worker | bắt buộc; khóa HMAC-SHA256 ký Mã QR vé (`t<k>.<ticketId>.<sig>`), cùng dạng `TINGEE_CREDENTIAL_KEYS` nhưng là khóa khác. Ký Vé mới bằng khóa có `k` lớn nhất; Vé lưu `k` (không lưu chuỗi QR) nên xoay khóa thì thêm khóa mới và giữ khóa cũ tới khi không còn Vé nào dùng. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì Mã QR đã gửi không còn khớp và link chia sẻ trả 404 (xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32` |
 | `OPS_ALERT_EMAILS`       | worker      | tùy chọn; người nhận email cảnh báo vận hành (Story 4.6-b), email cách nhau bằng dấu phẩy. Không đặt: cảnh báo chỉ ghi log, worker log `warn` lúc khởi động và mỗi lần có cảnh báo (xem "Cảnh báo vận hành") |
-| `OPS_ALERT_COOLDOWN_MINUTES` | api, worker | mặc định `30` (1–1440); loại cảnh báo có cooldown (thiếu khóa QR, hàng đợi ùn) báo lại cùng đối tượng sau chừng này phút |
+| `OPS_ALERT_COOLDOWN_MINUTES` | api, worker | mặc định `30` (1–1440); loại cảnh báo có cooldown (thiếu khóa QR, hàng đợi ùn, IPN lỗi tăng, tạo link chậm, tỉ lệ phát Vé giảm) báo lại cùng đối tượng sau chừng này phút |
 | `OPS_ALERT_QUEUE_WAIT_MINUTES` | worker  | mặc định `5` (1–1440); job pg-boss tới hạn quá chừng này phút mà chưa chạy thì báo hàng đợi ùn |
+| `OPS_ALERT_IPN_FAILURES` | api         | mặc định `5` (số nguyên ≥ 1); số IPN lỗi (401, 400 body hỏng, 5xx) trong 5 phút ở một instance api để báo `ipn_failures` |
+| `OPS_ALERT_LINK_P95_MS`  | api         | mặc định `2000` (số nguyên ≥ 1); p95 thời gian `create-link` trong 5 phút ở một instance api phải vượt chừng này ms để báo `payment_link_slow` |
+| `OPS_ALERT_LINK_MIN_SAMPLES` | api     | mặc định `20` (số nguyên ≥ 1); `payment_link_slow` chỉ xét khi có từ chừng này lần gọi `create-link` trong 5 phút |
+| `OPS_ALERT_ISSUANCE_MIN_ORDERS` | worker | mặc định `10` (số nguyên ≥ 1); `ticket_issuance_drop` chỉ xét khi khung 75 → 15 phút trước có từ chừng này Đơn có lượt tạo link |
+| `OPS_ALERT_ISSUANCE_RATIO` | worker    | mặc định `0.5` (số trong (0, 1]); báo `ticket_issuance_drop` khi tỉ lệ Đơn đã được trả tiền dưới chừng này lần tỉ lệ của cùng khung 7 ngày trước |
 | `NEXT_PUBLIC_API_BASE_URL` | web       | gốc REST của api; client thêm `/v1`; nhúng lúc build. `next build` thiếu biến thì dừng; lệnh dev ở gốc tự đặt `http://localhost:3001` (xem "Biến build của web") |
 | `TICKEE_UI_KIT`          | web         | `1` bật `/ui-kit`; production không đặt (404) |
 

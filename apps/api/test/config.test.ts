@@ -161,6 +161,51 @@ describe('loadConfig', () => {
     }
   });
 
+  it('luật cảnh báo nghiệp vụ (Story 4.6-e): mặc định IPN lỗi 5, p95 tạo link 2000 ms / 20 mẫu (chỉ api); 10 Đơn, tỉ lệ 0,5 (chỉ worker)', () => {
+    const api = loadConfig(apiEnv);
+    expect(api).toMatchObject({ OPS_ALERT_IPN_FAILURES: 5, OPS_ALERT_LINK_P95_MS: 2000, OPS_ALERT_LINK_MIN_SAMPLES: 20 });
+    expect(
+      loadConfig({ ...apiEnv, OPS_ALERT_IPN_FAILURES: '12', OPS_ALERT_LINK_P95_MS: '1500', OPS_ALERT_LINK_MIN_SAMPLES: '50' }),
+    ).toMatchObject({ OPS_ALERT_IPN_FAILURES: 12, OPS_ALERT_LINK_P95_MS: 1500, OPS_ALERT_LINK_MIN_SAMPLES: 50 });
+    // Biến của vai kia không được đọc.
+    const apiWithWorkerVars = loadConfig({ ...apiEnv, OPS_ALERT_ISSUANCE_MIN_ORDERS: '3', OPS_ALERT_ISSUANCE_RATIO: '0.2' });
+    expect(apiWithWorkerVars).not.toHaveProperty('OPS_ALERT_ISSUANCE_MIN_ORDERS');
+    expect(apiWithWorkerVars).not.toHaveProperty('OPS_ALERT_ISSUANCE_RATIO');
+
+    const worker = loadConfig(workerEnv);
+    expect(worker).toMatchObject({ OPS_ALERT_ISSUANCE_MIN_ORDERS: 10, OPS_ALERT_ISSUANCE_RATIO: 0.5 });
+    expect(loadConfig({ ...workerEnv, OPS_ALERT_ISSUANCE_MIN_ORDERS: '25', OPS_ALERT_ISSUANCE_RATIO: '1' })).toMatchObject({
+      OPS_ALERT_ISSUANCE_MIN_ORDERS: 25,
+      OPS_ALERT_ISSUANCE_RATIO: 1,
+    });
+    for (const variable of ['OPS_ALERT_IPN_FAILURES', 'OPS_ALERT_LINK_P95_MS', 'OPS_ALERT_LINK_MIN_SAMPLES']) {
+      expect(loadConfig({ ...workerEnv, [variable]: '7' })).not.toHaveProperty(variable);
+    }
+  });
+
+  it('ngưỡng luật cảnh báo nghiệp vụ: số nguyên ≥ 1; OPS_ALERT_ISSUANCE_RATIO trong (0, 1]; sai → lỗi nêu tên biến, không in giá trị', () => {
+    for (const value of ['0', '-3', '1.5', 'nam', SECRET]) {
+      for (const variable of ['OPS_ALERT_IPN_FAILURES', 'OPS_ALERT_LINK_P95_MS', 'OPS_ALERT_LINK_MIN_SAMPLES']) {
+        const err = issuesOf({ ...apiEnv, [variable]: value });
+        expect(err.issues.map((i) => i.variable), `${variable}=${value}`).toEqual([variable]);
+        expect(err.message).not.toContain(SECRET);
+      }
+      const err = issuesOf({ ...workerEnv, OPS_ALERT_ISSUANCE_MIN_ORDERS: value });
+      expect(err.issues.map((i) => i.variable), value).toEqual(['OPS_ALERT_ISSUANCE_MIN_ORDERS']);
+    }
+    for (const value of ['0', '-0.5', '1.01', '2', 'nua', SECRET]) {
+      const err = issuesOf({ ...workerEnv, OPS_ALERT_ISSUANCE_RATIO: value });
+      expect(err.issues.map((i) => i.variable), value).toEqual(['OPS_ALERT_ISSUANCE_RATIO']);
+      expect(err.message).not.toContain(SECRET);
+    }
+    const ratio = (value: string) => {
+      const config = loadConfig({ ...workerEnv, OPS_ALERT_ISSUANCE_RATIO: value });
+      return config.APP_ROLE === 'worker' ? config.OPS_ALERT_ISSUANCE_RATIO : null;
+    };
+    expect(ratio('0.25')).toBe(0.25);
+    expect(ratio('1')).toBe(1);
+  });
+
   it('vai worker: thiếu REVALIDATE_SECRET → dừng và nêu tên biến; ngắn hơn 32 ký tự → lỗi, không in giá trị', () => {
     const missing = issuesOf({ ...workerEnv, REVALIDATE_SECRET: undefined });
     expect(missing.issues).toEqual([{ variable: 'REVALIDATE_SECRET', reason: 'thiếu' }]);
