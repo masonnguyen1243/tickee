@@ -1,0 +1,1 @@
+CREATE INDEX "orders_pending_expires_at_idx" ON "orders" USING btree ("expires_at") WHERE "orders"."status" = 'pending';

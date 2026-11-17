@@ -62,6 +62,21 @@ export const JobQueue = {
   /** Dead-letter của `ORDERING_SEND_EVENT_CHANGE_EMAIL`: job hết lượt retry được chép sang đây. */
   ORDERING_SEND_EVENT_CHANGE_EMAIL_DEAD_LETTER: 'ordering.send-event-change-email.dead-letter',
   /**
+   * Lưới an toàn hết hạn Đơn (`ordering`, Story 4.6-c, AD-4): job cron mỗi phút, chỉ vai worker lên lịch. Không payload,
+   * không retry, không dead-letter: lượt kế làm lại. Mỗi lượt cho hết hạn (bằng chính hàm của `ORDERING_EXPIRE_ORDER`,
+   * mỗi Đơn một transaction) tối đa 200 Đơn `pending` đã quá mốc hết hạn của loại mình (chưa có link: `expires_at`; có
+   * link: `expires_at + PAYMENT_LINK_GRACE_SECONDS`) thêm 120 giây mà job hoãn bỏ sót, báo kênh cảnh báo vận hành
+   * (`pending_order_overdue`, mỗi mã Đơn một lần), rồi xóa bộ đếm tạo Đơn cũ hơn `ORDER_RATE_LIMITS.windowSeconds`.
+   */
+  ORDERING_SAFETY_SWEEP: 'ordering.safety-sweep',
+  /**
+   * Đối chiếu tồn kho (`ordering`, Story 4.6-c, AD-2): job cron mỗi 10 phút, chỉ vai worker lên lịch. Không payload,
+   * không retry, không dead-letter: lượt kế làm lại. Trong một snapshot, so `held` của từng Hạng vé với tổng Vé của Đơn
+   * `pending`, `sold` với số Vé đã phát (mọi trạng thái); lệch thì log `error` và báo kênh cảnh báo vận hành
+   * (`inventory_drift`), không bao giờ tự sửa tồn kho.
+   */
+  ORDERING_INVENTORY_CHECK: 'ordering.inventory-check',
+  /**
    * Đối soát bù (`payment`, Story 4.1, FR-20, AD-8): tra trạng thái đơn Gateway của một Đơn theo `orderId` (mã Đơn) bằng
    * credential chụp ở `orders.payout_account_id`, rồi đưa kết quả vào cùng đường xử lý IPN (nguồn `reconciliation`).
    * Payload `{ orderId, failures }` (id Đơn, số lần tra lỗi liên tiếp; không credential, không PII). TX2 gắn link enqueue

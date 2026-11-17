@@ -1,6 +1,6 @@
-import { Inject, Injectable, Logger, Module, type DynamicModule, type OnApplicationBootstrap } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { JobQueue, OrderStatus, PAYMENT_LINK_GRACE_SECONDS } from '@tickee/contracts';
-import { and, eq, gte, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm';
+import { and, eq, gte, isNotNull, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
@@ -12,8 +12,6 @@ import {
   registerQueueWorker,
   type EnsurableQueue,
 } from '../../platform/jobs/index.js';
-import { BuyerEmailWorker, ORDERING_JOBS_CONFIG, type OrderingJobsConfig } from './buyer-email-jobs.js';
-import { EventChangeEmailWorker } from './event-change-email-jobs.js';
 import { releaseOrderHeld } from './inventory.service.js';
 import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
 import { RECONCILE_ORDER_QUEUE } from './reconciliation-jobs.js';
@@ -25,7 +23,8 @@ import { orders } from './schema.js';
  * - (c) Đơn đã có link (Story 3.4): TX2 gắn link enqueue bằng chính `tx` của nó, `startAfter = expires_at +
  *   PAYMENT_LINK_GRACE_SECONDS` (chừa thời gian cho IPN của lần trả tiền sát giờ).
  * Worker chạy `expireOrder` theo loại. Tạo Đơn cũng gọi `expireOrder` cho Đơn chờ cũ đã quá hạn của chính Người mua
- * (job chưa chạy) trước TX1, trong transaction riêng.
+ * (job chưa chạy) trước TX1, trong transaction riêng. Lưới an toàn mỗi phút (Story 4.6-c, `safety-net-jobs.ts`) cho hết
+ * hạn Đơn mà job bỏ sót, cũng bằng `expireOrder`, với cùng điều kiện quá hạn (`overduePending`).
  */
 
 /**
@@ -95,6 +94,28 @@ const deadlineOf = (kind: ExpiryKind): SQL =>
 /** (a) chỉ chạm Đơn chưa có link; (c) chỉ chạm Đơn đã có link. */
 const linkConditionOf = (kind: ExpiryKind): SQL =>
   kind === 'hold' ? isNull(orders.paymentLink) : isNotNull(orders.paymentLink);
+
+/** Loại hết hạn của một Đơn theo link hiện có: chưa có link → (a) `hold`; có → (c) `link`. */
+export const expiryKindOf = (paymentLink: string | null): ExpiryKind => (paymentLink === null ? 'hold' : 'link');
+
+/**
+ * Điều kiện quá hạn dùng chung: Đơn `pending` đã quá mốc hết hạn của loại mình thêm `extraSeconds` giây — (a) chưa có
+ * link, quá `expires_at`; (c) có link, quá `expires_at + PAYMENT_LINK_GRACE_SECONDS`. Với `extraSeconds = 0` đúng là
+ * mốc của CAS trong `expireOrder` (`deadlineOf`). Hai nơi dùng, khác nhau ở số giây thêm: tạo Đơn hết hạn Đơn chờ cũ của
+ * chính Người mua (`expireStalePending`, 0 giây) và lưới an toàn (`safety-net-jobs.ts`, 120 giây). Viết dạng
+ * `expires_at < now() - …` để dùng được partial index `orders_pending_expires_at_idx`.
+ */
+export function overduePending(extraSeconds = 0): SQL {
+  const overdue = (kind: ExpiryKind, graceSeconds: number): SQL =>
+    and(
+      linkConditionOf(kind),
+      lt(orders.expiresAt, sql`now() - make_interval(secs => ${graceSeconds + extraSeconds})`),
+    )!;
+  return and(
+    eq(orders.status, OrderStatus.PENDING),
+    or(overdue('hold', 0), overdue('link', PAYMENT_LINK_GRACE_SECONDS)),
+  )!;
+}
 
 /** Kết quả `expireOrder`: đã hết hạn và nhả chỗ; bỏ qua (đã có link, không còn `pending`, không có); còn trong hạn. */
 export type ExpireOrderResult = 'expired' | 'skipped' | 'not_yet';
@@ -200,26 +221,5 @@ export class OrderExpiryWorker implements OnApplicationBootstrap {
         return JOB_COMPLETED;
       },
     });
-  }
-}
-
-/**
- * Job nền của `ordering` cho vai `worker`: hết hạn Giữ chỗ ((a) và (c)), email Người mua (Story 3.8: email Vé, email
- * tiền về muộn hết chỗ) và email báo Sự kiện đổi giờ hoặc địa điểm (Story 3.10). Cần `DbModule`, `JobsModule`,
- * `EmailModule` và `TicketingModule` (toàn cục) ở gốc DI; `config` cho origin web của link trong email. Không cần cấu
- * hình Tingee.
- */
-@Module({})
-export class OrderingJobsModule {
-  static forRoot(config: OrderingJobsConfig): DynamicModule {
-    return {
-      module: OrderingJobsModule,
-      providers: [
-        { provide: ORDERING_JOBS_CONFIG, useValue: { WEB_ORIGIN: config.WEB_ORIGIN } satisfies OrderingJobsConfig },
-        OrderExpiryWorker,
-        BuyerEmailWorker,
-        EventChangeEmailWorker,
-      ],
-    };
   }
 }

@@ -21,7 +21,8 @@ import { TelemetryModule } from './platform/telemetry/index.js';
  * hoặc mất, đi cùng đường xử lý với IPN qua `IpnProcessor` và `OrderPayments`; cờ `TINGEE_ORDER_STATUS_QUERY`), job
  * cron dò dịch vụ thanh toán của BTC bị ngắt và job "đã mở lại" (Story 4.2: Đối soát bù mọi Đơn còn mở của BTC), job
  * cron dò Token mỗi giờ và email cảnh báo Token dưới ngưỡng (Story 4.5-b), kênh cảnh báo vận hành: email cho đội vận hành
- * và job quét mỗi phút (Story 4.6-b). Có sẵn adapter Tingee và Vé (khóa QR).
+ * và job quét mỗi phút (Story 4.6-b), lưới an toàn của `ordering`: quét Đơn quá hạn mỗi phút và đối chiếu tồn kho mỗi 10
+ * phút (Story 4.6-c). Có sẵn adapter Tingee và Vé (khóa QR).
  */
 @Module({})
 export class WorkerModule {

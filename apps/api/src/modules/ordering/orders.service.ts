@@ -7,12 +7,11 @@ import {
   ORDER_CODE_PATTERN,
   orderRequestFor,
   OrderStatus,
-  PAYMENT_LINK_GRACE_SECONDS,
   type BuyerOrderView,
   type CheckoutForm,
   type PendingOrderExistsDetails,
 } from '@tickee/contracts';
-import { and, desc, eq, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { AppError, parseRequest } from '../../platform/http/index.js';
@@ -22,7 +21,7 @@ import { TicketsService } from '../ticketing/index.js';
 import { OrderPayments } from './mark-paid.js';
 import { announceOrderCreated } from './order-changed.js';
 import { ORDER_CODE_GENERATOR, type OrderCodeGenerator } from './order-code.js';
-import { expireOrder, OrderQueues } from './order-jobs.js';
+import { expireOrder, expiryKindOf, OrderQueues, overduePending } from './order-jobs.js';
 import { OrderRateLimiter } from './order-rate-limit.js';
 import { buyerOrderView } from './order-view.js';
 import { PaymentLinks } from './payment-link.js';
@@ -233,28 +232,16 @@ export class OrdersService {
 
   /**
    * Đơn chờ cũ của chính Người mua cho Sự kiện đã quá hạn (job chưa kịp chạy): (a) chưa có link, quá `expires_at`; (c)
-   * đã có link, quá `expires_at + PAYMENT_LINK_GRACE_SECONDS`. Hết hạn bằng chính hàm của job, mỗi Đơn một transaction
-   * riêng trước TX1 (nhả rồi giữ chỗ trong cùng TX1 là hai lượt khóa tồn kho).
+   * đã có link, quá `expires_at + PAYMENT_LINK_GRACE_SECONDS` (`overduePending`, không thêm giây nào; lưới an toàn của
+   * Story 4.6-c dùng cùng điều kiện, thêm 120 giây). Hết hạn bằng chính hàm của job, mỗi Đơn một transaction riêng trước
+   * TX1 (nhả rồi giữ chỗ trong cùng TX1 là hai lượt khóa tồn kho).
    */
   private async expireStalePending(userId: string, eventId: string): Promise<void> {
     const stale = await this.db.orm
       .select({ id: orders.id, paymentLink: orders.paymentLink })
       .from(orders)
-      .where(
-        and(
-          eq(orders.userId, userId),
-          eq(orders.eventId, eventId),
-          eq(orders.status, OrderStatus.PENDING),
-          or(
-            and(isNull(orders.paymentLink), lt(orders.expiresAt, sql`now()`)),
-            and(
-              isNotNull(orders.paymentLink),
-              lt(sql`${orders.expiresAt} + make_interval(secs => ${PAYMENT_LINK_GRACE_SECONDS})`, sql`now()`),
-            ),
-          ),
-        ),
-      );
-    for (const { id, paymentLink } of stale) await expireOrder(this.db, id, paymentLink === null ? 'hold' : 'link');
+      .where(and(eq(orders.userId, userId), eq(orders.eventId, eventId), overduePending()));
+    for (const { id, paymentLink } of stale) await expireOrder(this.db, id, expiryKindOf(paymentLink));
   }
 
   /** Đơn `pending` của Người mua cho Sự kiện (tối đa một, unique một phần); không có → `null`. */
