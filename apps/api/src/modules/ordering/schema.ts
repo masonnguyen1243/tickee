@@ -147,6 +147,8 @@ export const orders = pgTable(
     index('orders_match_candidates_idx')
       .on(t.organizationId, t.totalAmount)
       .where(sql`${t.status} IN ('expired', 'review')`),
+    // Lưới an toàn (Story 4.6-c): Đơn `pending` đã quá hạn, theo `expires_at` tăng dần.
+    index('orders_pending_expires_at_idx').on(t.expiresAt).where(sql`${t.status} = 'pending'`),
     check(
       'orders_status_check',
       sql`${t.status} IN ('pending', 'paid', 'expired', 'review', 'cancelled', 'refunded')`,
@@ -229,7 +231,8 @@ export const orderAnswers = pgTable(
 
 /**
  * Bộ đếm giới hạn tốc độ tạo Đơn (Story 3.2): một dòng cho mỗi lần thử tới được TX1, theo `user_id` và HMAC của IP
- * (không lưu IP thô). Dọn dòng cũ là việc của quét định kỳ (deferred, Story 4.6).
+ * (không lưu IP thô). Lưới an toàn mỗi phút (`ordering.safety-sweep`, Story 4.6-c) xóa dòng đã ra khỏi cửa sổ
+ * `ORDER_RATE_LIMITS.windowSeconds`.
  */
 export const orderCreateAttempts = pgTable(
   'order_create_attempts',

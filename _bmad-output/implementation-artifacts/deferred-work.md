@@ -767,3 +767,15 @@ Spec 4.2 đầy đủ khoảng 5.500 token. Mason chọn tách ba ngày 13/11/20
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-6-b-canh-bao-van-hanh.md`
   summary: Cảnh báo job hết retry ở queue không có dead-letter. `event.revalidate-public-page` (retry 3, không có dead-letter) và các queue cron (`organizer.probe-payment-service`, `organizer.token-alert-scan`, `identity.purge-expired`, `platform.ops-alert-scan`) kết thúc ở `failed` mà không ai biết. Hai luật pg-boss của 4.6-b chỉ xét job chờ quá hạn và job trong `*.dead-letter`. Hướng sửa: thêm một luật vào registry `OpsAlertRules` báo job `failed` của queue không khai dead-letter (`pgboss.queue.dead_letter IS NULL`), chống lặp `once` theo id job, hoặc `cooldown` theo queue cho các queue cron. Gộp được với việc "báo khi `identity.purge-expired` lỗi hay ngừng chạy" của 4.7.
   evidence: Review 4.6-b (ECH). Có từ trước 4.6-b: các queue này vốn không khai dead-letter (`event/public-page-jobs.ts:29`, `organizer/payment-service.ts:568`, `organizer/token-alert-jobs.ts:138`, `identity/identity-janitor.ts:57`). Revalidate lỗi thì trang Sự kiện cũ thêm tối đa 30 giây (cache); cron lỗi thì lượt kế chạy lại. Nên mức độ thấp, nhưng job lỗi lặp lại liên tục thì không ai biết.
+
+## Deferred from: build of spec-4-6-c-luoi-an-toan-dinh-ky.md (2026-11-17)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-6-c-luoi-an-toan-dinh-ky.md`
+  summary: Thu hẹp Story 4.6-e (mục "Luật cảnh báo nghiệp vụ" ở phần build của spec 4.6-b): bỏ luật (4) `pending_order_overdue` và partial index `orders (expires_at) WHERE status = 'pending'`, vì 4.6-c đã làm cả hai. Lưới an toàn `ordering.safety-sweep` (mỗi phút) cho hết hạn Đơn `pending` đã quá mốc hết hạn thêm 120 giây mà job hoãn bỏ sót, rồi `raise` loại `pending_order_overdue` (chống lặp `once` theo mã Đơn, details `{ orders: n }`); index là `orders_pending_expires_at_idx` (migration `0029`). 4.6-e còn luật (1)–(3); không cần `OPS_ALERT_PENDING_GRACE_MINUTES`; partial index `orders (payment_link_attempt_at)` vẫn thuộc luật (3) của 4.6-e.
+  evidence: Mason chốt 17/11/2026, phương án (a) trong spec 4.6-c (mục "Báo vận hành"). `ordering/safety-net-jobs.ts` › `sweepOverdueOrders`, `platform/alerts/kinds.ts` (`PENDING_ORDER_OVERDUE`), `apps/api/drizzle/0029_pending_expires_at.sql`.
+
+## Deferred from: code review of spec-4-6-c-luoi-an-toan-dinh-ky.md (2026-11-17)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-6-c-luoi-an-toan-dinh-ky.md`
+  summary: Thêm test cho snapshot `REPEATABLE READ READ ONLY` của `checkInventory` (`apps/api/src/modules/ordering/safety-net-jobs.ts`): một Đơn được tạo, bán hoặc hết hạn và commit vào giữa các câu đọc tồn kho, tổng `pending` và số Vé đã phát thì không được báo `inventory_drift` giả.
+  evidence: Review 4.6-c (VG), regression gap: bỏ `CHECK_TRANSACTION`, hoặc truyền `db` thay `tx` cho `issuedTicketCountsByType`, thì mọi test vẫn pass, vì không test nào ghi xen giữa các câu đọc. Muốn test tất định thì cần điểm chèn (hook giữa hai câu đọc). Test tải song song thì sẽ chập chờn.

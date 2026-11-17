@@ -1,7 +1,8 @@
 /**
  * Loại cảnh báo vận hành (Story 4.6-b). Ba loại đầu trùng marker `alert` của dòng log `error` có sẵn ở mô-đun miền
- * (`PAYMENT_UNMATCHED_ALERT`, `PAYMENT_RECONCILIATION_STOPPED_ALERT`, `TICKET_QR_KEY_MISSING_ALERT`); hai loại sau do luật
- * pg-boss của job quét báo. Story 4.6-e thêm loại nghiệp vụ.
+ * (`PAYMENT_UNMATCHED_ALERT`, `PAYMENT_RECONCILIATION_STOPPED_ALERT`, `TICKET_QR_KEY_MISSING_ALERT`); hai loại kế do luật
+ * pg-boss của job quét báo; hai loại cuối do lưới an toàn định kỳ của `ordering` báo (Story 4.6-c). Story 4.6-e thêm loại
+ * nghiệp vụ.
  */
 export const OpsAlertKind = {
   /** Tiền về tài khoản của BTC mà không khớp Đơn nào của BTC (IPN hay Đối soát bù). Subject: id `payment_events`. */
@@ -14,6 +15,16 @@ export const OpsAlertKind = {
   QUEUE_BACKLOG: 'queue_backlog',
   /** Có job mới trong một queue `*.dead-letter`. Subject: id job (trong queue dead-letter). */
   DEAD_LETTER: 'dead_letter',
+  /**
+   * Lưới an toàn (`ordering.safety-sweep`) vừa cho hết hạn Đơn `pending` đã quá hạn hơn 2 phút mà job hết hạn chưa xử lý
+   * (không được enqueue, lỗi đang retry, hoặc worker ngừng). Subject: mã Đơn.
+   */
+  PENDING_ORDER_OVERDUE: 'pending_order_overdue',
+  /**
+   * Đối chiếu tồn kho (`ordering.inventory-check`) thấy Hạng vé lệch. Subject:
+   * `<ticketTypeId>:held=<held>/<tổng Vé của Đơn pending>:sold=<sold>/<số Vé đã phát>` (số liệu đổi thì là subject mới).
+   */
+  INVENTORY_DRIFT: 'inventory_drift',
 } as const;
 export type OpsAlertKind = (typeof OpsAlertKind)[keyof typeof OpsAlertKind];
 
@@ -71,6 +82,20 @@ export const OPS_ALERT_KINDS: Readonly<Record<OpsAlertKind, OpsAlertKindSpec>> =
     title: 'Job vào dead-letter',
     summary: 'Job đã hết lượt retry và được chép sang queue dead-letter. Kiểm tra lỗi của job rồi xử lý hoặc chạy lại.',
     subjectLabel: 'Job (id trong queue dead-letter)',
+    dedupe: 'once',
+  },
+  pending_order_overdue: {
+    title: 'Đơn quá hạn hơn 2 phút chưa được job hết hạn xử lý',
+    summary:
+      'Đơn dưới đây còn giữ chỗ quá mốc hết hạn hơn 2 phút mà job hết hạn (ordering.expire-order) chưa xử lý. Nguyên nhân có thể: job không được enqueue, job lỗi đang retry, hoặc worker ngừng. Lưới an toàn đã cho Đơn hết hạn và nhả chỗ; kiểm tra job hết hạn Đơn (worker, hàng đợi, dead-letter).',
+    subjectLabel: 'Mã Đơn',
+    dedupe: 'once',
+  },
+  inventory_drift: {
+    title: 'Tồn kho lệch',
+    summary:
+      'Số đang giữ (held) hoặc đã bán (sold) của Hạng vé dưới đây khác với tổng Vé của Đơn đang chờ hoặc số Vé đã phát. Hệ thống không tự sửa tồn kho; tìm nguyên nhân rồi sửa bằng tay.',
+    subjectLabel: 'Hạng vé:held=<held>/<tổng Vé của Đơn pending>:sold=<sold>/<số Vé đã phát>',
     dedupe: 'once',
   },
 };

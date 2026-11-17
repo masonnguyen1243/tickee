@@ -40,7 +40,8 @@ export {
 } from './match-read.js';
 export { notifyEventOrdersChanged } from './order-changed.js';
 export { ORDER_CODE_GENERATOR, type OrderCodeGenerator } from './order-code.js';
-export { markExpired, OrderingJobsModule, type MarkExpiredResult } from './order-jobs.js';
+export { markExpired, type MarkExpiredResult } from './order-jobs.js';
+export { OrderingJobsModule } from './ordering-jobs.module.js';
 export { type OrderingConfig } from './order-rate-limit.js';
 export { OrderReviewDecisions, type OrderDecision } from './order-review.js';
 export { OrderingModule } from './ordering.module.js';
