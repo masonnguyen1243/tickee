@@ -72,6 +72,52 @@ const tingeeAndTickets = {
   TICKET_QR_KEYS: credentialKeys,
 };
 
+/** Tên header HTTP (token theo RFC 9110). */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+/**
+ * `OTEL_EXPORTER_OTLP_HEADERS` (dạng chuẩn của OpenTelemetry): `key=value` cách nhau bằng dấu phẩy, giá trị có thể
+ * percent-encode, vd. `authorization=Bearer%20abc,x-scope=tickee`. Lỗi chỉ nêu sai gì, không bao giờ nêu giá trị.
+ */
+export function parseOtlpHeaders(raw: string): Record<string, string> | null {
+  const headers: Record<string, string> = {};
+  for (const entry of raw.split(',')) {
+    const eq = entry.indexOf('=');
+    if (eq < 0) return null;
+    const key = entry.slice(0, eq).trim();
+    let value: string;
+    try {
+      value = decodeURIComponent(entry.slice(eq + 1).trim());
+    } catch {
+      return null;
+    }
+    if (!HEADER_NAME.test(key) || value === '' || /[\r\n]/.test(value)) return null;
+    headers[key.toLowerCase()] = value;
+  }
+  return headers;
+}
+
+const otlpHeaders = z.string().transform((raw, ctx) => {
+  const headers = parseOtlpHeaders(raw);
+  if (headers) return headers;
+  ctx.addIssue({ code: 'custom', message: 'phải là danh sách key=value cách nhau bằng dấu phẩy' });
+  return z.NEVER;
+});
+
+/**
+ * OpenTelemetry (Story 4.6-a), chỉ vai api và worker: trace và metrics xuất OTLP/HTTP (JSON) tới một collector bất kỳ, không
+ * gắn nhà cung cấp nào. Log không đi qua OTLP (vẫn là JSON ra stdout). Không đặt endpoint thì không khởi SDK, không đăng
+ * ký hook nào: hành vi như trước 4.6-a.
+ */
+const telemetry = {
+  /** Gốc OTLP/HTTP của collector, vd. `http://localhost:4318` (local: `otel-lgtm`); trace gửi tới `/v1/traces`, metrics tới `/v1/metrics`. */
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.url({ protocol: /^https?$/ }).optional(),
+  /** Header gửi kèm mỗi lần xuất (khóa API của collector…). Là secret: không bao giờ log. */
+  OTEL_EXPORTER_OTLP_HEADERS: otlpHeaders.optional(),
+  /** Chu kỳ xuất metrics (ms). */
+  OTEL_METRIC_EXPORT_INTERVAL: z.coerce.number().int().min(1_000).max(3_600_000).default(60_000),
+};
+
 export const apiConfigSchema = z.object({
   APP_ROLE: z.literal('api'),
   ...common,
@@ -101,6 +147,7 @@ export const apiConfigSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
   ...tingeeAndTickets,
+  ...telemetry,
 });
 
 export const workerConfigSchema = z.object({
@@ -129,6 +176,7 @@ export const workerConfigSchema = z.object({
    * (`.env.example`, Tingee fake) và trong test; staging chỉ bật khi hợp đồng thật đã thay hợp đồng tạm.
    */
   TINGEE_ORDER_STATUS_QUERY: z.stringbool().default(false),
+  ...telemetry,
 });
 
 export const migrateConfigSchema = z.object({

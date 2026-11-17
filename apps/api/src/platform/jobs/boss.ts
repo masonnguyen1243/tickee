@@ -1,4 +1,5 @@
-import { PgBoss } from 'pg-boss';
+import { W3CTraceContextPropagator } from '@opentelemetry/core';
+import { PgBoss, type OpenTelemetryOptions } from 'pg-boss';
 
 export const PGBOSS_SCHEMA = 'pgboss';
 
@@ -18,6 +19,17 @@ export interface BossOptions {
 }
 
 /**
+ * OpenTelemetry có sẵn của pg-boss (Story 4.6-a): span `send <queue>` / `process <queue>`, metrics
+ * `messaging.process.duration` và `pgboss.queue.jobs` (theo trạng thái, gồm `failed`). Job lưu context của trace lúc
+ * enqueue, nên job chạy một mình nối tiếp trace của request đã enqueue nó; chỉ trace id (W3C `traceparent`), không baggage.
+ * Telemetry tắt (không có SDK) thì mọi thứ là no-op và job không lưu context nào.
+ */
+export const BOSS_OPEN_TELEMETRY: OpenTelemetryOptions = {
+  propagateContext: true,
+  propagator: new W3CTraceContextPropagator(),
+};
+
+/**
  * pg-boss cho vai `api`/`worker`: chạy bằng `tickee_app`, không bao giờ tự migrate schema
  * (vai `migrate` lo việc đó).
  */
@@ -28,6 +40,7 @@ export function createBoss({ connectionString, applicationName, mode = 'worker' 
     application_name: applicationName,
     migrate: false,
     createSchema: false,
+    openTelemetry: BOSS_OPEN_TELEMETRY,
     ...(mode === 'producer' ? { supervise: false, schedule: false } : {}),
   });
 }

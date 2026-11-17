@@ -3,8 +3,14 @@ packages:
   - packages/*
 allowBuilds:
   esbuild: true
+  # Kéo theo bởi exporter gRPC/proto của @opentelemetry/sdk-node (không dùng): postinstall chỉ in cảnh báo phiên bản.
+  protobufjs: false
 minimumReleaseAgeExclude:
   - '@nestjs/common@12.3.2'
   - '@nestjs/core@12.3.2'
   - '@nestjs/platform-express@12.3.2'
   - '@nestjs/testing@12.3.2'
+overrides:
+  # Một bản `@opentelemetry/core` cho cả SDK (ghim 3.0.0) lẫn instrumentation contrib (khai `^3.0.0`): `RPCMetadata` và
+  # propagator dùng chung một bản (Story 4.6-a).
+  '@opentelemetry/core': 3.0.0

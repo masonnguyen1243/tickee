@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { ErrorCode, PaymentServiceReason } from '@tickee/contracts';
 import { z } from 'zod';
 import { AppError } from '../../platform/http/index.js';
+import { measured, type MeasuredOutcome } from '../../platform/telemetry/index.js';
 import {
   createLinkServiceReasonOf,
   DOMAIN_ERROR_MESSAGES,
@@ -265,6 +266,32 @@ const AccountItem = z.object({
 /** Checkout URL: chỉ http/https (web mở bằng `window.location.assign`, không bao giờ nhận `javascript:`). */
 const CheckoutUrl = z.url({ protocol: /^https?$/ });
 
+/**
+ * Histogram thời gian (giây) của mỗi lời gọi Tingee (Story 4.6-a), theo `tingee.operation` và `outcome`: nền cho cảnh báo
+ * p95 tạo link của 4.6-b (undici chỉ biết host Tingee, không biết thao tác nào).
+ */
+export const TINGEE_REQUEST_DURATION_METRIC = 'tickee.tingee.request.duration';
+
+/** `tingee.operation` của span và histogram, theo hằng đường dẫn (giá trị ít, không id). */
+export const TINGEE_OPERATIONS: Readonly<Record<string, string>> = {
+  [TINGEE_CREATE_LINK_PATH]: 'create_link',
+  [TINGEE_GET_ORDER_PATH]: 'get_order',
+  [TINGEE_ACCOUNTS_PATH]: 'get_va_paging',
+  [TINGEE_TOKEN_BALANCE_PATH]: 'get_token_balance',
+};
+
+/**
+ * `outcome` của một lần gửi: `timeout` / `network` / `invalid_json` (không có phản hồi đọc được: span lỗi), `ok` (HTTP 2xx
+ * và `code = '00'`), `rejected` (mọi phản hồi khác: mã từ chối, HTTP lỗi, envelope sai dạng). HTTP không phải 2xx (Tingee
+ * sự cố) cũng là span lỗi.
+ */
+function sendOutcome(sent: Sent): MeasuredOutcome {
+  if (sent.kind === 'failed') return { outcome: sent.reason, error: true };
+  const http2xx = sent.httpStatus >= 200 && sent.httpStatus < 300;
+  const ok = http2xx && sent.envelope?.code === '00';
+  return { outcome: ok ? 'ok' : 'rejected', error: !http2xx };
+}
+
 /** Lỗi miền kèm thông điệp hành động được. */
 export function tingeeError(code: TingeeDomainError, cause?: unknown): AppError {
   return new AppError(code, DOMAIN_ERROR_MESSAGES[code], { cause });
@@ -488,9 +515,30 @@ export class HttpTingeeClient implements TingeeClient {
 
   /**
    * Ký và gửi `payload` (JSON minify, đúng chuỗi được ký) bằng credential của BTC, timestamp `yyyyMMddHHmmssSSS` (mọi
-   * API Tingee, kể cả Cổng thanh toán). Không ném: trả lỗi vận chuyển hoặc phản hồi đọc được.
+   * API Tingee, kể cả Cổng thanh toán). Không ném: trả lỗi vận chuyển hoặc phản hồi đọc được. Mỗi lần gửi chạy trong span
+   * `tingee <operation>` và ghi `TINGEE_REQUEST_DURATION_METRIC` (Story 4.6-a); không thuộc tính nào mang body, header,
+   * credential hay id.
    */
-  private async send(
+  private send(
+    credential: TingeeCredential,
+    path: string,
+    payload: Record<string, unknown>,
+    timeoutMs: number,
+  ): Promise<Sent> {
+    const operation = TINGEE_OPERATIONS[path] ?? 'other';
+    return measured(
+      {
+        span: `tingee ${operation}`,
+        metric: TINGEE_REQUEST_DURATION_METRIC,
+        description: 'Thời gian một lời gọi Open API của Tingee.',
+        attributes: { 'tingee.operation': operation },
+        outcome: sendOutcome,
+      },
+      () => this.sendOnce(credential, path, payload, timeoutMs),
+    );
+  }
+
+  private async sendOnce(
     credential: TingeeCredential,
     path: string,
     payload: Record<string, unknown>,

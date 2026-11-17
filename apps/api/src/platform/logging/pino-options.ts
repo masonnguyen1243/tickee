@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { isSpanContextValid, trace } from '@opentelemetry/api';
 import { PII_KEYS, REAUTH_HEADER } from '@tickee/contracts';
 import type { LoggerOptions } from 'pino';
 
@@ -50,10 +51,21 @@ export function buildRedactPaths(keys: readonly string[] = PII_KEYS): string[] {
   ];
 }
 
+/**
+ * `traceId` và `spanId` của span OpenTelemetry đang chạy (Story 4.6-a), để nối log với trace. Telemetry tắt (không có SDK
+ * hay context manager) thì không có span nào: không thêm gì.
+ */
+export function activeTraceFields(): { traceId?: string; spanId?: string } {
+  const spanContext = trace.getActiveSpan()?.spanContext();
+  if (!spanContext || !isSpanContextValid(spanContext)) return {};
+  return { traceId: spanContext.traceId, spanId: spanContext.spanId };
+}
+
 export function basePinoOptions(level: string): LoggerOptions {
   return {
     level,
     redact: { paths: buildRedactPaths(), censor: REDACTED },
+    mixin: activeTraceFields,
   };
 }
 

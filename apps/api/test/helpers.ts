@@ -45,6 +45,8 @@ export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
   TINGEE_BASE_URL: 'http://127.0.0.1:1',
   TINGEE_CREDENTIAL_KEYS: TEST_CREDENTIAL_KEYS,
   TICKET_QR_KEYS: TEST_TICKET_QR_KEYS,
+  // OpenTelemetry tắt (không có endpoint): như khi không đặt `OTEL_*`.
+  OTEL_METRIC_EXPORT_INTERVAL: 60_000,
   ...overrides,
 });
 
@@ -71,6 +73,7 @@ export const workerConfig = (overrides: Partial<WorkerConfig> = {}): WorkerConfi
     TINGEE_CREDENTIAL_KEYS: api.TINGEE_CREDENTIAL_KEYS,
     TICKET_QR_KEYS: api.TICKET_QR_KEYS,
     TINGEE_ORDER_STATUS_QUERY: true,
+    OTEL_METRIC_EXPORT_INTERVAL: api.OTEL_METRIC_EXPORT_INTERVAL,
     ...overrides,
   };
 };
