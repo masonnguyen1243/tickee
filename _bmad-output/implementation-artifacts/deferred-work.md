@@ -779,3 +779,12 @@ Spec 4.2 đầy đủ khoảng 5.500 token. Mason chọn tách ba ngày 13/11/20
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-6-c-luoi-an-toan-dinh-ky.md`
   summary: Thêm test cho snapshot `REPEATABLE READ READ ONLY` của `checkInventory` (`apps/api/src/modules/ordering/safety-net-jobs.ts`): một Đơn được tạo, bán hoặc hết hạn và commit vào giữa các câu đọc tồn kho, tổng `pending` và số Vé đã phát thì không được báo `inventory_drift` giả.
   evidence: Review 4.6-c (VG), regression gap: bỏ `CHECK_TRANSACTION`, hoặc truyền `db` thay `tx` cho `issuedTicketCountsByType`, thì mọi test vẫn pass, vì không test nào ghi xen giữa các câu đọc. Muốn test tất định thì cần điểm chèn (hook giữa hai câu đọc). Test tải song song thì sẽ chập chờn.
+
+## Deferred from: code review of spec-4-6-e-luat-canh-bao-nghiep-vu.md (2026-11-17)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-6-e-luat-canh-bao-nghiep-vu.md`
+  summary: Cảnh báo `create-link` lỗi nhanh. Tingee từ chối `create-link` bằng mã thường thì `release()` (`ordering/payment-link.ts:286-292`) trả lượt về `NULL`, nên Đơn rời khung của `ticket_issuance_drop`; lỗi trả nhanh nên p95 vẫn thấp; không có link thì không có IPN. Một sự cố Tingee trả lỗi nhanh không bị luật nào trong ba luật của 4.6-e bắt. Hướng làm: tỉ lệ `outcome` khác `ok` của `create_link` trong 5 phút, dùng chung nguồn `onPaymentLinkDuration`.
+  evidence: Review 4.6-e (BH), medium. Có từ trước 4.6-e: NFR-10 không liệt kê điều kiện này; ba luật mới không xét `outcome`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-6-e-luat-canh-bao-nghiep-vu.md`
+  summary: Thứ tự deploy cho loại cảnh báo mới (4.7). api của bản mới raise `ipn_failures`/`payment_link_slow`; nếu worker còn bản cũ thì `OpsAlertPayload` (enum `kind`) từ chối job, job vào `platform.ops-alert.dead-letter`, mà dấu chống lặp đã ghi nên loại đó im một cooldown. Checklist deploy của 4.7 phải đổi worker trước api khi thêm loại cảnh báo (hoặc thêm job), hoặc cho đường gửi nhận `kind` lạ.
+  evidence: Review 4.6-e (ECH). Mối nguy chung của payload job khi rolling deploy; chưa có production nên chưa xảy ra.

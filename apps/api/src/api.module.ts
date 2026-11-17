@@ -45,7 +45,11 @@ export class ApiModule {
         // Realtime (AD-17, toàn cục): một kết nối `LISTEN` mỗi instance, SSE theo bộ lọc của mô-đun, `/readyz`.
         RealtimeModule.forRoot({ connectionString: config.DATABASE_URL }),
         // Adapter Tingee (`TINGEE_CLIENT`, toàn cục): mọi lời gọi ký bằng credential của từng BTC (`organizer` giải mã).
-        TingeeModule.forRoot({ baseUrl: config.TINGEE_BASE_URL }),
+        // Thời lượng `create-link` nạp vào cửa sổ p95 của luật cảnh báo `payment_link_slow` (Story 4.6-e).
+        TingeeModule.forRoot({
+          baseUrl: config.TINGEE_BASE_URL,
+          linkLatencyAlert: { p95Ms: config.OPS_ALERT_LINK_P95_MS, minSamples: config.OPS_ALERT_LINK_MIN_SAMPLES },
+        }),
         IdentityModule.forRoot(config),
         // Sau IdentityModule: PermissionGuard chạy sau SessionGuard, TotpGuard, ConsentGuard và PlatformAdminGuard.
         OrganizerModule.forRoot(config),
@@ -59,7 +63,8 @@ export class ApiModule {
         // Trạng thái bán công khai (Story 2.11-a): `GET /v1/events/:slug/availability`; phễu mua (Story 3.1); Checkout
         // và tạo Đơn, giữ chỗ (Story 3.2); Đơn 0đ nhận Vé ngay (Story 3.3).
         OrderingModule.forRoot(config),
-        // IPN Tingee (Story 3.5): `POST /v1/payments/tingee/ipn/:ipnKey` → `ordering.markPaid` / `markExpired`.
+        // IPN Tingee (Story 3.5): `POST /v1/payments/tingee/ipn/:ipnKey` → `ordering.markPaid` / `markExpired`; IPN lỗi
+        // đếm cho luật cảnh báo `ipn_failures` (Story 4.6-e).
         PaymentModule.forRoot(config),
         // Hạng vé và tồn kho (Story 2.8), sửa thông tin Sự kiện kèm email báo Người mua và số Người mua (Story 3.10):
         // ghi/đọc cả `event` lẫn `ordering` nên controller ở flows.

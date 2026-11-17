@@ -3,6 +3,7 @@ import type { ApiConfig } from '../../platform/config/index.js';
 import { parseCredentialKeys, SecretBox } from '../../platform/crypto/index.js';
 import { OrderPaymentsModule } from '../ordering/index.js';
 import { IPN_SETTINGS, TingeeIpnController, type IpnSettings } from './ipn.controller.js';
+import { IPN_FAILURE_ALERT_SETTINGS, IpnFailureMonitor, type IpnFailureAlertSettings } from './ipn-failure-alert.js';
 import { IpnProcessor } from './ipn-processor.js';
 import { PaymentServiceResumedWorker } from './payment-service-resumed-worker.js';
 import { ReviewActionsController } from './review-actions.controller.js';
@@ -14,8 +15,11 @@ import {
   type ReconciliationConfig,
 } from './reconciliation-worker.js';
 
-/** Cấu hình của `payment` ở vai api: khóa giải mã Secret Token Tingee của BTC để kiểm chữ ký IPN. */
-export type PaymentConfig = Pick<ApiConfig, 'TINGEE_CREDENTIAL_KEYS'>;
+/**
+ * Cấu hình của `payment` ở vai api: khóa giải mã Secret Token Tingee của BTC để kiểm chữ ký IPN, và ngưỡng của luật
+ * cảnh báo `ipn_failures` (Story 4.6-e).
+ */
+export type PaymentConfig = Pick<ApiConfig, 'TINGEE_CREDENTIAL_KEYS' | 'OPS_ALERT_IPN_FAILURES'>;
 
 /**
  * Lõi xử lý IPN (`IpnProcessor`, Story 3.5) không có controller, không cần cấu hình: vai worker import để Đối soát bù
@@ -58,7 +62,8 @@ export class PaymentJobsModule {
 /**
  * `payment` ở vai api: endpoint IPN Tingee `POST /v1/payments/tingee/ipn/:ipnKey` (`@Public`, Story 3.5) trên lõi xử lý,
  * và thao tác của Owner/Admin trên mục Cần xử lý `POST /v1/orgs/:orgId/review-items/:itemId/{approve,reject,refund,
- * dismiss,match}` (Story 4.4-a, 4.4-b). Cần thêm ở gốc DI những gì `PaymentProcessingModule` cần.
+ * dismiss,match}` (Story 4.4-a, 4.4-b). Bộ đếm IPN lỗi của luật cảnh báo `ipn_failures` (Story 4.6-e) báo qua
+ * `OpsAlerts` (toàn cục, `AlertsModule`). Cần thêm ở gốc DI những gì `PaymentProcessingModule` cần.
  */
 @Module({})
 export class PaymentModule {
@@ -72,6 +77,11 @@ export class PaymentModule {
           provide: IPN_SETTINGS,
           useFactory: (): IpnSettings => ({ secretBox: new SecretBox(parseCredentialKeys(config.TINGEE_CREDENTIAL_KEYS)) }),
         },
+        {
+          provide: IPN_FAILURE_ALERT_SETTINGS,
+          useValue: { threshold: config.OPS_ALERT_IPN_FAILURES } satisfies IpnFailureAlertSettings,
+        },
+        IpnFailureMonitor,
         ReviewActionsService,
       ],
     };

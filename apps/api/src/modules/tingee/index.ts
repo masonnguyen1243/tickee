@@ -1,6 +1,12 @@
 // Mô-đun `tingee`: API công khai cho mô-đun khác chỉ xuất từ file này (AD-10).
 export { TingeeModule, type TingeeConfig } from './tingee.module.js';
 export {
+  PAYMENT_LINK_LATENCY_WINDOW_MS,
+  PaymentLinkLatencyMonitor,
+  type PaymentLinkLatencyAlertSettings,
+  type PaymentLinkLatencyStats,
+} from './link-latency-alert.js';
+export {
   CreateLinkError,
   HttpTingeeClient,
   TINGEE_ACCOUNT_PAGE_SIZE,

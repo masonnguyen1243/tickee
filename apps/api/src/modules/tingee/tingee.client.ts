@@ -234,6 +234,12 @@ export interface TingeeClientOptions {
   /** Timeout của lời gọi đọc Token; mặc định `TINGEE_TOKEN_BALANCE_TIMEOUT_MS`. */
   tokenBalanceTimeoutMs?: number;
   now?: () => Date;
+  /**
+   * Nhận thời lượng (giây) và `outcome` của mỗi lời gọi `create-link` (mọi kết quả, kể cả timeout), đúng số đo ghi vào
+   * `TINGEE_REQUEST_DURATION_METRIC`: cửa sổ p95 của cảnh báo `payment_link_slow` (Story 4.6-e). Lời gọi khác không
+   * nạp. Không đặt: không ai nhận.
+   */
+  onPaymentLinkDuration?: (seconds: number, outcome: string) => void;
 }
 
 const Envelope = z.object({ code: z.coerce.string(), message: z.string().nullish(), data: z.unknown().optional() });
@@ -517,7 +523,7 @@ export class HttpTingeeClient implements TingeeClient {
    * Ký và gửi `payload` (JSON minify, đúng chuỗi được ký) bằng credential của BTC, timestamp `yyyyMMddHHmmssSSS` (mọi
    * API Tingee, kể cả Cổng thanh toán). Không ném: trả lỗi vận chuyển hoặc phản hồi đọc được. Mỗi lần gửi chạy trong span
    * `tingee <operation>` và ghi `TINGEE_REQUEST_DURATION_METRIC` (Story 4.6-a); không thuộc tính nào mang body, header,
-   * credential hay id.
+   * credential hay id. Riêng `create-link`: cùng số đo đưa cho `onPaymentLinkDuration` (Story 4.6-e).
    */
   private send(
     credential: TingeeCredential,
@@ -526,6 +532,7 @@ export class HttpTingeeClient implements TingeeClient {
     timeoutMs: number,
   ): Promise<Sent> {
     const operation = TINGEE_OPERATIONS[path] ?? 'other';
+    const onRecorded = path === TINGEE_CREATE_LINK_PATH ? this.options.onPaymentLinkDuration : undefined;
     return measured(
       {
         span: `tingee ${operation}`,
@@ -533,6 +540,7 @@ export class HttpTingeeClient implements TingeeClient {
         description: 'Thời gian một lời gọi Open API của Tingee.',
         attributes: { 'tingee.operation': operation },
         outcome: sendOutcome,
+        onRecorded,
       },
       () => this.sendOnce(credential, path, payload, timeoutMs),
     );

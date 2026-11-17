@@ -1,0 +1,1 @@
+CREATE INDEX "orders_payment_link_attempt_at_idx" ON "orders" USING btree ("payment_link_attempt_at") WHERE "orders"."payment_link_attempt_at" IS NOT NULL;

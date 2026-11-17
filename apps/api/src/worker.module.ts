@@ -22,7 +22,8 @@ import { TelemetryModule } from './platform/telemetry/index.js';
  * cron dò dịch vụ thanh toán của BTC bị ngắt và job "đã mở lại" (Story 4.2: Đối soát bù mọi Đơn còn mở của BTC), job
  * cron dò Token mỗi giờ và email cảnh báo Token dưới ngưỡng (Story 4.5-b), kênh cảnh báo vận hành: email cho đội vận hành
  * và job quét mỗi phút (Story 4.6-b), lưới an toàn của `ordering`: quét Đơn quá hạn mỗi phút và đối chiếu tồn kho mỗi 10
- * phút (Story 4.6-c). Có sẵn adapter Tingee và Vé (khóa QR).
+ * phút (Story 4.6-c), luật cảnh báo tỉ lệ phát Vé giảm của `ordering` trong job quét (Story 4.6-e). Có sẵn adapter
+ * Tingee và Vé (khóa QR).
  */
 @Module({})
 export class WorkerModule {
@@ -52,7 +53,12 @@ export class WorkerModule {
           TINGEE_BASE_URL: config.TINGEE_BASE_URL,
         }),
         EventJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN, REVALIDATE_SECRET: config.REVALIDATE_SECRET }),
-        OrderingJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN }),
+        // Lưới an toàn (Story 4.6-c) và luật cảnh báo `ticket_issuance_drop` của job quét (Story 4.6-e).
+        OrderingJobsModule.forRoot({
+          WEB_ORIGIN: config.WEB_ORIGIN,
+          OPS_ALERT_ISSUANCE_MIN_ORDERS: config.OPS_ALERT_ISSUANCE_MIN_ORDERS,
+          OPS_ALERT_ISSUANCE_RATIO: config.OPS_ALERT_ISSUANCE_RATIO,
+        }),
       ],
       providers: [{ provide: APP_CONFIG, useValue: config }, UsePinoLoggerBeforeBootstrap],
     };
