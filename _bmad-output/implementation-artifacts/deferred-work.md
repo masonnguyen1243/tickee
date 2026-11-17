@@ -734,3 +734,21 @@ Spec 4.2 đầy đủ khoảng 5.500 token. Mason chọn tách ba ngày 13/11/20
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-5-a-trang-token.md`
   summary: `apps/api/test/payment/ipn-dev-checkout.test.ts` › "Đã thanh toán (giả lập)" lỗi lẻ khi chạy cả bộ test API: `POST` tạo Đơn trả 500 thay vì 201 (`placePaid`, :74). Log của lượt chạy không giữ lỗi phía server nên chưa rõ gốc.
   evidence: Gặp 1 lần trong lượt `pnpm --filter @tickee/api test` khi kiểm 4.5-a (16/11/2026). Chạy riêng file đó pass 3/3, chạy lại cả bộ pass 1272/1272. Đường tạo Đơn → `create-link` không đi qua code của 4.5-a. Lần sau gặp thì giữ log của harness (`h.logs`) để biết lỗi 500.
+
+## Deferred from: build of spec-4-6-a-nen-quan-sat.md (2026-11-17)
+
+- source_spec: none
+  summary: Story 4.6-b "Cảnh báo vận hành". Kênh gửi cảnh báo tới đội vận hành và 5 điều kiện của NFR-10: IPN lỗi chữ ký hoặc lỗi xử lý tăng, tỉ lệ phát Vé giảm bất thường, hàng đợi pg-boss ùn hoặc có dead-letter, Đơn `pending` quá hạn chưa xác nhận, p95 tạo link > 2 giây. Nối các marker log đang chờ kênh này: tiền về không khớp Đơn (`payment/ipn-processor.ts:149`), chuỗi Đối soát bù dừng (`payment/reconciliation-worker.ts:45`), thiếu khóa Mã QR (`ticketing/tickets.service.ts:29`, `TICKET_QR_KEY_MISSING_ALERT`). Phải chốt luật cảnh báo nằm trong app hay trong backend giám sát (backend "chọn cùng hạ tầng", chờ NĐ 53/2022), và phần cảnh báo giữ chỗ hàng loạt bằng nhiều tài khoản (epic-4-context, mục 4.6).
+  evidence: Mason chọn tách ở bước kiểm phạm vi của Build 4.6 (17/11/2026). Dùng metrics của 4.6-a cho p95 và các điều kiện về tỉ lệ.
+- source_spec: none
+  summary: Story 4.6-c "Lưới an toàn định kỳ". Job đối chiếu tồn kho định kỳ so `held` với tổng Vé của Đơn `pending`, `sold` với số Vé đã phát; lệch thì cảnh báo, không tự sửa (AD-2). Quét cấp phút tìm Đơn `pending` đã quá mốc hết hạn mà job hoãn bỏ sót và xử lý như AD-4 (lưới an toàn).
+  evidence: Mason chọn tách ở bước kiểm phạm vi của Build 4.6 (17/11/2026). Phần cảnh báo lệch tồn kho dùng kênh cảnh báo của 4.6-b; phần quét Đơn `pending` độc lập.
+- source_spec: none
+  summary: Story 4.6-d "Dead-letter ở `/admin`". Quản trị Tingee xem danh sách job lỗi trong dead-letter queue của pg-boss và requeue từng job; mọi thao tác ghi audit (AD-12). Route mới `/v1/admin/*` đi qua bộ test cách ly.
+  evidence: Mason chọn tách ở bước kiểm phạm vi của Build 4.6 (17/11/2026). Độc lập với 4.6-a/b/c, làm lúc nào cũng được.
+
+## Deferred from: code review of spec-4-6-a-nen-quan-sat.md (2026-11-17)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-6-a-nen-quan-sat.md`
+  summary: Thêm test cho nhánh `startTelemetryIfConfigured` của `apps/api/src/main.ts` khi khởi SDK OpenTelemetry lỗi: phải log đúng một dòng `warn` "Không bật được OpenTelemetry" (không message), rồi vai api/worker vẫn khởi động và phục vụ request. Hiện chưa test nào làm `startTelemetry` ném, nên bỏ try/catch thì api sập lúc khởi mà không test nào fail.
+  evidence: Review 4.6-a (VG), maybe-false; nếu nhánh hỏng thì là medium (chưa kiểm). Muốn kiểm cần một chỗ tiêm lỗi vào `dist/main.js`, vd. biến env chỉ dùng cho test làm `sdk.ts` ném, hoặc chạy một bản Node không có `module.registerHooks`.

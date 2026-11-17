@@ -755,7 +755,10 @@ describe('gửi lại và cuộc đua', () => {
     const sale = await eventOnSale(org, [TIER]);
     const { placed, itemId } = await mismatchItem(org, sale, 200_000, [2]);
     const key = randomUUID();
+    const start = signalsOf(org.orgId).length;
     const first = await actOk(org, itemId, 'approve', { key });
+    // NOTIFY của lần duyệt đầu tới kết nối LISTEN bất đồng bộ, có thể sau response: chờ đủ 3 tín hiệu rồi mới đếm mốc.
+    await signalsAfter(org.orgId, start, 3);
     const before = signalsOf(org.orgId).length;
     // Cùng khóa (thử lại sau lỗi mạng) hay khóa mới (bấm lại ở tab khác) đều chỉ đọc trạng thái.
     expect(await actOk(org, itemId, 'approve', { key })).toEqual(first);
@@ -1238,7 +1241,10 @@ describe('Ghép với Đơn (Story 4.4-b)', () => {
     const second = await expiredOrder(org, sale, [2]);
     const itemId = await unmatchedItem(org, placed.total);
     const key = randomUUID();
+    const start = signalsOf(org.orgId).length;
     const first = await matchOk(org, itemId, placed.code, { key });
+    // NOTIFY của lần ghép đầu tới kết nối LISTEN bất đồng bộ, có thể sau response: chờ đủ 3 tín hiệu rồi mới đếm mốc.
+    await signalsAfter(org.orgId, start, 3);
     const before = signalsOf(org.orgId).length;
     expect(await matchOk(org, itemId, placed.code, { key })).toEqual(first);
     // Khóa mới, kể cả mã Đơn khác: chỉ đọc trạng thái hiện tại.

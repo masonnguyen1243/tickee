@@ -2,6 +2,7 @@ import { Inject, Injectable, type CanActivate, type ExecutionContext } from '@ne
 import { Reflector } from '@nestjs/core';
 import { ErrorCode, roleHasPermission, type Permission } from '@tickee/contracts';
 import { AppError, PUBLIC_ROUTE_KEY } from '../http/index.js';
+import { assignLogContext } from '../logging/index.js';
 import { ACCESS_RESOLVER, type AccessResolver } from './access-resolver.js';
 import type { RequestWithAccess } from './org-scope.js';
 import { ORG_ID_PARAM, REQUIRE_PERMISSION_KEY } from './require-permission.js';
@@ -26,8 +27,8 @@ const toDate = (value: Date | string | null | undefined): Date | null => {
  * Guard toàn cục số 5 (sau bốn guard của `identity`: `SessionGuard`, `TotpGuard`, `ConsentGuard`, `PlatformAdminGuard`):
  * chỉ chạy ở route `@RequirePermission`.
  * Không là thành viên (kể cả BTC không tồn tại hay `orgId` sai dạng) → 403 `NOT_A_MEMBER`; vai thiếu quyền →
- * 403 `FORBIDDEN_ROLE`. Qua thì gắn `req.accessContext` (kèm `stepUpAt` của session để story sau dùng). Luật 2FA
- * không nằm ở đây mà ở `TotpGuard` của `identity` (AD-26).
+ * 403 `FORBIDDEN_ROLE`. Qua thì gắn `req.accessContext` (kèm `stepUpAt` của session để story sau dùng) và gắn
+ * `organizationId` vào mọi log còn lại của request. Luật 2FA không nằm ở đây mà ở `TotpGuard` của `identity` (AD-26).
  */
 @Injectable()
 export class PermissionGuard implements CanActivate {
@@ -69,6 +70,8 @@ export class PermissionGuard implements CanActivate {
       assignedEventIds: [],
       stepUpAt: toDate(req.session?.session?.stepUpAt),
     };
+    // Mọi log còn lại của request (kể cả dòng kết thúc request) mang BTC (Story 4.6-a).
+    assignLogContext({ organizationId: req.accessContext.organizationId });
     return true;
   }
 }

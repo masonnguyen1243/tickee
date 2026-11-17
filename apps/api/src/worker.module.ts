@@ -10,7 +10,8 @@ import { APP_CONFIG, type WorkerConfig } from './platform/config/index.js';
 import { DbModule } from './platform/db/index.js';
 import { EmailModule } from './platform/email/index.js';
 import { JobsModule } from './platform/jobs/index.js';
-import { createLoggerModule } from './platform/logging/index.js';
+import { createLoggerModule, UsePinoLoggerBeforeBootstrap } from './platform/logging/index.js';
+import { TelemetryModule } from './platform/telemetry/index.js';
 
 /**
  * Gốc DI của vai `worker`: không mở HTTP, chạy pg-boss, các job định kỳ, job gửi email (lời mời Admin, email Vé,
@@ -26,6 +27,8 @@ export class WorkerModule {
     return {
       module: WorkerModule,
       imports: [
+        // Đầu tiên (Story 4.6-a): tắt SDK OpenTelemetry sau cùng khi dừng (sau `boss.stop`).
+        TelemetryModule.forRoot({ httpRoutes: false }),
         createLoggerModule({ level: config.LOG_LEVEL }),
         DbModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-worker' }),
         JobsModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-worker' }),
@@ -45,7 +48,7 @@ export class WorkerModule {
         EventJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN, REVALIDATE_SECRET: config.REVALIDATE_SECRET }),
         OrderingJobsModule.forRoot({ WEB_ORIGIN: config.WEB_ORIGIN }),
       ],
-      providers: [{ provide: APP_CONFIG, useValue: config }],
+      providers: [{ provide: APP_CONFIG, useValue: config }, UsePinoLoggerBeforeBootstrap],
     };
   }
 }

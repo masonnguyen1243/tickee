@@ -1,13 +1,32 @@
 import 'reflect-metadata';
 import { pino } from 'pino';
 import { ConfigError, loadConfig, type AppConfig } from './platform/config/index.js';
-import { basePinoOptions } from './platform/logging/index.js';
+// Thẳng `pino-options` (không qua `logging/index`, vốn nạp pg): trước khi telemetry đăng ký hook, chưa nạp express hay pg.
+import { basePinoOptions } from './platform/logging/pino-options.js';
+// Thẳng `state.js` (không qua `telemetry/index`, vốn nạp @nestjs/common và @opentelemetry/core trước hook).
+import { telemetryErrorSummary } from './platform/telemetry/state.js';
 
 // `context` thay cho `name` của pino: trùng khóa mà log Nest dùng (`context: 'ErrorFilter'`…), nên log khởi động đọc
 // cùng kiểu với log của app. (`name` không bị che ở gốc, chỉ `user.name` bị che.)
 const bootLog = pino(basePinoOptions(process.env.LOG_LEVEL === 'silent' ? 'silent' : 'info')).child({
   context: 'Bootstrap',
 });
+
+/**
+ * OpenTelemetry (Story 4.6-a) cho vai api và worker, khi có `OTEL_EXPORTER_OTLP_ENDPOINT`: khởi SDK và hook nạp mô-đun
+ * TRƯỚC khi nạp vai (vai được `import` động, nên express và pg nạp sau hook). Không có endpoint thì không nạp SDK. Lỗi khởi
+ * chỉ log `warn`: thiếu số liệu không được làm sập api.
+ */
+async function startTelemetryIfConfigured(config: AppConfig): Promise<void> {
+  if (config.APP_ROLE === 'migrate' || !config.OTEL_EXPORTER_OTLP_ENDPOINT) return;
+  const log = pino(basePinoOptions(config.LOG_LEVEL)).child({ context: 'Telemetry' });
+  try {
+    const { startTelemetry } = await import('./platform/telemetry/sdk.js');
+    startTelemetry(config, log);
+  } catch (err) {
+    log.warn({ err: telemetryErrorSummary(err) }, 'Không bật được OpenTelemetry');
+  }
+}
 
 async function main(): Promise<void> {
   let config: AppConfig;
@@ -20,6 +39,8 @@ async function main(): Promise<void> {
     }
     throw err;
   }
+
+  await startTelemetryIfConfigured(config);
 
   switch (config.APP_ROLE) {
     case 'api': {

@@ -17,6 +17,7 @@ import { ErrorFilter, HealthController } from './platform/http/index.js';
 import { JobsModule } from './platform/jobs/index.js';
 import { createLoggerModule, type LoggingOptions } from './platform/logging/index.js';
 import { RealtimeModule } from './platform/realtime/index.js';
+import { TelemetryModule } from './platform/telemetry/index.js';
 
 /**
  * Gốc DI của vai `api`. Story sau thêm mô-đun miền vào `imports`.
@@ -30,6 +31,8 @@ export class ApiModule {
     return {
       module: ApiModule,
       imports: [
+        // Đầu tiên (Story 4.6-a): mẫu route Nest lên span server; tắt SDK sau cùng khi dừng (sau pg-boss).
+        TelemetryModule.forRoot({ httpRoutes: true }),
         createLoggerModule({ level: config.LOG_LEVEL, ...options }),
         DbModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-api' }),
         EmailModule.forRoot({ url: config.SMTP_URL, from: config.EMAIL_FROM }),

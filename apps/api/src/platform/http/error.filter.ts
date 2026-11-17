@@ -2,6 +2,7 @@ import { ArgumentsHost, Catch, HttpException, Logger, type ExceptionFilter } fro
 import { ErrorCode, type ErrorResponse } from '@tickee/contracts';
 import type { Response } from 'express';
 import { dbErrorSummary, isDatabaseError } from '../logging/index.js';
+import { setHttpRoute } from '../telemetry/index.js';
 import { AppError } from './app-error.js';
 
 /** Mã lỗi `codeForStatus` trả cho lỗi HTTP không phải `AppError` (lỗi miền mang message của chính nó). */
@@ -38,6 +39,8 @@ export class ErrorFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const res = host.switchToHttp().getResponse<Response>();
+    // Lỗi từ guard (401, 403) chưa qua `HttpRouteInterceptor`: route Nest đã khớp vẫn lên span và metric (Story 4.6-a).
+    setHttpRoute(host.switchToHttp().getRequest());
     let status: number;
     let body: ErrorResponse;
 

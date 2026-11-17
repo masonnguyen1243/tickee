@@ -27,5 +27,15 @@ services:
       MP_SMTP_AUTH_ACCEPT_ANY: '1'
       MP_SMTP_AUTH_ALLOW_INSECURE: '1'
 
+  # Quan sát ở local (Story 4.6-a): collector OTLP + Grafana, Tempo (trace), Prometheus (metrics) trong một image. Không chạy
+  # mặc định: `docker compose --profile observability up -d otel-lgtm`, rồi đặt
+  # OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 trong .env. Grafana: http://localhost:3030.
+  otel-lgtm:
+    image: grafana/otel-lgtm:0.38.1
+    profiles: ['observability']
+    ports:
+      - '127.0.0.1:4318:4318' # OTLP HTTP
+      - '127.0.0.1:3030:3000' # Grafana
+
 volumes:
   postgres-data:

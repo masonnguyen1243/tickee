@@ -262,7 +262,7 @@ describe('registerQueueWorker', () => {
       { id: 'job-2', status: 'failed', output: { error: 'Chưa tới hạn' } },
     ]);
     expect(logger.error).toHaveBeenCalledTimes(1);
-    expect(logger.error.mock.calls[0]?.[0]).toEqual({ jobId: 'job-0' });
+    expect(logger.error.mock.calls[0]?.[0]).toEqual({ queue: 'test.queue', jobId: 'job-0' });
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
@@ -278,7 +278,7 @@ describe('registerQueueWorker', () => {
       output: { error: JSON.stringify({ type: 'DrizzleQueryError', code: '57P01' }) },
     });
     expect(JSON.stringify(result)).not.toContain('a@vidu.vn');
-    expect(logger.warn.mock.calls[0]?.[0]).toEqual({ jobId: 'job-0', itemId, error: result?.output.error });
+    expect(logger.warn.mock.calls[0]?.[0]).toEqual({ queue: 'test.queue', jobId: 'job-0', itemId, error: result?.output.error });
     expect(logger.warn.mock.calls[0]?.[1]).toBe('Việc thử thất bại; pg-boss sẽ thử lại');
   });
 

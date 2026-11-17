@@ -4,7 +4,8 @@ import { sql } from 'drizzle-orm';
 import { fromDrizzle, type Job, type JobResult, type PgBoss, type Queue, type WorkOptions } from 'pg-boss';
 import type { z } from 'zod';
 import type { Tx } from '../db/index.js';
-import { dbErrorSummary, isDatabaseError } from '../logging/index.js';
+import { dbErrorSummary, isDatabaseError, runInLogContext } from '../logging/index.js';
+import { markActiveSpanFailed } from '../telemetry/index.js';
 
 /*
  * Khung pg-boss dùng chung cho các queue của mô-đun miền: khai báo queue (`defineQueue`), tạo queue lúc khởi động ở vai
@@ -174,6 +175,10 @@ type Settled = JobOutcome | { status: 'error'; error: string };
  * - `handle` trả `completed` → `completed`; trả `retry` → `failed` với lý do (pg-boss retry, hết lượt thì sang
  *   dead-letter);
  * - `handle` ném lỗi → `failed`, lỗi lưu qua `jobErrorMessage`, log warn.
+ *
+ * Quan sát (Story 4.6-a): `handle` chạy trong ngữ cảnh log riêng của job, nên mọi log bên trong mang `queue`, `jobId` và
+ * các id của `logContext(payload)`; log còn mang `traceId` của span `process <queue>` mà pg-boss mở cho lô. Payload hỏng
+ * hay `handle` ném lỗi thì span đó thành lỗi (`error.type`): worker chốt từng job nên pg-boss không tự đánh dấu.
  */
 export async function registerQueueWorker<S extends z.ZodType>(
   boss: PgBoss,
@@ -185,12 +190,18 @@ export async function registerQueueWorker<S extends z.ZodType>(
   await boss.work<unknown>(queue.name, queue.workOptions, async (jobs) => {
     const runs = new Map<string, Promise<Settled>>();
     const run = (payload: z.output<S>, job: Job<unknown>): Promise<Settled> =>
-      handle(payload, job).catch((err: unknown) => ({ status: 'error', error: jobErrorMessage(err) }) as const);
+      runInLogContext({ queue: queue.name, jobId: job.id, ...logContext(payload) }, () => handle(payload, job)).catch(
+        (err: unknown) => {
+          markActiveSpanFailed(errorName(err));
+          return { status: 'error', error: jobErrorMessage(err) } as const;
+        },
+      );
 
     const settle = async (job: Job<unknown>): Promise<JobResult> => {
       const parsed = queue.payload.safeParse(job.data);
       if (!parsed.success) {
-        logger.error({ jobId: job.id }, `Payload job ${queue.name} không hợp lệ`);
+        markActiveSpanFailed('invalid_payload');
+        logger.error({ queue: queue.name, jobId: job.id }, `Payload job ${queue.name} không hợp lệ`);
         return { id: job.id, status: 'deadletter', output: { error: 'Payload không hợp lệ' } };
       }
       const payload = parsed.data;
@@ -203,7 +214,10 @@ export async function registerQueueWorker<S extends z.ZodType>(
       const outcome = await pending;
       if (outcome.status === 'completed') return { id: job.id, status: 'completed' };
       if (outcome.status === 'retry') return { id: job.id, status: 'failed', output: { error: outcome.reason } };
-      logger.warn({ jobId: job.id, ...logContext(payload), error: outcome.error }, `${label} thất bại; pg-boss sẽ thử lại`);
+      logger.warn(
+        { queue: queue.name, jobId: job.id, ...logContext(payload), error: outcome.error },
+        `${label} thất bại; pg-boss sẽ thử lại`,
+      );
       return { id: job.id, status: 'failed', output: { error: outcome.error } };
     };
 

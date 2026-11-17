@@ -160,6 +160,28 @@ APP_ROLE=worker node --env-file=.env apps/api/dist/main.js
 NEXT_PUBLIC_API_BASE_URL=http://localhost:3001 pnpm --filter @tickee/web start
 ```
 
+### Quan sát: trace và metrics ở local (OpenTelemetry)
+
+api và worker xuất trace và metrics OpenTelemetry (OTLP/HTTP) khi có `OTEL_EXPORTER_OTLP_ENDPOINT`; để trống (mặc định của
+`.env.example`) là tắt hẳn. Log không đi qua OTLP: vẫn là JSON ra stdout, và khi bật thì mỗi dòng log trong một span mang
+`traceId`, `spanId` để nối sang trace. Thử ở local:
+
+1. `docker compose --profile observability up -d otel-lgtm` (collector + Grafana, Tempo, Prometheus; không chạy mặc định).
+2. Đặt `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` trong `.env` (muốn thấy metrics nhanh: `OTEL_METRIC_EXPORT_INTERVAL=5000`)
+   rồi chạy lại `pnpm dev`. Dòng log `OpenTelemetry đã bật` của vai api và worker cho biết SDK đã khởi.
+3. Mua một Vé có phí với Tingee fake, rồi mở Grafana ở `http://localhost:3030`: Explore › Tempo thấy trace
+   `POST /v1/events/:slug/orders` → `tingee create_link`. Span `process <queue>` của worker chỉ vào trace khi job chạy:
+   job Đối soát bù chạy khoảng 2 phút sau lần tạo link. Muốn thấy job của worker ngay trong cùng trace: BTC đang "Tạm
+   ngừng bán" bấm "Kiểm tra lại" (`POST /v1/orgs/:orgId/payment-service/check`) → `tingee get_va_paging` →
+   `process payment.service-resumed`.
+4. Explore › Prometheus: tên metric là tên OpenTelemetry đã đổi sang quy ước Prometheus, vd.
+   `tickee.tingee.request.duration` → `tickee_tingee_request_duration_seconds` (theo `tingee_operation`, `outcome`),
+   `http.server.request.duration` → `http_server_request_duration_seconds` (theo `http_route`), `pgboss.queue.jobs` →
+   `pgboss_queue_jobs` (theo queue và trạng thái).
+
+Span không mang query, token link chia sẻ, `ipnKey`, đường dẫn `/v1/auth/*`, header, IP, User-Agent hay message lỗi.
+Collector không chạy thì api, worker vẫn chạy bình thường, chỉ log `warn` mỗi lần không xuất được.
+
 ### Trang Sự kiện công khai cập nhật ngay khi BTC sửa
 
 Trang `/e/{slug}` cache phần tĩnh 30 giây. BTC sửa Sự kiện đã mở bán (tên, giờ, địa điểm, Hạng vé…) hoặc bấm "Mở bán"
