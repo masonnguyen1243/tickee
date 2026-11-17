@@ -36,9 +36,10 @@ export type SendAdminInvitationPayload = z.infer<typeof SendAdminInvitationPaylo
 
 /**
  * Queue gửi email mời Admin. Retry khi gửi lỗi (SMTP chập chờn): 8 lần, chờ 30 giây rồi tăng gấp đôi (tối đa 1 giờ) —
- * vài giờ trước khi bỏ cuộc, còn xa hạn 7 ngày của lời mời. Hết lượt thì pg-boss chép job sang dead-letter (cảnh báo
- * dead-letter là Story 4.6). Lấy tối đa 10 job mỗi lần và lấy tiếp ngay khi lô đầy (dồn job thì xả nhanh, không chờ chu
- * kỳ poll 2 giây cho từng job); mỗi job được chốt riêng nên một email lỗi không làm hỏng cả lô.
+ * vài giờ trước khi bỏ cuộc, còn xa hạn 7 ngày của lời mời. Hết lượt thì pg-boss chép job sang dead-letter (job quét
+ * của `platform/alerts` báo đội vận hành, Story 4.6-b). Lấy tối đa 10 job mỗi lần và lấy tiếp ngay khi lô đầy (dồn job
+ * thì xả nhanh, không chờ chu kỳ poll 2 giây cho từng job); mỗi job được chốt riêng nên một email lỗi không làm hỏng cả
+ * lô.
  */
 export const ADMIN_INVITATION_QUEUE = defineQueue({
   name: JobQueue.ORGANIZER_SEND_ADMIN_INVITATION,

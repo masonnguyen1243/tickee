@@ -21,6 +21,7 @@ import {
   type ReconcileOutcome,
 } from '../../src/modules/payment/index.js';
 import { HttpTingeeClient, type TingeeClient, type TingeeCredential } from '../../src/modules/tingee/index.js';
+import { OpsAlerts } from '../../src/platform/alerts/index.js';
 import { parseCredentialKeys, SecretBox } from '../../src/platform/crypto/index.js';
 import { Database, DATABASE } from '../../src/platform/db/index.js';
 import { BOSS } from '../../src/platform/jobs/index.js';
@@ -116,6 +117,7 @@ function workerWith(enabled: boolean, secretBox?: SecretBox): ReconciliationWork
     secretBox
       ? { secretBox, orderStatusQuery: enabled }
       : reconciliationSettings({ TINGEE_CREDENTIAL_KEYS: TEST_CREDENTIAL_KEYS, TINGEE_ORDER_STATUS_QUERY: enabled }),
+    h.app.get(OpsAlerts),
   );
 }
 
@@ -222,6 +224,14 @@ async function buyerEmails(orderId: string): Promise<unknown[]> {
 
 const alertsOf = (code: string) =>
   h.logs.lines.filter((l) => l.orderCode === code && l.alert === PAYMENT_RECONCILIATION_STOPPED_ALERT);
+
+/** Job email cảnh báo vận hành (Story 4.6-b) của mã Đơn `code`: loại `payment_reconciliation_stopped`, subject mã Đơn. */
+const opsAlertsOf = async (code: string) =>
+  (
+    await boss.findJobs(JobQueue.OPS_ALERT, {
+      data: { kind: PAYMENT_RECONCILIATION_STOPPED_ALERT, subjects: [code] },
+    })
+  ).map((job) => job.data);
 
 const sendIpn = (payload: Record<string, unknown>, credential: TingeeCredential = MAIN) =>
   postIpn(h, ipnKey, signIpn(credential.secretToken, payload));
@@ -583,6 +593,21 @@ describe('I/O Matrix', () => {
     expect(alertsOf(placed.code)).toMatchObject([
       { level: 50, reason: 'credential_invalid', organizationId: own.orgId, orderCode: placed.code },
     ]);
+    // Story 4.6-b: marker đi qua kênh cảnh báo vận hành: một email, subject là mã Đơn.
+    expect(await opsAlertsOf(placed.code)).toEqual([
+      {
+        kind: PAYMENT_RECONCILIATION_STOPPED_ALERT,
+        count: 1,
+        subjects: [placed.code],
+        details: {
+          organizationId: own.orgId,
+          orderCode: placed.code,
+          reason: 'credential_invalid',
+          error: null,
+          failures: 0,
+        },
+      },
+    ]);
     expect(await orderState(h, placed.code)).toMatchObject({ status: 'pending', tickets: 0 });
     // Story 4.2: key cũ đã gỡ không bật cờ dịch vụ thanh toán; BTC vẫn bán bằng key mới.
     expect(await paymentServiceOf(h, own.orgId)).toMatchObject({ status: 'active', reason: null });
@@ -602,6 +627,7 @@ describe('I/O Matrix', () => {
       error: null,
     });
     expect(alertsOf(missing.code)).toMatchObject([{ reason: 'credential_unreadable' }]);
+    expect(await opsAlertsOf(missing.code)).toMatchObject([{ details: { reason: 'credential_unreadable' } }]);
 
     const own = await paidReadyOrg(h, { name: 'CLB Bơi mùa đông', credential: MAIN, payout: payoutOf(mainAccount) });
     const broken = await place(1, own);
@@ -635,6 +661,7 @@ describe('I/O Matrix', () => {
     const job = await onlyJob(placed.orderId);
     await expect(run(job, workerWith(true, box))).rejects.toThrow('mất kết nối DB');
     expect(alertsOf(placed.code)).toEqual([]);
+    expect(await opsAlertsOf(placed.code)).toEqual([]);
     expect(lookupsOf(placed.code)).toEqual([]);
     expect(await reconcileJobs(placed.orderId)).toEqual([job]);
     expect(await orderState(h, placed.code)).toMatchObject({ status: 'pending' });
@@ -686,6 +713,17 @@ describe('I/O Matrix', () => {
       { level: 50, reason: 'failed', error: 'PAYMENT_PROVIDER_UNAVAILABLE', failures: 4, orderCode: placed.code },
     ]);
     expect(lookupsOf(placed.code)).toHaveLength(4);
+    // Story 4.6-b: marker đi qua kênh cảnh báo vận hành (một email, subject là mã Đơn).
+    expect(await opsAlertsOf(placed.code)).toEqual([
+      expect.objectContaining({
+        count: 1,
+        details: expect.objectContaining({ reason: 'failed', error: 'PAYMENT_PROVIDER_UNAVAILABLE', failures: 4 }),
+      }),
+    ]);
+    // Chống lặp `once` theo mã Đơn: chuỗi dừng lần nữa (job chạy lại) vẫn log marker, nhưng không thêm email.
+    expect(await run(parent)).toMatchObject({ result: 'stopped', reason: 'failed' });
+    expect(alertsOf(placed.code)).toHaveLength(2);
+    expect(await opsAlertsOf(placed.code)).toHaveLength(1);
     expect(await orderState(h, placed.code)).toMatchObject({ status: 'pending', tickets: 0 });
     await expectInvariants(h, placed.eventId);
   });

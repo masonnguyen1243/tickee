@@ -119,6 +119,48 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...apiEnv, TINGEE_ORDER_STATUS_QUERY: 'true' })).not.toHaveProperty('TINGEE_ORDER_STATUS_QUERY');
   });
 
+  it('cảnh báo vận hành (Story 4.6-b): mặc định cooldown 30 phút (api, worker), ngưỡng ùn 5 phút và không người nhận (worker)', () => {
+    const api = loadConfig(apiEnv);
+    expect(api).toMatchObject({ OPS_ALERT_COOLDOWN_MINUTES: 30 });
+    // Vai api chỉ raise: không gửi email, không quét.
+    expect(api).not.toHaveProperty('OPS_ALERT_EMAILS');
+    expect(loadConfig({ ...apiEnv, OPS_ALERT_QUEUE_WAIT_MINUTES: '9' })).not.toHaveProperty('OPS_ALERT_QUEUE_WAIT_MINUTES');
+    const worker = loadConfig(workerEnv);
+    expect(worker).toMatchObject({ OPS_ALERT_COOLDOWN_MINUTES: 30, OPS_ALERT_QUEUE_WAIT_MINUTES: 5 });
+    expect(worker).not.toHaveProperty('OPS_ALERT_EMAILS');
+    expect(loadConfig({ ...workerEnv, OPS_ALERT_EMAILS: '' })).not.toHaveProperty('OPS_ALERT_EMAILS');
+    expect(
+      loadConfig({ ...workerEnv, OPS_ALERT_COOLDOWN_MINUTES: '45', OPS_ALERT_QUEUE_WAIT_MINUTES: '10' }),
+    ).toMatchObject({ OPS_ALERT_COOLDOWN_MINUTES: 45, OPS_ALERT_QUEUE_WAIT_MINUTES: 10 });
+  });
+
+  it('OPS_ALERT_EMAILS: danh sách email cách nhau bằng dấu phẩy (bỏ khoảng trắng, gộp trùng); sai → lỗi, không in giá trị', () => {
+    const emails = (value: string) => {
+      const config = loadConfig({ ...workerEnv, OPS_ALERT_EMAILS: value });
+      return config.APP_ROLE === 'worker' ? config.OPS_ALERT_EMAILS : null;
+    };
+    expect(emails('ops@tickee.vn')).toEqual(['ops@tickee.vn']);
+    expect(emails(' ops@tickee.vn , oncall@tickee.vn,ops@tickee.vn ')).toEqual(['ops@tickee.vn', 'oncall@tickee.vn']);
+    for (const value of [`${SECRET}`, `ops@tickee.vn,${SECRET}`, ' , ', `ops@tickee.vn;${SECRET}@x.vn`]) {
+      const err = issuesOf({ ...workerEnv, OPS_ALERT_EMAILS: value });
+      expect(err.issues, value).toEqual([
+        { variable: 'OPS_ALERT_EMAILS', reason: 'phải là danh sách email cách nhau bằng dấu phẩy' },
+      ]);
+      expect(err.message).not.toContain(SECRET);
+    }
+  });
+
+  it('OPS_ALERT_COOLDOWN_MINUTES, OPS_ALERT_QUEUE_WAIT_MINUTES: số nguyên 1–1440 phút; sai → lỗi, nêu tên biến', () => {
+    for (const value of ['0', '-5', '1.5', '1441', 'ba-muoi']) {
+      expect(issuesOf({ ...apiEnv, OPS_ALERT_COOLDOWN_MINUTES: value }).issues.map((i) => i.variable), value).toEqual([
+        'OPS_ALERT_COOLDOWN_MINUTES',
+      ]);
+      expect(issuesOf({ ...workerEnv, OPS_ALERT_QUEUE_WAIT_MINUTES: value }).issues.map((i) => i.variable), value).toEqual(
+        ['OPS_ALERT_QUEUE_WAIT_MINUTES'],
+      );
+    }
+  });
+
   it('vai worker: thiếu REVALIDATE_SECRET → dừng và nêu tên biến; ngắn hơn 32 ký tự → lỗi, không in giá trị', () => {
     const missing = issuesOf({ ...workerEnv, REVALIDATE_SECRET: undefined });
     expect(missing.issues).toEqual([{ variable: 'REVALIDATE_SECRET', reason: 'thiếu' }]);

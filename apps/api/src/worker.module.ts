@@ -6,6 +6,7 @@ import { OrganizerJobsModule } from './modules/organizer/index.js';
 import { PaymentJobsModule } from './modules/payment/index.js';
 import { TicketingModule } from './modules/ticketing/index.js';
 import { TingeeModule } from './modules/tingee/index.js';
+import { AlertsModule } from './platform/alerts/index.js';
 import { APP_CONFIG, type WorkerConfig } from './platform/config/index.js';
 import { DbModule } from './platform/db/index.js';
 import { EmailModule } from './platform/email/index.js';
@@ -19,7 +20,8 @@ import { TelemetryModule } from './platform/telemetry/index.js';
  * `<WEB_ORIGIN>/api/revalidate`), job hết hạn Giữ chỗ của Đơn và job Đối soát bù (Story 4.1: tra Tingee khi IPN trễ
  * hoặc mất, đi cùng đường xử lý với IPN qua `IpnProcessor` và `OrderPayments`; cờ `TINGEE_ORDER_STATUS_QUERY`), job
  * cron dò dịch vụ thanh toán của BTC bị ngắt và job "đã mở lại" (Story 4.2: Đối soát bù mọi Đơn còn mở của BTC), job
- * cron dò Token mỗi giờ và email cảnh báo Token dưới ngưỡng (Story 4.5-b). Có sẵn adapter Tingee và Vé (khóa QR).
+ * cron dò Token mỗi giờ và email cảnh báo Token dưới ngưỡng (Story 4.5-b), kênh cảnh báo vận hành: email cho đội vận hành
+ * và job quét mỗi phút (Story 4.6-b). Có sẵn adapter Tingee và Vé (khóa QR).
  */
 @Module({})
 export class WorkerModule {
@@ -33,6 +35,9 @@ export class WorkerModule {
         DbModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-worker' }),
         JobsModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-worker' }),
         EmailModule.forRoot({ url: config.SMTP_URL, from: config.EMAIL_FROM }),
+        // Kênh cảnh báo vận hành (Story 4.6-b, toàn cục): `raise`, job gửi email tới `OPS_ALERT_EMAILS` và job quét mỗi
+        // phút (hàng đợi pg-boss ùn, job vào dead-letter).
+        AlertsModule.forWorker(config),
         // Adapter Tingee (`TINGEE_CLIENT`, toàn cục) và Vé + Mã QR vé (`TicketsService`, toàn cục) như vai api.
         TingeeModule.forRoot({ baseUrl: config.TINGEE_BASE_URL }),
         TicketingModule.forRoot(config),

@@ -60,8 +60,8 @@ export type DefaultPayoutChangedPayload = z.input<typeof DefaultPayoutChangedPay
 
 /**
  * Retry khi gửi lỗi (SMTP chập chờn): 8 lần, chờ 30 giây rồi tăng gấp đôi (tối đa 1 giờ). Hết lượt thì pg-boss chép
- * job sang dead-letter (như job mời Admin; cảnh báo dead-letter là Story 4.6). Lô tối đa 10 job, lấy tiếp ngay khi lô
- * đầy, mỗi job được chốt riêng.
+ * job sang dead-letter (như job mời Admin; job quét của `platform/alerts` báo đội vận hành, Story 4.6-b). Lô tối đa
+ * 10 job, lấy tiếp ngay khi lô đầy, mỗi job được chốt riêng.
  */
 export const DEFAULT_PAYOUT_QUEUE = defineQueue({
   name: JobQueue.ORGANIZER_NOTIFY_DEFAULT_PAYOUT_CHANGED,

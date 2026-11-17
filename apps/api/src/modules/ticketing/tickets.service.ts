@@ -9,6 +9,7 @@ import {
   type TicketShareLink,
 } from '@tickee/contracts';
 import { and, asc, eq, sql } from 'drizzle-orm';
+import { OpsAlerts } from '../../platform/alerts/index.js';
 import { audit } from '../../platform/audit/index.js';
 import type { Database, DbExecutor, Tx } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
@@ -26,7 +27,8 @@ const sharedTicketNotFound = () =>
 
 /**
  * Marker `alert` của dòng log khi link chia sẻ hợp lệ nhưng khóa QR của Vé đã bị gỡ khỏi `TICKET_QR_KEYS` (xoay khóa sai,
- * AD-29). Cảnh báo vận hành (Story 4.6) bắt theo marker này.
+ * AD-29); cũng là loại cảnh báo của kênh `platform/alerts` (Story 4.6-b: chống lặp `cooldown` theo cặp
+ * `qrKeyVersion:currentVersion`).
  */
 export const TICKET_QR_KEY_MISSING_ALERT = 'ticket_qr_key_missing';
 
@@ -64,7 +66,10 @@ export interface IssuedTicket {
 export class TicketsService {
   private readonly logger = new Logger('TicketsService');
 
-  constructor(@Inject(TICKET_QR_KEYS) private readonly keys: TicketQrKeys) {}
+  constructor(
+    @Inject(TICKET_QR_KEYS) private readonly keys: TicketQrKeys,
+    @Inject(OpsAlerts) private readonly alerts: OpsAlerts,
+  ) {}
 
   /**
    * Phát N Vé cho Đơn trong `tx`: `seq` 1..N theo dòng có `ticket_type_id` tăng dần (trong một dòng liên tiếp),
@@ -162,7 +167,8 @@ export class TicketsService {
    * `effective_end_at` (AD-14) → cùng một `404 SHARED_TICKET_NOT_FOUND`. Không trả tên, SĐT, email Người mua, mã Đơn hay
    * id user. Khóa `qr_key_version` của Vé không có trong `TICKET_QR_KEYS` của instance (khóa cũ đã gỡ, hoặc instance
    * chưa có khóa mới) → cũng `404` chung, kèm log `error` có marker `TICKET_QR_KEY_MISSING_ALERT` (id Vé, id Sự kiện,
-   * phiên bản khóa của Vé và phiên bản hiện hành; không có token).
+   * phiên bản khóa của Vé và phiên bản hiện hành; không có token) và báo kênh cảnh báo vận hành (Story 4.6-b; raise không
+   * bao giờ ném, nên vẫn là `404` chung).
    */
   async sharedTicket(db: DbExecutor, token: string): Promise<SharedTicketView> {
     if (!SHARE_TOKEN_PATTERN.test(token)) throw sharedTicketNotFound();
@@ -195,6 +201,16 @@ export class TicketsService {
         },
         'Link chia sẻ Vé: TICKET_QR_KEYS của instance này không có khóa của Vé; trả 404',
       );
+      await this.alerts.raise({
+        kind: TICKET_QR_KEY_MISSING_ALERT,
+        subjects: [`${row.qrKeyVersion}:${this.keys.currentVersion}`],
+        details: {
+          ticketId: row.id,
+          eventId: row.eventId,
+          qrKeyVersion: row.qrKeyVersion,
+          currentVersion: this.keys.currentVersion,
+        },
+      });
       throw sharedTicketNotFound();
     }
     return {

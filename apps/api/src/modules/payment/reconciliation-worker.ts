@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { ErrorCode, OrderStatus } from '@tickee/contracts';
 import type { PgBoss } from 'pg-boss';
+import { OpsAlerts } from '../../platform/alerts/index.js';
 import type { WorkerConfig } from '../../platform/config/index.js';
 import { parseCredentialKeys, SecretBox, SecretBoxError } from '../../platform/crypto/index.js';
 import { DATABASE, dbClock, type Database } from '../../platform/db/index.js';
@@ -34,7 +35,8 @@ import { IPN_EXPIRING_STATUSES, IPN_SUCCESS_STATUS, IpnProcessor, TingeeIpn, typ
  * trước `expires_at`) mà job của một mốc `pending` còn lại chạy → không gọi Tingee, chỉ hẹn mốc `expires_at` + 30 phút.
  * Tra lỗi (Tingee tạm lỗi, timeout, mã lạ, không
  * tìm thấy đơn, `MERCHANT_SUSPENDED`, kết quả sai dạng, trạng thái lạ) → tra lại cùng mốc sau 1, 2, 4 phút; lỗi lần thứ
- * 4 liên tiếp → dừng chuỗi, log `error` có `alert: 'payment_reconciliation_stopped'`. Key sai (`TINGEE_CREDENTIAL_INVALID`,
+ * 4 liên tiếp → dừng chuỗi, log `error` có `alert: 'payment_reconciliation_stopped'` và báo kênh cảnh báo vận hành (Story
+ * 4.6-b: email cho đội vận hành, mỗi mã Đơn một lần). Key sai (`TINGEE_CREDENTIAL_INVALID`,
  * kể cả credential cũ đã gỡ) → dừng ngay, lý do `credential_invalid`; không đụng trạng thái dịch vụ thanh toán của BTC
  * (Đơn hết hạn theo job (c)). Không đọc được credential → dừng, lý do `credential_unreadable`.
  *
@@ -42,7 +44,10 @@ import { IPN_EXPIRING_STATUSES, IPN_SUCCESS_STATUS, IpnProcessor, TingeeIpn, typ
  * payload job. Worker tra tuần tự (mặc định của `registerQueueWorker`).
  */
 
-/** Marker log của cảnh báo vận hành khi chuỗi Đối soát bù của một Đơn dừng (Story 4.6 nối kênh cảnh báo theo marker). */
+/**
+ * Marker log của cảnh báo vận hành khi chuỗi Đối soát bù của một Đơn dừng; cũng là loại cảnh báo của kênh
+ * `platform/alerts` (Story 4.6-b: chống lặp theo mã Đơn).
+ */
 export const PAYMENT_RECONCILIATION_STOPPED_ALERT = 'payment_reconciliation_stopped';
 
 /** Trạng thái đơn Gateway "chưa trả, link còn" (hợp đồng tạm của API tra đơn). */
@@ -123,6 +128,7 @@ export class ReconciliationWorker implements OnApplicationBootstrap {
     @Inject(TINGEE_CLIENT) private readonly tingee: TingeeClient,
     @Inject(IpnProcessor) private readonly processor: IpnProcessor,
     @Inject(RECONCILIATION_SETTINGS) private readonly settings: ReconciliationSettings,
+    @Inject(OpsAlerts) private readonly alerts: OpsAlerts,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -169,11 +175,11 @@ export class ReconciliationWorker implements OnApplicationBootstrap {
     }
 
     const credential = await this.credentialOf(order);
-    if (!credential) return this.stop(context, 'credential_unreadable', null, failures);
+    if (!credential) return await this.stop(context, 'credential_unreadable', null, failures);
 
     const lookup = await this.lookup(credential, context);
     if (!lookup.ok) {
-      if (lookup.stop) return this.stop(context, lookup.reason, null, failures);
+      if (lookup.stop) return await this.stop(context, lookup.reason, null, failures);
       return this.fail(context, { jobId, orderId, failures: failures + 1 }, lookup.error);
     }
 
@@ -250,7 +256,7 @@ export class ReconciliationWorker implements OnApplicationBootstrap {
     input: { jobId: string; orderId: string; failures: number },
     error: ReconciliationError,
   ): Promise<ReconcileOutcome> {
-    if (input.failures >= RECONCILE_MAX_FAILURES) return this.stop(context, 'failed', error, input.failures);
+    if (input.failures >= RECONCILE_MAX_FAILURES) return await this.stop(context, 'failed', error, input.failures);
     const retryAt = await scheduleReconciliationRetry(this.boss, this.db, {
       parentJobId: input.jobId,
       orderId: input.orderId,
@@ -263,17 +269,25 @@ export class ReconciliationWorker implements OnApplicationBootstrap {
     return { result: 'retry', error, failures: input.failures, retryAt };
   }
 
-  /** Dừng chuỗi: log `error` có marker cảnh báo vận hành, mã Đơn và lý do. Không enqueue gì. */
-  private stop(
+  /**
+   * Dừng chuỗi: log `error` có marker cảnh báo vận hành, mã Đơn và lý do, rồi báo kênh cảnh báo vận hành (chống lặp theo
+   * mã Đơn; raise không bao giờ ném). Không enqueue job tra nào.
+   */
+  private async stop(
     context: { organizationId: string; orderCode: string },
     reason: ReconciliationStopReason,
     error: ReconciliationError | null,
     failures: number,
-  ): ReconcileOutcome {
+  ): Promise<ReconcileOutcome> {
     this.logger.error(
       { ...context, alert: PAYMENT_RECONCILIATION_STOPPED_ALERT, reason, error: error ?? undefined, failures },
       'Đối soát bù dừng cho Đơn này; cần vận hành kiểm tra',
     );
+    await this.alerts.raise({
+      kind: PAYMENT_RECONCILIATION_STOPPED_ALERT,
+      subjects: [context.orderCode],
+      details: { organizationId: context.organizationId, orderCode: context.orderCode, reason, error, failures },
+    });
     return { result: 'stopped', reason, error };
   }
 }
