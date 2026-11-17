@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ORDER_CODE_PATTERN, OrderStatus, RealtimeTopic, ReviewItemType, type ReviewItemReason } from '@tickee/contracts';
 import { z } from 'zod';
+import { OpsAlerts } from '../../platform/alerts/index.js';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
 import { realtime } from '../../platform/realtime/index.js';
 import {
@@ -146,7 +147,10 @@ interface Settlement {
 /** Nhánh không khớp Đơn nào của BTC (bước 1 có mã mà không có Đơn, bước 2): cảnh báo vận hành (`alert`). */
 const UNMATCHED_BRANCHES: ReadonlySet<IpnBranch> = new Set<IpnBranch>(['order_not_found', 'other_organization']);
 
-/** Marker log của cảnh báo vận hành cho tiền về không khớp Đơn (Story 4.6 nối kênh cảnh báo theo marker này). */
+/**
+ * Marker log của cảnh báo vận hành cho tiền về không khớp Đơn; cũng là loại cảnh báo của kênh `platform/alerts` (Story
+ * 4.6-b: một email cho mỗi khoản tiền, chống lặp theo id `payment_events`).
+ */
 export const PAYMENT_UNMATCHED_ALERT = 'payment_unmatched';
 
 /** Kết quả `markPaid` (bước 3–7) của nguồn `source` → nhánh và mục Cần xử lý của Đơn `orderId`. */
@@ -183,6 +187,7 @@ export class IpnProcessor {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     @Inject(OrderPayments) private readonly payments: OrderPayments,
+    @Inject(OpsAlerts) private readonly alerts: OpsAlerts,
   ) {}
 
   /**
@@ -196,6 +201,8 @@ export class IpnProcessor {
    * - trạng thái lạ → chỉ lưu.
    * Lỗi DB (kể cả phát Vé, enqueue email, tạo mục) → ném, cả `tx` rollback (không lưu event, Đơn và tồn kho không đổi):
    * Tingee gửi lại (IPN) hoặc job tra retry (Đối soát bù).
+   * Tiền về không khớp Đơn nào của BTC: sau khi `tx` commit, log `error` có marker `PAYMENT_UNMATCHED_ALERT` rồi báo kênh
+   * cảnh báo vận hành (Story 4.6-b; raise không bao giờ ném, nên không đổi kết quả hay mã trả về).
    */
   async process(organizationId: string, ipn: TingeeIpn, source: GatewaySource = 'ipn'): Promise<IpnOutcome> {
     const kind: PaymentEventKind = ipn.status === IPN_SUCCESS_STATUS ? 'payment' : 'status';
@@ -250,11 +257,26 @@ export class IpnProcessor {
     };
     const what = source === 'ipn' ? 'IPN Tingee' : 'Kết quả Đối soát bù';
     if (UNMATCHED_BRANCHES.has(outcome.branch)) {
-      // Cảnh báo vận hành cho tới khi Story 4.6 nối kênh: tiền đã về tài khoản BTC mà không khớp Đơn nào của BTC.
+      // Cảnh báo vận hành: tiền đã về tài khoản BTC mà không khớp Đơn nào của BTC. Marker log giữ nguyên; kênh
+      // `platform/alerts` gửi email cho đội vận hành (sau commit, mỗi khoản tiền một lần).
       this.logger.error(
         { ...context, alert: PAYMENT_UNMATCHED_ALERT },
         `${what}: tiền về không khớp Đơn nào của BTC; đã tạo mục Cần xử lý`,
       );
+      if (outcome.paymentEventId) {
+        await this.alerts.raise({
+          kind: PAYMENT_UNMATCHED_ALERT,
+          subjects: [outcome.paymentEventId],
+          details: {
+            organizationId,
+            paymentEventId: outcome.paymentEventId,
+            orderCode: validCode ? ipn.orderId : null,
+            providerTransactionCode: ipn.providerTransactionCode,
+            source,
+            reason: outcome.branch,
+          },
+        });
+      }
     } else if (outcome.reviewItem) {
       this.logger.warn(context, `${what} không phát Vé; đã tạo mục Cần xử lý`);
     } else if (outcome.branch === 'unknown_status') {

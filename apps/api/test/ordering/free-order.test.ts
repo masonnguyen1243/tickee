@@ -10,6 +10,7 @@ import {
   type IssueTicketsInput,
   type IssuedTicket,
 } from '../../src/modules/ticketing/index.js';
+import type { OpsAlerts } from '../../src/platform/alerts/index.js';
 import { audit } from '../../src/platform/audit/index.js';
 import type { Tx } from '../../src/platform/db/index.js';
 import { BOSS } from '../../src/platform/jobs/index.js';
@@ -47,7 +48,9 @@ class ToggleTicketsService extends TicketsService {
 }
 
 const qrKeys = TicketQrKeys.parse(TEST_TICKET_QR_KEYS);
-const tickets = new ToggleTicketsService(qrKeys);
+/** Kênh cảnh báo vận hành không dùng ở file này (không có link chia sẻ thiếu khóa QR): stub không báo gì. */
+const noAlerts = { raise: async () => [] } as unknown as OpsAlerts;
+const tickets = new ToggleTicketsService(qrKeys, noAlerts);
 
 let h: Harness;
 let boss: PgBoss;

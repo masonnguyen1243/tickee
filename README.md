@@ -182,6 +182,36 @@ api và worker xuất trace và metrics OpenTelemetry (OTLP/HTTP) khi có `OTEL_
 Span không mang query, token link chia sẻ, `ipnKey`, đường dẫn `/v1/auth/*`, header, IP, User-Agent hay message lỗi.
 Collector không chạy thì api, worker vẫn chạy bình thường, chỉ log `warn` mỗi lần không xuất được.
 
+### Cảnh báo vận hành (email cho đội vận hành)
+
+Kênh `platform/alerts` (Story 4.6-b) gửi email `[Tickee vận hành] <tiêu đề>` tới `OPS_ALERT_EMAILS` khi:
+
+| Loại | Báo khi | Chống lặp |
+| ---- | ------- | --------- |
+| `payment_unmatched` | tiền về tài khoản BTC mà không khớp Đơn nào của BTC (IPN hay Đối soát bù) | một lần mỗi khoản tiền |
+| `payment_reconciliation_stopped` | Đối soát bù dừng tra một Đơn | một lần mỗi mã Đơn |
+| `ticket_qr_key_missing` | link chia sẻ Vé trả 404 vì `TICKET_QR_KEYS` của instance thiếu khóa của Vé | mỗi cặp phiên bản khóa, `OPS_ALERT_COOLDOWN_MINUTES` |
+| `queue_backlog` | queue pg-boss có job tới hạn quá `OPS_ALERT_QUEUE_WAIT_MINUTES` mà chưa chạy | mỗi queue, `OPS_ALERT_COOLDOWN_MINUTES` |
+| `dead_letter` | có job mới trong một queue `*.dead-letter` (một email mỗi queue mỗi lượt quét) | một lần mỗi job |
+
+Ba loại đầu đi cùng dòng log `error` có `alert` sẵn có; hai loại sau do job cron `platform.ops-alert-scan` của worker quét
+mỗi phút. Mỗi lần có đối tượng mới còn có một dòng log `error` kèm `alert: <loại>`. Email chỉ có loại, id, mã Đơn, tên
+queue, số đếm và lý do. Không đặt `OPS_ALERT_EMAILS` thì chỉ có log (worker log `warn`); cảnh báo phát hiện trong lúc
+đó vẫn được ghi dấu, nên đặt người nhận sau sẽ không được gửi email lại. Email gửi lỗi thì retry 8 lần rồi vào
+`platform.ops-alert.dead-letter`; job quét chỉ log `error` cho queue này, và cho chính `platform.ops-alert` khi nó ùn.
+Worker chết thì không có lượt quét nào.
+
+Thử ở local: đặt `OPS_ALERT_EMAILS=van-hanh@tickee.local` trong `.env`, chạy `pnpm dev`, rồi chép tay một job vào
+dead-letter (job thật chỉ vào đó sau 8 lần retry, mất vài giờ):
+
+```sh
+docker compose exec postgres psql -U tickee_app -d tickee \
+  -c "INSERT INTO pgboss.job (name, data) VALUES ('ordering.send-buyer-email.dead-letter', '{}')"
+```
+
+Trong một phút Mailpit (`http://localhost:8025`) nhận đúng một email `[Tickee vận hành] Job vào dead-letter` nêu id job;
+lượt quét sau không gửi lại.
+
 ### Trang Sự kiện công khai cập nhật ngay khi BTC sửa
 
 Trang `/e/{slug}` cache phần tĩnh 30 giây. BTC sửa Sự kiện đã mở bán (tên, giờ, địa điểm, Hạng vé…) hoặc bấm "Mở bán"
@@ -295,6 +325,9 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `TINGEE_CREDENTIAL_KEYS` | api, worker | bắt buộc; khóa AES-256-GCM mã hóa Secret Token Tingee của BTC: `v<k>:<base64 của 32 byte>`, nhiều khóa cách nhau bằng dấu phẩy, không trùng `k`. Mã hóa bằng khóa có `k` lớn nhất, giải mã theo tiền tố `v<k>:` của ciphertext; xoay khóa thì thêm khóa mới và giữ khóa cũ. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì api không giải mã được Secret Token đã lưu (local: `pnpm db:seed` mã hóa lại key demo, xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32`. `pnpm db:seed` cũng đọc biến này để mã hóa key demo |
 | `TINGEE_ORDER_STATUS_QUERY` | worker   | mặc định tắt; `true` bật Đối soát bù (Story 4.1): worker tra trạng thái đơn Gateway khi IPN trễ hoặc mất, kết quả đi cùng đường xử lý IPN. Tingee chưa công bố API tra đơn: adapter theo hợp đồng tạm mà chỉ Tingee fake hiểu, nên chỉ bật ở local (`.env.example`) và test; staging bật khi đã thay bằng hợp đồng thật. Tắt: job tra xong ngay, không gọi Tingee |
 | `TICKET_QR_KEYS`         | api, worker | bắt buộc; khóa HMAC-SHA256 ký Mã QR vé (`t<k>.<ticketId>.<sig>`), cùng dạng `TINGEE_CREDENTIAL_KEYS` nhưng là khóa khác. Ký Vé mới bằng khóa có `k` lớn nhất; Vé lưu `k` (không lưu chuỗi QR) nên xoay khóa thì thêm khóa mới và giữ khóa cũ tới khi không còn Vé nào dùng. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì Mã QR đã gửi không còn khớp và link chia sẻ trả 404 (xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32` |
+| `OPS_ALERT_EMAILS`       | worker      | tùy chọn; người nhận email cảnh báo vận hành (Story 4.6-b), email cách nhau bằng dấu phẩy. Không đặt: cảnh báo chỉ ghi log, worker log `warn` lúc khởi động và mỗi lần có cảnh báo (xem "Cảnh báo vận hành") |
+| `OPS_ALERT_COOLDOWN_MINUTES` | api, worker | mặc định `30` (1–1440); loại cảnh báo có cooldown (thiếu khóa QR, hàng đợi ùn) báo lại cùng đối tượng sau chừng này phút |
+| `OPS_ALERT_QUEUE_WAIT_MINUTES` | worker  | mặc định `5` (1–1440); job pg-boss tới hạn quá chừng này phút mà chưa chạy thì báo hàng đợi ùn |
 | `NEXT_PUBLIC_API_BASE_URL` | web       | gốc REST của api; client thêm `/v1`; nhúng lúc build. `next build` thiếu biến thì dừng; lệnh dev ở gốc tự đặt `http://localhost:3001` (xem "Biến build của web") |
 | `TICKEE_UI_KIT`          | web         | `1` bật `/ui-kit`; production không đặt (404) |
 

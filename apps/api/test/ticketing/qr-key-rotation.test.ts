@@ -1,14 +1,23 @@
 import 'reflect-metadata';
 import type { INestApplicationContext } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { MyTicketDetail, SharedTicketView } from '@tickee/contracts';
+import { JobQueue, MyTicketDetail, SharedTicketView } from '@tickee/contracts';
 import { Logger as PinoNestLogger } from 'nestjs-pino';
+import pg from 'pg';
+import type { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { TICKET_QR_KEY_MISSING_ALERT, TicketQrKeys, verifyTicketQr } from '../../src/modules/ticketing/index.js';
 import { EMAIL_TRANSPORT } from '../../src/platform/email/index.js';
+import { BOSS } from '../../src/platform/jobs/index.js';
 import { REDACTED } from '../../src/platform/logging/index.js';
 import { WorkerModule } from '../../src/worker.module.js';
-import { TEST_TICKET_QR_KEY_V2, TEST_TICKET_QR_KEYS, TEST_WEB_ORIGIN, workerConfig } from '../helpers.js';
+import {
+  migrationDatabaseUrl,
+  TEST_TICKET_QR_KEY_V2,
+  TEST_TICKET_QR_KEYS,
+  TEST_WEB_ORIGIN,
+  workerConfig,
+} from '../helpers.js';
 import { createHarness, FakeEmailTransport, signUp, type Harness } from '../identity/harness.js';
 import {
   eventOnSale,
@@ -27,7 +36,8 @@ import {
  * - `hOld`: chỉ v1 (khóa test mặc định), phát Vé v1; cũng là instance "chưa có khóa mới" khi đang deploy dần;
  * - `hBoth`: v1 + v2 (đang xoay khóa): Vé mới ký v2, Vé v1 vẫn đọc đúng;
  * - `hNew`: chỉ v2 (khóa cũ đã gỡ).
- * Link chia sẻ của Vé có khóa không có trên instance → 404 chung + log `alert`. Một worker v1 + v2 chạy suốt file, để
+ * Link chia sẻ của Vé có khóa không có trên instance → 404 chung + log `alert` + kênh cảnh báo vận hành (Story 4.6-b:
+ * `hNew2` là api thứ hai chỉ có v2, cùng thiếu khóa v1 với `hNew`). Một worker v1 + v2 chạy suốt file, để
  * mọi job email Vé (kể cả Vé v2) xong trong file này, không để lại cho file sau (worker chỉ có v1).
  * Trang Đơn, Chi tiết Vé và email khi thiếu khóa vẫn là lỗi cấu hình (runbook Story 4.7), ngoài phạm vi.
  */
@@ -42,6 +52,7 @@ const NOT_FOUND = {
 let hOld: Harness;
 let hBoth: Harness;
 let hNew: Harness;
+let hNew2: Harness;
 let org: Org;
 let worker: INestApplicationContext;
 let workerEmail: FakeEmailTransport;
@@ -50,6 +61,7 @@ beforeAll(async () => {
   hOld = await createHarness({}, { overrides: [rejectingTingee] });
   hBoth = await createHarness({ TICKET_QR_KEYS: KEYS_BOTH }, { overrides: [rejectingTingee] });
   hNew = await createHarness({ TICKET_QR_KEYS: TEST_TICKET_QR_KEY_V2 }, { overrides: [rejectingTingee] });
+  hNew2 = await createHarness({ TICKET_QR_KEYS: TEST_TICKET_QR_KEY_V2 }, { overrides: [rejectingTingee] });
   org = await paidReadyOrg(hOld, { name: 'CLB Bóng bàn Quận 5' });
   workerEmail = new FakeEmailTransport();
   const moduleRef = await Test.createTestingModule({
@@ -66,6 +78,7 @@ beforeEach(async () => {
 });
 afterAll(async () => {
   await worker?.close();
+  await hNew2?.close();
   await hNew?.close();
   await hBoth?.close();
   await hOld?.close();
@@ -95,8 +108,8 @@ async function keyVersionOf(ticketId: string): Promise<number> {
   return rows[0]!.qr_key_version;
 }
 
-/** nestjs-pino giữ một logger gốc cho cả process, nên gom log của cả ba app. */
-const allLogs = () => [hOld, hBoth, hNew].flatMap((h) => h.logs.lines);
+/** nestjs-pino giữ một logger gốc cho cả process, nên gom log của mọi app. */
+const allLogs = () => [hOld, hBoth, hNew, hNew2].flatMap((h) => h.logs.lines);
 const alertLines = (ticketId: string) =>
   allLogs().filter((l) => l.alert === TICKET_QR_KEY_MISSING_ALERT && l.ticketId === ticketId);
 /** Dòng log request (pino-http) của các lần mở link chia sẻ trả 404; đường dẫn đã che token. */
@@ -152,7 +165,45 @@ describe('khóa của Vé có trên instance', () => {
   });
 });
 
+/**
+ * Job email cảnh báo vận hành (Story 4.6-b) cho cặp phiên bản khóa `pair` (`qrKeyVersion:currentVersion`) do link của Vé
+ * `ticketId` gây ra (job của lần chạy trước không lẫn vào).
+ */
+const qrAlertJobs = async (pair: string, ticketId: string) =>
+  hOld.app.get<PgBoss>(BOSS).findJobs(JobQueue.OPS_ALERT, {
+    data: { kind: TICKET_QR_KEY_MISSING_ALERT, subjects: [pair], details: { ticketId } },
+  });
+
 describe('khóa của Vé không có trên instance', () => {
+  beforeAll(async () => {
+    // Dấu chống lặp `cooldown` của lần chạy trước (30 phút) không được chặn email của file này.
+    await hOld.db.pool.query("DELETE FROM ops_alert_marks WHERE kind = 'ticket_qr_key_missing'");
+  });
+
+  it('DB lỗi khi raise (Story 4.6-b): link vẫn 404 chung, vẫn có marker; raise chỉ log warn, không ghi dấu, không email', async () => {
+    const { order } = await freeTickets(hOld, 1);
+    const ticket = order.tickets[0]!;
+    const migrator = new pg.Client({ connectionString: migrationDatabaseUrl() });
+    await migrator.connect();
+    try {
+      await migrator.query('REVOKE INSERT ON TABLE ops_alert_marks FROM tickee_app');
+      const res = await hNew2.http.get(`/v1/shared-tickets/${ticket.shareToken}`);
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual(NOT_FOUND);
+    } finally {
+      await migrator.query('GRANT INSERT ON TABLE ops_alert_marks TO tickee_app');
+      await migrator.end();
+    }
+    await expect.poll(() => alertLines(ticket.id).length).toBe(1);
+    const warn = allLogs().find(
+      (l) => l.kind === TICKET_QR_KEY_MISSING_ALERT && l.msg === 'Không ghi được cảnh báo vận hành; bỏ qua lần báo này',
+    );
+    expect(warn).toMatchObject({ level: 40, context: 'OpsAlerts', error: { code: '42501' } });
+    expect(await qrAlertJobs('1:2', ticket.id)).toEqual([]);
+    const { rows } = await hOld.db.pool.query("SELECT 1 FROM ops_alert_marks WHERE kind = 'ticket_qr_key_missing'");
+    expect(rows).toEqual([]);
+  });
+
   it('khóa cũ đã gỡ: link của Vé v1 trên app chỉ có v2 → 404 chung; log error có marker, Vé, Sự kiện, hai phiên bản, không có token', async () => {
     const { order, eventId } = await freeTickets(hOld, 1);
     const ticket = order.tickets[0]!;
@@ -170,6 +221,23 @@ describe('khóa của Vé không có trên instance', () => {
       alert: TICKET_QR_KEY_MISSING_ALERT,
     });
     expect(JSON.stringify(allLogs())).not.toContain(ticket.shareToken);
+
+    // Story 4.6-b: marker đi qua kênh cảnh báo vận hành: một email cho cặp phiên bản 1:2.
+    const jobs = await qrAlertJobs('1:2', ticket.id);
+    expect(jobs.map((job) => job.data)).toEqual([
+      {
+        kind: TICKET_QR_KEY_MISSING_ALERT,
+        count: 1,
+        subjects: ['1:2'],
+        details: { ticketId: ticket.id, eventId, qrKeyVersion: 1, currentVersion: 2 },
+      },
+    ]);
+    // Hai instance cùng thiếu khóa của cùng cặp phiên bản (api thứ hai, rồi lại api đầu): vẫn 404 và marker, một email.
+    for (const h of [hNew2, hNew]) {
+      expect((await h.http.get(`/v1/shared-tickets/${ticket.shareToken}`)).status).toBe(404);
+    }
+    await expect.poll(() => alertLines(ticket.id).length).toBe(3);
+    expect(await qrAlertJobs('1:2', ticket.id)).toHaveLength(1);
   });
 
   it('instance chưa có khóa mới (deploy dần, rollback): link của Vé v2 trên app chỉ có v1 → 404 chung + log alert', async () => {
@@ -180,6 +248,9 @@ describe('khóa của Vé không có trên instance', () => {
     expect(res.body).toEqual(NOT_FOUND);
     await expect.poll(() => alertLines(ticket.id).length).toBe(1);
     expect(alertLines(ticket.id)[0]).toMatchObject({ qrKeyVersion: 2, currentVersion: 1 });
+    expect((await qrAlertJobs('2:1', ticket.id)).map((job) => job.data)).toMatchObject([
+      { subjects: ['2:1'], details: { ticketId: ticket.id, qrKeyVersion: 2, currentVersion: 1 } },
+    ]);
   });
 
   it('Vé đã hủy, Sự kiện đã kết thúc → vẫn 404 chung nhưng không log alert (các lý do 404 khác được xét trước)', async () => {

@@ -100,6 +100,23 @@ export const JobQueue = {
   TOKEN_ALERT_EMAIL: 'organizer.token-alert-email',
   /** Dead-letter của `TOKEN_ALERT_EMAIL`: job hết lượt retry được chép sang đây. */
   TOKEN_ALERT_EMAIL_DEAD_LETTER: 'organizer.token-alert-email.dead-letter',
+  /**
+   * Email cảnh báo vận hành gửi đội vận hành (`platform/alerts`, Story 4.6-b). `raise` enqueue bằng chính `tx` ghi dấu
+   * chống lặp, chỉ khi có subject mới. Payload: loại, số subject mới, tối đa 20 subject mới và chi tiết (id, mã, tên
+   * queue, số đếm, lý do; không PII, secret, chữ ký hay token). Worker gửi tới `OPS_ALERT_EMAILS`; gửi lỗi thì retry.
+   */
+  OPS_ALERT: 'platform.ops-alert',
+  /**
+   * Dead-letter của `OPS_ALERT`: job hết lượt retry được chép sang đây. Job quét cảnh báo chỉ log `error` cho queue
+   * này, không gửi email (kênh không tự báo lỗi của chính nó qua chính nó).
+   */
+  OPS_ALERT_DEAD_LETTER: 'platform.ops-alert.dead-letter',
+  /**
+   * Quét cảnh báo vận hành (`platform/alerts`, Story 4.6-b): job cron mỗi phút, chỉ vai worker lên lịch, chạy các luật đã
+   * đăng ký (hàng đợi pg-boss ùn, job vào dead-letter; luật nghiệp vụ của mô-đun về sau). Không payload, không retry,
+   * không dead-letter: lần chạy kế làm lại.
+   */
+  OPS_ALERT_SCAN: 'platform.ops-alert-scan',
 } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];
 

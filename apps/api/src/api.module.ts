@@ -10,6 +10,7 @@ import { PaymentModule } from './modules/payment/index.js';
 import { ReportingModule } from './modules/reporting/index.js';
 import { TicketingModule, TicketingRoutesModule } from './modules/ticketing/index.js';
 import { TingeeModule } from './modules/tingee/index.js';
+import { AlertsModule } from './platform/alerts/index.js';
 import { APP_CONFIG, type ApiConfig } from './platform/config/index.js';
 import { DbModule } from './platform/db/index.js';
 import { EmailModule } from './platform/email/index.js';
@@ -38,6 +39,9 @@ export class ApiModule {
         EmailModule.forRoot({ url: config.SMTP_URL, from: config.EMAIL_FROM }),
         // Chỉ enqueue job (cùng `tx` của thay đổi); không bảo trì, không lịch, không handler — việc của vai `worker`.
         JobsModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-api', mode: 'producer' }),
+        // Kênh cảnh báo vận hành (Story 4.6-b, toàn cục): `OpsAlerts.raise` ghi dấu chống lặp và enqueue email cho đội vận
+        // hành (link chia sẻ thiếu khóa QR, tiền về không khớp Đơn); vai worker gửi email.
+        AlertsModule.forRoot(config),
         // Realtime (AD-17, toàn cục): một kết nối `LISTEN` mỗi instance, SSE theo bộ lọc của mô-đun, `/readyz`.
         RealtimeModule.forRoot({ connectionString: config.DATABASE_URL }),
         // Adapter Tingee (`TINGEE_CLIENT`, toàn cục): mọi lời gọi ký bằng credential của từng BTC (`organizer` giải mã).

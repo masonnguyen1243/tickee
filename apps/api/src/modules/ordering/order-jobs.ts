@@ -36,8 +36,9 @@ export type ExpireOrderPayload = z.infer<typeof ExpireOrderPayload>;
 
 /**
  * Queue hết hạn Đơn. Retry khi chạy sớm (Đơn còn trong hạn) hay lỗi DB: 10 lần, chờ 5 giây rồi tăng gấp đôi (tối đa 5
- * phút). Hết lượt thì pg-boss chép job sang dead-letter; quét định kỳ (Story 4.6) là lưới an toàn. Lấy tối đa 20 job mỗi
- * lần, lấy tiếp ngay khi lô đầy; mỗi job một transaction ngắn, chốt riêng.
+ * phút). Hết lượt thì pg-boss chép job sang dead-letter (job quét của `platform/alerts` báo đội vận hành, Story 4.6-b);
+ * quét định kỳ (Story 4.6-c) là lưới an toàn. Lấy tối đa 20 job mỗi lần, lấy tiếp ngay khi lô đầy; mỗi job một
+ * transaction ngắn, chốt riêng.
  */
 export const EXPIRE_ORDER_QUEUE = defineQueue({
   name: JobQueue.ORDERING_EXPIRE_ORDER,

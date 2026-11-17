@@ -47,6 +47,8 @@ export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
   TICKET_QR_KEYS: TEST_TICKET_QR_KEYS,
   // OpenTelemetry tắt (không có endpoint): như khi không đặt `OTEL_*`.
   OTEL_METRIC_EXPORT_INTERVAL: 60_000,
+  // Cảnh báo vận hành (Story 4.6-b): mặc định của schema.
+  OPS_ALERT_COOLDOWN_MINUTES: 30,
   ...overrides,
 });
 
@@ -74,6 +76,9 @@ export const workerConfig = (overrides: Partial<WorkerConfig> = {}): WorkerConfi
     TICKET_QR_KEYS: api.TICKET_QR_KEYS,
     TINGEE_ORDER_STATUS_QUERY: true,
     OTEL_METRIC_EXPORT_INTERVAL: api.OTEL_METRIC_EXPORT_INTERVAL,
+    // Cảnh báo vận hành (Story 4.6-b): mặc định của schema, không có người nhận (chỉ log).
+    OPS_ALERT_COOLDOWN_MINUTES: api.OPS_ALERT_COOLDOWN_MINUTES,
+    OPS_ALERT_QUEUE_WAIT_MINUTES: 5,
     ...overrides,
   };
 };

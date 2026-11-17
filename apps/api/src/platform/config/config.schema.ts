@@ -118,6 +118,42 @@ const telemetry = {
   OTEL_METRIC_EXPORT_INTERVAL: z.coerce.number().int().min(1_000).max(3_600_000).default(60_000),
 };
 
+const emailAddress = z.email();
+
+/**
+ * Danh sách email cách nhau bằng dấu phẩy (khoảng trắng quanh dấu phẩy bỏ qua, trùng thì gộp). Lỗi chỉ nêu sai gì, không
+ * bao giờ nêu giá trị.
+ */
+const emailList = z.string().transform((raw, ctx) => {
+  const emails = raw
+    .split(',')
+    .map((email) => email.trim())
+    .filter((email) => email !== '');
+  if (emails.length > 0 && emails.every((email) => emailAddress.safeParse(email).success)) return [...new Set(emails)];
+  ctx.addIssue({ code: 'custom', message: 'phải là danh sách email cách nhau bằng dấu phẩy' });
+  return z.NEVER;
+});
+
+/**
+ * Cảnh báo vận hành (Story 4.6-b, `platform/alerts`), chung cho vai api và worker: cả hai `raise` (api: link chia sẻ thiếu
+ * khóa QR, tiền về không khớp Đơn; worker: Đối soát bù dừng, luật của job quét).
+ */
+const opsAlerts = {
+  /** Loại cảnh báo `cooldown` (thiếu khóa QR, hàng đợi ùn): cùng subject báo lại sau chừng này phút. */
+  OPS_ALERT_COOLDOWN_MINUTES: z.coerce.number().int().min(1).max(1_440).default(30),
+};
+
+/** Cảnh báo vận hành, chỉ vai worker: gửi email và job quét mỗi phút. */
+const opsAlertDelivery = {
+  /**
+   * Người nhận email cảnh báo vận hành (đội vận hành), cách nhau bằng dấu phẩy. Không đặt: cảnh báo chỉ ghi log (worker
+   * log `warn` một lần lúc khởi động và mỗi job).
+   */
+  OPS_ALERT_EMAILS: emailList.optional(),
+  /** Luật `queue_backlog`: job tới hạn (`start_after`) quá chừng này phút mà chưa chạy thì báo hàng đợi ùn. */
+  OPS_ALERT_QUEUE_WAIT_MINUTES: z.coerce.number().int().min(1).max(1_440).default(5),
+};
+
 export const apiConfigSchema = z.object({
   APP_ROLE: z.literal('api'),
   ...common,
@@ -148,6 +184,7 @@ export const apiConfigSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().min(1),
   ...tingeeAndTickets,
   ...telemetry,
+  ...opsAlerts,
 });
 
 export const workerConfigSchema = z.object({
@@ -177,6 +214,8 @@ export const workerConfigSchema = z.object({
    */
   TINGEE_ORDER_STATUS_QUERY: z.stringbool().default(false),
   ...telemetry,
+  ...opsAlerts,
+  ...opsAlertDelivery,
 });
 
 export const migrateConfigSchema = z.object({

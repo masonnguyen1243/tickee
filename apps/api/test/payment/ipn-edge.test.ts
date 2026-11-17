@@ -237,6 +237,29 @@ async function expectReviewItem(
   });
   if (unmatched) expect(logged[0]).toMatchObject({ alert: 'payment_unmatched' });
   else expect(logged[0]!.alert).toBeUndefined();
+  // Story 4.6-b: marker đi qua kênh cảnh báo vận hành sau commit: một job email, subject là id `payment_events`.
+  const opsAlerts = await h.app
+    .get<PgBoss>(BOSS)
+    .findJobs(JobQueue.OPS_ALERT, { data: { kind: 'payment_unmatched', subjects: [event.id] } });
+  expect(opsAlerts.map((job) => job.data)).toEqual(
+    unmatched
+      ? [
+          {
+            kind: 'payment_unmatched',
+            count: 1,
+            subjects: [event.id],
+            details: {
+              organizationId: org.orgId,
+              paymentEventId: event.id,
+              orderCode: String(payload.orderId),
+              providerTransactionCode: String(payload.providerTransactionCode),
+              source: 'ipn',
+              reason: expected.branch,
+            },
+          },
+        ]
+      : [],
+  );
   await expect.poll(() => reviewSignalsOf(org.orgId).length).toBe(signalsBefore + 1);
   expect(reviewSignalsOf(org.orgId).at(-1)).toEqual({
     type: 'org_review_items_changed',

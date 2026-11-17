@@ -41,8 +41,8 @@ import { orders } from './schema.js';
 
 /**
  * Queue email Người mua. Retry khi gửi lỗi (SMTP chập chờn): 8 lần, chờ 30 giây rồi tăng gấp đôi (tối đa 1 giờ). Hết
- * lượt thì pg-boss chép job sang dead-letter (cảnh báo dead-letter là Story 4.6). Lấy tối đa 10 job mỗi lần, lấy tiếp
- * ngay khi lô đầy; mỗi job được chốt riêng nên một email lỗi không làm hỏng cả lô.
+ * lượt thì pg-boss chép job sang dead-letter (job quét của `platform/alerts` báo đội vận hành, Story 4.6-b). Lấy tối
+ * đa 10 job mỗi lần, lấy tiếp ngay khi lô đầy; mỗi job được chốt riêng nên một email lỗi không làm hỏng cả lô.
  */
 export const BUYER_EMAIL_QUEUE = defineQueue({
   name: JobQueue.ORDERING_SEND_BUYER_EMAIL,
