@@ -143,6 +143,7 @@ beforeAll(async () => {
       if (hook) await hook();
       return status;
     },
+    getTokenBalance: (credential) => http.getTokenBalance(credential),
   };
   h = await createHarness({ TINGEE_BASE_URL: fake.url }, { overrides: [{ provide: TINGEE_CLIENT, useValue: client }] });
   boss = h.app.get<PgBoss>(BOSS);

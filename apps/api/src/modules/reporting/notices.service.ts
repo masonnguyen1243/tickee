@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   ClosedBetaStatus,
   ErrorCode,
+  NOTIFICATION_CATALOG,
   PAYMENT_SERVICE_NOTICE_CODES,
   PaymentServiceReason,
   PaymentServiceStatus,
@@ -19,16 +20,21 @@ import {
   closedBetaStatusOf,
   paymentServiceStateOf,
   payoutAccountStatusOf,
+  tokenAlertStateOf,
   type ClosedBetaState,
   type PaymentServiceRow,
   type PayoutAccountState,
+  type TokenAlertRow,
 } from '../organizer/index.js';
 
 /** Token DI của cấu hình `notices`. */
 export const NOTICES_SETTINGS = Symbol('NOTICES_SETTINGS');
 
 export interface NoticesSettings {
-  /** Portal Tingee ứng với `TINGEE_BASE_URL` (link "Mua thêm Token" của banner hết Token, Story 4.2). */
+  /**
+   * Portal Tingee ứng với `TINGEE_BASE_URL` (link "Mua thêm Token" của banner hết Token, Story 4.2, và banner Token dưới
+   * ngưỡng, Story 4.5-b).
+   */
   tingeePortalUrl: string;
 }
 
@@ -117,9 +123,39 @@ function paymentServiceNotices(state: PaymentServiceRow, tingeePortalUrl: string
 }
 
 /**
+ * Thông báo Token dưới ngưỡng cảnh báo (Story 4.5-b): BTC có mốc vượt ngưỡng (`token_below_threshold_since`) →
+ * `TOKEN_BELOW_THRESHOLD` (warning, không chặn bán, đóng được; audience theo danh mục thông báo: chỉ Owner), `version` =
+ * mốc vượt ngưỡng (lần vượt mới thì banner đã đóng hiện lại), `data.tingeePortalUrl` để "Mua thêm Token". BTC đang Tạm
+ * ngừng bán vì hết Token → không có (banner danger của 4.2 đã báo).
+ */
+function tokenAlertNotices(
+  alert: TokenAlertRow,
+  paymentService: PaymentServiceRow | null,
+  tingeePortalUrl: string,
+): StatusNotice[] {
+  if (!alert.since) return [];
+  if (paymentService?.status === PaymentServiceStatus.SUSPENDED && paymentService.reason === PaymentServiceReason.TOKEN) {
+    return [];
+  }
+  const notification = NOTIFICATION_CATALOG.token_below_threshold;
+  return [
+    {
+      code: notification.noticeCode,
+      severity: StatusNoticeSeverity.WARNING,
+      blocking: false,
+      dismissible: true,
+      scope: StatusNoticeScope.ORGANIZATION,
+      audience: [...notification.recipients],
+      data: { tingeePortalUrl },
+      version: alert.since.toISOString(),
+    },
+  ];
+}
+
+/**
  * `reporting.notices(scope)` (AD-34): nguồn duy nhất cho `status-banner` của dashboard. Chỉ đọc qua read model của mô-đun
- * sở hữu (Closed Beta, tài khoản nhận tiền, dịch vụ thanh toán: `organizer`); trả thông báo có vai của người xem trong
- * `audience`, sắp theo `STATUS_NOTICE_PRIORITY`. Story sau (Token dưới ngưỡng, Sheets…) thêm nguồn vào đây.
+ * sở hữu (Closed Beta, tài khoản nhận tiền, dịch vụ thanh toán, cảnh báo Token: `organizer`); trả thông báo có vai của
+ * người xem trong `audience`, sắp theo `STATUS_NOTICE_PRIORITY`. Story sau (Sheets…) thêm nguồn vào đây.
  */
 @Injectable()
 export class NoticesService {
@@ -134,10 +170,13 @@ export class NoticesService {
     if (!closedBeta) throw new AppError(ErrorCode.NOT_A_MEMBER, 'Bạn không phải thành viên của BTC này.');
     const payout = await payoutAccountStatusOf(this.db.orm, scope);
     const paymentService = await paymentServiceStateOf(this.db.orm, scope);
+    const tokenAlert = await tokenAlertStateOf(this.db.orm, scope);
+    const { tingeePortalUrl } = this.settings;
     const all = [
       ...closedBetaNotices(closedBeta),
-      ...(paymentService ? paymentServiceNotices(paymentService, this.settings.tingeePortalUrl) : []),
+      ...(paymentService ? paymentServiceNotices(paymentService, tingeePortalUrl) : []),
       ...payoutNotices(payout, closedBeta.createdAt),
+      ...(tokenAlert ? tokenAlertNotices(tokenAlert, paymentService, tingeePortalUrl) : []),
     ];
     return sortStatusNotices(all.filter((n) => n.audience.includes(scope.role)));
   }

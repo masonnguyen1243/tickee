@@ -44,6 +44,11 @@ import { parseTingeeTimestamp, sign, tingeeTimestamp, verifySignature } from '..
  * của các lần gọi `get-va-paging` kế tiếp (sau khi qua kiểm key, giờ và chữ ký), vd. `1033` (hết Token), `1007`/`1034`
  * (merchant bị khóa), `97` (key không còn dùng được), HTTP 500 hay treo; hết thì trả danh sách tài khoản như Tingee. Mã
  * ngắt của `create-link` cài bằng `linkReplies`.
+ *
+ * Đọc Token (Story 4.5-a, hợp đồng tạm `TOKEN_BALANCE_PATH`, chờ Tingee có API): body phải là `{}` (không thì 400), trả
+ * `00` với `data: { balance, creditLimit }` lấy từ `token` của merchant (mặc định `FAKE_TOKEN_BALANCE`: 1.200 và 500).
+ * `tokenReplies` cài trước phản hồi của các lần đọc kế tiếp (mã lỗi, HTTP lạ, `data` sai dạng, treo); `behavior`
+ * `forbidden`/`error`/`hang` của merchant áp như mọi API.
  */
 
 /** `create-link` của Cổng thanh toán (`developers.tingee.vn/docs/payment-gateway/create-payment-link`). */
@@ -54,6 +59,12 @@ export const GET_ORDER_PATH = '/v1/payment-gateway/get-order';
 
 /** Danh sách tài khoản (VA) của merchant; cũng là lời gọi dò dịch vụ thanh toán (hợp đồng tạm của Story 4.2). */
 export const ACCOUNTS_PATH = '/v1/get-va-paging';
+
+/** Đọc Token của merchant (hợp đồng tạm của Story 4.5-a, cùng giá trị với `TINGEE_TOKEN_BALANCE_PATH` của adapter). */
+export const TOKEN_BALANCE_PATH = '/v1/merchant/get-token-balance';
+
+/** Số dư và hạn mức Token mặc định của mọi merchant trên fake (`FakeMerchant.token`). */
+export const FAKE_TOKEN_BALANCE = { balance: 1_200, creditLimit: 500 } as const;
 
 /** Mã "không tìm thấy đơn" của tra đơn Gateway (hợp đồng tạm). */
 export const ORDER_NOT_FOUND_CODE = '2004';
@@ -100,6 +111,10 @@ export interface FakeMerchant {
    * 4.2), lấy lần lượt; hết thì trả danh sách tài khoản.
    */
   accountReplies?: FakeLinkReply[];
+  /** Số dư (có thể âm) và hạn mức Token mà lần đọc Token trả; mặc định `FAKE_TOKEN_BALANCE`. Sửa giữa hai lần đọc được. */
+  token?: { balance: number; creditLimit: number };
+  /** Phản hồi của các lần đọc Token kế tiếp (`TOKEN_BALANCE_PATH`), lấy lần lượt; hết thì trả `token`. */
+  tokenReplies?: FakeLinkReply[];
   /**
    * "Đường dẫn IPN" của merchant (như ô cùng tên trên portal Tingee: một URL cho mỗi merchant). Trang thanh toán giả
    * điền sẵn URL này, và lưu đè bằng URL vừa gửi IPN thành công (api trả ACK: 2xx + `code: '00'`).
@@ -533,6 +548,12 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
         if (!link || link.clientId !== merchant.clientId) return fail(ORDER_NOT_FOUND_CODE, 'Không tìm thấy đơn hàng');
         return ok(orderData(link));
       }
+      case TOKEN_BALANCE_PATH: {
+        // Hợp đồng tạm: body `{}` (không `merchantId`, không trường nào).
+        if (Object.keys(body).length > 0) return fail('400', 'Body phải là {}');
+        const { balance, creditLimit } = merchant.token ?? FAKE_TOKEN_BALANCE;
+        return ok({ balance, creditLimit });
+      }
       default:
         return fail('404', 'Không có API này');
     }
@@ -710,6 +731,7 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
       else if (path === CREATE_LINK_PATH) reply = await createLinkReply(body, merchant);
       else if (path === GET_ORDER_PATH) reply = orderReply(body, merchant);
       else if (path === ACCOUNTS_PATH) reply = accountsReply(body, merchant);
+      else if (path === TOKEN_BALANCE_PATH) reply = tokenReply(body, merchant);
       else reply = route(path, body, merchant);
 
       options.log?.(`${req.method} ${path} → ${reply === 'hang' ? 'treo' : reply.code}`);
@@ -754,6 +776,14 @@ export async function startTingeeFake(options: TingeeFakeOptions): Promise<Tinge
     if (scripted === 'hang') return 'hang';
     if (scripted) return { httpStatus: scripted.httpStatus, code: scripted.code, message: 'Kịch bản test', data: scripted.data };
     return route(ACCOUNTS_PATH, body, merchant);
+  }
+
+  /** Đọc Token sau khi qua kiểm key, giờ và chữ ký: phản hồi cài trước (nếu có), không thì `token` của merchant. */
+  function tokenReply(body: Record<string, unknown>, merchant: FakeMerchant): Reply | 'hang' {
+    const scripted = merchant.tokenReplies?.shift();
+    if (scripted === 'hang') return 'hang';
+    if (scripted) return { httpStatus: scripted.httpStatus, code: scripted.code, message: 'Kịch bản test', data: scripted.data };
+    return route(TOKEN_BALANCE_PATH, body, merchant);
   }
 
   /** Link `orderId` mà fake đã tạo; chưa tạo → lỗi (lỗi của test). */

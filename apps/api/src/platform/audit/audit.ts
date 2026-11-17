@@ -57,6 +57,12 @@ export type AuditAction =
    */
   | 'organization.payment_service_resumed'
   /**
+   * Owner đặt, đổi hoặc tắt ngưỡng cảnh báo Token (Story 4.5-b; actor: Owner; đối tượng: `{ type: 'organization', id }`).
+   * `changedFields`: `['token_alert_threshold']`, thêm `token_below_threshold_since` khi tắt cảnh báo xóa mốc dưới
+   * ngưỡng. Không ghi ngưỡng hay số Token.
+   */
+  | 'organization.token_alert_threshold_update'
+  /**
    * Owner kết nối API key Tingee của BTC (Tingee đã chấp nhận key): credential mới thành hiện hành; credential cũ (nếu
    * có, "Dùng key khác") chuyển `retired_at`. Không ghi Client ID hay Secret Token.
    */

@@ -1,0 +1,5 @@
+ALTER TABLE "organizations" ADD COLUMN "token_alert_threshold" bigint;--> statement-breakpoint
+ALTER TABLE "organizations" ADD COLUMN "token_below_threshold_since" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "organizations_token_alert_idx" ON "organizations" USING btree ("id") WHERE "organizations"."token_alert_threshold" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "organizations" ADD CONSTRAINT "organizations_token_alert_threshold_check" CHECK ("organizations"."token_alert_threshold" IS NULL OR ("organizations"."token_alert_threshold" >= 1 AND "organizations"."token_alert_threshold" <= 1000000000000));--> statement-breakpoint
+ALTER TABLE "organizations" ADD CONSTRAINT "organizations_token_below_threshold_since_check" CHECK ("organizations"."token_below_threshold_since" IS NULL OR "organizations"."token_alert_threshold" IS NOT NULL);

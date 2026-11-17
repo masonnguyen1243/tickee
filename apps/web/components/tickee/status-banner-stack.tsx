@@ -76,7 +76,7 @@ function NoticeBanner({ notice, onDismiss }: { notice: StatusNotice; onDismiss: 
  * Dải `status-banner` đầu vùng nội dung dashboard một BTC (UX-DR8, AD-34): dữ liệu từ `GET /v1/orgs/:orgId/notices`
  * (đã lọc theo vai và sắp theo ưu tiên ở api), web chỉ ánh xạ `code` (+ vai người xem) sang nội dung và nút (link trong
  * app, hoặc liên kết ngoài mở tab mới). Hiện tối đa `STATUS_BANNER_LIMIT` banner, còn lại gộp "+N thông báo" mở `Sheet`.
- * Banner `dismissible` đóng được và ẩn theo `code` + `version` tới hết phiên trình duyệt. Thay đổi được đọc qua
+ * Banner `dismissible` đóng được và ẩn theo BTC + `code` + `version` tới hết phiên trình duyệt. Thay đổi được đọc qua
  * `aria-live="polite"` (vùng luôn có trong DOM). Lỗi tải thì không hiện gì: 401, 2FA và bị xóa khỏi BTC do khung
  * dashboard / `Providers` xử lý.
  *
@@ -124,7 +124,7 @@ export function StatusBannerStack({
   // điều kiện bán Vé có phí đổi.
   const paidSalesKey = notices.data
     ?.filter((n) => PAID_SALES_CODES.has(n.code))
-    .map(statusNoticeDismissKey)
+    .map((n) => statusNoticeDismissKey(orgId, n))
     .join('|');
   const lastPaidSalesKey = useRef(paidSalesKey);
   const refreshViewsRef = useRef(refreshPaymentServiceViews);
@@ -140,7 +140,8 @@ export function StatusBannerStack({
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const visible = (notices.data ?? []).filter(
-    (n) => !(n.dismissible && (dismissed.has(statusNoticeDismissKey(n)) || isStatusNoticeDismissed(n))),
+    (n) =>
+      !(n.dismissible && (dismissed.has(statusNoticeDismissKey(orgId, n)) || isStatusNoticeDismissed(orgId, n))),
   );
   const shown = visible.slice(0, STATUS_BANNER_LIMIT);
   const rest = visible.slice(STATUS_BANNER_LIMIT);
@@ -148,8 +149,8 @@ export function StatusBannerStack({
   if (sheetOpen && rest.length === 0) setSheetOpen(false);
 
   const dismiss = (notice: StatusNotice) => {
-    saveStatusNoticeDismissed(notice);
-    setDismissed((prev) => new Set(prev).add(statusNoticeDismissKey(notice)));
+    saveStatusNoticeDismissed(orgId, notice);
+    setDismissed((prev) => new Set(prev).add(statusNoticeDismissKey(orgId, notice)));
   };
 
   return (
@@ -159,7 +160,7 @@ export function StatusBannerStack({
       className="flex flex-col gap-2 [&:not(:empty)]:pt-2 [&:not(:empty)]:pb-4"
     >
       {shown.map((notice) => (
-        <NoticeBanner key={statusNoticeDismissKey(notice)} notice={notice} onDismiss={dismiss} />
+        <NoticeBanner key={statusNoticeDismissKey(orgId, notice)} notice={notice} onDismiss={dismiss} />
       ))}
       {rest.length > 0 ? (
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
@@ -175,7 +176,7 @@ export function StatusBannerStack({
             </SheetHeader>
             <div className="flex flex-col gap-2">
               {rest.map((notice) => (
-                <NoticeBanner key={statusNoticeDismissKey(notice)} notice={notice} onDismiss={dismiss} />
+                <NoticeBanner key={statusNoticeDismissKey(orgId, notice)} notice={notice} onDismiss={dismiss} />
               ))}
             </div>
           </SheetContent>

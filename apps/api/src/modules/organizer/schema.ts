@@ -50,6 +50,17 @@ export const organizations = pgTable(
     paymentServiceSince: timestamptz('payment_service_since'),
     /** Lần dò gần nhất (job dò hoặc "Kiểm tra lại"); giữ qua các lần bật/tắt cờ, `null` khi chưa dò lần nào. */
     paymentServiceCheckedAt: timestamptz('payment_service_checked_at'),
+    /**
+     * Ngưỡng cảnh báo Token Owner đặt (Story 4.5-b, `TOKEN_ALERT_THRESHOLD_MIN`…`MAX`); `null`: chưa đặt hoặc đã tắt. Chỉ
+     * lưu ngưỡng, không bao giờ lưu số dư, hạn mức hay Token khả dụng.
+     */
+    tokenAlertThreshold: bigint('token_alert_threshold', { mode: 'number' }),
+    /**
+     * Lúc Token khả dụng xuống dưới ngưỡng lần gần nhất (đồng hồ DB; `token-alert.ts`, compare-and-set từ `null`); `null`:
+     * không dưới ngưỡng. Mỗi giá trị là một lần vượt ngưỡng: khóa chống gửi lặp email và `version` của banner. Chỉ khác
+     * `null` khi có ngưỡng.
+     */
+    tokenBelowThresholdSince: timestamptz('token_below_threshold_since'),
     createdAt: createdAt(),
     updatedAt: timestamptz('updated_at')
       .notNull()
@@ -70,6 +81,20 @@ export const organizations = pgTable(
     index('organizations_payment_service_suspended_idx')
       .on(t.paymentServiceSince)
       .where(sql`${t.paymentServiceStatus} = 'suspended'`),
+    // Ngưỡng cảnh báo Token: số nguyên 1…10^12 (Story 4.5-b).
+    check(
+      'organizations_token_alert_threshold_check',
+      sql`${t.tokenAlertThreshold} IS NULL OR (${t.tokenAlertThreshold} >= 1 AND ${t.tokenAlertThreshold} <= 1000000000000)`,
+    ),
+    // Chỉ dưới ngưỡng khi đã có ngưỡng.
+    check(
+      'organizations_token_below_threshold_since_check',
+      sql`${t.tokenBelowThresholdSince} IS NULL OR ${t.tokenAlertThreshold} IS NOT NULL`,
+    ),
+    // Job dò Token mỗi giờ chỉ đọc BTC có ngưỡng.
+    index('organizations_token_alert_idx')
+      .on(t.id)
+      .where(sql`${t.tokenAlertThreshold} IS NOT NULL`),
   ],
 );
 

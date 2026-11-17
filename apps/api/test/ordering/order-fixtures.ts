@@ -127,6 +127,7 @@ export const REJECTING_TINGEE: TingeeClient = {
   getGatewayOrder: () => Promise.resolve(null),
   // Không có lần ngắt nào (mã 1006 không bật cờ dịch vụ thanh toán): lỡ dò thì không kết luận được.
   getMerchantServiceStatus: () => Promise.resolve({ status: 'unknown' }),
+  getTokenBalance: () => Promise.resolve({ status: 'unavailable' }),
 };
 
 /** Override của harness cho test của 3.2/3.3 (`REJECTING_TINGEE`). */

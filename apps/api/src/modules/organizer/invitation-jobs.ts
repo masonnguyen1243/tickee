@@ -13,6 +13,7 @@ import {
   QueueProducer,
   registerQueueWorker,
 } from '../../platform/jobs/index.js';
+import { tingeePortalUrl } from '../tingee/index.js';
 import { buildAdminInvitationEmail } from './invitation-email.js';
 import { generateInvitationToken, hashInvitationToken } from './invitation-token.js';
 import { OwnershipTransferWorker } from './ownership-transfer-jobs.js';
@@ -25,6 +26,9 @@ import {
 } from './payment-service.js';
 import { DefaultPayoutWorker } from './payout-default-jobs.js';
 import { organizationInvitations, organizations } from './schema.js';
+import { TokenAlertQueues } from './token-alert.js';
+import { TOKEN_ALERT_EMAIL_SETTINGS, TokenAlertEmailWorker, TokenAlertScanWorker } from './token-alert-jobs.js';
+import { TOKEN_SETTINGS, TokenReader, tokenSettings } from './token.service.js';
 
 /** Payload của job: chỉ id lời mời — không email, không token. */
 export const SendAdminInvitationPayload = z.object({ invitationId: z.uuid() });
@@ -130,8 +134,10 @@ export const ORGANIZER_JOBS_CONFIG = Symbol('ORGANIZER_JOBS_CONFIG');
 
 export interface OrganizerJobsConfig {
   WEB_ORIGIN: string;
-  /** Giải mã key Tingee của BTC cho job dò dịch vụ thanh toán (Story 4.2). */
+  /** Giải mã key Tingee của BTC cho job dò dịch vụ thanh toán (Story 4.2) và job dò Token (Story 4.5-b). */
   TINGEE_CREDENTIAL_KEYS: string;
+  /** Môi trường Tingee: link portal Tingee (mua Token) trong email cảnh báo Token (Story 4.5-b). */
+  TINGEE_BASE_URL: string;
 }
 
 /** Vai `worker`: tạo queue và đăng ký handler gửi email mời Admin. */
@@ -168,8 +174,9 @@ export class AdminInvitationWorker implements OnApplicationBootstrap {
 
 /**
  * Job nền của `organizer` cho vai `worker` (gửi email mời Admin, email cảnh báo đổi tài khoản nhận tiền mặc định,
- * email báo chuyển quyền Owner, job cron dò dịch vụ thanh toán của BTC bị ngắt — Story 4.2). Cần `DbModule`,
- * `JobsModule`, `EmailModule` và `TingeeModule` (toàn cục) ở gốc DI.
+ * email báo chuyển quyền Owner, job cron dò dịch vụ thanh toán của BTC bị ngắt — Story 4.2; job cron dò Token mỗi giờ
+ * và email cảnh báo Token dưới ngưỡng — Story 4.5-b). Cần `DbModule`, `JobsModule`, `EmailModule` và `TingeeModule`
+ * (toàn cục) ở gốc DI.
  */
 @Module({})
 export class OrganizerJobsModule {
@@ -185,6 +192,19 @@ export class OrganizerJobsModule {
         PaymentServiceQueues,
         PaymentServiceProber,
         PaymentServiceProbeWorker,
+        // Cảnh báo Token (Story 4.5-b): job dò đọc như `GET …/token` (`TokenReader`) rồi đánh giá ngưỡng.
+        { provide: TOKEN_SETTINGS, useFactory: () => tokenSettings(config) },
+        {
+          provide: TOKEN_ALERT_EMAIL_SETTINGS,
+          useFactory: () => ({
+            webOrigin: config.WEB_ORIGIN,
+            tingeePortalUrl: tingeePortalUrl(config.TINGEE_BASE_URL),
+          }),
+        },
+        TokenAlertQueues,
+        TokenReader,
+        TokenAlertScanWorker,
+        TokenAlertEmailWorker,
       ],
     };
   }

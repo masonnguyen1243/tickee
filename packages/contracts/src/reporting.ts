@@ -63,6 +63,14 @@ export const StatusNoticeCode = {
    * liên kết hết): chưa bán được Vé có phí (danger, chặn bán, không đóng được).
    */
   PAYOUT_ACCOUNT_NOT_LINKED: 'PAYOUT_ACCOUNT_NOT_LINKED',
+  /**
+   * Token khả dụng của BTC dưới ngưỡng cảnh báo Owner đặt (Story 4.5-b; `organizations.token_below_threshold_since`):
+   * warning, không chặn bán, đóng được; audience theo danh mục thông báo (`NOTIFICATION_CATALOG.token_below_threshold`:
+   * chỉ Owner). `version` = lúc vượt ngưỡng (ISO): lần vượt mới thì banner đã đóng hiện lại. `data.tingeePortalUrl`:
+   * portal Tingee để mua thêm Token. Không có khi BTC đang Tạm ngừng bán vì hết Token (banner của 4.2 đã báo). Giá trị
+   * mã trùng loại thông báo trong danh mục (`NotificationKind.TOKEN_BELOW_THRESHOLD`).
+   */
+  TOKEN_BELOW_THRESHOLD: 'token_below_threshold',
 } as const;
 export type StatusNoticeCode = (typeof StatusNoticeCode)[keyof typeof StatusNoticeCode];
 export const statusNoticeCodeSchema = z.enum(StatusNoticeCode);
@@ -83,6 +91,8 @@ export const STATUS_NOTICE_PRIORITY: readonly StatusNoticeCode[] = [
   StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED,
   StatusNoticeCode.PAYOUT_ACCOUNT_NOT_LINKED,
   StatusNoticeCode.CLOSED_BETA_PENDING,
+  // Bậc 9 (Story 4.5-b).
+  StatusNoticeCode.TOKEN_BELOW_THRESHOLD,
 ];
 
 /** Mã thông báo của từng lý do ngắt dịch vụ thanh toán (Story 4.2). */
@@ -139,8 +149,8 @@ export const statusNoticesApiPath = (organizationId: string): string =>
  * Đường SSE (sau `/v1`) cấp BTC (Story 4.2-b, AD-17; Owner và Admin: `org.read`): chỉ đẩy tín hiệu cấp BTC của BTC này
  * (`org_status_changed`, và `org_review_items_changed` khi vai có `review_queue.handle`, Story 4.3) cùng `resync`. Web
  * tải lại `notices` (dải banner), tổng quan Tài khoản nhận tiền, badge và hàng Cần xử lý. Với `org_status_changed`, hiện
- * chỉ cờ dịch vụ thanh toán (bật, đổi lý do, tắt) phát; Closed Beta và tài khoản nhận tiền chưa phát (xem
- * `deferred-work.md`).
+ * cờ dịch vụ thanh toán (bật, đổi lý do, tắt) và cảnh báo Token (vượt ngưỡng, về trên ngưỡng, Owner tắt cảnh báo; Story
+ * 4.5-b) phát; Closed Beta và tài khoản nhận tiền chưa phát (xem `deferred-work.md`).
  */
 export const organizationLiveApiPath = (organizationId: string): string =>
   `/orgs/${encodeURIComponent(organizationId)}/live`;
