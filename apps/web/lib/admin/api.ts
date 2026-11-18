@@ -1,7 +1,10 @@
 import {
+  ADMIN_DEAD_LETTERS_API_PATH,
   ADMIN_SUSPENDED_PAYMENT_SERVICES_API_PATH,
+  adminDeadLetterRequeueApiPath,
   adminPaymentServiceResumeApiPath,
   ClosedBetaOrganizationList,
+  DeadLetterJobList,
   SuspendedPaymentServiceOrganizationList,
   type ClosedBetaAction,
   type ClosedBetaStatus,
@@ -17,6 +20,8 @@ export const CLOSED_BETA_QUEUE_QUERY_KEY = [...ADMIN_QUERY_KEY, 'closed-beta'] a
 export const closedBetaQueueQueryKey = (status: ClosedBetaStatus) => [...CLOSED_BETA_QUEUE_QUERY_KEY, status] as const;
 /** Tab "Tạm ngừng bán": BTC đang bị ngắt dịch vụ thanh toán (Story 4.2-b). */
 export const SUSPENDED_PAYMENT_SERVICES_QUERY_KEY = [...ADMIN_QUERY_KEY, 'payment-service', 'suspended'] as const;
+/** Tab "Dead-letter": job pg-boss hết retry (Story 4.6-d). */
+export const DEAD_LETTER_JOBS_QUERY_KEY = [...ADMIN_QUERY_KEY, 'dead-letters'] as const;
 
 /** `GET /v1/admin/organizations?closedBeta=…` (mỗi lần gọi api ghi một dòng audit `platform_admin.read`). */
 export const fetchClosedBetaQueue = (status: ClosedBetaStatus, signal?: AbortSignal) =>
@@ -48,3 +53,17 @@ export const fetchSuspendedPaymentServices = (signal?: AbortSignal) =>
  */
 export const resumePaymentService = (organizationId: string) =>
   apiRequest(adminPaymentServiceResumeApiPath(organizationId), { schema: z.undefined(), init: { method: 'POST' } });
+
+/**
+ * `GET /v1/admin/dead-letters`: tối đa 200 job mới vào dead-letter nhất trước, kèm tổng số job (mỗi lần gọi api ghi một
+ * dòng audit `platform_admin.read`).
+ */
+export const fetchDeadLetterJobs = (signal?: AbortSignal) =>
+  apiRequest(ADMIN_DEAD_LETTERS_API_PATH, { schema: DeadLetterJobList, init: { signal } });
+
+/**
+ * Requeue một job dead-letter về queue gốc: 204 No Content (job chạy lại từ đầu). Job không còn trong dead-letter →
+ * `DEAD_LETTER_JOB_GONE`.
+ */
+export const requeueDeadLetterJob = (jobId: string) =>
+  apiRequest(adminDeadLetterRequeueApiPath(jobId), { schema: z.undefined(), init: { method: 'POST' } });

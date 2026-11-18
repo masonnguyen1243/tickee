@@ -50,12 +50,42 @@ export type SuspendedOrganization = {
 export const SUSPENDED_KEY = 'GET /admin/organizations/payment-service/suspended';
 export const resumeKey = (id: string) => `POST /admin/organizations/${id}/payment-service/resume`;
 
+/** Một job trong dead-letter của pg-boss (tab "Dead-letter", Story 4.6-d). */
+export type DeadLetterJob = {
+  id: string;
+  queue: string;
+  sourceQueue: string | null;
+  sourceJobId: string | null;
+  retryCount: number | null;
+  createdAt: string;
+  reason: string | null;
+  payload: string;
+};
+
+export const deadLetterJob = (overrides: Partial<DeadLetterJob> & Pick<DeadLetterJob, 'id'>): DeadLetterJob => ({
+  queue: 'ordering.send-buyer-email.dead-letter',
+  sourceQueue: 'ordering.send-buyer-email',
+  sourceJobId: '019a3b2c-0f01-7abc-8def-0123456789ab',
+  retryCount: 8,
+  createdAt: '2026-11-17T03:00:00.000Z',
+  reason: 'Không gửi được email (SmtpError)',
+  payload: '{"orderId":"019a3b2c-0e01-7abc-8def-0123456789ab"}',
+  ...overrides,
+});
+
+/** Api chỉ trả tối đa chừng này job dead-letter (như `DEAD_LETTER_JOBS_LIMIT`). */
+const DEAD_LETTER_LIMIT = 200;
+
+export const DEAD_LETTERS_KEY = 'GET /admin/dead-letters';
+export const requeueKey = (id: string) => `POST /admin/dead-letters/${id}/requeue`;
+
 /**
  * API admin có trạng thái: danh sách theo tab đọc từ `organizations`, Duyệt/Thu hồi đổi trạng thái theo đúng máy
  * trạng thái của api (bấm lại → 204; chuyển sai → 409). Tab "Tạm ngừng bán" đọc `suspended` (theo thứ tự truyền vào,
  * như api: ngắt lâu nhất trước); "Mở lại" gỡ BTC khỏi danh sách (204), BTC không còn trong danh sách → 409
- * `PAYMENT_SERVICE_NOT_SUSPENDED`. `gate` (nếu trả `Reply`) thay mọi phản hồi, để giả lập mất cờ, chưa bật 2FA, chưa
- * qua lớp hai…
+ * `PAYMENT_SERVICE_NOT_SUSPENDED`. Tab "Dead-letter" đọc `deadLetters` (theo thứ tự truyền vào, như api: mới nhất trước;
+ * tối đa 200 job kèm `total`); "Requeue" gỡ job khỏi danh sách (204), job không còn → 409 `DEAD_LETTER_JOB_GONE`.
+ * `gate` (nếu trả `Reply`) thay mọi phản hồi, để giả lập mất cờ, chưa bật 2FA, chưa qua lớp hai…
  */
 export async function mockAdminApi(
   page: Page,
@@ -64,7 +94,13 @@ export async function mockAdminApi(
     gate,
     handlers = {},
     suspended = [],
-  }: { gate?: Gate; handlers?: Record<string, Handler>; suspended?: SuspendedOrganization[] } = {},
+    deadLetters = [],
+  }: {
+    gate?: Gate;
+    handlers?: Record<string, Handler>;
+    suspended?: SuspendedOrganization[];
+    deadLetters?: DeadLetterJob[];
+  } = {},
 ): Promise<Call[]> {
   const calls: Call[] = [];
   const cors = {
@@ -100,6 +136,7 @@ export async function mockAdminApi(
       const list = /^GET \/admin\/organizations\?closedBeta=(pending|approved|revoked)$/.exec(key);
       const change = /^POST \/admin\/organizations\/([^/]+)\/closed-beta\/(approve|revoke)$/.exec(key);
       const resume = /^POST \/admin\/organizations\/([^/]+)\/payment-service\/resume$/.exec(key);
+      const requeue = /^POST \/admin\/dead-letters\/([^/]+)\/requeue$/.exec(key);
       if (list) reply = { status: 200, body: organizations.filter((o) => o.closedBetaStatus === list[1]) };
       else if (change) reply = transition(decodeURIComponent(change[1]!), change[2] as 'approve' | 'revoke');
       else if (key === SUSPENDED_KEY) reply = { status: 200, body: suspended };
@@ -108,6 +145,15 @@ export async function mockAdminApi(
         if (index < 0) reply = apiError(409, 'PAYMENT_SERVICE_NOT_SUSPENDED');
         else {
           suspended.splice(index, 1);
+          reply = { status: 204 };
+        }
+      } else if (key === DEAD_LETTERS_KEY) {
+        reply = { status: 200, body: { items: deadLetters.slice(0, DEAD_LETTER_LIMIT), total: deadLetters.length } };
+      } else if (requeue) {
+        const index = deadLetters.findIndex((j) => j.id === decodeURIComponent(requeue[1]!));
+        if (index < 0) reply = apiError(409, 'DEAD_LETTER_JOB_GONE');
+        else {
+          deadLetters.splice(index, 1);
           reply = { status: 204 };
         }
       } else reply = apiError(500, 'INTERNAL_ERROR');

@@ -222,6 +222,12 @@ docker compose exec postgres psql -U tickee_app -d tickee \
 Trong một phút Mailpit (`http://localhost:8025`) nhận đúng một email `[Tickee vận hành] Job vào dead-letter` nêu id job;
 lượt quét sau không gửi lại.
 
+Xem và chạy lại job dead-letter ở `/admin` › tab "Dead-letter" (Quản trị Tingee, Story 4.6-d): bảng 200 job mới vào
+dead-letter nhất (queue gốc, id job nêu trong email, số lần đã thử, lý do lỗi đã che email và chuỗi số dài, payload).
+"Requeue" chuyển đúng một job về queue gốc bằng `boss.redrive` (job mới, lượt thử từ 0; job gửi email sẽ gửi lại) và
+ghi audit `dead_letter_job.requeued` trong cùng transaction. Không có xóa hay requeue hàng loạt: job không cần chạy lại
+thì để đó, pg-boss tự xóa sau 14 ngày. Job chép tay như lệnh trên không có queue gốc nên không requeue được.
+
 ### Trang Sự kiện công khai cập nhật ngay khi BTC sửa
 
 Trang `/e/{slug}` cache phần tĩnh 30 giây. BTC sửa Sự kiện đã mở bán (tên, giờ, địa điểm, Hạng vé…) hoặc bấm "Mở bán"

@@ -95,3 +95,62 @@ export const ADMIN_SUSPENDED_PAYMENT_SERVICES_API_PATH = '/admin/organizations/p
  */
 export const adminPaymentServiceResumeApiPath = (organizationId: string): string =>
   `/admin/organizations/${encodeURIComponent(organizationId)}/payment-service/resume`;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Quản trị Tingee: job trong dead-letter của pg-boss (AD-12, Story 4.6-d)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Danh sách dead-letter trả tối đa chừng này job, mới nhất trước; `total` là số job thật đang nằm trong dead-letter. */
+export const DEAD_LETTER_JOBS_LIMIT = 200;
+
+/** `reason` và `payload` của một job dead-letter dài tối đa chừng này ký tự (bị cắt bớt). */
+export const DEAD_LETTER_TEXT_MAX_LENGTH = 300;
+
+/**
+ * Một job `created` trong một queue `*.dead-letter` (`GET /v1/admin/dead-letters`). Các trường `source*` là dấu vết
+ * pg-boss ghi khi chép job hết retry sang dead-letter; `null` khi pg-boss không ghi (job chép tay vào dead-letter): job
+ * như vậy không requeue được.
+ */
+export const DeadLetterJob = z.object({
+  /** Id của job trong queue dead-letter (id mà email cảnh báo `dead_letter` nêu). */
+  id: z.uuid(),
+  /** Tên queue dead-letter (`<queue gốc>.dead-letter`). */
+  queue: z.string(),
+  /** Queue gốc: requeue tạo job mới ở đây. */
+  sourceQueue: z.string().nullable(),
+  /** Id job gốc đã hết retry (`z.guid`: id job gốc có thể do Tickee đặt, không bắt buộc đúng phiên bản UUID). */
+  sourceJobId: z.guid().nullable(),
+  /** Số lần thử lại của job gốc trước khi vào dead-letter (`source_retry_count`). */
+  retryCount: z.number().int().nullable(),
+  /** Lúc job vào dead-letter. */
+  createdAt: z.iso.datetime(),
+  /**
+   * Lý do lỗi: `message` của output job gốc (không có thì JSON của cả output, bỏ mọi `stack`). Chuỗi dạng email và chuỗi
+   * từ 9 chữ số trở lên thay bằng `[REDACTED]`; tối đa `DEAD_LETTER_TEXT_MAX_LENGTH` ký tự. `null` khi không có output.
+   */
+  reason: z.string().nullable(),
+  /** JSON của payload (`data`), tối đa `DEAD_LETTER_TEXT_MAX_LENGTH` ký tự. */
+  payload: z.string(),
+});
+export type DeadLetterJob = z.infer<typeof DeadLetterJob>;
+
+/** `GET /v1/admin/dead-letters`: tối đa `DEAD_LETTER_JOBS_LIMIT` job mới vào dead-letter nhất trước, kèm tổng số job. */
+export const DeadLetterJobList = z.object({
+  items: z.array(DeadLetterJob),
+  total: z.number().int().nonnegative(),
+});
+export type DeadLetterJobList = z.infer<typeof DeadLetterJobList>;
+
+/** Tham số đường dẫn của requeue: id job dead-letter (sai dạng → 400 `VALIDATION_FAILED`). */
+export const DeadLetterJobParams = z.object({ id: z.uuid() });
+export type DeadLetterJobParams = z.infer<typeof DeadLetterJobParams>;
+
+/** Đường API (sau `/v1`) của danh sách job dead-letter (GET). */
+export const ADMIN_DEAD_LETTERS_API_PATH = '/admin/dead-letters';
+
+/**
+ * Đường API (sau `/v1`) Quản trị Tingee requeue một job dead-letter về queue gốc (POST → 204; job không còn trong
+ * dead-letter → 409 `DEAD_LETTER_JOB_GONE`).
+ */
+export const adminDeadLetterRequeueApiPath = (jobId: string): string =>
+  `${ADMIN_DEAD_LETTERS_API_PATH}/${encodeURIComponent(jobId)}/requeue`;

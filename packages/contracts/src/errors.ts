@@ -63,6 +63,12 @@ export const ErrorCode = {
    */
   PAYMENT_SERVICE_NOT_SUSPENDED: 'PAYMENT_SERVICE_NOT_SUSPENDED',
   /**
+   * Quản trị Tingee requeue một job không còn trong dead-letter (Story 4.6-d): id không thuộc job `created` nào của một
+   * queue `*.dead-letter` (kể cả job thường, job đã được requeue, kể cả khi hai người bấm cùng lúc và bên kia thắng, hay
+   * job đã bị pg-boss xóa), hoặc pg-boss không chuyển được job về queue gốc. Không đổi gì, không audit.
+   */
+  DEAD_LETTER_JOB_GONE: 'DEAD_LETTER_JOB_GONE',
+  /**
    * Tingee từ chối API key của BTC: Client ID không tồn tại hoặc bị khóa, Secret Token sai, hoặc key chưa được cấp quyền
    * nhóm dịch vụ cần dùng. Không lưu gì.
    */
