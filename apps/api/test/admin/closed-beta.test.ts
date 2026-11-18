@@ -8,7 +8,7 @@ import type { Response } from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Auth } from '../../src/modules/identity/auth.js';
 import { PlatformAdminGuard } from '../../src/modules/identity/platform-admin.guard.js';
-import { RequirePlatformAdmin } from '../../src/platform/access/index.js';
+import { PLATFORM_ADMIN_ROUTE_PREFIX, RequirePlatformAdmin } from '../../src/platform/access/index.js';
 import { DATABASE, type Database } from '../../src/platform/db/index.js';
 import { runMigrations } from '../../src/roles/migrate.js';
 import { migrationDatabaseUrl } from '../helpers.js';
@@ -89,8 +89,14 @@ async function auditRows(where: { action: string; actor?: string; organizationId
 }
 
 describe('khu /v1/admin/* — ai được vào', () => {
-  it('mọi route dưới /v1/admin mang @RequirePlatformAdmin(), không @Public() hay @RequirePermission', () => {
-    const adminRoutes = discoverRoutes(h.app).filter((r) => ADMIN_ROUTE.test(r.path));
+  it('mọi route dưới /v1/admin mang @RequirePlatformAdmin(), không @Public() hay @RequirePermission; và ngược lại', () => {
+    const routes = discoverRoutes(h.app);
+    // Story 4.7-a: route @RequirePlatformAdmin() phải nằm trong vùng giới hạn IP `/v1/admin/`.
+    const outside = routes
+      .filter((r) => r.platformAdmin && !r.path.startsWith(PLATFORM_ADMIN_ROUTE_PREFIX))
+      .map((r) => `${r.method} ${r.path} (${r.handler})`);
+    expect(outside).toEqual([]);
+    const adminRoutes = routes.filter((r) => ADMIN_ROUTE.test(r.path));
     expect(adminRoutes.map((r) => `${r.method} ${r.path}`).sort()).toEqual(
       expect.arrayContaining([
         'GET /v1/admin/organizations',
@@ -162,6 +168,8 @@ describe('khu /v1/admin/* — ai được vào', () => {
     }
     const guard = new PlatformAdminGuard(new Reflector(), h.app.get<Database>(DATABASE));
     const req = {
+      // Mẫu route Express đã khớp: route admin phải nằm dưới `/v1/admin/` (Story 4.7-a).
+      route: { path: '/v1/admin/khong-dang-ky' },
       session: { user: { id: admin.userId, twoFactorEnabled: false }, session: { stepUpAt: null } },
     } as unknown as Record<string, unknown>;
     const context = {

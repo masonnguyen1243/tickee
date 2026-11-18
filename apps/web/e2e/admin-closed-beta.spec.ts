@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 
 import {
+  adminIpNotAllowed,
   adminOrganization,
   mockAdminApi,
   queueKey,
@@ -213,6 +214,35 @@ test('chưa đăng nhập → màn đăng nhập với returnTo=/admin', async (
   await page.waitForURL(`**/dang-nhap?returnTo=${encodeURIComponent('/admin')}`);
 });
 
+test('mạng không được phép (ADMIN_IP_NOT_ALLOWED) → empty-state mạng không được phép, không có bảng hay tab', async ({
+  page,
+}) => {
+  const { calls } = await openAdmin(page, { gate: adminIpNotAllowed });
+  await expect(page.getByText('Bạn đang truy cập từ mạng không được phép.')).toBeVisible();
+  await expect(page.getByText('Kết nối mạng được cấp quyền của Tingee rồi tải lại trang.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Duyệt Closed Beta' })).toHaveCount(0);
+  await expect(page.getByRole('tab')).toHaveCount(0);
+  await expect(rows(page)).toHaveCount(0);
+  // Lỗi 4xx không thử lại; không chuyển sang đăng nhập.
+  expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([queueKey('pending')]);
+  expect(new URL(page.url()).pathname).toBe('/admin');
+});
+
+test('đổi sang mạng không được phép giữa phiên: thao tác nhận ADMIN_IP_NOT_ALLOWED → trang chuyển sang empty-state', async ({
+  page,
+}) => {
+  let allowed = true;
+  const { calls } = await openAdmin(page, { gate: () => (allowed ? undefined : adminIpNotAllowed()) });
+  await expect(row(page, 'CLB Cờ Vua Quận 3')).toBeVisible();
+  allowed = false;
+  await row(page, 'CLB Cờ Vua Quận 3').getByRole('button', { name: 'Duyệt CLB Cờ Vua Quận 3' }).click();
+  await expect(page.getByText('Bạn đang truy cập từ mạng không được phép.')).toBeVisible();
+  await expect(page.getByRole('tab')).toHaveCount(0);
+  await expect(rows(page)).toHaveCount(0);
+  await expect(page.getByText('Đã duyệt CLB Cờ Vua Quận 3 vào Closed Beta.')).toHaveCount(0);
+  expect(posts(calls)).toEqual([`/admin/organizations/${PENDING_ID}/closed-beta/approve`]);
+});
+
 test('không có cờ (FORBIDDEN_ROLE) → empty-state không quyền, không có bảng hay tab', async ({ page }) => {
   await openAdmin(page, { gate: () => apiError(403, 'FORBIDDEN_ROLE') });
   await expect(page.getByText('Bạn không có quyền vào trang này.')).toBeVisible();
@@ -416,6 +446,25 @@ test.describe('tab "Tạm ngừng bán" (Story 4.2-b)', () => {
       `/admin/organizations/${KEY_ID}/payment-service/resume`,
     ]);
     expect(identityCalls.filter((c) => c.path === '/identity/totp/step-up')).toHaveLength(1);
+  });
+
+  test('mạng không được phép khi Mở lại (ADMIN_IP_NOT_ALLOWED) → đóng Dialog, trang chuyển sang empty-state mạng', async ({
+    page,
+  }) => {
+    let allowed = true;
+    await openAdmin(page, {
+      suspended: suspendedSeed(),
+      gate: () => (allowed ? undefined : adminIpNotAllowed()),
+    });
+    await tab(page, 'Tạm ngừng bán').click();
+    await expect(suspendedRows(page)).toHaveCount(2);
+    allowed = false;
+    const name = 'Giải Cầu Lông Ba Đình';
+    await suspendedRow(page, name).getByRole('button', { name: `Mở lại ${name}` }).click();
+    await resumeDialog(page, name).getByRole('button', { name: 'Mở lại' }).click();
+    await expect(page.getByText('Bạn đang truy cập từ mạng không được phép.')).toBeVisible();
+    await expect(resumeDialog(page, name)).toBeHidden();
+    await expect(suspendedRows(page)).toHaveCount(0);
   });
 
   test('bị thu cờ giữa phiên ở tab này: Mở lại nhận FORBIDDEN_ROLE → trang chuyển sang empty-state không quyền', async ({

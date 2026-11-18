@@ -10,7 +10,7 @@ import {
   type ClosedBetaOrganization,
   type SuspendedPaymentServiceOrganization,
 } from '@tickee/contracts';
-import { Building2, CircleCheck, ShieldCheck, ShieldX } from 'lucide-react';
+import { Building2, CircleCheck, ShieldAlert, ShieldCheck, ShieldX } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -81,8 +81,12 @@ const isAdminTab = (value: string): value is AdminTab =>
   value === DEAD_LETTER_TAB ||
   (Object.values(ClosedBetaStatus) as string[]).includes(value);
 
-/** Lỗi làm cả trang đổi trạng thái (không phải lỗi của một thao tác): mất cờ, chưa bật 2FA, hết phiên. */
+/**
+ * Lỗi làm cả trang đổi trạng thái (không phải lỗi của một thao tác): truy cập từ mạng ngoài dải IP được phép (Story
+ * 4.7-a), mất cờ, chưa bật 2FA, hết phiên.
+ */
 const isGateError = (error: unknown) =>
+  hasErrorCode(error, ErrorCode.ADMIN_IP_NOT_ALLOWED) ||
   hasErrorCode(error, ErrorCode.FORBIDDEN_ROLE) ||
   hasErrorCode(error, ErrorCode.TWO_FACTOR_NOT_ENABLED) ||
   hasErrorCode(error, ErrorCode.UNAUTHENTICATED);
@@ -226,11 +230,12 @@ function RevokeDialog({
  * Màn "Duyệt Closed Beta" (FR-37, UX-DR44): tab Chờ duyệt / Đã duyệt / Đã thu hồi; "Duyệt" ở Chờ duyệt và Đã thu hồi
  * (duyệt lại), "Thu hồi" ở Đã duyệt qua `Dialog` nêu hậu quả. Tab "Tạm ngừng bán" (Story 4.2-b): BTC đang bị ngắt dịch vụ
  * thanh toán (ngắt lâu nhất trước), "Mở lại" qua `Dialog`. Tab "Dead-letter" (Story 4.6-d): job pg-boss hết retry (mới
- * nhất trước), "Requeue" từng job qua `Dialog`. Chưa đăng nhập → đăng nhập rồi quay về `/admin`; không
- * có quyền → `empty-state`; có quyền mà chưa bật 2FA → `empty-state` + "Bật xác thực hai lớp" (xong quay về `/admin`);
- * chưa qua lớp hai → `Providers` mở dialog "Xác thực hai lớp", xong thì tự tải lại. Cổng quyền đọc theo danh sách của tab
- * đang mở; thao tác của mọi tab dùng chung cách xử lý lỗi. Mỗi thao tác đặt xử lý kết quả trên `useMutation` để
- * `Providers` gửi lại được sau khi qua lớp hai.
+ * nhất trước), "Requeue" từng job qua `Dialog`. Truy cập từ mạng ngoài dải IP được phép (api trả
+ * `ADMIN_IP_NOT_ALLOWED`, Story 4.7-a) → `empty-state` mạng không được phép; chưa đăng nhập → đăng nhập rồi quay về
+ * `/admin`; không có quyền → `empty-state`; có quyền mà chưa bật 2FA → `empty-state` + "Bật xác thực hai lớp" (xong
+ * quay về `/admin`); chưa qua lớp hai → `Providers` mở dialog "Xác thực hai lớp", xong thì tự tải lại. Cổng quyền đọc
+ * theo danh sách của tab đang mở; thao tác của mọi tab dùng chung cách xử lý lỗi. Mỗi thao tác đặt xử lý kết quả trên
+ * `useMutation` để `Providers` gửi lại được sau khi qua lớp hai.
  */
 export function ClosedBetaReview() {
   const router = useRouter();
@@ -345,6 +350,16 @@ export function ClosedBetaReview() {
       ? requeue.error
       : null;
 
+  // Api chặn theo IP trước mọi kiểm tra quyền: mạng không được phép thì không có gì khác để làm trên trang.
+  if (hasErrorCode(active.error, ErrorCode.ADMIN_IP_NOT_ALLOWED)) {
+    return (
+      <EmptyState
+        icon={ShieldAlert}
+        title="Bạn đang truy cập từ mạng không được phép."
+        description="Kết nối mạng được cấp quyền của Tingee rồi tải lại trang."
+      />
+    );
+  }
   if (hasErrorCode(active.error, ErrorCode.FORBIDDEN_ROLE)) {
     return (
       <EmptyState

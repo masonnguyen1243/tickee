@@ -81,8 +81,9 @@ export class ApiModule {
         // Hạng vé và tồn kho (Story 2.8), sửa thông tin Sự kiện kèm email báo Người mua và số Người mua (Story 3.10):
         // ghi/đọc cả `event` lẫn `ordering` nên controller ở flows.
         FlowsModule,
-        // Khu `/v1/admin/*`: guard Quản trị Tingee (cờ `platform_admin`, 2FA, step-up) do IdentityModule đăng ký.
-        AdminModule,
+        // Khu `/v1/admin/*`: guard Quản trị Tingee (cờ `platform_admin`, 2FA, step-up) do IdentityModule đăng ký; giới hạn
+        // IP theo `ADMIN_ALLOWED_CIDRS` chạy trước mọi guard (Story 4.7-a).
+        AdminModule.forRoot(config),
       ],
       controllers: [HealthController],
       providers: [

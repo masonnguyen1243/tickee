@@ -433,6 +433,66 @@ describe('loadConfig', () => {
     expect(issuesOf({ ...apiEnv, TRUST_PROXY_HOPS: 'hai' }).issues.map((i) => i.variable)).toEqual(['TRUST_PROXY_HOPS']);
   });
 
+  it('ADMIN_ALLOWED_CIDRS (Story 4.7-a): danh sách CIDR đã chuẩn hóa; development/test không đặt → không có; worker không đọc', () => {
+    const cidrsOf = (env: Record<string, string | undefined>) => {
+      const config = loadConfig(env);
+      return config.APP_ROLE === 'api' ? config.ADMIN_ALLOWED_CIDRS : 'không phải api';
+    };
+    expect(cidrsOf({ ...apiEnv, ADMIN_ALLOWED_CIDRS: ' 203.0.113.0/24 , 2001:DB8::/32,198.51.100.7,203.0.113.0/24' })).toEqual([
+      '203.0.113.0/24',
+      '2001:db8::/32',
+      '198.51.100.7/32',
+    ]);
+    for (const NODE_ENV of ['development', 'test', undefined]) {
+      expect(cidrsOf({ ...apiEnv, NODE_ENV }), String(NODE_ENV)).toBeUndefined();
+      expect(cidrsOf({ ...apiEnv, NODE_ENV, ADMIN_ALLOWED_CIDRS: '' }), String(NODE_ENV)).toBeUndefined();
+    }
+    expect(loadConfig({ ...workerEnv, ADMIN_ALLOWED_CIDRS: '203.0.113.0/24' })).not.toHaveProperty('ADMIN_ALLOWED_CIDRS');
+    // Worker ở production không cần biến này.
+    expect(loadConfig({ ...workerEnv, NODE_ENV: 'production' })).not.toHaveProperty('ADMIN_ALLOWED_CIDRS');
+  });
+
+  it('ADMIN_ALLOWED_CIDRS: NODE_ENV=production thiếu hoặc rỗng → "thiếu"; đặt đúng thì khởi động được', () => {
+    for (const value of [undefined, '']) {
+      const err = issuesOf({ ...apiEnv, NODE_ENV: 'production', ADMIN_ALLOWED_CIDRS: value });
+      expect(err.issues).toEqual([{ variable: 'ADMIN_ALLOWED_CIDRS', reason: 'thiếu' }]);
+      expect(err.message).toContain('ADMIN_ALLOWED_CIDRS');
+    }
+    expect(loadConfig({ ...apiEnv, NODE_ENV: 'production', ADMIN_ALLOWED_CIDRS: '203.0.113.0/24' })).toMatchObject({
+      NODE_ENV: 'production',
+      ADMIN_ALLOWED_CIDRS: ['203.0.113.0/24'],
+    });
+    // Báo cùng lượt với biến khác đang lỗi (không phải sửa từng biến một).
+    const both = issuesOf({ ...apiEnv, NODE_ENV: 'production', DATABASE_URL: undefined });
+    expect(both.issues).toEqual(
+      expect.arrayContaining([
+        { variable: 'DATABASE_URL', reason: 'thiếu' },
+        { variable: 'ADMIN_ALLOWED_CIDRS', reason: 'thiếu' },
+      ]),
+    );
+    expect(both.issues).toHaveLength(2);
+  });
+
+  it('ADMIN_ALLOWED_CIDRS: mục sai, prefix /0 hay danh sách rỗng → lỗi có lý do, không in giá trị (cả production lẫn dev)', () => {
+    const cases: [string, string][] = [
+      ['10.0.0.0/33', 'mục thứ 1 có prefix ngoài 1–32 của IPv4'],
+      ['abc', 'mục thứ 1 không phải IP hoặc CIDR IPv4/IPv6 hợp lệ'],
+      ['0.0.0.0/0', 'mục thứ 1 có prefix /0 (mở cho mọi IP)'],
+      [',', 'danh sách CIDR rỗng'],
+      [' ', 'danh sách CIDR rỗng'],
+      [`203.0.113.0/24,${SECRET}`, 'mục thứ 2 không phải IP hoặc CIDR IPv4/IPv6 hợp lệ'],
+    ];
+    for (const NODE_ENV of ['production', 'development']) {
+      for (const [value, reason] of cases) {
+        const err = issuesOf({ ...apiEnv, NODE_ENV, ADMIN_ALLOWED_CIDRS: value });
+        // Một issue: lỗi định dạng, không thêm "thiếu" ở production.
+        expect(err.issues, `${NODE_ENV} ${value}`).toEqual([{ variable: 'ADMIN_ALLOWED_CIDRS', reason }]);
+        expect(err.message).not.toContain(SECRET);
+        if (value.trim() !== '' && value !== ',') expect(err.message).not.toContain(value);
+      }
+    }
+  });
+
   it('BETTER_AUTH_SECRET phải ≥ 32 ký tự; AUTH_COOKIE_DOMAIN tùy chọn', () => {
     expect(issuesOf({ ...apiEnv, BETTER_AUTH_SECRET: 'ngan' }).issues).toEqual([
       { variable: 'BETTER_AUTH_SECRET', reason: 'ngoài khoảng cho phép' },

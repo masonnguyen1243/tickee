@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CredentialKeysError, parseCredentialKeys } from '../crypto/index.js';
+import { parseCidrList } from './cidr.js';
 
 export const APP_ROLES = ['api', 'worker', 'migrate'] as const;
 export type AppRole = (typeof APP_ROLES)[number];
@@ -212,16 +213,35 @@ const storage = {
   S3_PUBLIC_BASE_URL: httpUrl,
 };
 
-export const apiConfigSchema = z.object({
+/**
+ * Danh sách CIDR cách nhau bằng dấu phẩy (`parseCidrList`) → CIDR đã chuẩn hóa, không trùng. Lỗi chỉ nêu sai gì và ở mục
+ * thứ mấy, không bao giờ nêu giá trị.
+ */
+const cidrList = z.string().transform((raw, ctx) => {
+  const parsed = parseCidrList(raw);
+  if (parsed.ok) return parsed.cidrs;
+  ctx.addIssue({ code: 'custom', message: parsed.reason });
+  return z.NEVER;
+});
+
+/** Biến của vai api; luật giữa các biến nằm ở `apiConfigSchema`. */
+const apiConfigFields = z.object({
   APP_ROLE: z.literal('api'),
   ...common,
   DATABASE_URL: postgresUrl,
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   /**
    * Số proxy tin cậy đứng trước api (load balancer…) để Express lấy IP thật từ `X-Forwarded-For`
-   * (giới hạn gửi OTP theo IP). 0 = api nhận kết nối trực tiếp (local).
+   * (giới hạn gửi OTP theo IP, giới hạn IP của `/v1/admin/*`). 0 = api nhận kết nối trực tiếp (local).
    */
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
+  /**
+   * Dải IP được gọi khu Quản trị Tingee `/v1/admin/*` (Story 4.7-a, FR-4, AD-26): `ip/prefix` IPv4 (1–32) hoặc IPv6
+   * (1–128) cách nhau bằng dấu phẩy, IP trần là `/32` hoặc `/128`; không nhận `/0`. IP client là `req.ip` (theo
+   * `TRUST_PROXY_HOPS`). Bắt buộc khi `NODE_ENV=production` (kể cả staging); `development`/`test` không đặt thì không
+   * giới hạn (api log `warn` lúc khởi động). Worker không đọc.
+   */
+  ADMIN_ALLOWED_CIDRS: cidrList.optional(),
   /** Khóa ký session/cookie của Better Auth và khóa gốc HMAC bộ đếm OTP. */
   BETTER_AUTH_SECRET: z.string().min(32),
   /** Origin công khai của api (vd. `https://api.tickee.vn`); Better Auth mount ở `<origin>/v1/auth`. */
@@ -246,6 +266,18 @@ export const apiConfigSchema = z.object({
   ...opsAlerts,
   ...opsAlertApiRules,
 });
+
+/** Vai api: `ADMIN_ALLOWED_CIDRS` bắt buộc khi `NODE_ENV=production` (Story 4.7-a; staging cũng chạy production). */
+export const apiConfigSchema = apiConfigFields.refine(
+  (config) => config.NODE_ENV !== 'production' || config.ADMIN_ALLOWED_CIDRS !== undefined,
+  {
+    // Issue mức object phải gắn đúng tên biến (`toIssues` đọc `path[0]`); biến không đặt thì lý do là "thiếu".
+    path: ['ADMIN_ALLOWED_CIDRS'],
+    message: 'bắt buộc khi NODE_ENV=production',
+    // Chạy cả khi biến khác lỗi để báo đủ trong một lần; bỏ qua khi chính biến này đã lỗi định dạng.
+    when: (payload) => !payload.issues.some((issue) => issue.path?.[0] === 'ADMIN_ALLOWED_CIDRS'),
+  },
+);
 
 export const workerConfigSchema = z.object({
   APP_ROLE: z.literal('worker'),

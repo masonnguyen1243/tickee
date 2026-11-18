@@ -5,6 +5,12 @@ import { apiError, WEB_ORIGIN, type Call, type Handler, type Reply } from './ide
 /** Chặn trước mọi route admin: trả `Reply` để thay phản hồi, `undefined` để đi tiếp tới API giả có trạng thái. */
 export type Gate = (request: Request) => Reply | undefined;
 
+/**
+ * Api chặn `/v1/admin/*` vì IP client nằm ngoài `ADMIN_ALLOWED_CIDRS` (Story 4.7-a): 403 trước mọi guard, cả với request
+ * chưa đăng nhập. Dùng làm `gate`.
+ */
+export const adminIpNotAllowed = (): Reply => apiError(403, 'ADMIN_IP_NOT_ALLOWED');
+
 /*
  * API Quản trị Tingee giả bằng `page.route` cho `/v1/admin/**`. Khóa handler gồm cả query (vd.
  * `GET /admin/organizations?closedBeta=pending`) vì mỗi tab là một query khác nhau; lời gọi không có handler → 500.
@@ -85,7 +91,8 @@ export const requeueKey = (id: string) => `POST /admin/dead-letters/${id}/requeu
  * như api: ngắt lâu nhất trước); "Mở lại" gỡ BTC khỏi danh sách (204), BTC không còn trong danh sách → 409
  * `PAYMENT_SERVICE_NOT_SUSPENDED`. Tab "Dead-letter" đọc `deadLetters` (theo thứ tự truyền vào, như api: mới nhất trước;
  * tối đa 200 job kèm `total`); "Requeue" gỡ job khỏi danh sách (204), job không còn → 409 `DEAD_LETTER_JOB_GONE`.
- * `gate` (nếu trả `Reply`) thay mọi phản hồi, để giả lập mất cờ, chưa bật 2FA, chưa qua lớp hai…
+ * `gate` (nếu trả `Reply`) thay mọi phản hồi, để giả lập mạng không được phép (`adminIpNotAllowed`), mất cờ, chưa bật
+ * 2FA, chưa qua lớp hai…
  */
 export async function mockAdminApi(
   page: Page,
