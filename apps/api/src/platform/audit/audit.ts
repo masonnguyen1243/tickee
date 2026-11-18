@@ -37,6 +37,13 @@ export type AuditAction =
   /** Quản trị Tingee thu hồi Closed Beta của BTC. */
   | 'organization.closed_beta_revoked'
   /**
+   * Quản trị Tingee requeue một job dead-letter của pg-boss về queue gốc (Story 4.6-d, AD-12; không thuộc BTC nào):
+   * pg-boss tạo job mới cùng payload ở queue gốc (lượt thử tính lại từ 0) và xóa dòng dead-letter, cùng transaction với
+   * dòng audit này. Đối tượng: `{ type: 'dead_letter_job', id: '<queue dead-letter>:<id job dead-letter>' }`. Không ghi
+   * payload hay lý do lỗi.
+   */
+  | 'dead_letter_job.requeued'
+  /**
    * Dịch vụ thanh toán của BTC bị ngắt (Story 4.2, AD-32; actor: hệ thống): `create-link` bằng key hiện hành bị Tingee
    * từ chối vì hết Token, merchant bị khóa, key không còn dùng được, key chưa được cấp quyền "Cổng thanh toán", hoặc VA
    * của tài khoản mặc định chưa dùng được với Cổng thanh toán (Story 4.2-d). Đối tượng: lý do (`{ type:

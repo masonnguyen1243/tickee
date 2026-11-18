@@ -10,6 +10,13 @@ import {
   ClosedBetaTransitionInvalidDetails,
   SuspendedPaymentServiceOrganization,
   SuspendedPaymentServiceOrganizationList,
+  ADMIN_DEAD_LETTERS_API_PATH,
+  adminDeadLetterRequeueApiPath,
+  DEAD_LETTER_JOBS_LIMIT,
+  DEAD_LETTER_TEXT_MAX_LENGTH,
+  DeadLetterJob,
+  DeadLetterJobList,
+  DeadLetterJobParams,
 } from '../src/admin.js';
 import { ErrorCode } from '../src/errors.js';
 import { safeReturnTo } from '../src/identity.js';
@@ -188,5 +195,46 @@ describe('dịch vụ thanh toán của BTC (Story 4.2)', () => {
     expect(ok('cooldown', 31)).toBe(false);
     expect(ok('unknown', 5)).toBe(false);
     expect(ok('skipped', null)).toBe(false);
+  });
+});
+
+describe('dead-letter ở /admin (Story 4.6-d)', () => {
+  const job = {
+    id: ID,
+    queue: 'ordering.send-buyer-email.dead-letter',
+    sourceQueue: 'ordering.send-buyer-email',
+    sourceJobId: ID,
+    retryCount: 8,
+    createdAt: '2026-11-17T01:02:03.000Z',
+    reason: 'SmtpError',
+    payload: '{"orderId":"x"}',
+  };
+
+  it('danh sách: items + total; trường source* và reason có thể null; id dead-letter phải là uuid', () => {
+    expect(DeadLetterJobList.parse({ items: [job], total: 250 })).toEqual({ items: [job], total: 250 });
+    const legacy = { ...job, sourceQueue: null, sourceJobId: null, retryCount: null, reason: null };
+    expect(DeadLetterJob.parse(legacy)).toEqual(legacy);
+    expect(DeadLetterJob.safeParse({ ...job, id: 'khong-phai-uuid' }).success).toBe(false);
+    expect(DeadLetterJobList.safeParse({ items: [], total: -1 }).success).toBe(false);
+    expect(Object.keys(DeadLetterJob.shape).sort()).toEqual([
+      'createdAt',
+      'id',
+      'payload',
+      'queue',
+      'reason',
+      'retryCount',
+      'sourceJobId',
+      'sourceQueue',
+    ]);
+    expect(DEAD_LETTER_JOBS_LIMIT).toBe(200);
+    expect(DEAD_LETTER_TEXT_MAX_LENGTH).toBe(300);
+  });
+
+  it('đường API, tham số id và mã lỗi', () => {
+    expect(ADMIN_DEAD_LETTERS_API_PATH).toBe('/admin/dead-letters');
+    expect(adminDeadLetterRequeueApiPath(ID)).toBe(`/admin/dead-letters/${ID}/requeue`);
+    expect(DeadLetterJobParams.safeParse({ id: ID }).success).toBe(true);
+    expect(DeadLetterJobParams.safeParse({ id: 'khong-phai-uuid' }).success).toBe(false);
+    expect(ErrorCode.DEAD_LETTER_JOB_GONE).toBe('DEAD_LETTER_JOB_GONE');
   });
 });

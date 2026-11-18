@@ -27,8 +27,11 @@ import {
   ADMIN_QUERY_KEY,
   changeClosedBeta,
   closedBetaQueueQueryKey,
+  DEAD_LETTER_JOBS_QUERY_KEY,
   fetchClosedBetaQueue,
+  fetchDeadLetterJobs,
   fetchSuspendedPaymentServices,
+  requeueDeadLetterJob,
   resumePaymentService,
   SUSPENDED_PAYMENT_SERVICES_QUERY_KEY,
 } from '@/lib/admin/api';
@@ -37,6 +40,13 @@ import { hasErrorCode } from '@/lib/auth/api';
 import { LOGIN_PATH, TOTP_ENROLL_PATH, withReturnTo } from '@/lib/auth/return-to';
 import { isTotpRequired } from '@/lib/auth/totp';
 
+import {
+  DEAD_LETTER_EMPTY,
+  DEAD_LETTER_EMPTY_DESCRIPTION,
+  DeadLetterTable,
+  RequeueDialog,
+  type RequeueableDeadLetterJob,
+} from './dead-letter-jobs';
 import { ResumeDialog, SUSPENDED_EMPTY, SUSPENDED_EMPTY_DESCRIPTION, SuspendedTable } from './suspended-payment-services';
 
 const TABS: readonly { status: ClosedBetaStatus; label: string; empty: string; emptyDescription: string }[] = [
@@ -62,10 +72,14 @@ const TABS: readonly { status: ClosedBetaStatus; label: string; empty: string; e
 
 /** Tab thứ tư (Story 4.2-b): BTC đang bị ngắt dịch vụ thanh toán. */
 const PAYMENT_SERVICE_TAB = 'payment-service';
-type AdminTab = ClosedBetaStatus | typeof PAYMENT_SERVICE_TAB;
+/** Tab thứ năm (Story 4.6-d): job pg-boss trong dead-letter. */
+const DEAD_LETTER_TAB = 'dead-letter';
+type AdminTab = ClosedBetaStatus | typeof PAYMENT_SERVICE_TAB | typeof DEAD_LETTER_TAB;
 
 const isAdminTab = (value: string): value is AdminTab =>
-  value === PAYMENT_SERVICE_TAB || (Object.values(ClosedBetaStatus) as string[]).includes(value);
+  value === PAYMENT_SERVICE_TAB ||
+  value === DEAD_LETTER_TAB ||
+  (Object.values(ClosedBetaStatus) as string[]).includes(value);
 
 /** Lỗi làm cả trang đổi trạng thái (không phải lỗi của một thao tác): mất cờ, chưa bật 2FA, hết phiên. */
 const isGateError = (error: unknown) =>
@@ -74,13 +88,21 @@ const isGateError = (error: unknown) =>
   hasErrorCode(error, ErrorCode.UNAUTHENTICATED);
 
 /**
- * Trạng thái của BTC đã đổi ở nơi khác (Quản trị Tingee khác, hay dịch vụ thanh toán đã về qua đường khác) hoặc BTC không
- * còn: tải lại danh sách.
+ * Trạng thái của BTC đã đổi ở nơi khác (Quản trị Tingee khác, hay dịch vụ thanh toán đã về qua đường khác), BTC không
+ * còn, hoặc job không còn trong dead-letter (đã requeue ở nơi khác): tải lại danh sách.
  */
 const isStale = (error: unknown) =>
   hasErrorCode(error, ErrorCode.CLOSED_BETA_TRANSITION_INVALID) ||
   hasErrorCode(error, ErrorCode.PAYMENT_SERVICE_NOT_SUSPENDED) ||
+  hasErrorCode(error, ErrorCode.DEAD_LETTER_JOB_GONE) ||
   hasErrorCode(error, ErrorCode.NOT_FOUND);
+
+/** Toast của `isStale`. */
+const staleMessage = (error: unknown) => {
+  if (hasErrorCode(error, ErrorCode.NOT_FOUND)) return 'BTC này không còn tồn tại. Đã tải lại danh sách.';
+  if (hasErrorCode(error, ErrorCode.DEAD_LETTER_JOB_GONE)) return 'Job không còn trong dead-letter.';
+  return 'Trạng thái của BTC đã đổi. Đã tải lại danh sách.';
+};
 
 function Loading() {
   return (
@@ -203,7 +225,8 @@ function RevokeDialog({
 /**
  * Màn "Duyệt Closed Beta" (FR-37, UX-DR44): tab Chờ duyệt / Đã duyệt / Đã thu hồi; "Duyệt" ở Chờ duyệt và Đã thu hồi
  * (duyệt lại), "Thu hồi" ở Đã duyệt qua `Dialog` nêu hậu quả. Tab "Tạm ngừng bán" (Story 4.2-b): BTC đang bị ngắt dịch vụ
- * thanh toán (ngắt lâu nhất trước), "Mở lại" qua `Dialog`. Chưa đăng nhập → đăng nhập rồi quay về `/admin`; không
+ * thanh toán (ngắt lâu nhất trước), "Mở lại" qua `Dialog`. Tab "Dead-letter" (Story 4.6-d): job pg-boss hết retry (mới
+ * nhất trước), "Requeue" từng job qua `Dialog`. Chưa đăng nhập → đăng nhập rồi quay về `/admin`; không
  * có quyền → `empty-state`; có quyền mà chưa bật 2FA → `empty-state` + "Bật xác thực hai lớp" (xong quay về `/admin`);
  * chưa qua lớp hai → `Providers` mở dialog "Xác thực hai lớp", xong thì tự tải lại. Cổng quyền đọc theo danh sách của tab
  * đang mở; thao tác của mọi tab dùng chung cách xử lý lỗi. Mỗi thao tác đặt xử lý kết quả trên `useMutation` để
@@ -215,8 +238,9 @@ export function ClosedBetaReview() {
   const [tab, setTab] = useState<AdminTab>(ClosedBetaStatus.PENDING);
   const [revoking, setRevoking] = useState<ClosedBetaOrganization | null>(null);
   const [resuming, setResuming] = useState<SuspendedPaymentServiceOrganization | null>(null);
+  const [requeuing, setRequeuing] = useState<RequeueableDeadLetterJob | null>(null);
 
-  const closedBetaTab = tab === PAYMENT_SERVICE_TAB ? null : tab;
+  const closedBetaTab = tab === PAYMENT_SERVICE_TAB || tab === DEAD_LETTER_TAB ? null : tab;
   const queue = useQuery({
     queryKey: closedBetaQueueQueryKey(closedBetaTab ?? ClosedBetaStatus.PENDING),
     queryFn: ({ signal }) => fetchClosedBetaQueue(closedBetaTab ?? ClosedBetaStatus.PENDING, signal),
@@ -227,8 +251,13 @@ export function ClosedBetaReview() {
     queryFn: ({ signal }) => fetchSuspendedPaymentServices(signal),
     enabled: tab === PAYMENT_SERVICE_TAB,
   });
+  const deadLetters = useQuery({
+    queryKey: DEAD_LETTER_JOBS_QUERY_KEY,
+    queryFn: ({ signal }) => fetchDeadLetterJobs(signal),
+    enabled: tab === DEAD_LETTER_TAB,
+  });
   /** Danh sách của tab đang mở: quyết định cổng quyền (không quyền, chưa bật 2FA, hết phiên). */
-  const active = tab === PAYMENT_SERVICE_TAB ? suspended : queue;
+  const active = tab === PAYMENT_SERVICE_TAB ? suspended : tab === DEAD_LETTER_TAB ? deadLetters : queue;
 
   const unauthenticated = hasErrorCode(active.error, ErrorCode.UNAUTHENTICATED);
   useEffect(() => {
@@ -250,11 +279,7 @@ export function ClosedBetaReview() {
       return true;
     }
     if (isStale(error)) {
-      toast.info(
-        hasErrorCode(error, ErrorCode.NOT_FOUND)
-          ? 'BTC này không còn tồn tại. Đã tải lại danh sách.'
-          : 'Trạng thái của BTC đã đổi. Đã tải lại danh sách.',
-      );
+      toast.info(staleMessage(error));
       refresh();
       return true;
     }
@@ -304,6 +329,22 @@ export function ClosedBetaReview() {
       ? resume.error
       : null;
 
+  const requeue = useMutation({
+    mutationFn: (job: RequeueableDeadLetterJob) => requeueDeadLetterJob(job.id),
+    onSuccess: (_data, job) => {
+      setRequeuing(null);
+      toast.success(`Đã requeue job vào ${job.sourceQueue}.`);
+      refresh();
+    },
+    onError: (error) => {
+      if (handleActionError(error) && !isTotpRequired(error)) setRequeuing(null);
+    },
+  });
+  const requeueFailure =
+    requeue.error && !isTotpRequired(requeue.error) && !isGateError(requeue.error) && !isStale(requeue.error)
+      ? requeue.error
+      : null;
+
   if (hasErrorCode(active.error, ErrorCode.FORBIDDEN_ROLE)) {
     return (
       <EmptyState
@@ -331,7 +372,43 @@ export function ClosedBetaReview() {
   if (unauthenticated || hasErrorCode(active.error, ErrorCode.CONSENT_REQUIRED)) return <Loading />;
 
   let body;
-  if (tab === PAYMENT_SERVICE_TAB) {
+  if (tab === DEAD_LETTER_TAB) {
+    if (deadLetters.data) {
+      body =
+        deadLetters.data.items.length === 0 ? (
+          <EmptyState
+            icon={CircleCheck}
+            title={DEAD_LETTER_EMPTY}
+            description={DEAD_LETTER_EMPTY_DESCRIPTION}
+            className="rounded-lg bg-card px-card-padding shadow-card"
+          />
+        ) : (
+          <DeadLetterTable
+            jobs={deadLetters.data.items}
+            total={deadLetters.data.total}
+            onRequeue={(job) => {
+              requeue.reset();
+              setRequeuing(job);
+            }}
+          />
+        );
+    } else if (deadLetters.isError) {
+      body = (
+        <StatusBanner
+          tone="danger"
+          title="Chưa tải được danh sách dead-letter"
+          description={messageOf(deadLetters.error)}
+          action={
+            <Button type="button" variant="link" size="sm" onClick={() => void deadLetters.refetch()}>
+              Thử lại
+            </Button>
+          }
+        />
+      );
+    } else {
+      body = <Loading />;
+    }
+  } else if (tab === PAYMENT_SERVICE_TAB) {
     if (suspended.data) {
       body =
         suspended.data.length === 0 ? (
@@ -415,6 +492,7 @@ export function ClosedBetaReview() {
             </TabsTrigger>
           ))}
           <TabsTrigger value={PAYMENT_SERVICE_TAB}>Tạm ngừng bán</TabsTrigger>
+          <TabsTrigger value={DEAD_LETTER_TAB}>Dead-letter</TabsTrigger>
         </TabsList>
         {TABS.map((t) => (
           <TabsContent key={t.status} value={t.status}>
@@ -422,6 +500,7 @@ export function ClosedBetaReview() {
           </TabsContent>
         ))}
         <TabsContent value={PAYMENT_SERVICE_TAB}>{tab === PAYMENT_SERVICE_TAB ? body : null}</TabsContent>
+        <TabsContent value={DEAD_LETTER_TAB}>{tab === DEAD_LETTER_TAB ? body : null}</TabsContent>
       </Tabs>
       <RevokeDialog
         organization={revoking}
@@ -441,6 +520,16 @@ export function ClosedBetaReview() {
         onClose={() => {
           resume.reset();
           setResuming(null);
+        }}
+      />
+      <RequeueDialog
+        job={requeuing}
+        pending={requeue.isPending}
+        failure={requeueFailure}
+        onConfirm={(job) => !requeue.isPending && requeue.mutate(job)}
+        onClose={() => {
+          requeue.reset();
+          setRequeuing(null);
         }}
       />
     </div>

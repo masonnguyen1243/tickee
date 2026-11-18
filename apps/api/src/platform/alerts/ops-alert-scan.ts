@@ -4,7 +4,15 @@ import { sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 import { DATABASE, type Database } from '../db/index.js';
-import { BOSS, defineQueue, errorName, JOB_COMPLETED, PGBOSS_SCHEMA, registerQueueWorker } from '../jobs/index.js';
+import {
+  BOSS,
+  DEAD_LETTER_SUFFIX,
+  defineQueue,
+  errorName,
+  JOB_COMPLETED,
+  PGBOSS_SCHEMA,
+  registerQueueWorker,
+} from '../jobs/index.js';
 import { dbErrorSummary, isDatabaseError } from '../logging/index.js';
 import { OpsAlertKind } from './kinds.js';
 import { OpsAlerts } from './ops-alerts.js';
@@ -23,9 +31,6 @@ export const OPS_ALERT_SCAN_CRON = '* * * * *';
 
 /** Dấu chống lặp cũ hơn chừng này ngày bị xóa (job dead-letter đã bị pg-boss xóa trước đó: giữ 14 ngày). */
 export const OPS_ALERT_MARK_RETENTION_DAYS = 30;
-
-/** Hậu tố tên queue dead-letter (mọi queue dead-letter của Tickee khai ở `JobQueue` đều theo quy ước này). */
-export const DEAD_LETTER_SUFFIX = '.dead-letter';
 
 /** Tiền tố queue nội bộ của pg-boss (vd. `__pgboss__send-it` của lịch cron). */
 const PGBOSS_INTERNAL_PREFIX = '__pgboss';
