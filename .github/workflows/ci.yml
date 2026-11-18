@@ -15,7 +15,9 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Lúc bình thường job chạy 20–30 phút (Vitest 5–8, Playwright 11–18). Khi mirror apt của Ubuntu chậm, riêng bước
+    # `playwright install --with-deps` có lúc mất 20 phút (18/11/2026), nên trần 30 phút làm job bị hủy dù test xanh.
+    timeout-minutes: 60
 
     services:
       postgres:
