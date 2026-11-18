@@ -223,6 +223,8 @@ test('sửa tên ở Cài đặt: PATCH đủ trường, toast, tiêu đề đ�
     endsAt: '2099-11-16T17:00:00+07:00',
     venue: 'Hồ Gươm',
     refundPolicy: 'Hoàn 100% trước 7 ngày.',
+    // Web luôn gửi `imageKey` (Story 4.8-b): Sự kiện chưa có ảnh → `null`.
+    imageKey: null,
   });
 });
 
@@ -581,6 +583,10 @@ test('đã hủy: form chỉ đọc kèm lý do, không có nút lưu hay nút t
   await expect(page.getByRole('button', { name: 'Lưu thay đổi' })).toHaveCount(0);
   await expect(statusSection(page).getByRole('button')).toHaveCount(0);
   await expect(statusSection(page)).toContainText('Sự kiện đã hủy, không đổi trạng thái được nữa.');
+  // Ô ảnh bìa (Story 4.8-b) cũng chỉ đọc: không chọn, không gỡ.
+  const image = page.getByRole('group', { name: 'Ảnh bìa' });
+  await expect(image).toContainText('Chưa có ảnh bìa');
+  await expect(image.getByRole('button')).toHaveCount(0);
 });
 
 // ---------------------------------------------------------------------------------------------------------------

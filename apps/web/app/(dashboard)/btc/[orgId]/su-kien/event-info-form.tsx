@@ -19,17 +19,19 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError } from '@/lib/api/errors';
+import { IMAGE_REJECTED_ERROR } from '@/lib/event/image-upload';
 
 /*
- * Form thông tin Sự kiện dùng chung cho wizard bước 1 (Story 2.7) và tab "Cài đặt" (Story 2.12): tên, thời gian,
- * địa điểm, mô tả, chính sách hoàn vé. Component chỉ hiển thị; trạng thái ô, kiểm và lưu do nơi dùng giữ. Lỗi hiện tại
- * từng ô. Giờ nhập luôn hiểu theo giờ Việt Nam (+07:00), không theo máy.
+ * Form thông tin Sự kiện dùng chung cho wizard bước 1 (Story 2.7) và tab "Cài đặt" (Story 2.12): tên, ảnh bìa (Story
+ * 4.8-b, slot `image`), thời gian, địa điểm, mô tả, chính sách hoàn vé. Component chỉ hiển thị; trạng thái ô, kiểm và lưu
+ * do nơi dùng giữ. Lỗi hiện tại từng ô. Giờ nhập luôn hiểu theo giờ Việt Nam (+07:00), không theo máy.
  */
 
 export type EventInfoField = 'name' | 'startsAt' | 'endsAt' | 'venue' | 'description' | 'refundPolicy';
 /** Giá trị ô nhập; giờ là giá trị `datetime-local` (`2026-11-16T07:00`) theo giờ Việt Nam. */
 export type EventInfoValues = Record<EventInfoField, string>;
-export type EventInfoErrors = Partial<Record<EventInfoField, string>>;
+/** Lỗi theo ô; `imageKey` là lỗi của ô ảnh bìa (key bị từ chối), ô ảnh tự hiện. */
+export type EventInfoErrors = Partial<Record<EventInfoField | 'imageKey', string>>;
 
 const FIELDS: readonly EventInfoField[] = ['name', 'startsAt', 'endsAt', 'venue', 'description', 'refundPolicy'];
 
@@ -51,13 +53,15 @@ export const valuesOf = (event: EventDetail): EventInfoValues => ({
   refundPolicy: event.refundPolicy ?? '',
 });
 
-export const inputOf = (values: EventInfoValues) => ({
+/** Body lưu Sự kiện; luôn có `imageKey` (key đang có, key mới, hoặc `null` sau "Gỡ ảnh"). */
+export const inputOf = (values: EventInfoValues, imageKey: string | null) => ({
   name: values.name,
   startsAt: eventLocalToIso(values.startsAt),
   endsAt: eventLocalToIso(values.endsAt),
   venue: values.venue,
   description: values.description,
   refundPolicy: values.refundPolicy,
+  imageKey,
 });
 
 const YEAR_OUT_OF_RANGE = `Năm phải trong khoảng ${EVENT_YEAR_MIN}–${EVENT_YEAR_MAX}.`;
@@ -84,17 +88,24 @@ function messageFor(field: EventInfoField, values: EventInfoValues): string {
   }
 }
 
-/** Lỗi theo trường từ danh sách đường dẫn trường (Zod phía web hoặc `details.issues` của api). */
+/**
+ * Lỗi theo trường từ danh sách đường dẫn trường (Zod phía web hoặc `details.issues` của api). `imageKey` → lỗi tại ô ảnh
+ * bìa.
+ */
 export function fieldErrorsOf(paths: readonly unknown[], values: EventInfoValues): EventInfoErrors {
   const errors: EventInfoErrors = {};
   for (const path of paths) {
+    if (path === 'imageKey') {
+      errors.imageKey = IMAGE_REJECTED_ERROR;
+      continue;
+    }
     const field = FIELDS.find((f) => f === path);
     if (field && !errors[field]) errors[field] = messageFor(field, values);
   }
   return errors;
 }
 
-/** Lỗi theo trường từ `400 VALIDATION_FAILED` của api; không khớp ô nào thì báo chung ở ô tên. */
+/** Lỗi theo trường từ `400 VALIDATION_FAILED` của api (kể cả ô ảnh); không khớp ô nào thì báo chung ở ô tên. */
 export function serverFieldErrors(error: ApiError, values: EventInfoValues): EventInfoErrors {
   const issues = (error.details as { issues?: { path?: unknown }[] } | null)?.issues;
   const paths = Array.isArray(issues) ? issues.map((i) => String(i.path ?? '').split('.')[0] ?? '') : [];
@@ -108,6 +119,8 @@ type EventInfoFieldsProps = {
   onChange: (field: EventInfoField, value: string) => void;
   /** Chỉ đọc (Sự kiện đã hủy): mọi ô `readOnly`. */
   readOnly?: boolean;
+  /** Ô ảnh bìa (`EventImagePicker`), đặt ngay sau ô "Tên Sự kiện". */
+  image?: ReactNode;
   /** Nội dung thêm dưới tiêu đề (vd. lý do chỉ đọc). */
   notice?: ReactNode;
   /** Nút lưu… đặt cuối thẻ. */
@@ -122,6 +135,7 @@ export function EventInfoFields({
   errors,
   onChange,
   readOnly = false,
+  image,
   notice,
   footer,
   draft = true,
@@ -162,6 +176,8 @@ export function EventInfoFields({
         <Input {...name.props} autoComplete="off" placeholder="vd. Giải chạy Hà Nội 2026" />
         <FieldError id={name.errorId} message={errors.name} />
       </div>
+
+      {image}
 
       <fieldset className="flex min-w-0 flex-col gap-stack">
         <legend className="text-label">Thời gian</legend>

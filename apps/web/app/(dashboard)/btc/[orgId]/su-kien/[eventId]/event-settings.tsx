@@ -15,6 +15,7 @@ import { useId, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 
 import { ConfirmDialog } from '@/components/tickee/confirm-dialog';
+import { EventImagePicker } from '@/components/tickee/event-image-picker';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
 import { handledElsewhere } from '@/lib/api/handled-elsewhere';
@@ -32,6 +33,7 @@ import {
   updateEvent,
 } from '@/lib/event/api';
 import { refreshEventSaleStatus } from '@/lib/event/sale-status';
+import { useEventImage } from '@/lib/event/use-event-image';
 
 import {
   EventInfoFields,
@@ -59,6 +61,9 @@ import { isEventEnded } from '../event-status';
  * E3-2: bấm "Kết thúc" thì đếm Đơn đang chờ thanh toán trước (nút có spinner, chặn bấm lặp) rồi mới mở `Dialog`; `Dialog`
  * nêu đủ hậu quả (Vé hết hiệu lực) và, khi còn Đơn đang chờ thanh toán, số Đơn đó cùng việc BTC phải hoàn tay khoản
  * chuyển muộn. Đếm lỗi → banner "Chưa kết thúc được", không mở `Dialog`.
+ *
+ * Story 4.8-b: ô "Ảnh bìa" upload ngay khi chọn; "Lưu thay đổi" gửi `imageKey` cùng các ô khác (đang upload thì nút bận).
+ * Đổi ảnh không báo Người mua (`notifiesBuyers` chỉ xét giờ và địa điểm). Sự kiện đã hủy: ô ảnh chỉ đọc.
  */
 
 const NOT_STARTED_REASON = 'Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.';
@@ -117,6 +122,12 @@ function InfoForm({ orgId, event }: { orgId: string; event: EventDetail }) {
   const [errors, setErrors] = useState<EventInfoErrors>({});
   const [notice, setNotice] = useState<PendingNotice | null>(null);
   const cancelled = event.status === 'cancelled';
+  const image = useEventImage({
+    orgId,
+    initialKey: event.imageKey,
+    initialUrl: event.imageUrl,
+    onEdit: () => setErrors((prev) => (prev.imageKey ? { ...prev, imageKey: undefined } : prev)),
+  });
 
   const save = useMutation({
     mutationFn: (body: EventDraftInput) => updateEvent(orgId, event.id, body),
@@ -147,12 +158,12 @@ function InfoForm({ orgId, event }: { orgId: string; event: EventDetail }) {
       if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
     },
   });
-  const busy = save.isPending || count.isPending;
+  const busy = save.isPending || count.isPending || image.uploading;
 
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (busy || cancelled) return;
-    const parsed = EventDraftInput.safeParse(inputOf(values));
+    const parsed = EventDraftInput.safeParse(inputOf(values, image.key));
     save.reset();
     count.reset();
     if (!parsed.success) {
@@ -188,6 +199,15 @@ function InfoForm({ orgId, event }: { orgId: string; event: EventDetail }) {
           errors={errors}
           onChange={update}
           readOnly={cancelled}
+          image={
+            <EventImagePicker
+              {...image.controls}
+              error={errors.imageKey ?? image.controls.error}
+              readOnly={cancelled}
+              // Đang đếm Người mua hoặc đang lưu: body đã chốt `imageKey`, đổi ảnh lúc này sẽ lệch với thứ được lưu.
+              disabled={save.isPending || count.isPending}
+            />
+          }
           draft={event.status === 'draft'}
           notice={
             cancelled ? (

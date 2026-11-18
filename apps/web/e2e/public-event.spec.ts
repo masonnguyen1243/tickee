@@ -1,13 +1,25 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import sharp from 'sharp';
 
 import { PORT_PUBLIC_EVENT } from '../playwright.config';
 import { expect, test } from './fixtures';
 import { mockIdentityApi } from './identity-mock';
-import { SLUG_DRAFT, SLUG_HIDDEN, SLUG_ON_SALE, TIER_FREE_ID, TIER_PAID_ID } from './public-event-api';
+import {
+  SLUG_BROKEN_IMAGE,
+  SLUG_DRAFT,
+  SLUG_HIDDEN,
+  SLUG_ON_SALE,
+  SLUG_SLOW_IMAGE,
+  SLUG_WITH_IMAGE,
+  SOLID_IMAGE_URL,
+  TIER_FREE_ID,
+  TIER_PAID_ID,
+} from './public-event-api';
 
 /*
  * Trang Sự kiện công khai `/e/{slug}` (Story 2.11-b). Phần tĩnh SSR lấy từ API giả `e2e/public-event-api.ts` (server
- * Next riêng có `API_INTERNAL_URL`); `/availability` gọi từ trình duyệt nên giả bằng `page.route`.
+ * Next riêng có `API_INTERNAL_URL`); `/availability` gọi từ trình duyệt nên giả bằng `page.route`. Ảnh Sự kiện (Story
+ * 4.8-b): API giả cũng phục vụ ảnh một màu (xanh lá), ảnh 404 và ảnh trả chậm cho hero và ảnh OG.
  */
 
 const ORIGIN = `http://localhost:${PORT_PUBLIC_EVENT}`;
@@ -51,6 +63,27 @@ async function mockAvailability(page: Page, initial: Reply) {
 const tierRow = (page: Page, name: string) =>
   page.locator('[data-slot^="ticket-tier-row"]').filter({ has: page.getByRole('heading', { name }) });
 
+/** Ảnh đã tải xong và vẽ được (không phải ảnh hỏng). */
+const expectLoaded = (image: Locator) =>
+  expect.poll(() => image.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
+
+/** Màu điểm ảnh (x, y) của một ảnh PNG/JPEG. */
+async function pixelAt(image: Buffer, x: number, y: number) {
+  const { data, info } = await sharp(image).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const i = (y * info.width + x) * info.channels;
+  return { r: data[i]!, g: data[i + 1]!, b: data[i + 2]! };
+}
+
+/** Điểm ảnh thuộc ảnh Sự kiện một màu xanh lá (có thể đã phủ lớp tối mỏng). */
+const isGreen = ({ r, g, b }: { r: number; g: number; b: number }) => g > 120 && g > r + 60 && g > b + 60;
+/** Lề phải của ảnh OG (không bao giờ có chữ), gần trên, nơi lớp tối mỏng nhất; và gần đáy, nơi lớp tối đậm nhất. */
+const OG_TOP = { x: 1160, y: 140 } as const;
+const OG_BOTTOM = { x: 1160, y: 620 } as const;
+/** Trong lề trên-trái, gần tâm quầng coral của nền gradient (ảnh OG không ảnh). */
+const OG_CORAL = { x: 40, y: 20 } as const;
+/** Điểm ảnh của quầng coral: đỏ trội hẳn xanh lá. */
+const isCoral = ({ r, g }: { r: number; g: number }) => r > g + 60;
+
 test.beforeEach(async ({ page }) => {
   await mockIdentityApi(page, {}, { origin: ORIGIN });
 });
@@ -67,6 +100,9 @@ test('đang bán: hero, hàng BTC, Hạng vé "Còn N vé", không banner', asyn
   await expect(venue).toHaveAttribute('href', /^https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=/);
   await expect(page.locator('[data-slot="event-organizer"]')).toHaveText('Tổ chức bởi CLB Chạy Bộ Phố Cổ');
   await expect(page.getByRole('heading', { name: 'Chính sách hoàn vé' })).toBeVisible();
+  // Không có ảnh Sự kiện: gradient như trước.
+  await expect(hero.locator('[data-slot="event-hero-fallback"]')).toBeVisible();
+  await expect(hero.locator('[data-slot="event-hero-image"]')).toHaveCount(0);
 
   const free = tierRow(page, 'Vé phổ thông');
   await expect(free).toContainText('Miễn phí');
@@ -307,7 +343,94 @@ test('thẻ meta OG và ảnh OG 1200×630', async ({ page, request }) => {
   const png = await image.body();
   expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1200, 630]);
 
+  // Không có ảnh Sự kiện (Story 4.8-b): nền gradient coral như trước, không phải ảnh.
+  expect(isGreen(await pixelAt(png, OG_TOP.x, OG_TOP.y))).toBe(false);
+  const coral = await pixelAt(png, OG_CORAL.x, OG_CORAL.y);
+  expect(isCoral(coral), JSON.stringify(coral)).toBe(true);
+
   // Cùng route ảnh (đường dẫn có hậu tố hash do Next sinh) với Sự kiện nháp → 404.
   const draftImage = await request.get(new URL(imageUrl!).pathname.replace(SLUG_ON_SALE, SLUG_DRAFT));
   expect(draftImage.status()).toBe(404);
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// Story 4.8-b: ảnh Sự kiện ở hero và ảnh OG
+// ---------------------------------------------------------------------------------------------------------------
+
+test('có ảnh: hero hiện ảnh object-cover khung 16:9 (≥ lg 2:1), alt rỗng, không gradient', async ({ page }) => {
+  await mockAvailability(page, ON_SALE);
+  await page.goto(`/e/${SLUG_WITH_IMAGE}`);
+  const hero = page.locator('[data-slot="event-hero"]');
+  const image = hero.locator('[data-slot="event-hero-image"]');
+  await expect(image).toHaveAttribute('src', SOLID_IMAGE_URL);
+  await expect(image).toHaveAttribute('alt', '');
+  await expect(image).toHaveClass(/object-cover/);
+  await expectLoaded(image);
+  await expect(hero.locator('[data-slot="event-hero-fallback"]')).toHaveCount(0);
+  const mobile = (await image.boundingBox())!;
+  expect(mobile.width / mobile.height).toBeCloseTo(16 / 9, 1);
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect.poll(async () => {
+    const box = (await image.boundingBox())!;
+    return Math.round((box.width / box.height) * 100) / 100;
+  }).toBe(2);
+});
+
+test('ảnh tải lỗi: hero về gradient như khi không có ảnh', async ({ page }) => {
+  await mockAvailability(page, ON_SALE);
+  await page.goto(`/e/${SLUG_BROKEN_IMAGE}`);
+  const hero = page.locator('[data-slot="event-hero"]');
+  await expect(hero.locator('[data-slot="event-hero-fallback"]')).toBeVisible();
+  await expect(hero.locator('[data-slot="event-hero-image"]')).toHaveCount(0);
+  await expect(hero.getByRole('heading', { level: 1 })).toHaveText('Giải chạy Hồ Gươm mùa thu 2026');
+});
+
+/** Đường dẫn ảnh OG của `slug` (cùng hậu tố hash do Next sinh với mọi slug), lấy từ thẻ meta của trang đang bán. */
+async function ogImagePath(page: Page, slug: string): Promise<string> {
+  await mockAvailability(page, ON_SALE);
+  await page.goto(`/e/${SLUG_ON_SALE}`);
+  const url = await page.locator('meta[property="og:image"]').getAttribute('content');
+  return new URL(url!).pathname.replace(SLUG_ON_SALE, slug);
+}
+
+test('ảnh OG có ảnh Sự kiện: ảnh phủ kín 1200×630 (WebP đã đổi), lớp tối phía dưới', async ({ page, request }) => {
+  const image = await request.get(await ogImagePath(page, SLUG_WITH_IMAGE));
+  expect(image.status()).toBe(200);
+  expect(image.headers()['content-type']).toBe('image/png');
+  const png = await image.body();
+  expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1200, 630]);
+
+  const top = await pixelAt(png, OG_TOP.x, OG_TOP.y);
+  expect(isGreen(top), JSON.stringify(top)).toBe(true);
+  // Phủ kín cả khung: sát mép trái và mép phải cũng là ảnh, không còn nền gradient coral.
+  for (const [x, y] of [
+    [4, 140],
+    [1195, 140],
+  ] as const) {
+    const p = await pixelAt(png, x, y);
+    expect(isGreen(p), `(${x}, ${y}) ${JSON.stringify(p)}`).toBe(true);
+  }
+  const bottom = await pixelAt(png, OG_BOTTOM.x, OG_BOTTOM.y);
+  expect(bottom.g, JSON.stringify(bottom)).toBeLessThan(top.g - 80);
+});
+
+for (const [label, slug] of [
+  ['ảnh 404', SLUG_BROKEN_IMAGE],
+  ['ảnh quá 3 giây', SLUG_SLOW_IMAGE],
+] as const) {
+  test(`ảnh OG khi ${label}: vẫn 200, bản gradient`, async ({ page, request }) => {
+    const path = await ogImagePath(page, slug);
+    const started = Date.now();
+    const image = await request.get(path, { timeout: 20_000 });
+    expect(image.status()).toBe(200);
+    expect(image.headers()['content-type']).toBe('image/png');
+    const png = await image.body();
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1200, 630]);
+    expect(isGreen(await pixelAt(png, OG_TOP.x, OG_TOP.y))).toBe(false);
+    const coral = await pixelAt(png, OG_CORAL.x, OG_CORAL.y);
+    expect(isCoral(coral), JSON.stringify(coral)).toBe(true);
+    // Không chờ hết ảnh chậm (6 giây): bỏ sau 3 giây.
+    expect(Date.now() - started).toBeLessThan(5_500);
+  });
+}

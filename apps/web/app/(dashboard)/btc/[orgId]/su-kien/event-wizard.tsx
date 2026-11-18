@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 
+import { EventImagePicker } from '@/components/tickee/event-image-picker';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { WizardStepper } from '@/components/tickee/wizard-stepper';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,7 @@ import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
 import { useGoToLogin } from '@/lib/auth/use-go-to-login';
 import { createEvent, eventQueryKey, eventsQueryKey, updateEvent } from '@/lib/event/api';
+import { useEventImage } from '@/lib/event/use-event-image';
 
 import {
   EMPTY_EVENT_INFO,
@@ -38,6 +40,9 @@ import { TicketTypesEditor } from './ticket-types-editor';
  * link công khai sau khi mở bán). "Lưu nháp" có ở mọi bước; "Tiếp" lưu rồi mới sang bước sau; "Quay lại" giữ nguyên dữ
  * liệu đã nhập. Lưu lần đầu (POST) xong thì URL chuyển sang `su-kien/{id}/thiet-lap`, nên mọi
  * lần lưu sau là PATCH, không tạo Sự kiện thứ hai. Giờ nhập luôn hiểu theo giờ Việt Nam (+07:00), không theo máy.
+ *
+ * Ảnh bìa (Story 4.8-b) ở bước 1: chọn file là upload ngay (presign theo BTC, nên Sự kiện mới chưa có id vẫn upload
+ * được); key vào Sự kiện khi lưu. Đang upload thì "Lưu nháp"/"Tiếp" bận, không lưu được.
  */
 
 export const WIZARD_STEPS = ['Thông tin', 'Hạng vé', 'Form mua', 'Xem trước & mở bán'] as const;
@@ -63,6 +68,12 @@ export function EventWizard({ orgId, event, initialStep = 0 }: EventWizardProps)
   /** Đã tạo Sự kiện và đang chuyển sang `thiet-lap`: giữ spinner, chặn bấm lặp (không POST lần hai). */
   const [leaving, setLeaving] = useState(false);
   const eventId = event?.id;
+  const image = useEventImage({
+    orgId,
+    initialKey: event?.imageKey ?? null,
+    initialUrl: event?.imageUrl ?? null,
+    onEdit: () => setErrors((prev) => (prev.imageKey ? { ...prev, imageKey: undefined } : prev)),
+  });
 
   const save = useMutation({
     mutationFn: ({ body }: { body: EventDraftInput; intent: SaveIntent }) =>
@@ -89,12 +100,12 @@ export function EventWizard({ orgId, event, initialStep = 0 }: EventWizardProps)
     },
   });
 
-  const busy = save.isPending || leaving;
+  const busy = save.isPending || leaving || image.uploading;
 
   /** Kiểm rồi lưu; thành công thì sang bước `next` (Lưu nháp: ở lại bước hiện tại). */
   const submit = (intent: SaveIntent) => {
     if (busy) return;
-    const parsed = EventDraftInput.safeParse(inputOf(values));
+    const parsed = EventDraftInput.safeParse(inputOf(values, image.key));
     if (!parsed.success) {
       setErrors(fieldErrorsOf(parsed.error.issues.map((i) => i.path[0]), values));
       setStep(0);
@@ -126,7 +137,19 @@ export function EventWizard({ orgId, event, initialStep = 0 }: EventWizardProps)
       <WizardStepper steps={WIZARD_STEPS} current={step} label="Các bước thiết lập Sự kiện" />
 
       {step === 0 ? (
-        <EventInfoFields values={values} errors={errors} onChange={update} />
+        <EventInfoFields
+          values={values}
+          errors={errors}
+          onChange={update}
+          image={
+            <EventImagePicker
+              {...image.controls}
+              error={errors.imageKey ?? image.controls.error}
+              // Đang lưu hoặc đang chuyển sang `thiet-lap` (remount sẽ bỏ upload dở): không đổi ảnh.
+              disabled={save.isPending || leaving}
+            />
+          }
+        />
       ) : step === 1 && event ? (
         <TicketTypesEditor orgId={orgId} event={event} />
       ) : step === 2 && event ? (
@@ -181,13 +204,13 @@ export function EventWizard({ orgId, event, initialStep = 0 }: EventWizardProps)
           <Button
             type="button"
             variant="secondary"
-            loading={busy && save.variables?.intent.kind === 'draft'}
+            loading={image.uploading || (busy && save.variables?.intent.kind === 'draft')}
             onClick={() => submit({ next: step, kind: 'draft' })}
           >
             Lưu nháp
           </Button>
           {step < LAST_STEP ? (
-            <Button type="submit" loading={busy && save.variables?.intent.kind === 'next'}>
+            <Button type="submit" loading={image.uploading || (busy && save.variables?.intent.kind === 'next')}>
               Tiếp
             </Button>
           ) : null}

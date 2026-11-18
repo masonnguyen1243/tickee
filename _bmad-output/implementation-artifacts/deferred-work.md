@@ -824,3 +824,12 @@ Spec 4.2 đầy đủ khoảng 5.500 token. Mason chọn tách ba ngày 13/11/20
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-8-a-ha-tang-va-api-anh-su-kien.md`
   summary: Thứ tự deploy api trước web khi contract thêm trường bắt buộc vào response (4.7). 4.8-a thêm `imageUrl` bắt buộc vào `EventSummary`, `EventDetail`, `PublicEvent` (và `imageKey` vào `EventDetail`); web kiểm mọi response bằng schema contract, nên web mới gặp api cũ thì dashboard, Cài đặt và `/e/{slug}` lỗi parse. Checklist deploy của 4.7 phải đổi api trước web, hoặc trường mới phía đọc dùng `.default(null)` trong thời gian rollout.
   evidence: Review 4.8-a (ECH, BH), medium. Mối nguy chung của rolling deploy, cùng loại mục thứ tự worker/api của 4.6-e; chưa có production nên chưa xảy ra.
+
+## Deferred from: code review of spec-4-8-b-anh-su-kien-tren-web.md (2026-11-18)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-8-b-anh-su-kien-tren-web.md`
+  summary: Preview link đã chia sẻ giữ ảnh, tên và giờ cũ sau khi BTC sửa. URL `og:image` của `/e/{slug}` (`/opengraph-image-<hash>?<hash>`, file-based metadata) không đổi theo nội dung, mà Facebook/Zalo cache ảnh theo URL; đổi hoặc gỡ ảnh bìa (4.8-b), đổi tên hay giờ (2.11-b, 3.10) đều chỉ hiện ở preview mới khi nền tảng quét lại. Hướng làm: `generateMetadata` đặt `openGraph.images` kèm phiên bản (vd. `?v=` băm của `imageKey`, `name`, `startsAt`), hoặc ghi rõ cách nhờ quét lại (Facebook Sharing Debugger).
+  evidence: Review 4.8-b (BH), medium. URL `og:image` cố định có từ 2.11-b; 4.8-b làm vấn đề dễ thấy hơn vì ảnh là phần nổi nhất của preview.
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-8-b-anh-su-kien-tren-web.md`
+  summary: E2E cho gửi lại upload ảnh sau xác thực hai lớp: presign trả `TOTP_REQUIRED` một lần → không hiện "Chưa tải được ảnh.", hộp xác thực mở, nhập mã xong upload tự gửi lại và lưu Sự kiện gửi key mới. Chặn hồi quy khi chuyển `onSuccess`/`onError` của mutation upload vào `mutate(vars, {...})` (đường gửi lại của `Providers` không tới được) hoặc bỏ kiểm `handledElsewhere`.
+  evidence: Review 4.8-b (VG), medium. Cần mất step-up giữa phiên; đường gửi lại chung của `Providers` đã có test ở `members.spec.ts:190`.

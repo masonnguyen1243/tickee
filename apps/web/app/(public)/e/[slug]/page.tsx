@@ -83,6 +83,7 @@ export default async function PublicEventPage({ params }: Props) {
           startsAt={event.startsAt}
           endsAt={event.endsAt}
           venue={event.venue}
+          imageUrl={event.imageUrl}
         />
         <p data-slot="event-organizer" className="flex min-w-0 items-center gap-2 text-label">
           <Building2 aria-hidden="true" className="size-5 shrink-0 text-muted-foreground" />
