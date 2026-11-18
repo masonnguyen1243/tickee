@@ -5,6 +5,10 @@ import { createServer } from 'node:http';
  * server (không qua trình duyệt) nên `page.route` không chặn được; server Next riêng của e2e đặt `API_INTERNAL_URL` trỏ
  * vào đây. `/availability` gọi từ trình duyệt nên spec giả bằng `page.route`.
  *
+ * Ảnh Sự kiện (Story 4.8-b): cũng đóng vai object storage công khai ở `/__test/images/*` (ảnh OG tải từ server Next, hero
+ * tải từ trình duyệt): `solid.webp` là ảnh WebP một màu `SOLID_IMAGE_RGB`, `slow.webp` trả sau `SLOW_IMAGE_DELAY_MS`,
+ * đường khác 404.
+ *
  * Chạy: `node --no-warnings e2e/public-event-api.ts` (Node tự bỏ kiểu TS). Spec import dữ liệu từ file này; server chỉ khởi động khi
  * file là entry point.
  */
@@ -37,6 +41,16 @@ export const TIER_FREE_ONLY_ID = '019a3b2c-0800-7abc-8def-000000000003';
 
 /** Giới hạn Vé/Đơn của mọi Sự kiện giả (Story 3.1). */
 export const MAX_TICKETS_PER_ORDER = 4;
+
+/** Sự kiện có ảnh (Story 4.8-b): ảnh tải được, ảnh 404, ảnh trả chậm hơn timeout 3 giây của ảnh OG. */
+export const SLUG_WITH_IMAGE = 'giai-chay-co-anh-k1l2';
+export const SLUG_BROKEN_IMAGE = 'giai-chay-anh-loi-m3n4';
+export const SLUG_SLOW_IMAGE = 'giai-chay-anh-cham-p5q6';
+/** Màu của ảnh một màu `solid.webp`: xanh lá, khác hẳn nền stage gradient coral của ảnh OG không ảnh. */
+export const SOLID_IMAGE_RGB = { r: 0, g: 200, b: 0 } as const;
+export const SLOW_IMAGE_DELAY_MS = 6_000;
+const imageUrl = (name: string) => `http://localhost:${PUBLIC_EVENT_API_PORT}/__test/images/${name}`;
+export const SOLID_IMAGE_URL = imageUrl('solid.webp');
 
 const event = (slug: string, status: 'published' | 'hidden') => ({
   slug,
@@ -93,10 +107,37 @@ export const PUBLIC_EVENTS: Record<string, unknown> = {
   [SLUG_HIDDEN]: event(SLUG_HIDDEN, 'hidden'),
   [SLUG_BUY]: { ...event(SLUG_BUY, 'published'), ...FAR_FUTURE },
   [SLUG_FREE]: freeEvent(SLUG_FREE),
+  [SLUG_WITH_IMAGE]: { ...event(SLUG_WITH_IMAGE, 'published'), imageUrl: SOLID_IMAGE_URL },
+  [SLUG_BROKEN_IMAGE]: { ...event(SLUG_BROKEN_IMAGE, 'published'), imageUrl: imageUrl('missing.webp') },
+  [SLUG_SLOW_IMAGE]: { ...event(SLUG_SLOW_IMAGE, 'published'), imageUrl: imageUrl('slow.webp') },
+};
+
+/** Ảnh WebP 320×180 một màu `SOLID_IMAGE_RGB`, dựng một lần khi cần. */
+let solidImage: Promise<Buffer> | null = null;
+const solidWebp = (): Promise<Buffer> => {
+  solidImage ??= import('sharp').then(({ default: sharp }) =>
+    sharp({ create: { width: 320, height: 180, channels: 3, background: SOLID_IMAGE_RGB } }).webp().toBuffer(),
+  );
+  return solidImage;
 };
 
 function start(): void {
   const server = createServer((req, res) => {
+    const image = /^\/__test\/images\/([^/?]+)$/.exec(req.url ?? '');
+    if (image && req.method === 'GET') {
+      const name = image[1];
+      if (name === 'solid.webp' || name === 'slow.webp') {
+        const delay = name === 'slow.webp' ? SLOW_IMAGE_DELAY_MS : 0;
+        void solidWebp().then((bytes) =>
+          setTimeout(() => {
+            if (!res.destroyed) res.writeHead(200, { 'content-type': 'image/webp' }).end(bytes);
+          }, delay),
+        );
+        return;
+      }
+      res.writeHead(404).end();
+      return;
+    }
     const rename = /^\/__test\/events\/([^/?]+)\/name$/.exec(req.url ?? '');
     if (rename && req.method === 'POST') {
       let raw = '';

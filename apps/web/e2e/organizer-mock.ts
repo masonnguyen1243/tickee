@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Page, Request } from '@playwright/test';
 import type { EventSaleReason } from '@tickee/contracts';
 
 import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
@@ -17,6 +17,9 @@ import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
  * `GET /orgs/:id/review-items` (trang Cần xử lý) → hàng trống không lọc, `GET /orgs/:id/token` (trang Token, Story 4.5-a)
  * → BTC chưa có tài khoản nhận tiền mặc định, không có link portal, chưa đặt ngưỡng cảnh báo (Story 4.5-b); lời gọi
  * không có handler → 500.
+ *
+ * Ảnh Sự kiện (Story 4.8-b): `presignReply` cho handler `POST /orgs/:id/event-images`, `mockImageStorage` giả object
+ * storage (host riêng, không qua api) cho PUT của trình duyệt và ảnh công khai.
  */
 
 export const ORG_ID = '019a3b2c-5678-7abc-8def-0123456789ab';
@@ -189,4 +192,79 @@ export async function mockOrganizerApi(page: Page, handlers: Record<string, Hand
     },
   );
   return calls;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Ảnh Sự kiện (Story 4.8-b)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Object storage giả: host riêng, trình duyệt PUT thẳng vào đây (CORS) rồi đọc ảnh công khai. */
+export const STORAGE_ORIGIN = 'http://storage.test';
+const STORAGE_BUCKET = `${STORAGE_ORIGIN}/tickee-event-images`;
+
+/** Key ảnh Sự kiện thứ `n` của BTC giả, đúng dạng `orgs/{orgId}/events/{uuid}.{ext}`. */
+export const eventImageKey = (n: number, ext: 'jpg' | 'png' | 'webp' = 'png') =>
+  `orgs/${ORG_ID}/events/019a3b2c-0a00-7abc-8def-${String(n).padStart(12, '0')}.${ext}`;
+
+/** URL công khai của `key` trên storage giả (`S3_PUBLIC_BASE_URL/{key}`). */
+export const eventImageUrl = (key: string) => `${STORAGE_BUCKET}/${key}`;
+
+/** URL upload (presigned PUT) của `key` trên storage giả. */
+export const eventImageUploadUrl = (key: string) => `${STORAGE_BUCKET}/${key}?X-Amz-Signature=e2e`;
+
+/** Phản hồi `POST /orgs/:id/event-images`: presign cho `key`, hạn sau `ttlMs` (mặc định 5 phút như api). */
+export const presignReply = (key: string, ttlMs = 5 * 60_000) => ({
+  status: 200,
+  body: { key, uploadUrl: eventImageUploadUrl(key), expiresAt: new Date(Date.now() + ttlMs).toISOString() },
+});
+
+/** PNG 1×1 hợp lệ: storage giả trả cho mọi `GET` ảnh có trong `objects` lúc khởi tạo hoặc đã PUT. */
+export const TINY_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+/** Một lần PUT trình duyệt gửi lên storage giả. */
+export type StoragePut = { key: string; contentType: string | undefined; body: Buffer | null };
+
+export type ImageStorageOptions = {
+  /** Key đã có trên storage (ảnh hiện có của Sự kiện): `GET` trả PNG. Key khác chưa PUT → 404. */
+  objects?: string[];
+  /** Mã trạng thái của PUT (mặc định 200); `'abort'` = mất mạng. Gọi trước khi ghi nhận object. */
+  put?: (request: Request) => number | 'abort' | Promise<number | 'abort'>;
+};
+
+/**
+ * Giả object storage bằng `page.route` theo host: `OPTIONS` (preflight của PUT) → 204 cho phép `PUT` và `content-type`;
+ * `PUT` ghi lại `content-type` và byte nhận được; `GET` trả PNG nhỏ cho object đã có. Trả danh sách lần PUT.
+ */
+export async function mockImageStorage(page: Page, { objects = [], put }: ImageStorageOptions = {}): Promise<StoragePut[]> {
+  const puts: StoragePut[] = [];
+  const stored = new Set(objects);
+  const cors = {
+    'access-control-allow-origin': WEB_ORIGIN,
+    'access-control-allow-methods': 'PUT',
+    'access-control-allow-headers': 'content-type',
+  };
+  await page.route(
+    (url) => url.origin === STORAGE_ORIGIN,
+    async (route) => {
+      const request = route.request();
+      const key = decodeURIComponent(new URL(request.url()).pathname.replace(/^\/tickee-event-images\//, ''));
+      if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+      if (request.method() === 'PUT') {
+        const status = put ? await put(request) : 200;
+        if (status === 'abort') return route.abort('internetdisconnected');
+        puts.push({ key, contentType: request.headers()['content-type'], body: request.postDataBuffer() });
+        if (status < 300) stored.add(key);
+        // PUT bị giữ có thể đã bị trình duyệt hủy (chọn ảnh khác, "Gỡ ảnh"): trả lời muộn thì bỏ qua lỗi.
+        return route.fulfill({ status, headers: cors, body: '' }).catch(() => undefined);
+      }
+      if (request.method() === 'GET' && stored.has(key)) {
+        return route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'image/png' }, body: TINY_PNG });
+      }
+      return route.fulfill({ status: 404, headers: cors, body: '' });
+    },
+  );
+  return puts;
 }

@@ -200,7 +200,7 @@ test('tạo nháp: giờ gửi theo +07:00 dù máy ở múi giờ khác; URL sa
         venue: null,
         description: null,
         refundPolicy: null,
-        // Web gửi bản đã qua `EventDraftInput`: chưa có ô ảnh (Story 4.8-b) nên `imageKey` luôn `null`.
+        // Web luôn gửi `imageKey` (Story 4.8-b): chưa chọn ảnh bìa → `null`. Ô ảnh: xem `event-image.spec.ts`.
         imageKey: null,
       },
     },

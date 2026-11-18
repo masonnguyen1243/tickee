@@ -2,10 +2,11 @@
 
 import { formatVnd } from '@tickee/contracts';
 import { Inbox, Settings } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 
 import { EmptyState } from '@/components/tickee/empty-state';
+import { EventImagePicker } from '@/components/tickee/event-image-picker';
 import { StageBlock } from '@/components/tickee/stage-block';
 import { StatusBadge } from '@/components/tickee/status-badge';
 import { StatusBanner } from '@/components/tickee/status-banner';
@@ -23,6 +24,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { eventImageFileError, IMAGE_UPLOAD_ERROR } from '@/lib/event/image-upload';
 
 const TONES: { tone: StatusTone; badge: string; title: string; description: string }[] = [
   { tone: 'success', badge: 'Đã thanh toán', title: 'Đang mở bán', description: 'Người mua có thể đặt vé ngay.' },
@@ -30,6 +32,42 @@ const TONES: { tone: StatusTone; badge: string; title: string; description: stri
   { tone: 'danger', badge: 'Cần xử lý', title: 'Sự kiện đã hủy', description: 'Liên hệ ban tổ chức để được hỗ trợ.' },
   { tone: 'neutral', badge: 'Hết hạn', title: 'Sự kiện đã kết thúc', description: 'Cảm ơn bạn đã quan tâm.' },
 ];
+
+/** Ảnh mẫu 16:9 (SVG nội tuyến) cho ô ảnh bìa ở trạng thái lỗi upload. */
+const SAMPLE_IMAGE = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 90"><defs><linearGradient id="g" x2="1" y2="1"><stop offset="0" stop-color="#FF4D6A"/><stop offset="1" stop-color="#1C1416"/></linearGradient></defs><rect width="160" height="90" fill="url(#g)"/></svg>',
+)}`;
+
+/**
+ * Ô ảnh bìa chỉ chạy ở trình duyệt: chọn file thì kiểm loại và dung lượng như thật rồi hiện preview, không upload.
+ * Trạng thái đang upload xem ở wizard (spinner trong nút "Chọn ảnh").
+ */
+function ImagePickerDemo() {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+  return (
+    <EventImagePicker
+      previewUrl={previewUrl}
+      uploading={false}
+      hasImage={previewUrl !== null}
+      error={error}
+      canRetry={false}
+      onSelect={(file) => {
+        const invalid = eventImageFileError(file);
+        setError(invalid);
+        if (!invalid) setPreviewUrl(URL.createObjectURL(file));
+      }}
+      onRemove={() => {
+        setError(null);
+        setPreviewUrl(null);
+      }}
+      onRetry={() => undefined}
+    />
+  );
+}
 
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
@@ -167,6 +205,33 @@ export function UiKit() {
         <Button variant="secondary" className="w-full" onClick={() => toast.success('Đã lưu thay đổi')}>
           Hiện thông báo
         </Button>
+      </Section>
+
+      <Section id="kit-image" title="Ô ảnh bìa">
+        <div className="flex flex-col gap-section rounded-lg bg-card p-card-padding shadow-card">
+          <ImagePickerDemo />
+          <EventImagePicker
+            previewUrl={SAMPLE_IMAGE}
+            uploading={false}
+            hasImage
+            error={IMAGE_UPLOAD_ERROR}
+            canRetry
+            onSelect={() => undefined}
+            onRemove={() => undefined}
+            onRetry={() => toast.info('Thử tải lại ảnh')}
+          />
+          <EventImagePicker
+            previewUrl={null}
+            uploading={false}
+            hasImage={false}
+            error={null}
+            canRetry={false}
+            onSelect={() => undefined}
+            onRemove={() => undefined}
+            onRetry={() => undefined}
+            readOnly
+          />
+        </div>
       </Section>
 
       <Section id="kit-overlays" title="Sheet và tooltip">

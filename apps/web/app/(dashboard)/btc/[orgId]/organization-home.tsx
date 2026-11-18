@@ -92,9 +92,36 @@ function TwoFactorHint() {
   );
 }
 
+/** Thumbnail 56px của `event-card` (Story 4.8-b): ảnh Sự kiện; không có ảnh hoặc ảnh tải lỗi → ô nền thay thế. */
+function EventThumbnail({ imageUrl }: { imageUrl: string | null }) {
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
+  if (imageUrl && imageUrl !== brokenUrl) {
+    return (
+      <img
+        src={imageUrl}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        data-slot="event-card-image"
+        className="size-14 shrink-0 rounded-md bg-muted object-cover"
+        onError={() => setBrokenUrl(imageUrl)}
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden="true"
+      data-slot="event-card-placeholder"
+      className="flex size-14 shrink-0 items-center justify-center rounded-md bg-muted"
+    >
+      <CalendarDays strokeWidth={1.5} className="size-6 text-muted-foreground" />
+    </span>
+  );
+}
+
 /**
- * `event-card` (DESIGN.md): chạm cả hàng mở tab Tổng quan của Sự kiện. Chưa có ảnh (Story 2.7-b): ô 56px nền thay thế.
- * Nhãn trạng thái bán lấy từ `sale` của api (Story 4.2-c), chưa có thì tính ở máy khách.
+ * `event-card` (DESIGN.md): chạm cả hàng mở tab Tổng quan của Sự kiện. Thumbnail 56px là ảnh Sự kiện (Story 4.8-b), không
+ * có thì ô nền thay thế. Nhãn trạng thái bán lấy từ `sale` của api (Story 4.2-c), chưa có thì tính ở máy khách.
  */
 function EventCard({ orgId, event, sale }: { orgId: string; event: EventSummary; sale: EventSaleStatus | undefined }) {
   const badge = eventSaleBadge(event, sale);
@@ -105,9 +132,7 @@ function EventCard({ orgId, event, sale }: { orgId: string; event: EventSummary;
         data-slot="event-card"
         className="flex min-w-0 items-center gap-3 rounded-lg bg-card px-card-padding py-card-padding shadow-card transition-[filter] active:brightness-95"
       >
-        <span aria-hidden="true" className="flex size-14 shrink-0 items-center justify-center rounded-md bg-muted">
-          <CalendarDays strokeWidth={1.5} className="size-6 text-muted-foreground" />
-        </span>
+        <EventThumbnail imageUrl={event.imageUrl} />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="truncate text-title">{event.name}</span>
           <span className="text-meta text-muted-foreground tabular-nums">{formatEventDateTime(event.startsAt)}</span>

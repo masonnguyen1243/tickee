@@ -60,8 +60,11 @@ và nêu tên biến thiếu.
   contentLength }`, JPEG/PNG/WebP ≤ 5 MB) trả `{ key, uploadUrl, expiresAt }`. URL ký đúng `content-type` và
   `content-length` đã khai, hạn 5 phút: PUT file khác số byte thì MinIO trả 403.
 - Lưu `key` vào Sự kiện bằng trường `imageKey` khi tạo hoặc sửa (`null` hoặc bỏ trường = gỡ ảnh). Detail, danh sách và
-  trang công khai trả `imageUrl` = `<S3_PUBLIC_BASE_URL>/<key>`. Tới khi có ô chọn ảnh (Story 4.8-b), web lưu Sự kiện
-  luôn gửi `imageKey: null`: bấm lưu ở wizard hay Cài đặt sẽ gỡ ảnh vừa đặt bằng `curl`.
+  trang công khai trả `imageUrl` = `<S3_PUBLIC_BASE_URL>/<key>`.
+- Web (Story 4.8-b): ô "Ảnh bìa" ở wizard bước 1 và tab "Cài đặt" làm đúng hai bước trên ngay khi chọn file, rồi gửi
+  `imageKey` (key đang có, key mới, hoặc `null` sau "Gỡ ảnh") cùng nút lưu. `event-card`, hero `/e/{slug}` và ảnh OG
+  dùng `imageUrl`; ảnh OG do server Next tự tải ảnh (timeout 3 giây) nên `S3_PUBLIC_BASE_URL` phải mở được từ cả server
+  web lẫn trình duyệt.
 - Thử bằng tay (cookie session của BTC demo lấy từ trình duyệt):
 
   ```sh
@@ -374,7 +377,7 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `S3_BUCKET`              | api         | bắt buộc; bucket ảnh Sự kiện: đọc ẩn danh từng object (`s3:GetObject`, không liệt kê), CORS `GET`/`PUT` cho origin web. Local: `tickee-event-images` (`minio-init` tạo sẵn) |
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | api | bắt buộc; credential ký presigned PUT, chỉ cần quyền `PutObject` trên bucket. Secret: không log, không commit. Local: root user của MinIO trong `docker-compose.yml` |
 | `S3_FORCE_PATH_STYLE`    | api         | mặc định `false`; `true` khi storage cần URL `<endpoint>/<bucket>/<key>` (MinIO, `.env.example`) |
-| `S3_PUBLIC_BASE_URL`     | api         | bắt buộc; gốc URL công khai của ảnh: `imageUrl` = `<S3_PUBLIC_BASE_URL>/<key>`. Local: `http://localhost:9000/tickee-event-images` |
+| `S3_PUBLIC_BASE_URL`     | api (server web phải tới được) | bắt buộc ở api; gốc URL công khai của ảnh: `imageUrl` = `<S3_PUBLIC_BASE_URL>/<key>`. Local: `http://localhost:9000/tickee-event-images`. Server web không đọc biến này nhưng tự tải `imageUrl` để dựng ảnh OG, nên URL phải mở được từ cả server web lẫn trình duyệt (vd. `localhost:9000` không tới được từ trong container web); không tới được thì ảnh OG dùng nền gradient và server web log `warn` `[og-image]` |
 | `TICKET_QR_KEYS`         | api, worker | bắt buộc; khóa HMAC-SHA256 ký Mã QR vé (`t<k>.<ticketId>.<sig>`), cùng dạng `TINGEE_CREDENTIAL_KEYS` nhưng là khóa khác. Ký Vé mới bằng khóa có `k` lớn nhất; Vé lưu `k` (không lưu chuỗi QR) nên xoay khóa thì thêm khóa mới và giữ khóa cũ tới khi không còn Vé nào dùng. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì Mã QR đã gửi không còn khớp và link chia sẻ trả 404 (xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32` |
 | `OPS_ALERT_EMAILS`       | worker      | tùy chọn; người nhận email cảnh báo vận hành (Story 4.6-b), email cách nhau bằng dấu phẩy. Không đặt: cảnh báo chỉ ghi log, worker log `warn` lúc khởi động và mỗi lần có cảnh báo (xem "Cảnh báo vận hành") |
 | `OPS_ALERT_COOLDOWN_MINUTES` | api, worker | mặc định `30` (1–1440); loại cảnh báo có cooldown (thiếu khóa QR, hàng đợi ùn, IPN lỗi tăng, tạo link chậm, tỉ lệ phát Vé giảm) báo lại cùng đối tượng sau chừng này phút |
