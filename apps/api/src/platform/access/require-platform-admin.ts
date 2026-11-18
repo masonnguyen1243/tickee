@@ -4,6 +4,12 @@ import { createParamDecorator, SetMetadata, type ExecutionContext } from '@nestj
 export const REQUIRE_PLATFORM_ADMIN_KEY = 'access:platform-admin';
 
 /**
+ * Mọi route `@RequirePlatformAdmin()` phải có đường dẫn (mẫu route, kèm tiền tố `/v1`) bắt đầu bằng tiền tố này: đó là
+ * vùng mà giới hạn IP `ADMIN_ALLOWED_CIDRS` chặn (Story 4.7-a). Guard ném lỗi cấu hình với route nằm ngoài.
+ */
+export const PLATFORM_ADMIN_ROUTE_PREFIX = '/v1/admin/';
+
+/**
  * Ngữ cảnh Quản trị Tingee do guard của `identity` dựng: người gọi có cờ `platform_admin` (đọc mới từ DB ở mỗi
  * request), đã bật 2FA và session đã qua lớp hai.
  */

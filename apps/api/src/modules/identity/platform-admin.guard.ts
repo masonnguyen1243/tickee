@@ -2,14 +2,19 @@ import { Inject, Injectable, type CanActivate, type ExecutionContext } from '@ne
 import { Reflector } from '@nestjs/core';
 import { ErrorCode } from '@tickee/contracts';
 import { eq } from 'drizzle-orm';
-import { REQUIRE_PLATFORM_ADMIN_KEY, type RequestWithPlatformAdmin } from '../../platform/access/index.js';
+import {
+  PLATFORM_ADMIN_ROUTE_PREFIX,
+  REQUIRE_PLATFORM_ADMIN_KEY,
+  type RequestWithPlatformAdmin,
+} from '../../platform/access/index.js';
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { AppError, PUBLIC_ROUTE_KEY } from '../../platform/http/index.js';
 import { users } from './schema.js';
 import type { RequestWithSession } from './session.guard.js';
 import { totpRequired } from './totp.service.js';
 
-type PlatformAdminRequest = RequestWithSession & RequestWithPlatformAdmin;
+/** `route.path`: mẫu route Express đã khớp (vd. `/v1/admin/organizations/:id/closed-beta/approve`). */
+type PlatformAdminRequest = RequestWithSession & RequestWithPlatformAdmin & { route?: { path?: unknown } };
 
 const toDate = (value: Date | string | null | undefined): Date | null => {
   if (value === null || value === undefined) return null;
@@ -23,7 +28,8 @@ const toDate = (value: Date | string | null | undefined): Date | null => {
  * `users.two_factor_enabled` ở mỗi request (không qua session của Better Auth), nên thu cờ có hiệu lực ngay ở request kế
  * tiếp. Không cờ → 403 `FORBIDDEN_ROLE`; có cờ mà chưa bật 2FA → 403 `TWO_FACTOR_NOT_ENABLED`; session chưa qua lớp hai
  * → `TOTP_REQUIRED` (thường `TotpGuard` đã chặn trước; kiểm lại ở đây vì 2FA có thể vừa bật trong lúc session cũ còn
- * mang cờ cũ). Qua thì gắn `req.platformAdminContext`.
+ * mang cờ cũ). Qua thì gắn `req.platformAdminContext`. Route `@RequirePlatformAdmin()` có mẫu đường dẫn ngoài
+ * `PLATFORM_ADMIN_ROUTE_PREFIX` → lỗi cấu hình (500), để route admin không thể nằm ngoài vùng giới hạn IP (Story 4.7-a).
  */
 @Injectable()
 export class PlatformAdminGuard implements CanActivate {
@@ -41,6 +47,10 @@ export class PlatformAdminGuard implements CanActivate {
     }
 
     const req = context.switchToHttp().getRequest<PlatformAdminRequest>();
+    const routePath = req.route?.path;
+    if (typeof routePath !== 'string' || !routePath.startsWith(PLATFORM_ADMIN_ROUTE_PREFIX)) {
+      throw new Error(`Route @RequirePlatformAdmin() nằm ngoài ${PLATFORM_ADMIN_ROUTE_PREFIX}: cấu hình sai`);
+    }
     const session = req.session;
     if (!session) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Bạn cần đăng nhập để tiếp tục.');
 

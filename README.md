@@ -314,8 +314,22 @@ pnpm --filter @tickee/api admin:revoke binh.tran@vidu.vn --by an.nguyen@vidu.vn
 
 Email không tồn tại hoặc thiếu `--by` thì thoát mã ≠ 0 và không đổi gì. Vào `http://localhost:3000/admin` (màn "Duyệt
 Closed Beta") còn cần đã bật xác thực hai lớp (Bảo mật tài khoản) và nhập mã TOTP trong phiên đăng nhập; thu cờ có hiệu
-lực ngay ở request kế tiếp. Chưa có giới hạn IP `ADMIN_ALLOWED_CIDRS` (phải xong trước khi mở `/admin` trên môi trường
-thật, xem `deferred-work.md`).
+lực ngay ở request kế tiếp.
+
+Giới hạn IP (Story 4.7-a): api chỉ nhận request `/v1/admin` và `/v1/admin/*` (kể cả route không tồn tại và request
+chưa đăng nhập) từ IP nằm trong `ADMIN_ALLOWED_CIDRS`. Mọi method đều bị chặn, trừ preflight CORS `OPTIONS`: lớp CORS
+trả lời nó trước khi kiểm IP (không dữ liệu, không log chặn) để trình duyệt đọc được mã 403 của request thật. IP client
+là `req.ip` của Express: `TRUST_PROXY_HOPS` phải bằng đúng số proxy trước api. Thấp hơn thì api so IP của LB (với `0`,
+`X-Forwarded-For` do client gửi bị bỏ qua); cao hơn thì mục `X-Forwarded-For` do client tự gửi thành `req.ip` và ai cũng
+tự nhận được một IP trong dải. Admin bị chặn sau deploy thì sửa `TRUST_PROXY_HOPS`, **không bao giờ** thêm dải nội bộ
+của load balancer hay VPC vào `ADMIN_ALLOWED_CIDRS`: mọi request đi qua LB sẽ vào được. IPv4 dạng `::ffff:a.b.c.d`
+được so như IPv4; dải IPv6 chồng lên `::ffff:0:0/96` (vd. `::/1`) bị từ chối vì sẽ khớp mọi client IPv4. IP ngoài dải
+nhận `403 ADMIN_IP_NOT_ALLOWED` trước mọi guard (không chạm DB) và api log `warn` có marker `admin_ip_blocked` kèm
+method, đường dẫn, không có IP; `/admin` hiện "Bạn đang truy cập từ mạng không được phép.". Ở `NODE_ENV=production` (cả
+staging) thiếu hoặc sai biến này thì api không khởi động; có thì api log `info` một lần với số dải IPv4/IPv6 (không nêu
+địa chỉ) để kiểm sau deploy; local để trống thì không giới hạn. Mọi route `@RequirePlatformAdmin()` phải nằm dưới
+`/v1/admin/`, nếu không guard trả 500 (lỗi cấu hình) để route admin không lọt ra ngoài vùng bị chặn. Web `/admin` không
+tự giới hạn IP.
 
 ## Kiểm tra
 
@@ -361,7 +375,8 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `DATABASE_URL`           | api, worker | role `tickee_app` (DML)        |
 | `MIGRATION_DATABASE_URL` | migrate     | role `tickee_migrator` (DDL); cả `pnpm db:seed`, `admin:grant`/`admin:revoke` |
 | `PORT`                   | api         | mặc định `3001`                |
-| `TRUST_PROXY_HOPS`       | api         | mặc định `0`; số proxy tin cậy trước api (vd. `1` sau load balancer) để `req.ip` là IP thật — bắt buộc đặt khi có LB, nếu không mọi người dùng chung giới hạn 20 OTP/giờ theo IP của LB |
+| `TRUST_PROXY_HOPS`       | api         | mặc định `0`; số proxy tin cậy trước api (vd. `1` sau load balancer) để `req.ip` là IP thật. Phải bằng **đúng** số proxy trước api: thấp hơn thì mọi người dùng chung giới hạn 20 OTP/giờ theo IP của LB và giới hạn IP của `/v1/admin/*` so IP của LB; **cao hơn** thì mục `X-Forwarded-For` do client tự gửi thành `req.ip`, ai cũng tự nhận được IP trong `ADMIN_ALLOWED_CIDRS` |
+| `ADMIN_ALLOWED_CIDRS`    | api         | bắt buộc khi `NODE_ENV=production` (cả staging; thiếu hoặc sai thì api không khởi động); dải IP được gọi `/v1/admin/*`: CIDR IPv4/IPv6 cách nhau bằng dấu phẩy (`203.0.113.0/24,2001:db8::/32`; IP trần = `/32`/`/128`; không nhận `/0` hay dải IPv6 chồng lên `::ffff:0:0/96`). Có biến thì api log `info` số dải lúc khởi động; development/test để trống = không giới hạn, api log `warn`. Không bao giờ thêm dải nội bộ của LB/VPC (xem "Quản trị Tingee") |
 | `BETTER_AUTH_SECRET`     | api         | ≥ 32 ký tự; ký session/cookie và khóa gốc HMAC bộ đếm OTP |
 | `API_PUBLIC_URL`         | api         | origin công khai của api; Better Auth ở `/v1/auth`, URL IPN của BTC ở `/v1/payments/tingee/ipn/{ipnKey}`. Tingee fake (local) cũng đọc để biết URL IPN của BTC demo |
 | `WEB_ORIGIN`             | api, worker | api: origin duy nhất được CORS kèm cookie; worker: gốc link trong email (lời mời Admin `<WEB_ORIGIN>/loi-moi-btc#…`) và nơi gọi `<WEB_ORIGIN>/api/revalidate` |

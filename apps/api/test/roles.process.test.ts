@@ -136,6 +136,13 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
       expect(output).toContain(variable);
       expect(output).not.toContain(SECRET);
     });
+
+    it('vai api NODE_ENV=production thiếu ADMIN_ALLOWED_CIDRS (Story 4.7-a) → exit 1, issue "thiếu", không khởi động', async () => {
+      const { code, output } = await run({ ...apiRoleEnv(), NODE_ENV: 'production' });
+      expect(code, output).toBe(1);
+      expect(output).toContain('ADMIN_ALLOWED_CIDRS (thiếu)');
+      expect(output).not.toContain('đang nghe cổng');
+    });
   });
 
   it('vai api: /healthz 200 có x-request-id, /readyz 200 (DB + LISTEN realtime), SIGTERM → exit 0', async () => {

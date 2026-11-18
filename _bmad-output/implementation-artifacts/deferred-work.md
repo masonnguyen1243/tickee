@@ -127,6 +127,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: none
   summary: Story 2.5 phần sau — giới hạn `/v1/admin/*` theo dải IP `ADMIN_ALLOWED_CIDRS` (kiểm bằng Zod khi khởi động, thiếu/sai ở production thì api không khởi động) cùng cấu hình trusted proxy để lấy đúng IP client (FR-4, AD-26).
   evidence: Tách khỏi Story 2.5 theo quyết định của Mason (02/11): chỉ có tác dụng khi đã deploy và dính `TRUST_PROXY_HOPS` đang nằm trong checklist Story 4.7 ở file này; không chặn 2.6/2.10. Phải xong trước khi mở `/admin` trên môi trường thật.
+- Đã xử lý (18/11/2026): mục ngay trên (giới hạn `/v1/admin/*` theo IP) được giải quyết bằng `_bmad-output/implementation-artifacts/spec-4-7-a-gioi-han-ip-admin.md`. `ADMIN_ALLOWED_CIDRS` (CIDR IPv4/IPv6, kiểm bằng Zod, bắt buộc khi `NODE_ENV=production`) và `AdminIpMiddleware` chặn mọi đường dẫn `/v1/admin` và `/v1/admin/*` theo `req.ip` (`TRUST_PROXY_HOPS`) trước mọi guard: `403 ADMIN_IP_NOT_ALLOWED`, log `warn` marker `admin_ip_blocked` không có IP; `PlatformAdminGuard` ném lỗi cấu hình với route admin ngoài `/v1/admin/`; `/admin` hiện `EmptyState` mạng không được phép. Mục `TRUST_PROXY_HOPS` của checklist 4.7 (đặt đúng số hop, cách kiểm sau deploy) vẫn mở: spec này không làm endpoint chẩn đoán IP.
 - source_spec: none
   summary: Story 2.5 phần sau — thao tác "Đặt lại TOTP" cho một user ở `/admin` (Quản trị Tingee đã step-up, lý do bắt buộc; xóa TOTP + mã khôi phục, hủy mọi phiên, 2FA về chưa bật; audit; email báo user và Owner/Admin của các BTC liên quan), chuyển từ Story 2.2 theo Sprint Change Proposal 30/10/2026.
   evidence: Tách khỏi Story 2.5 theo quyết định của Mason (02/11): chỉ cần khi đã có người dùng thật mất thiết bị; là mục tiêu độc lập (luồng hỗ trợ tài khoản), không story nào phụ thuộc. Phải xong trước Closed Beta.
@@ -833,3 +834,26 @@ Spec 4.2 đầy đủ khoảng 5.500 token. Mason chọn tách ba ngày 13/11/20
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-8-b-anh-su-kien-tren-web.md`
   summary: E2E cho gửi lại upload ảnh sau xác thực hai lớp: presign trả `TOTP_REQUIRED` một lần → không hiện "Chưa tải được ảnh.", hộp xác thực mở, nhập mã xong upload tự gửi lại và lưu Sự kiện gửi key mới. Chặn hồi quy khi chuyển `onSuccess`/`onError` của mutation upload vào `mutate(vars, {...})` (đường gửi lại của `Providers` không tới được) hoặc bỏ kiểm `handledElsewhere`.
   evidence: Review 4.8-b (VG), medium. Cần mất step-up giữa phiên; đường gửi lại chung của `Providers` đã có test ở `members.spec.ts:190`.
+
+## Deferred from: tách phạm vi Story 4.7 khi build (2026-11-18)
+
+Phần code của 4.7 không cần chọn nhà cung cấp hạ tầng được tách thành nhiều story con; 4.7-a làm giới hạn IP `/v1/admin/*` (`spec-4-7-a-gioi-han-ip-admin.md`). `/readyz` (DB + `LISTEN`), tắt êm khi `SIGTERM` (đóng SSE, `boss.stop` graceful) và `TRUST_PROXY_HOPS` đã có sẵn từ Epic 1–3, có test.
+
+- source_spec: none
+  summary: Story 4.7 con — siết cấu hình production lúc khởi động: `API_PUBLIC_URL` và `WEB_ORIGIN` bắt buộc `https`, chặn secret/placeholder mẫu của `.env.example` (gồm `BETTER_AUTH_SECRET`, Google, `TINGEE_CREDENTIAL_KEYS`, `TICKET_QR_KEYS`), `AUTH_COOKIE_DOMAIN` là miền cha của cả hai origin, `TICKET_QR_KEYS` khác `TINGEE_CREDENTIAL_KEYS`.
+  evidence: Mục tiêu giao riêng được, tách khỏi 4.7-a theo quyết định của Mason (18/11/2026). Gom các mục checklist cấu hình production đã có trong file này (retro Epic 1 AI-3, review 3.3 triage #9).
+- source_spec: none
+  summary: Story 4.7 con — giới hạn presign ảnh Sự kiện (`POST /v1/orgs/:orgId/event-images`) theo BTC và theo tài khoản, vượt thì 429, log `userId`/`organizationId`/`key`; bắt buộc trước khi tạo bucket production.
+  evidence: Mục tiêu giao riêng được, tách khỏi 4.7-a theo quyết định của Mason (18/11/2026). Chi tiết ở mục review 4.8-a trong file này.
+- source_spec: none
+  summary: Story 4.7 con — CI chạy e2e full-stack: Playwright với api thật, Tingee fake, Mailpit và bộ test cách ly trong pipeline (AC 4.7, action item AI-6 của retro Epic 1).
+  evidence: Mục tiêu giao riêng được, tách khỏi 4.7-a theo quyết định của Mason (18/11/2026). Hiện e2e web giả lập API bằng `page.route` (`.github/workflows/ci.yml`).
+- source_spec: none
+  summary: Story 4.7 con — vai `migrate` chỉ chạy một lần mỗi lượt deploy (advisory lock trong migrate) để hai tiến trình migrate không chạy cùng lúc.
+  evidence: Mục tiêu giao riêng được, tách khỏi 4.7-a theo quyết định của Mason (18/11/2026). Triage 1.1 #11, đã ghi ở checklist Story 4.7 trong file này.
+
+## Deferred from: code review of spec-4-7-a-gioi-han-ip-admin.md (2026-11-18)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-7-a-gioi-han-ip-admin.md`
+  summary: Chạy api mà không đặt `NODE_ENV` thì mặc định `development`, nên `ADMIN_ALLOWED_CIDRS` không bắt buộc và `/v1/admin/*` không giới hạn IP (chỉ có log `warn` lúc khởi động). Nên làm cùng story con "siết cấu hình production" của 4.7: bắt buộc đặt `NODE_ENV` tường minh ở môi trường deploy, hoặc chỉ cho chế độ không giới hạn khi env ghi rõ `development`/`test`.
+  evidence: Review 4.7-a (BH), medium. `common.NODE_ENV` mặc định `development` có từ Story 1.1; `apps/api/Dockerfile` đặt `NODE_ENV=production` nên image chuẩn không dính, chỉ cách chạy ngoài image (VM, `node dist/main.js`, buildpack) mới dính.

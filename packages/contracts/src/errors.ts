@@ -53,6 +53,13 @@ export const ErrorCode = {
    */
   TWO_FACTOR_NOT_ENABLED: 'TWO_FACTOR_NOT_ENABLED',
   /**
+   * Request tới khu `/v1/admin/*` (Story 4.7-a, FR-4, AD-26) từ IP client nằm ngoài `ADMIN_ALLOWED_CIDRS` của api, kể cả
+   * route không tồn tại và request chưa đăng nhập, mọi method trừ preflight CORS `OPTIONS` (lớp CORS trả trước khi kiểm
+   * IP, không dữ liệu). Chặn trước mọi guard, không chạm DB, không đổi gì. Response vẫn mang header CORS của web origin.
+   * Web `/admin` coi là lỗi chặn cả trang.
+   */
+  ADMIN_IP_NOT_ALLOWED: 'ADMIN_IP_NOT_ALLOWED',
+  /**
    * Chuyển trạng thái Closed Beta không hợp lệ (vd. thu hồi BTC đang chờ duyệt); `details.closedBetaStatus` là trạng
    * thái hiện tại (`ClosedBetaTransitionInvalidDetails`).
    */
