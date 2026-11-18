@@ -34,6 +34,8 @@ type EventDetail = EventBody & {
   status: 'draft';
   effectiveEndAt: string;
   endedManuallyAt: null;
+  imageKey: null;
+  imageUrl: null;
   maxTicketsPerOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -48,12 +50,14 @@ const detail = (n: number, body: EventBody): EventDetail => ({
   // Không kiểm ở web: api tính.
   effectiveEndAt: body.endsAt,
   endedManuallyAt: null,
+  imageKey: null,
+  imageUrl: null,
   maxTicketsPerOrder: 10,
   createdAt: '2026-11-03T03:00:00+07:00',
   updatedAt: '2026-11-03T03:00:00+07:00',
 });
 
-const summary = ({ id, slug, name, status, startsAt, endsAt, effectiveEndAt }: EventDetail) => ({
+const summary = ({ id, slug, name, status, startsAt, endsAt, effectiveEndAt, imageUrl }: EventDetail) => ({
   id,
   slug,
   name,
@@ -61,6 +65,7 @@ const summary = ({ id, slug, name, status, startsAt, endsAt, effectiveEndAt }: E
   startsAt,
   endsAt,
   effectiveEndAt,
+  imageUrl,
 });
 
 const trim = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
@@ -195,6 +200,8 @@ test('tạo nháp: giờ gửi theo +07:00 dù máy ở múi giờ khác; URL sa
         venue: null,
         description: null,
         refundPolicy: null,
+        // Web gửi bản đã qua `EventDraftInput`: chưa có ô ảnh (Story 4.8-b) nên `imageKey` luôn `null`.
+        imageKey: null,
       },
     },
   ]);

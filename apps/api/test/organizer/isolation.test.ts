@@ -112,6 +112,8 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('GET /v1/orgs/:orgId/live');
     // Story 4.2-c: trạng thái bán trên dashboard của `ordering` (ngoài tiền tố `…/events/`, như danh sách Sự kiện).
     expect(guarded).toContain('GET /v1/orgs/:orgId/event-sale-status');
+    // Story 4.8-a: presign ảnh Sự kiện của `event` (Owner và Admin; theo BTC nên ngoài tiền tố `…/events`).
+    expect(guarded).toContain('POST /v1/orgs/:orgId/event-images');
     // Story 4.3: hàng Cần xử lý của `reporting` (Owner và Admin, `review_queue.handle`).
     expect(guarded).toContain('GET /v1/orgs/:orgId/review-items');
     expect(guarded).toContain('GET /v1/orgs/:orgId/review-items/summary');
@@ -141,6 +143,7 @@ describe('cách ly BTC', () => {
     expect(permissionOf('/v1/orgs/:orgId/live')).toBe(Permission.ORG_READ);
     expect(permissionOf('/v1/orgs/:orgId/notices')).toBe(Permission.ORG_READ);
     expect(permissionOf('/v1/orgs/:orgId/event-sale-status')).toBe(Permission.EVENTS_MANAGE);
+    expect(permissionOf('/v1/orgs/:orgId/event-images', 'POST')).toBe(Permission.EVENTS_MANAGE);
     expect(permissionOf('/v1/orgs/:orgId/token')).toBe(Permission.TOKEN_VIEW);
     expect(permissionOf('/v1/orgs/:orgId/token/alert-threshold', 'PUT')).toBe(Permission.TOKEN_ALERT_MANAGE);
     expect(routes.find((r) => r.method === 'POST' && r.path === '/v1/orgs/:orgId/payment-service/check')?.permission).toBe(

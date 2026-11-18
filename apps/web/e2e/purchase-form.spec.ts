@@ -43,6 +43,8 @@ const event = () => ({
   venue: null,
   description: null,
   refundPolicy: null,
+  imageKey: null,
+  imageUrl: null,
   maxTicketsPerOrder: 10,
   createdAt: '2026-11-03T03:00:00+07:00',
   updatedAt: '2026-11-03T03:00:00+07:00',

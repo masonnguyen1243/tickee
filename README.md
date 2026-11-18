@@ -22,6 +22,7 @@ packages/contracts  schema Zod, mã lỗi, danh sách cột PII, formatVnd
 ```sh
 cp .env.example .env
 docker compose up -d --wait        # Postgres 18.6 (role tickee_migrator, tickee_app; DB tickee, tickee_test) + Mailpit
+                                   # + MinIO (ảnh Sự kiện, http://localhost:9000; console http://localhost:9001)
 pnpm install
 
 # Chế độ dev: migrate DB, rồi api (http://localhost:3001) + worker + web (http://localhost:3000) + contracts
@@ -46,6 +47,34 @@ pnpm db:seed
   phí ở local"). Không bao giờ gọi Tingee thật.
 - web: `next dev`, đọc `apps/web/.env.development` (`NEXT_PUBLIC_API_BASE_URL`, `TICKEE_UI_KIT=1`).
 - contracts: `tsc --watch`.
+
+### Ảnh Sự kiện ở local (MinIO)
+
+`docker compose up -d --wait` chạy MinIO (object storage tương thích S3, Story 4.8-a) và `minio-init`: tạo bucket
+`tickee-event-images`, cho đọc ẩn danh từng object (không cho liệt kê bucket) rồi đứng yên với healthcheck "đã sẵn sàng".
+MinIO bật CORS cho `http://localhost:3000` (cả `GET` lẫn `PUT`, vì trình duyệt PUT thẳng lên storage). `.env.example` đã
+trỏ các biến `S3_*` vào đây; `.env` chép từ trước Story 4.8-a thì thêm nhóm `S3_*` của `.env.example`, nếu không api dừng
+và nêu tên biến thiếu.
+
+- Api không tải hay đọc byte ảnh nào: `POST /v1/orgs/{orgId}/event-images` (Owner/Admin, body `{ contentType,
+  contentLength }`, JPEG/PNG/WebP ≤ 5 MB) trả `{ key, uploadUrl, expiresAt }`. URL ký đúng `content-type` và
+  `content-length` đã khai, hạn 5 phút: PUT file khác số byte thì MinIO trả 403.
+- Lưu `key` vào Sự kiện bằng trường `imageKey` khi tạo hoặc sửa (`null` hoặc bỏ trường = gỡ ảnh). Detail, danh sách và
+  trang công khai trả `imageUrl` = `<S3_PUBLIC_BASE_URL>/<key>`. Tới khi có ô chọn ảnh (Story 4.8-b), web lưu Sự kiện
+  luôn gửi `imageKey: null`: bấm lưu ở wizard hay Cài đặt sẽ gỡ ảnh vừa đặt bằng `curl`.
+- Thử bằng tay (cookie session của BTC demo lấy từ trình duyệt):
+
+  ```sh
+  curl -s -X POST http://localhost:3001/v1/orgs/<orgId>/event-images -H 'content-type: application/json' \
+    -H 'cookie: <cookie session>' -d "{\"contentType\":\"image/webp\",\"contentLength\":$(wc -c < anh.webp)}"
+  curl -i -X PUT '<uploadUrl>' -H 'content-type: image/webp' --data-binary @anh.webp   # 200
+  ```
+
+  Rồi `PATCH` Sự kiện với `imageKey` là `key` vừa nhận; mở `imageUrl` trong trình duyệt. Object nằm dưới
+  `orgs/{orgId}/events/` trong console MinIO (http://localhost:9001, `tickee-local` / `tickee-local-secret`).
+- Không xóa object cũ hay mồ côi khi đổi/gỡ ảnh. `docker compose down -v` xóa cả dữ liệu MinIO.
+- MinIO ngừng phát image cộng đồng (`minio/minio`, `minio/mc`) từ cuối 2025: compose dùng bản fork cộng đồng `pgsty/minio`
+  và `pgsty/mc`, ghim tag.
 
 ### Hai bẫy của `.env` local
 
@@ -340,6 +369,12 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `TINGEE_BASE_URL`        | api, worker | bắt buộc; origin Tingee Open API (UAT `https://uat-open-api.tingee.vn`). Env không có credential Tingee: mỗi BTC nhập API key của mình ở trang Tài khoản nhận tiền. `.env` local phải là `http://localhost:4010` (Tingee fake mà `pnpm dev` chạy sẵn): trỏ Tingee thật thì key demo lỗi và Đơn có phí báo "Chưa tạo được link thanh toán" (xem "Hai bẫy của `.env` local"). Với Tingee fake: BTC demo của `pnpm db:seed` đã liên kết sẵn, hoặc nhập key merchant demo (`demo-btc-co-tai-khoan` / `demo-secret-co-tai-khoan`: có tài khoản; `demo-btc-chua-lien-ket` / `demo-secret-chua-lien-ket`: chưa liên kết ngân hàng). Worker đọc cùng ba biến Tingee/Vé với api (cùng giá trị): Đối soát bù (Story 4.1) đi cùng đường xử lý IPN và phát Vé |
 | `TINGEE_CREDENTIAL_KEYS` | api, worker | bắt buộc; khóa AES-256-GCM mã hóa Secret Token Tingee của BTC: `v<k>:<base64 của 32 byte>`, nhiều khóa cách nhau bằng dấu phẩy, không trùng `k`. Mã hóa bằng khóa có `k` lớn nhất, giải mã theo tiền tố `v<k>:` của ciphertext; xoay khóa thì thêm khóa mới và giữ khóa cũ. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì api không giải mã được Secret Token đã lưu (local: `pnpm db:seed` mã hóa lại key demo, xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32`. `pnpm db:seed` cũng đọc biến này để mã hóa key demo |
 | `TINGEE_ORDER_STATUS_QUERY` | worker   | mặc định tắt; `true` bật Đối soát bù (Story 4.1): worker tra trạng thái đơn Gateway khi IPN trễ hoặc mất, kết quả đi cùng đường xử lý IPN. Tingee chưa công bố API tra đơn: adapter theo hợp đồng tạm mà chỉ Tingee fake hiểu, nên chỉ bật ở local (`.env.example`) và test; staging bật khi đã thay bằng hợp đồng thật. Tắt: job tra xong ngay, không gọi Tingee |
+| `S3_ENDPOINT`            | api         | bắt buộc; endpoint S3 mà trình duyệt PUT ảnh Sự kiện tới (URL presign trỏ vào đây). Local: MinIO `http://localhost:9000`. Api chỉ ký URL, không gọi mạng tới storage (Story 4.8-a) |
+| `S3_REGION`              | api         | mặc định `us-east-1`; region ký SigV4 |
+| `S3_BUCKET`              | api         | bắt buộc; bucket ảnh Sự kiện: đọc ẩn danh từng object (`s3:GetObject`, không liệt kê), CORS `GET`/`PUT` cho origin web. Local: `tickee-event-images` (`minio-init` tạo sẵn) |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | api | bắt buộc; credential ký presigned PUT, chỉ cần quyền `PutObject` trên bucket. Secret: không log, không commit. Local: root user của MinIO trong `docker-compose.yml` |
+| `S3_FORCE_PATH_STYLE`    | api         | mặc định `false`; `true` khi storage cần URL `<endpoint>/<bucket>/<key>` (MinIO, `.env.example`) |
+| `S3_PUBLIC_BASE_URL`     | api         | bắt buộc; gốc URL công khai của ảnh: `imageUrl` = `<S3_PUBLIC_BASE_URL>/<key>`. Local: `http://localhost:9000/tickee-event-images` |
 | `TICKET_QR_KEYS`         | api, worker | bắt buộc; khóa HMAC-SHA256 ký Mã QR vé (`t<k>.<ticketId>.<sig>`), cùng dạng `TINGEE_CREDENTIAL_KEYS` nhưng là khóa khác. Ký Vé mới bằng khóa có `k` lớn nhất; Vé lưu `k` (không lưu chuỗi QR) nên xoay khóa thì thêm khóa mới và giữ khóa cũ tới khi không còn Vé nào dùng. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì Mã QR đã gửi không còn khớp và link chia sẻ trả 404 (xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32` |
 | `OPS_ALERT_EMAILS`       | worker      | tùy chọn; người nhận email cảnh báo vận hành (Story 4.6-b), email cách nhau bằng dấu phẩy. Không đặt: cảnh báo chỉ ghi log, worker log `warn` lúc khởi động và mỗi lần có cảnh báo (xem "Cảnh báo vận hành") |
 | `OPS_ALERT_COOLDOWN_MINUTES` | api, worker | mặc định `30` (1–1440); loại cảnh báo có cooldown (thiếu khóa QR, hàng đợi ùn, IPN lỗi tăng, tạo link chậm, tỉ lệ phát Vé giảm) báo lại cùng đối tượng sau chừng này phút |

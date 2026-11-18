@@ -67,6 +67,8 @@ const eventOf = (state: State) => ({
   venue: 'Hồ Gươm',
   description: null,
   refundPolicy: state.refundPolicy,
+  imageKey: null,
+  imageUrl: null,
   maxTicketsPerOrder: 10,
   createdAt: '2026-11-03T03:00:00+07:00',
   updatedAt: '2026-11-03T03:00:00+07:00',
@@ -95,8 +97,8 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
     'GET /me/memberships': () => ({ status: 200, body: [{ organizationId: ORG_ID, name: ORG_NAME, role: state.role }] }),
     [`GET /orgs/${ORG_ID}/notices`]: () => ({ status: 200, body: state.notices }),
     [`GET /orgs/${ORG_ID}/events`]: () => {
-      const { id, slug, name, status, startsAt, endsAt, effectiveEndAt } = eventOf(state);
-      return { status: 200, body: [{ id, slug, name, status, startsAt, endsAt, effectiveEndAt }] };
+      const { id, slug, name, status, startsAt, endsAt, effectiveEndAt, imageUrl } = eventOf(state);
+      return { status: 200, body: [{ id, slug, name, status, startsAt, endsAt, effectiveEndAt, imageUrl }] };
     },
     [`GET ${eventPath}`]: () => ({ status: 200, body: eventOf(state) }),
     [`GET ${SALE_STATUS_PATH}`]: () => ({

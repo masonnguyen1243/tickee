@@ -6,6 +6,7 @@ import {
   EventDraftInput,
   effectiveEndAt,
   ErrorCode,
+  eventImageKeyPrefix,
   slugBase,
   timeOrVenueChanged,
   toEventIso,
@@ -23,6 +24,7 @@ import { audit } from '../../platform/audit/index.js';
 import { DATABASE, type Database, type Tx } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
+import { OBJECT_STORAGE, type ObjectStorage } from '../../platform/storage/index.js';
 import { enqueuePublicPageRevalidation, PublicPageQueues } from './public-page-jobs.js';
 import { events } from './schema.js';
 
@@ -30,6 +32,8 @@ import { events } from './schema.js';
  * Sự kiện nháp (FR-6, Story 2.7): Owner và Admin tạo, sửa, đọc Sự kiện của BTC mình; mọi truy vấn qua `orgScope(ctx)`.
  * Mỗi lần ghi là một transaction có audit (`event.created`, `event.updated` chỉ ghi tên trường đổi). API công khai theo
  * slug (`public-event.ts`) không bao giờ trả Sự kiện nháp: nháp và slug không tồn tại cùng `404 EVENT_NOT_FOUND`.
+ * Ảnh Sự kiện (Story 4.8-a) là một trường như các trường khác: `imageKey` do presign cấp
+ * (`event-images.controller.ts`), đọc ra thành `imageUrl` công khai qua `ObjectStorage.publicUrlOf`.
  */
 
 /** Token DI của hàm sinh hậu tố slug (test tiêm hàm cố định để ép trùng slug). */
@@ -63,8 +67,14 @@ function isUniqueViolation(err: unknown, constraint: string): boolean {
 export type EventRow = typeof events.$inferSelect;
 /** Body `PATCH`/`POST` Sự kiện sau khi qua `EventDraftInput`. */
 export type EventDraftValues = z.output<typeof EventDraftInput>;
+/** Phần `ObjectStorage` mà đường đọc Sự kiện cần: dựng URL công khai của ảnh. */
+export type EventImageUrls = Pick<ObjectStorage, 'publicUrlOf'>;
 
-export const detailOf = (row: EventRow): EventDetail => ({
+/** `imageUrl` của Sự kiện: URL công khai của `image_key`, `null` khi không có ảnh. */
+export const eventImageUrlOf = (images: EventImageUrls, imageKey: string | null): string | null =>
+  imageKey === null ? null : images.publicUrlOf(imageKey);
+
+export const detailOf = (row: EventRow, images: EventImageUrls): EventDetail => ({
   id: row.id,
   organizationId: row.organizationId,
   slug: row.slug,
@@ -77,10 +87,23 @@ export const detailOf = (row: EventRow): EventDetail => ({
   venue: row.venue,
   description: row.description,
   refundPolicy: row.refundPolicy,
+  imageKey: row.imageKey,
+  imageUrl: eventImageUrlOf(images, row.imageKey),
   maxTicketsPerOrder: row.maxTicketsPerOrder,
   createdAt: toEventIso(row.createdAt),
   updatedAt: toEventIso(row.updatedAt),
 });
+
+/**
+ * Key ảnh phải do presign cấp cho chính BTC này: tiền tố `orgs/{ctx.organizationId}/events/` (dạng key đã kiểm ở
+ * `EventDraftInput`). Key của BTC khác → `400 VALIDATION_FAILED` tại `imageKey`, cùng dạng lỗi với `parseRequest`.
+ */
+export function assertOwnEventImageKey(ctx: Pick<AccessContext, 'organizationId'>, imageKey: string | null): void {
+  if (imageKey === null || imageKey.startsWith(eventImageKeyPrefix(ctx.organizationId))) return;
+  throw new AppError(ErrorCode.VALIDATION_FAILED, 'Yêu cầu không hợp lệ.', {
+    details: { issues: [{ path: 'imageKey', code: 'custom' }] },
+  });
+}
 
 /**
  * Cột ghi từ input (giờ đã đổi sang `Date`). `effective_end_at` tính lại, trừ khi BTC đã bấm "Kết thúc"
@@ -97,6 +120,7 @@ function columnsOf(input: EventDraftValues, current?: Pick<EventRow, 'endedManua
     venue: input.venue,
     description: input.description,
     refundPolicy: input.refundPolicy,
+    imageKey: input.imageKey,
   };
 }
 
@@ -121,11 +145,12 @@ export interface EventEditResult {
 
 /**
  * Sửa Sự kiện trong `tx` của người gọi (Story 2.12; `flows/event-update.flow.ts` gọi, Story 3.10): thay toàn bộ các
- * trường của `EventDraftInput` ở mọi trạng thái trừ `cancelled` (→ `409 EVENT_CANCELLED`). Khóa dòng `FOR UPDATE` theo
- * `orgScope`; id lạ, sai dạng hoặc của BTC khác → `404 EVENT_NOT_FOUND`. Slug giữ nguyên; `effective_end_at` tính lại
- * trừ khi đã bấm "Kết thúc". Không có trường đổi → trả luôn, không ghi. Có thì `UPDATE` (đổi giờ hoặc địa điểm thì tăng
- * `time_venue_version` trong cùng lệnh), audit `event.updated` (`changedFields` là tên trường, không ghi giá trị) và, khi
- * Sự kiện không còn nháp, enqueue revalidate trang `/e/{slug}` bằng `tx` (Story 2.11-c). Người gọi đã
+ * trường của `EventDraftInput` ở mọi trạng thái trừ `cancelled` (→ `409 EVENT_CANCELLED`). Key ảnh không đúng tiền tố
+ * BTC → `400` trước khi chạm DB (Story 4.8-a). Khóa dòng `FOR UPDATE` theo `orgScope`; id lạ, sai dạng hoặc của BTC khác
+ * → `404 EVENT_NOT_FOUND`. Slug giữ nguyên; `effective_end_at` tính lại trừ khi đã bấm "Kết thúc". Không có trường đổi
+ * → trả luôn, không ghi. Đổi hay gỡ ảnh là một trường đổi như mọi trường khác. Có thì `UPDATE` (đổi giờ hoặc địa điểm
+ * thì tăng `time_venue_version` trong cùng lệnh), audit `event.updated` (`changedFields` là tên trường, không ghi giá
+ * trị) và, khi Sự kiện không còn nháp, enqueue revalidate trang `/e/{slug}` bằng `tx` (Story 2.11-c). Người gọi đã
  * `PublicPageQueues.ready()` trước transaction.
  */
 export async function applyEventEdit(
@@ -135,6 +160,7 @@ export async function applyEventEdit(
   eventId: string,
   input: EventDraftValues,
 ): Promise<EventEditResult> {
+  assertOwnEventImageKey(ctx, input.imageKey);
   if (!UUID.test(eventId)) throw notFound();
   const [current] = await tx
     .select()
@@ -173,10 +199,15 @@ export class EventService {
     @Inject(EVENT_SLUG_SUFFIX) private readonly slugSuffix: SlugSuffixGenerator,
     @Inject(BOSS) private readonly boss: PgBoss,
     @Inject(PublicPageQueues) private readonly publicPageQueues: PublicPageQueues,
+    @Inject(OBJECT_STORAGE) private readonly storage: ObjectStorage,
   ) {}
 
-  /** Tạo Sự kiện nháp kèm audit `event.created`. Slug trùng thì sinh hậu tố khác, tối đa `SLUG_ATTEMPTS` lần. */
+  /**
+   * Tạo Sự kiện nháp kèm audit `event.created`. Key ảnh không đúng tiền tố BTC → `400`. Slug trùng thì sinh hậu tố
+   * khác, tối đa `SLUG_ATTEMPTS` lần.
+   */
   async create(ctx: AccessContext, input: EventDraftValues): Promise<EventDetail> {
+    assertOwnEventImageKey(ctx, input.imageKey);
     const base = slugBase(input.name);
     for (let attempt = 1; ; attempt++) {
       const slug = `${base}-${this.slugSuffix()}`;
@@ -195,7 +226,7 @@ export class EventService {
           });
           return created;
         });
-        return detailOf(row);
+        return detailOf(row, this.storage);
       } catch (err) {
         if (attempt < SLUG_ATTEMPTS && isUniqueViolation(err, SLUG_KEY)) continue;
         throw err;
@@ -214,15 +245,17 @@ export class EventService {
         startsAt: events.startsAt,
         endsAt: events.endsAt,
         effectiveEndAt: events.effectiveEndAt,
+        imageKey: events.imageKey,
       })
       .from(events)
       .where(orgScope(ctx)(events))
       .orderBy(desc(events.createdAt), desc(events.id));
-    return rows.map((row) => ({
+    return rows.map(({ imageKey, ...row }) => ({
       ...row,
       startsAt: toEventIso(row.startsAt),
       endsAt: toEventIso(row.endsAt),
       effectiveEndAt: toEventIso(row.effectiveEndAt),
+      imageUrl: eventImageUrlOf(this.storage, imageKey),
     }));
   }
 
@@ -234,7 +267,7 @@ export class EventService {
       .from(events)
       .where(and(orgScope(ctx)(events), eq(events.id, eventId)));
     if (!row) throw notFound();
-    return detailOf(row);
+    return detailOf(row, this.storage);
   }
 
   /**
@@ -270,6 +303,6 @@ export class EventService {
       if (updated.status !== 'draft') await enqueuePublicPageRevalidation(this.boss, tx, updated.slug);
       return updated;
     });
-    return detailOf(row);
+    return detailOf(row, this.storage);
   }
 }

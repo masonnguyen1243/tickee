@@ -90,6 +90,8 @@ describe('tạo Sự kiện nháp', () => {
       venue: null,
       description: null,
       refundPolicy: null,
+      imageKey: null,
+      imageUrl: null,
     });
     expect(event.slug).toMatch(/^giai-chay-ha-noi-2026-[a-z0-9]{4}$/);
     expect(await audits(event.id)).toEqual([{ action: 'event.created', actor_user_id: admin.userId, changed_fields: [] }]);
@@ -291,6 +293,7 @@ describe('danh sách và cách ly', () => {
       startsAt: START,
       endsAt: END,
       effectiveEndAt: '2026-11-16T23:59:59+07:00',
+      imageUrl: null,
     });
     const empty = await h.http.get(`/v1/orgs/${orgB}/events`).set('cookie', ownerB.cookie).expect(200);
     expect(empty.body).toEqual([]);
@@ -350,6 +353,7 @@ describe('API công khai theo slug', () => {
       venue: null,
       description: null,
       refundPolicy: 'Hoàn 100% trước 7 ngày.',
+      imageUrl: null,
       organizationName: 'CLB Chạy Bộ',
       maxTicketsPerOrder: 10,
       ticketTypes: [

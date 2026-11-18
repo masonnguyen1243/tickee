@@ -92,6 +92,8 @@ const eventOf = (state: State) => ({
   venue: state.venue,
   description: state.description,
   refundPolicy: 'Hoàn 100% trước 7 ngày.',
+  imageKey: null,
+  imageUrl: null,
   maxTicketsPerOrder: 10,
   createdAt: '2026-11-03T03:00:00+07:00',
   updatedAt: '2026-11-03T03:00:00+07:00',
@@ -118,8 +120,8 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
     [`GET /orgs/${ORG_ID}`]: () => organization({ role: 'admin' }),
     'GET /me/memberships': () => ({ status: 200, body: [{ organizationId: ORG_ID, name: ORG_NAME, role: 'admin' }] }),
     [`GET /orgs/${ORG_ID}/events`]: () => {
-      const { id, slug, name, status, startsAt, endsAt, effectiveEndAt } = eventOf(state);
-      return { status: 200, body: [{ id, slug, name, status, startsAt, endsAt, effectiveEndAt }] };
+      const { id, slug, name, status, startsAt, endsAt, effectiveEndAt, imageUrl } = eventOf(state);
+      return { status: 200, body: [{ id, slug, name, status, startsAt, endsAt, effectiveEndAt, imageUrl }] };
     },
     [`GET ${eventPath}`]: () => ({ status: 200, body: eventOf(state) }),
     // Trạng thái bán như api (Story 4.2-c): nháp không có trong danh sách; hủy > kết thúc > Ẩn; còn lại đang bán.

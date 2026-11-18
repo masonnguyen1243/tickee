@@ -47,6 +47,7 @@ const event = (slug: string, status: 'published' | 'hidden') => ({
   venue: 'Hồ Hoàn Kiếm, Hà Nội',
   description: 'Cung đường 5 km quanh hồ.\nNhận bib tại nhà văn hóa phường.',
   refundPolicy: 'Hoàn 100% nếu hủy trước 7 ngày.',
+  imageUrl: null,
   organizationName: 'CLB Chạy Bộ Phố Cổ',
   maxTicketsPerOrder: MAX_TICKETS_PER_ORDER,
   ticketTypes: [

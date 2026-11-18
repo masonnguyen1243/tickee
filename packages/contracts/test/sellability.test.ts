@@ -34,6 +34,7 @@ describe('trạng thái bán', () => {
       venue: null,
       description: null,
       refundPolicy: 'Hoàn 100%.',
+      imageUrl: null,
       organizationName: 'CLB Chạy Bộ',
       maxTicketsPerOrder: 4,
       ticketTypes: [
@@ -64,6 +65,12 @@ describe('trạng thái bán', () => {
     expect(PublicEvent.safeParse(withoutLimit).success).toBe(false);
     expect(PublicEvent.safeParse({ ...base, maxTicketsPerOrder: 0 }).success).toBe(false);
     expect(PublicEvent.safeParse({ ...base, maxTicketsPerOrder: 51 }).success).toBe(false);
+    // Ảnh Sự kiện (Story 4.8): URL http(s) hoặc null, bắt buộc có trường.
+    const imageUrl = 'http://localhost:9000/tickee-event-images/orgs/o/events/a.webp';
+    expect(PublicEvent.parse({ ...base, imageUrl }).imageUrl).toBe(imageUrl);
+    const { imageUrl: _image, ...withoutImage } = base;
+    expect(PublicEvent.safeParse(withoutImage).success).toBe(false);
+    expect(PublicEvent.safeParse({ ...base, imageUrl: 'javascript:alert(1)' }).success).toBe(false);
   });
 });
 

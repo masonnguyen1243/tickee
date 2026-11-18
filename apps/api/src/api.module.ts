@@ -18,6 +18,7 @@ import { ErrorFilter, HealthController } from './platform/http/index.js';
 import { JobsModule } from './platform/jobs/index.js';
 import { createLoggerModule, type LoggingOptions } from './platform/logging/index.js';
 import { RealtimeModule } from './platform/realtime/index.js';
+import { StorageModule } from './platform/storage/index.js';
 import { TelemetryModule } from './platform/telemetry/index.js';
 
 /**
@@ -37,6 +38,17 @@ export class ApiModule {
         createLoggerModule({ level: config.LOG_LEVEL, ...options }),
         DbModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-api' }),
         EmailModule.forRoot({ url: config.SMTP_URL, from: config.EMAIL_FROM }),
+        // Object storage S3 (Story 4.8-a, toàn cục): ký presigned PUT ảnh Sự kiện và dựng `imageUrl` công khai; không
+        // gọi mạng tới storage. Worker không cần.
+        StorageModule.forRoot({
+          endpoint: config.S3_ENDPOINT,
+          region: config.S3_REGION,
+          bucket: config.S3_BUCKET,
+          accessKeyId: config.S3_ACCESS_KEY_ID,
+          secretAccessKey: config.S3_SECRET_ACCESS_KEY,
+          forcePathStyle: config.S3_FORCE_PATH_STYLE,
+          publicBaseUrl: config.S3_PUBLIC_BASE_URL,
+        }),
         // Chỉ enqueue job (cùng `tx` của thay đổi); không bảo trì, không lịch, không handler — việc của vai `worker`.
         JobsModule.forRoot({ connectionString: config.DATABASE_URL, applicationName: 'tickee-api', mode: 'producer' }),
         // Kênh cảnh báo vận hành (Story 4.6-b, toàn cục): `OpsAlerts.raise` ghi dấu chống lặp và enqueue email cho đội vận

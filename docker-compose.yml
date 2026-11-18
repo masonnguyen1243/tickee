@@ -27,6 +27,53 @@ services:
       MP_SMTP_AUTH_ACCEPT_ANY: '1'
       MP_SMTP_AUTH_ALLOW_INSECURE: '1'
 
+  # Object storage tương thích S3 cho ảnh Sự kiện (Story 4.8-a, AD-22). MinIO ngừng phát image cộng đồng (`minio/minio`,
+  # `minio/mc`) từ cuối 2025: dùng bản fork cộng đồng `pgsty/*`, ghim tag. Trình duyệt PUT thẳng vào cổng 9000 bằng URL
+  # presign của api, rồi đọc ảnh ẩn danh cũng ở đây. CORS: chỉ origin web local, cho mọi method (GET và PUT).
+  # Console: http://localhost:9001 (đăng nhập bằng MINIO_ROOT_USER / MINIO_ROOT_PASSWORD dưới đây).
+  minio:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      # CHỈ dùng ở local; khớp S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY của .env.example.
+      MINIO_ROOT_USER: tickee-local
+      MINIO_ROOT_PASSWORD: tickee-local-secret
+      MINIO_API_CORS_ALLOW_ORIGIN: http://localhost:3000
+    ports:
+      - '127.0.0.1:9000:9000' # API S3
+      - '127.0.0.1:9001:9001' # Console
+    volumes:
+      - minio-data:/data
+
+  # Tạo bucket ảnh và cho đọc ẩn danh từng object (chỉ `s3:GetObject`, không cho liệt kê bucket: key có uuid nên ảnh của
+  # Sự kiện nháp không đoán được). Xong việc thì đứng yên với healthcheck "đã sẵn sàng": `docker compose up -d --wait`
+  # coi container đã thoát là lỗi, nên không để nó thoát.
+  minio-init:
+    image: pgsty/mc:RELEASE.2026-10-26T00-00-00Z
+    depends_on:
+      - minio
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -e
+        rm -f /tmp/ready
+        until mc alias set local http://minio:9000 tickee-local tickee-local-secret >/dev/null 2>&1 &&
+          mc mb --ignore-existing local/tickee-event-images; do
+          echo 'chờ MinIO…'
+          sleep 1
+        done
+        printf '%s' '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject"],"Resource":["arn:aws:s3:::tickee-event-images/*"]}]}' > /tmp/public-read.json
+        mc anonymous set-json /tmp/public-read.json local/tickee-event-images
+        touch /tmp/ready
+        echo 'bucket tickee-event-images sẵn sàng'
+        trap 'exit 0' TERM INT
+        while :; do sleep 3600 & wait $$!; done
+    healthcheck:
+      test: ['CMD-SHELL', 'test -f /tmp/ready']
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
   # Quan sát ở local (Story 4.6-a): collector OTLP + Grafana, Tempo (trace), Prometheus (metrics) trong một image. Không chạy
   # mặc định: `docker compose --profile observability up -d otel-lgtm`, rồi đặt
   # OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 trong .env. Grafana: http://localhost:3030.
@@ -39,3 +86,4 @@ services:
 
 volumes:
   postgres-data:
+  minio-data:

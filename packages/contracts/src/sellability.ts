@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
-import { EventDateTime, eventStatusSchema, MAX_TICKETS_PER_ORDER_MAX, MAX_TICKETS_PER_ORDER_MIN } from './event.js';
+import {
+  EventDateTime,
+  EventImageUrl,
+  eventStatusSchema,
+  MAX_TICKETS_PER_ORDER_MAX,
+  MAX_TICKETS_PER_ORDER_MIN,
+} from './event.js';
 import { PublicTicketType } from './ticket-type.js';
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -21,6 +27,8 @@ export const PublicEvent = z.object({
   venue: z.string().nullable(),
   description: z.string().nullable(),
   refundPolicy: z.string().nullable(),
+  /** Ảnh Sự kiện (Story 4.8): URL công khai cho `event-hero` và ảnh OG; `null` khi không có ảnh. */
+  imageUrl: EventImageUrl,
   /** Tên BTC. */
   organizationName: z.string(),
   /** Giới hạn Vé/Đơn (Story 2.8): trần tổng số Vé chọn được ở trang Sự kiện và Checkout (Story 3.1). */

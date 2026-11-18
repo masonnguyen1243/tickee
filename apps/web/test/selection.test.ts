@@ -42,6 +42,7 @@ const event: PublicEvent = {
   venue: null,
   description: null,
   refundPolicy: 'Hoàn 100%.',
+  imageUrl: null,
   organizationName: 'CLB Chạy',
   maxTicketsPerOrder: 4,
   ticketTypes: [ticketType(A, 'Vé VIP', 300_000), ticketType(B, 'Phổ thông', 100_000), ticketType(C, 'Miễn phí', 0)],
