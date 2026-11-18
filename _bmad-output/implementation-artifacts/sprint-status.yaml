@@ -81,7 +81,7 @@ development_status:
   4-5-token-và-cảnh-báo-token: done
   4-6-giám-sát-và-lưới-an-toàn-vận-hành: done
   4-7-môi-trường-staging-production-deploy-và-diễn-tập-khôi-phục: backlog
-  4-8-ảnh-sự-kiện-trên-object-storage: review
+  4-8-ảnh-sự-kiện-trên-object-storage: done
   epic-4-retrospective: optional
 
   epic-5: backlog
