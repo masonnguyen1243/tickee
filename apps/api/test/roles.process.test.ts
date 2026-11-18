@@ -26,6 +26,13 @@ function apiRoleEnv(): Record<string, string> {
     TINGEE_BASE_URL: c.TINGEE_BASE_URL,
     TINGEE_CREDENTIAL_KEYS: c.TINGEE_CREDENTIAL_KEYS,
     TICKET_QR_KEYS: c.TICKET_QR_KEYS,
+    // Ảnh Sự kiện (Story 4.8-a): bắt buộc ở vai api, worker không đọc.
+    S3_ENDPOINT: c.S3_ENDPOINT,
+    S3_BUCKET: c.S3_BUCKET,
+    S3_ACCESS_KEY_ID: c.S3_ACCESS_KEY_ID,
+    S3_SECRET_ACCESS_KEY: c.S3_SECRET_ACCESS_KEY,
+    S3_FORCE_PATH_STYLE: String(c.S3_FORCE_PATH_STYLE),
+    S3_PUBLIC_BASE_URL: c.S3_PUBLIC_BASE_URL,
   };
 }
 
@@ -159,6 +166,7 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
       TINGEE_BASE_URL: c.TINGEE_BASE_URL,
       TINGEE_CREDENTIAL_KEYS: c.TINGEE_CREDENTIAL_KEYS,
       TICKET_QR_KEYS: c.TICKET_QR_KEYS,
+      // Không có biến `S3_*`: object storage chỉ là việc của vai api (Story 4.8-a).
     });
     try {
       await waitForOutput(p, 'worker đã chạy');

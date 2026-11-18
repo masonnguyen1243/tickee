@@ -6,6 +6,7 @@ export {
   EVENT_SLUG_SUFFIX,
   type EventDraftValues,
   type EventEditResult,
+  type EventImageUrls,
   type EventRow,
   type SlugSuffixGenerator,
 } from './event.service.js';

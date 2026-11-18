@@ -32,6 +32,7 @@ import type { AccessContext } from '../../src/platform/access/index.js';
 import { Database } from '../../src/platform/db/index.js';
 import { EMAIL_TRANSPORT } from '../../src/platform/email/index.js';
 import { BOSS, childJobId } from '../../src/platform/jobs/index.js';
+import { OBJECT_STORAGE, type ObjectStorage } from '../../src/platform/storage/index.js';
 import { WorkerModule } from '../../src/worker.module.js';
 import { migrationDatabaseUrl, TEST_WEB_ORIGIN, workerConfig } from '../helpers.js';
 import { createHarness, FakeEmailTransport, signUp, type Harness } from '../identity/harness.js';
@@ -324,7 +325,8 @@ describe('PATCH …/events/:eventId (flows): khi nào enqueue', () => {
       stepUpAt: null,
     };
     const input = EventDraftInput.parse(bodyOf(sale.event, { startsAt: NEW_START }));
-    await expect(updateEvent(h.db, failing, ctx, sale.event.id, input)).rejects.toThrow('lỗi sau khi enqueue');
+    const storage = h.app.get<ObjectStorage>(OBJECT_STORAGE);
+    await expect(updateEvent(h.db, failing, storage, ctx, sale.event.id, input)).rejects.toThrow('lỗi sau khi enqueue');
     expect(await versionOf(sale.event.id)).toBe(0);
     expect((await fetchEvent(sale.event.id)).startsAt).toBe(sale.event.startsAt);
     expect(await boss.findJobs(QUEUE, { data: { eventId: sale.event.id } })).toEqual([]);

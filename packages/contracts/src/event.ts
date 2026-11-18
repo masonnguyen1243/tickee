@@ -69,10 +69,69 @@ export const optionalText = (max: number) =>
     .nullish()
     .transform((v) => (v ? v : null));
 
+// ---------------------------------------------------------------------------------------------------------------
+// Ảnh Sự kiện (FR-7, Story 4.8): web upload thẳng lên object storage bằng presigned PUT của api
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Loại ảnh Sự kiện nhận được: JPEG, PNG hoặc WebP (`content-type` của lệnh PUT). */
+export const EVENT_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+export type EventImageType = (typeof EVENT_IMAGE_TYPES)[number];
+/** Đuôi file của key trên object storage theo loại ảnh. */
+export const EVENT_IMAGE_EXTENSIONS: Readonly<Record<EventImageType, 'jpg' | 'png' | 'webp'>> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
+/** Dung lượng tối đa của ảnh Sự kiện: 5 MB. */
+export const EVENT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+
+const UUID_LOWER = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+
+/**
+ * Key ảnh Sự kiện trên object storage: `orgs/{orgId}/events/{uuid}.{jpg|png|webp}` (uuid chữ thường). Api chỉ cấp key
+ * dạng này; lưu Sự kiện còn kiểm tiền tố đúng BTC (`eventImageKeyPrefix`).
+ */
+export const EVENT_IMAGE_KEY_PATTERN = new RegExp(`^orgs/${UUID_LOWER}/events/${UUID_LOWER}\\.(?:jpg|png|webp)$`);
+
+/** Tiền tố key ảnh Sự kiện của một BTC (`orgs/{orgId}/events/`). */
+export const eventImageKeyPrefix = (organizationId: string): string => `orgs/${organizationId}/events/`;
+
+/** Key ảnh Sự kiện đúng dạng `EVENT_IMAGE_KEY_PATTERN`. */
+export const EventImageKey = z.string().regex(EVENT_IMAGE_KEY_PATTERN);
+
+/** URL công khai của ảnh Sự kiện (`S3_PUBLIC_BASE_URL/{key}`); `null` khi Sự kiện không có ảnh. */
+export const EventImageUrl = z.url({ protocol: /^https?$/ }).nullable();
+
+/**
+ * `POST /v1/orgs/:orgId/event-images` (Owner và Admin, `events.manage`): xin URL upload một ảnh Sự kiện. Loại và dung
+ * lượng kiểm ở đây; URL ký đúng `content-type` và `content-length` này, nên storage từ chối file khác số byte đã khai.
+ */
+export const EventImageUploadInput = z.object({
+  contentType: z.enum(EVENT_IMAGE_TYPES),
+  contentLength: z.number().int().min(1).max(EVENT_IMAGE_MAX_BYTES),
+});
+export type EventImageUploadInput = z.infer<typeof EventImageUploadInput>;
+
+/**
+ * Kết quả presign: web `PUT` file lên `uploadUrl` (không credentials) kèm đúng `content-type` đã khai, trước
+ * `expiresAt` (5 phút), rồi gửi `key` làm `imageKey` khi tạo hoặc sửa Sự kiện.
+ */
+export const EventImageUpload = z.object({
+  key: EventImageKey,
+  uploadUrl: z.url({ protocol: /^https?$/ }),
+  expiresAt: z.iso.datetime(),
+});
+export type EventImageUpload = z.infer<typeof EventImageUpload>;
+
+/** Đường API (sau `/v1`) của presign ảnh Sự kiện (POST): trả `EventImageUpload`. */
+export const eventImagesApiPath = (organizationId: string): string =>
+  `/orgs/${encodeURIComponent(organizationId)}/event-images`;
+
 /**
  * `POST /v1/orgs/:orgId/events` và `PATCH /v1/orgs/:orgId/events/:eventId` (thay toàn bộ các trường dưới đây).
  * Lưu nháp cần tên, giờ bắt đầu và giờ kết thúc (`endsAt` > `startsAt`, lỗi ở `endsAt`); các trường khác để trống được,
- * kể cả chính sách hoàn vé (bắt buộc khi mở bán, Story 2.10).
+ * kể cả chính sách hoàn vé (bắt buộc khi mở bán, Story 2.10). `imageKey` (Story 4.8): key do presign cấp cho chính BTC
+ * này; thiếu hoặc `null` → Sự kiện không có ảnh (gỡ ảnh đang có).
  */
 export const EventDraftInput = z
   .object({
@@ -82,6 +141,7 @@ export const EventDraftInput = z
     venue: optionalText(EVENT_VENUE_MAX),
     description: optionalText(EVENT_DESCRIPTION_MAX),
     refundPolicy: optionalText(EVENT_REFUND_POLICY_MAX),
+    imageKey: EventImageKey.nullish().transform((v) => v ?? null),
   })
   .refine((v) => Date.parse(v.endsAt) > Date.parse(v.startsAt), {
     path: ['endsAt'],
@@ -90,7 +150,15 @@ export const EventDraftInput = z
 export type EventDraftInput = z.input<typeof EventDraftInput>;
 
 /** Các trường của `EventDraftInput`, theo thứ tự (cũng là tên trường trong `changedFields` của audit `event.updated`). */
-export const EVENT_DRAFT_FIELDS = ['name', 'startsAt', 'endsAt', 'venue', 'description', 'refundPolicy'] as const;
+export const EVENT_DRAFT_FIELDS = [
+  'name',
+  'startsAt',
+  'endsAt',
+  'venue',
+  'description',
+  'refundPolicy',
+  'imageKey',
+] as const;
 export type EventDraftField = (typeof EVENT_DRAFT_FIELDS)[number];
 
 /** Một hàng của danh sách Sự kiện (`event-card`). */
@@ -106,6 +174,8 @@ export const EventSummary = z.object({
    * thành status: Sự kiện `published`/`hidden` có mốc này ≤ bây giờ là đã kết thúc.
    */
   effectiveEndAt: EventDateTime,
+  /** Ảnh Sự kiện (Story 4.8): URL công khai, `null` khi không có ảnh. */
+  imageUrl: EventImageUrl,
 });
 export type EventSummary = z.infer<typeof EventSummary>;
 
@@ -126,6 +196,8 @@ export const EventDetail = EventSummary.extend({
   venue: z.string().nullable(),
   description: z.string().nullable(),
   refundPolicy: z.string().nullable(),
+  /** Key ảnh Sự kiện (Story 4.8): web gửi lại nguyên giá trị này khi lưu để giữ ảnh; `null` khi không có ảnh. */
+  imageKey: z.string().nullable(),
   /** Số Vé tối đa trong một Đơn (Story 2.8). */
   maxTicketsPerOrder: z.number().int(),
   createdAt: EventDateTime,

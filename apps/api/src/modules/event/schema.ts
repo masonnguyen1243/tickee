@@ -46,6 +46,12 @@ export const events = pgTable(
     endedManuallyAt: timestamptz('ended_manually_at'),
     venue: text('venue'),
     description: text('description'),
+    /**
+     * Key ảnh Sự kiện trên object storage (Story 4.8-a): `orgs/{organization_id}/events/{uuid}.{jpg|png|webp}`, do
+     * presign cấp; lưu Sự kiện chỉ nhận key đúng tiền tố BTC. `null`: không có ảnh. Không xóa object cũ khi đổi hoặc gỡ
+     * ảnh.
+     */
+    imageKey: text('image_key'),
     /** Bắt buộc để mở bán (Story 2.10); nháp để trống được. */
     refundPolicy: text('refund_policy'),
     lockedAt: timestamptz('locked_at'),

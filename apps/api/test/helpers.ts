@@ -25,6 +25,11 @@ export const TEST_TICKET_QR_KEY_V2 = testCredentialKey(2, 11);
 /** Origin web giả lập trong test: CORS và Better Auth chỉ tin origin này. */
 export const TEST_WEB_ORIGIN = 'http://web.tickee.test';
 
+/** Object storage giả lập trong test (Story 4.8-a): ký presign không gọi mạng, host `.test` không bao giờ phân giải. */
+export const TEST_S3_ENDPOINT = 'http://storage.tickee.test';
+export const TEST_S3_BUCKET = 'tickee-test-images';
+export const TEST_S3_PUBLIC_BASE_URL = `${TEST_S3_ENDPOINT}/${TEST_S3_BUCKET}`;
+
 export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
   APP_ROLE: 'api',
   NODE_ENV: 'test',
@@ -45,6 +50,14 @@ export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
   TINGEE_BASE_URL: 'http://127.0.0.1:1',
   TINGEE_CREDENTIAL_KEYS: TEST_CREDENTIAL_KEYS,
   TICKET_QR_KEYS: TEST_TICKET_QR_KEYS,
+  // Ảnh Sự kiện (Story 4.8-a): path-style như MinIO local; credential giả chỉ dùng để ký.
+  S3_ENDPOINT: TEST_S3_ENDPOINT,
+  S3_REGION: 'us-east-1',
+  S3_BUCKET: TEST_S3_BUCKET,
+  S3_ACCESS_KEY_ID: 'test-only-access-key',
+  S3_SECRET_ACCESS_KEY: 'test-only-secret-access-key',
+  S3_FORCE_PATH_STYLE: true,
+  S3_PUBLIC_BASE_URL: TEST_S3_PUBLIC_BASE_URL,
   // OpenTelemetry tắt (không có endpoint): như khi không đặt `OTEL_*`.
   OTEL_METRIC_EXPORT_INTERVAL: 60_000,
   // Cảnh báo vận hành (Story 4.6-b): mặc định của schema.

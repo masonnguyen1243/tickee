@@ -16,6 +16,7 @@ import { audit } from '../../platform/audit/index.js';
 import { DATABASE, type Database, type DbExecutor } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
+import { OBJECT_STORAGE, type ObjectStorage } from '../../platform/storage/index.js';
 import { detailOf, notFound, UUID } from './event.service.js';
 import { enqueuePublicPageRevalidation, PublicPageQueues } from './public-page-jobs.js';
 import { organizationLocked, paidSalesAllowed, refundPolicySet } from './sale-rules.js';
@@ -67,6 +68,7 @@ export class PublishService {
     @Inject(DATABASE) private readonly db: Database,
     @Inject(BOSS) private readonly boss: PgBoss,
     @Inject(PublicPageQueues) private readonly publicPageQueues: PublicPageQueues,
+    @Inject(OBJECT_STORAGE) private readonly storage: ObjectStorage,
   ) {}
 
   /** Điều kiện mở bán của Sự kiện; id lạ, sai dạng hoặc của BTC khác → `404 EVENT_NOT_FOUND`. */
@@ -117,7 +119,7 @@ export class PublishService {
       await enqueuePublicPageRevalidation(this.boss, tx, updated.slug);
       return updated;
     });
-    return detailOf(row);
+    return detailOf(row, this.storage);
   }
 }
 

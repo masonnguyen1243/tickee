@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { EventImagesController } from './event-images.controller.js';
 import { EventStatusService } from './event-status.service.js';
 import { EVENT_SLUG_SUFFIX, EventService, randomSlugSuffix } from './event.service.js';
 import { EventsController } from './events.controller.js';
@@ -9,12 +10,13 @@ import { PublicPageQueues } from './public-page-jobs.js';
 import { PublishService } from './publish.service.js';
 
 /**
- * Sự kiện (FR-6), mở bán (FR-8, Story 2.10), Ẩn / Kết thúc sớm (Story 2.12) và form mua vé (FR-9). Cần `DbModule` và `JobsModule` (enqueue revalidate
- * trang Sự kiện công khai, Story 2.11-c) ở gốc DI. Không đăng ký `PermissionGuard`: guard đó đã là guard toàn cục của
- * `OrganizerModule`. Xuất `PublicPageQueues` cho flows (Hạng vé) dùng chung một lần tạo queue.
+ * Sự kiện (FR-6), mở bán (FR-8, Story 2.10), Ẩn / Kết thúc sớm (Story 2.12), form mua vé (FR-9) và presign ảnh Sự kiện
+ * (Story 4.8-a). Cần `DbModule`, `JobsModule` (enqueue revalidate trang Sự kiện công khai, Story 2.11-c) và
+ * `StorageModule` (URL upload và URL công khai của ảnh) ở gốc DI. Không đăng ký `PermissionGuard`: guard đó đã là guard
+ * toàn cục của `OrganizerModule`. Xuất `PublicPageQueues` cho flows (Hạng vé) dùng chung một lần tạo queue.
  */
 @Module({
-  controllers: [EventsController, FormController, PublicEventsController],
+  controllers: [EventsController, EventImagesController, FormController, PublicEventsController],
   providers: [
     EventService,
     EventStatusService,

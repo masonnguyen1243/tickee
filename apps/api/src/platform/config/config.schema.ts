@@ -182,6 +182,36 @@ const opsAlertDelivery = {
   OPS_ALERT_ISSUANCE_RATIO: z.coerce.number().gt(0).max(1).default(0.5),
 };
 
+/** URL http(s) tuyệt đối, có thể có path (gốc URL công khai của ảnh). */
+const httpUrl = z.url({ protocol: /^https?$/ });
+
+/** Tên bucket S3 (3–63 ký tự chữ thường, số, `.` và `-`; đầu và cuối là chữ hoặc số). */
+const bucketName = z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/, { message: 'phải là tên bucket S3 hợp lệ' });
+
+/**
+ * Object storage tương thích S3 cho ảnh Sự kiện (Story 4.8-a, AD-22), chỉ vai api: ký presigned PUT (tính tại chỗ,
+ * không gọi mạng) và dựng URL công khai của ảnh. Chỉ dùng API S3 chuẩn, không gắn nhà cung cấp nào. Local: MinIO của
+ * docker compose. Worker không đọc nhóm này.
+ */
+const storage = {
+  /** Endpoint S3 mà trình duyệt PUT tới (URL ký trỏ vào đây), vd. `http://localhost:9000` (MinIO local). */
+  S3_ENDPOINT: httpOrigin,
+  /** Region ký SigV4; MinIO nhận mọi giá trị. */
+  S3_REGION: z.string().min(1).default('us-east-1'),
+  /** Bucket ảnh Sự kiện: cho đọc ẩn danh từng object, CORS `GET`/`PUT` cho origin web. */
+  S3_BUCKET: bucketName,
+  /** Access key chỉ cần quyền `PutObject` trên bucket. Là secret: không bao giờ log. */
+  S3_ACCESS_KEY_ID: z.string().min(1),
+  S3_SECRET_ACCESS_KEY: z.string().min(1),
+  /** `true`: URL dạng `<endpoint>/<bucket>/<key>` (MinIO); `false`: `<bucket>.<host>/<key>`. */
+  S3_FORCE_PATH_STYLE: z.stringbool().default(false),
+  /**
+   * Gốc URL công khai của ảnh: `imageUrl` = `<S3_PUBLIC_BASE_URL>/<key>`, vd.
+   * `http://localhost:9000/tickee-event-images` (sau CDN thì là gốc của CDN).
+   */
+  S3_PUBLIC_BASE_URL: httpUrl,
+};
+
 export const apiConfigSchema = z.object({
   APP_ROLE: z.literal('api'),
   ...common,
@@ -211,6 +241,7 @@ export const apiConfigSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
   ...tingeeAndTickets,
+  ...storage,
   ...telemetry,
   ...opsAlerts,
   ...opsAlertApiRules,

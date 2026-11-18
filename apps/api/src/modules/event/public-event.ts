@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import type { DbExecutor, Tx } from '../../platform/db/index.js';
 import { organizationNameOf } from '../organizer/index.js';
-import { notFound, UUID } from './event.service.js';
+import { eventImageUrlOf, notFound, UUID, type EventImageUrls } from './event.service.js';
 import { events } from './schema.js';
 import { ticketTypesOf } from './ticket-type.service.js';
 
@@ -212,10 +212,10 @@ export async function ticketEventsByIds(
 }
 
 /**
- * Phần tĩnh của trang Sự kiện: thông tin Sự kiện, tên BTC, giới hạn Vé/Đơn, Hạng vé (tạo trước đứng trước, không có
- * số vé).
+ * Phần tĩnh của trang Sự kiện: thông tin Sự kiện, URL công khai của ảnh (Story 4.8-a), tên BTC, giới hạn Vé/Đơn, Hạng
+ * vé (tạo trước đứng trước, không có số vé).
  */
-export async function publicEventDetail(db: DbExecutor, slug: string): Promise<PublicEvent> {
+export async function publicEventDetail(db: DbExecutor, images: EventImageUrls, slug: string): Promise<PublicEvent> {
   const row = await publishedRowBySlug(db, slug);
   const scope = { organizationId: row.organizationId };
   const [organizationName, tiers] = await Promise.all([
@@ -232,6 +232,7 @@ export async function publicEventDetail(db: DbExecutor, slug: string): Promise<P
     venue: row.venue,
     description: row.description,
     refundPolicy: row.refundPolicy,
+    imageUrl: eventImageUrlOf(images, row.imageKey),
     organizationName,
     maxTicketsPerOrder: row.maxTicketsPerOrder,
     ticketTypes: tiers.map((t) => ({

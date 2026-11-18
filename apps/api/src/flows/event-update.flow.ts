@@ -11,6 +11,7 @@ import {
   assertEventOfOrganization,
   eventDetailOf,
   type EventDraftValues,
+  type EventImageUrls,
 } from '../modules/event/index.js';
 import { enqueueEventChangeEmail, paidBuyerCount, pendingPaymentCountOf } from '../modules/ordering/index.js';
 import type { AccessContext } from '../platform/access/index.js';
@@ -32,6 +33,7 @@ import { dbNow, type Database } from '../platform/db/index.js';
 export async function updateEvent(
   db: Database,
   boss: PgBoss,
+  images: EventImageUrls,
   ctx: AccessContext,
   eventId: string,
   input: EventDraftValues,
@@ -48,7 +50,7 @@ export async function updateEvent(
     }
     return after;
   });
-  return eventDetailOf(row);
+  return eventDetailOf(row, images);
 }
 
 /**

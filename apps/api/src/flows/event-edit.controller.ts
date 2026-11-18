@@ -13,6 +13,7 @@ import { Access, RequirePermission, type AccessContext } from '../platform/acces
 import { DATABASE, type Database } from '../platform/db/index.js';
 import { parseRequest } from '../platform/http/index.js';
 import { BOSS } from '../platform/jobs/index.js';
+import { OBJECT_STORAGE, type ObjectStorage } from '../platform/storage/index.js';
 import { eventBuyerCount, eventPendingPaymentCount, updateEvent } from './event-update.flow.js';
 
 /**
@@ -29,6 +30,7 @@ export class EventEditController {
     @Inject(BOSS) private readonly boss: PgBoss,
     @Inject(PublicPageQueues) private readonly publicPageQueues: PublicPageQueues,
     @Inject(EventChangeEmailQueues) private readonly emailQueues: EventChangeEmailQueues,
+    @Inject(OBJECT_STORAGE) private readonly storage: ObjectStorage,
   ) {}
 
   /** Sửa Sự kiện (thay toàn bộ các trường của `EventDraftInput`); slug không đổi. */
@@ -41,7 +43,7 @@ export class EventEditController {
   ): Promise<EventDetail> {
     const input = parseRequest(EventDraftInput, body);
     await Promise.all([this.publicPageQueues.ready(), this.emailQueues.ready()]);
-    return updateEvent(this.db, this.boss, ctx, eventId, input);
+    return updateEvent(this.db, this.boss, this.storage, ctx, eventId, input);
   }
 
   /** Số Người mua (`user_id` có Đơn `paid`) của Sự kiện: `{ buyers }`. */

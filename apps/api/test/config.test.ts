@@ -21,6 +21,11 @@ const apiEnv = {
   TINGEE_BASE_URL: 'https://uat-open-api.tingee.vn',
   TINGEE_CREDENTIAL_KEYS: `v1:${KEY_1}, v2:${KEY_2}`,
   TICKET_QR_KEYS: `v1:${QR_KEY_1},v2:${QR_KEY_2}`,
+  S3_ENDPOINT: 'https://s3.tickee.vn',
+  S3_BUCKET: 'tickee-event-images',
+  S3_ACCESS_KEY_ID: 'AKIA-tickee-api',
+  S3_SECRET_ACCESS_KEY: `s3-${SECRET}`,
+  S3_PUBLIC_BASE_URL: 'https://anh.tickee.vn',
 };
 const workerEnv = {
   APP_ROLE: 'worker',
@@ -256,6 +261,11 @@ describe('loadConfig', () => {
       'EMAIL_FROM',
       'GOOGLE_CLIENT_ID',
       'GOOGLE_CLIENT_SECRET',
+      'S3_ACCESS_KEY_ID',
+      'S3_BUCKET',
+      'S3_ENDPOINT',
+      'S3_PUBLIC_BASE_URL',
+      'S3_SECRET_ACCESS_KEY',
       'SMTP_URL',
       'TICKET_QR_KEYS',
       'TINGEE_BASE_URL',
@@ -263,6 +273,50 @@ describe('loadConfig', () => {
       'WEB_ORIGIN',
     ]);
     expect(err.issues.every((i) => i.reason === 'thiếu')).toBe(true);
+  });
+
+  it('object storage (Story 4.8-a): chỉ vai api; mặc định region us-east-1, path-style tắt; sai → nêu tên biến, không in giá trị', () => {
+    expect(loadConfig(apiEnv)).toMatchObject({
+      S3_ENDPOINT: 'https://s3.tickee.vn',
+      S3_REGION: 'us-east-1',
+      S3_BUCKET: 'tickee-event-images',
+      S3_ACCESS_KEY_ID: 'AKIA-tickee-api',
+      S3_SECRET_ACCESS_KEY: `s3-${SECRET}`,
+      S3_FORCE_PATH_STYLE: false,
+      S3_PUBLIC_BASE_URL: 'https://anh.tickee.vn',
+    });
+    expect(
+      loadConfig({
+        ...apiEnv,
+        S3_REGION: 'ap-southeast-1',
+        S3_FORCE_PATH_STYLE: 'true',
+        S3_PUBLIC_BASE_URL: 'http://localhost:9000/anh',
+      }),
+    ).toMatchObject({
+      S3_REGION: 'ap-southeast-1',
+      S3_FORCE_PATH_STYLE: true,
+      S3_PUBLIC_BASE_URL: 'http://localhost:9000/anh',
+    });
+    const err = issuesOf({
+      ...apiEnv,
+      S3_ENDPOINT: `ftp://${SECRET}.vn`,
+      S3_BUCKET: `Bucket_${SECRET}`,
+      S3_FORCE_PATH_STYLE: SECRET,
+      S3_PUBLIC_BASE_URL: SECRET,
+      S3_SECRET_ACCESS_KEY: '',
+    });
+    expect(err.issues.map((i) => i.variable).sort()).toEqual([
+      'S3_BUCKET',
+      'S3_ENDPOINT',
+      'S3_FORCE_PATH_STYLE',
+      'S3_PUBLIC_BASE_URL',
+      'S3_SECRET_ACCESS_KEY',
+    ]);
+    expect(err.message).not.toContain(SECRET);
+    expect(JSON.stringify(err.issues)).not.toContain(SECRET);
+    // Worker không đọc nhóm `S3_*`.
+    const worker = loadConfig({ ...workerEnv, S3_ENDPOINT: 'https://s3.tickee.vn', S3_BUCKET: 'tickee-event-images' });
+    expect(Object.keys(worker).filter((k) => k.startsWith('S3_'))).toEqual([]);
   });
 
   it('vai api: biến Tingee bắt buộc; URL phải là origin; không còn credential Tingee nào trong env', () => {

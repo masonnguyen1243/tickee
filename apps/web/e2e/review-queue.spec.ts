@@ -211,6 +211,7 @@ const eventSummary = (event: { id: string; name: string }, status: string) => ({
   startsAt: '2026-11-20T18:00:00+07:00',
   endsAt: '2026-11-20T22:00:00+07:00',
   effectiveEndAt: '2026-11-20T22:00:00+07:00',
+  imageUrl: null,
 });
 const ORG_EVENTS = [
   eventSummary({ id: '019a3b2c-0d0d-7abc-8def-0123456789ab', name: 'Sự kiện nháp' }, 'draft'),

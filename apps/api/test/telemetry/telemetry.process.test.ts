@@ -62,6 +62,13 @@ function apiEnv(port: number, tingeeBaseUrl = 'http://127.0.0.1:1'): Record<stri
     TINGEE_BASE_URL: tingeeBaseUrl,
     TINGEE_CREDENTIAL_KEYS: c.TINGEE_CREDENTIAL_KEYS,
     TICKET_QR_KEYS: c.TICKET_QR_KEYS,
+    // Ảnh Sự kiện (Story 4.8-a): bắt buộc ở vai api.
+    S3_ENDPOINT: c.S3_ENDPOINT,
+    S3_BUCKET: c.S3_BUCKET,
+    S3_ACCESS_KEY_ID: c.S3_ACCESS_KEY_ID,
+    S3_SECRET_ACCESS_KEY: c.S3_SECRET_ACCESS_KEY,
+    S3_FORCE_PATH_STYLE: String(c.S3_FORCE_PATH_STYLE),
+    S3_PUBLIC_BASE_URL: c.S3_PUBLIC_BASE_URL,
   };
 }
 

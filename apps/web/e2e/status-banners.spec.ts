@@ -375,6 +375,7 @@ const eventSummary = (
   startsAt: '2099-11-16T07:00:00+07:00',
   endsAt: '2099-11-16T17:00:00+07:00',
   effectiveEndAt,
+  imageUrl: null,
 });
 
 const THREE_EVENTS = [

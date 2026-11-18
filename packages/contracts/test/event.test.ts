@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { ErrorCode } from '../src/errors.js';
 import {
+  EVENT_IMAGE_EXTENSIONS,
+  EVENT_IMAGE_MAX_BYTES,
+  EVENT_IMAGE_TYPES,
   EVENT_SLUG_BASE_MAX,
   EventBuyerCount,
   EventDraftInput,
+  EventImageKey,
+  EventImageUpload,
+  EventImageUploadInput,
+  eventImageKeyPrefix,
+  eventImagesApiPath,
   EventPendingPaymentCount,
   eventBuyerCountApiPath,
   eventPendingPaymentCountApiPath,
@@ -93,7 +101,14 @@ describe('EventDraftInput', () => {
 
   it('chỉ cần tên và giờ; trường tùy chọn trống → null', () => {
     const parsed = EventDraftInput.parse({ ...valid, venue: '   ', description: null });
-    expect(parsed).toEqual({ ...valid, name: 'Giải chạy', venue: null, description: null, refundPolicy: null });
+    expect(parsed).toEqual({
+      ...valid,
+      name: 'Giải chạy',
+      venue: null,
+      description: null,
+      refundPolicy: null,
+      imageKey: null,
+    });
   });
 
   it('thiếu giờ, giờ không có offset, kết thúc ≤ bắt đầu → lỗi ở đúng trường', () => {
@@ -124,6 +139,73 @@ describe('EventDraftInput', () => {
     // 2000-01-01 00:00 +07:00 là 1999 theo UTC: vẫn trong khoảng (tính theo giờ Việt Nam).
     expect(paths({ ...valid, startsAt: '2000-01-01T00:00:00+07:00' })).toEqual([]);
     expect(isEventYearInRange('2101-01-01T00:00:00+07:00')).toBe(false);
+  });
+});
+
+describe('ảnh Sự kiện (Story 4.8)', () => {
+  const ORG = '019a3b2c-5678-7abc-8def-0123456789ab';
+  const IMAGE = '0b9e4c1a-2f3d-4e5f-8a6b-7c8d9e0f1a2b';
+  const key = `orgs/${ORG}/events/${IMAGE}.webp`;
+  const valid = { name: 'Giải chạy', startsAt: '2026-11-16T07:00:00+07:00', endsAt: '2026-11-16T17:00:00+07:00' };
+  type Parsed = { success: boolean; error?: { issues: { path: PropertyKey[] }[] } };
+  const paths = (result: Parsed) => (result.success ? [] : (result.error?.issues ?? []).map((i) => i.path.join('.')));
+  const draftPaths = (input: unknown) => paths(EventDraftInput.safeParse(input));
+  const uploadPaths = (input: unknown) => paths(EventImageUploadInput.safeParse(input));
+
+  it('ba loại ảnh, tối đa 5 MB; đuôi key theo loại', () => {
+    expect(EVENT_IMAGE_TYPES).toEqual(['image/jpeg', 'image/png', 'image/webp']);
+    expect(EVENT_IMAGE_MAX_BYTES).toBe(5 * 1024 * 1024);
+    expect(EVENT_IMAGE_EXTENSIONS).toEqual({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' });
+  });
+
+  it('key: orgs/{orgId}/events/{uuid}.{jpg|png|webp}, uuid chữ thường; tiền tố theo BTC', () => {
+    expect(eventImageKeyPrefix(ORG)).toBe(`orgs/${ORG}/events/`);
+    for (const ext of ['jpg', 'png', 'webp']) {
+      expect(EventImageKey.safeParse(`orgs/${ORG}/events/${IMAGE}.${ext}`).success, ext).toBe(true);
+    }
+    for (const bad of [
+      `orgs/${ORG}/events/${IMAGE}.gif`,
+      `orgs/${ORG}/events/${IMAGE}.jpeg`,
+      `orgs/${ORG.toUpperCase()}/events/${IMAGE}.webp`,
+      `orgs/${ORG}/events/${IMAGE}`,
+      `orgs/${ORG}/events/../${IMAGE}.webp`,
+      `/orgs/${ORG}/events/${IMAGE}.webp`,
+      `orgs/${ORG}/tickets/${IMAGE}.webp`,
+      `orgs/khong-phai-uuid/events/${IMAGE}.webp`,
+      `${key}\n`,
+      `https://cdn.vidu.vn/${key}`,
+    ]) {
+      expect(EventImageKey.safeParse(bad).success, bad).toBe(false);
+    }
+  });
+
+  it('EventDraftInput: imageKey thiếu hoặc null → null (gỡ ảnh); key sai dạng → lỗi ở imageKey', () => {
+    expect(EventDraftInput.parse(valid).imageKey).toBeNull();
+    expect(EventDraftInput.parse({ ...valid, imageKey: null }).imageKey).toBeNull();
+    expect(EventDraftInput.parse({ ...valid, imageKey: key }).imageKey).toBe(key);
+    expect(draftPaths({ ...valid, imageKey: 'anh.webp' })).toEqual(['imageKey']);
+    expect(draftPaths({ ...valid, imageKey: '' })).toEqual(['imageKey']);
+    expect(draftPaths({ ...valid, imageKey: 42 })).toEqual(['imageKey']);
+  });
+
+  it('EventImageUploadInput: chỉ JPEG/PNG/WebP, 1 byte tới 5 MB, số nguyên', () => {
+    for (const contentType of EVENT_IMAGE_TYPES) {
+      expect(uploadPaths({ contentType, contentLength: 1 })).toEqual([]);
+      expect(uploadPaths({ contentType, contentLength: EVENT_IMAGE_MAX_BYTES })).toEqual([]);
+    }
+    expect(uploadPaths({ contentType: 'image/gif', contentLength: 10 })).toEqual(['contentType']);
+    expect(uploadPaths({ contentType: 'image/webp', contentLength: 0 })).toEqual(['contentLength']);
+    const tooBig = { contentType: 'image/webp', contentLength: EVENT_IMAGE_MAX_BYTES + 1 };
+    expect(uploadPaths(tooBig)).toEqual(['contentLength']);
+    expect(uploadPaths({ contentType: 'image/webp', contentLength: 1.5 })).toEqual(['contentLength']);
+    expect(uploadPaths({ contentType: 'image/webp', contentLength: '100' })).toEqual(['contentLength']);
+    expect(uploadPaths({})).toEqual(['contentType', 'contentLength']);
+  });
+
+  it('EventImageUpload và đường API presign', () => {
+    const uploadUrl = `http://localhost:9000/anh/${key}?X-Amz-Signature=abc`;
+    expect(EventImageUpload.parse({ key, uploadUrl, expiresAt: '2026-11-18T03:05:00.000Z' })).toMatchObject({ key });
+    expect(eventImagesApiPath(ORG)).toBe(`/orgs/${ORG}/event-images`);
   });
 });
 
