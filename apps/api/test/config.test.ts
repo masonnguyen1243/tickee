@@ -1,5 +1,16 @@
+import { readFileSync } from 'node:fs';
+import { parseEnv } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { ConfigError, loadConfig } from '../src/platform/config/index.js';
+import {
+  apiConfigSchema,
+  ConfigError,
+  ENV_EXAMPLE_KEYS,
+  ENV_EXAMPLE_SECRETS,
+  isCookieParent,
+  loadConfig,
+  sharesKey,
+  workerConfigSchema,
+} from '../src/platform/config/index.js';
 
 const SECRET = 's3cret-Gi4-tri';
 /** Khóa 32 byte (base64) dùng làm "giá trị bí mật" của `TINGEE_CREDENTIAL_KEYS`. */
@@ -10,6 +21,7 @@ const QR_KEY_1 = Buffer.alloc(32, 0x3c).toString('base64');
 const QR_KEY_2 = Buffer.alloc(32, 0xc3).toString('base64');
 const apiEnv = {
   APP_ROLE: 'api',
+  NODE_ENV: 'test',
   DATABASE_URL: `postgresql://tickee_app:${SECRET}@db:5432/tickee`,
   BETTER_AUTH_SECRET: `${SECRET}-${'x'.repeat(32)}`,
   API_PUBLIC_URL: 'https://api.tickee.vn',
@@ -29,6 +41,7 @@ const apiEnv = {
 };
 const workerEnv = {
   APP_ROLE: 'worker',
+  NODE_ENV: 'test',
   DATABASE_URL: apiEnv.DATABASE_URL,
   WEB_ORIGIN: apiEnv.WEB_ORIGIN,
   SMTP_URL: apiEnv.SMTP_URL,
@@ -38,6 +51,17 @@ const workerEnv = {
   TINGEE_CREDENTIAL_KEYS: apiEnv.TINGEE_CREDENTIAL_KEYS,
   TICKET_QR_KEYS: apiEnv.TICKET_QR_KEYS,
 };
+/** Production hợp lệ (Story 4.7-b): https, secret riêng, dải IP admin, cookie ở miền cha của `api.tickee.vn` và `tickee.vn`. */
+const apiProdEnv = {
+  ...apiEnv,
+  NODE_ENV: 'production',
+  ADMIN_ALLOWED_CIDRS: '203.0.113.0/24',
+  AUTH_COOKIE_DOMAIN: 'tickee.vn',
+};
+const workerProdEnv = { ...workerEnv, NODE_ENV: 'production' };
+
+/** `.env.example` ở gốc repo, đúng như `.env` local được tạo từ nó. */
+const envExample = parseEnv(readFileSync(new URL('../../../.env.example', import.meta.url), 'utf8'));
 
 function issuesOf(env: Record<string, string | undefined>): ConfigError {
   try {
@@ -56,19 +80,19 @@ describe('loadConfig', () => {
       APP_ROLE: 'api',
       PORT: 3001,
       LOG_LEVEL: 'info',
-      NODE_ENV: 'development',
+      NODE_ENV: 'test',
       TRUST_PROXY_HOPS: 0,
     });
   });
 
   it('vai migrate chỉ cần MIGRATION_DATABASE_URL, không cần DATABASE_URL', () => {
-    const config = loadConfig({ APP_ROLE: 'migrate', MIGRATION_DATABASE_URL: 'postgres://m:p@db/tickee' });
+    const config = loadConfig({ APP_ROLE: 'migrate', NODE_ENV: 'test', MIGRATION_DATABASE_URL: 'postgres://m:p@db/tickee' });
     expect(config.APP_ROLE).toBe('migrate');
   });
 
   it('biến tùy chọn đặt rỗng → dùng mặc định; biến bắt buộc rỗng → "thiếu"', () => {
-    const config = loadConfig({ ...apiEnv, PORT: '', LOG_LEVEL: '', NODE_ENV: '' });
-    expect(config).toMatchObject({ PORT: 3001, LOG_LEVEL: 'info', NODE_ENV: 'development' });
+    const config = loadConfig({ ...apiEnv, PORT: '', LOG_LEVEL: '' });
+    expect(config).toMatchObject({ PORT: 3001, LOG_LEVEL: 'info' });
     const err = issuesOf({ ...apiEnv, DATABASE_URL: '' });
     expect(err.issues).toEqual([{ variable: 'DATABASE_URL', reason: 'thiếu' }]);
   });
@@ -223,7 +247,7 @@ describe('loadConfig', () => {
   });
 
   it('thiếu MIGRATION_DATABASE_URL ở vai migrate', () => {
-    const err = issuesOf({ APP_ROLE: 'migrate', DATABASE_URL: apiEnv.DATABASE_URL });
+    const err = issuesOf({ APP_ROLE: 'migrate', NODE_ENV: 'test', DATABASE_URL: apiEnv.DATABASE_URL });
     expect(err.issues).toEqual([{ variable: 'MIGRATION_DATABASE_URL', reason: 'thiếu' }]);
   });
 
@@ -261,6 +285,7 @@ describe('loadConfig', () => {
       'EMAIL_FROM',
       'GOOGLE_CLIENT_ID',
       'GOOGLE_CLIENT_SECRET',
+      'NODE_ENV',
       'S3_ACCESS_KEY_ID',
       'S3_BUCKET',
       'S3_ENDPOINT',
@@ -443,27 +468,27 @@ describe('loadConfig', () => {
       '2001:db8::/32',
       '198.51.100.7/32',
     ]);
-    for (const NODE_ENV of ['development', 'test', undefined]) {
+    for (const NODE_ENV of ['development', 'test']) {
       expect(cidrsOf({ ...apiEnv, NODE_ENV }), String(NODE_ENV)).toBeUndefined();
       expect(cidrsOf({ ...apiEnv, NODE_ENV, ADMIN_ALLOWED_CIDRS: '' }), String(NODE_ENV)).toBeUndefined();
     }
     expect(loadConfig({ ...workerEnv, ADMIN_ALLOWED_CIDRS: '203.0.113.0/24' })).not.toHaveProperty('ADMIN_ALLOWED_CIDRS');
     // Worker ở production không cần biến này.
-    expect(loadConfig({ ...workerEnv, NODE_ENV: 'production' })).not.toHaveProperty('ADMIN_ALLOWED_CIDRS');
+    expect(loadConfig(workerProdEnv)).not.toHaveProperty('ADMIN_ALLOWED_CIDRS');
   });
 
   it('ADMIN_ALLOWED_CIDRS: NODE_ENV=production thiếu hoặc rỗng → "thiếu"; đặt đúng thì khởi động được', () => {
     for (const value of [undefined, '']) {
-      const err = issuesOf({ ...apiEnv, NODE_ENV: 'production', ADMIN_ALLOWED_CIDRS: value });
+      const err = issuesOf({ ...apiProdEnv, ADMIN_ALLOWED_CIDRS: value });
       expect(err.issues).toEqual([{ variable: 'ADMIN_ALLOWED_CIDRS', reason: 'thiếu' }]);
       expect(err.message).toContain('ADMIN_ALLOWED_CIDRS');
     }
-    expect(loadConfig({ ...apiEnv, NODE_ENV: 'production', ADMIN_ALLOWED_CIDRS: '203.0.113.0/24' })).toMatchObject({
+    expect(loadConfig(apiProdEnv)).toMatchObject({
       NODE_ENV: 'production',
       ADMIN_ALLOWED_CIDRS: ['203.0.113.0/24'],
     });
     // Báo cùng lượt với biến khác đang lỗi (không phải sửa từng biến một).
-    const both = issuesOf({ ...apiEnv, NODE_ENV: 'production', DATABASE_URL: undefined });
+    const both = issuesOf({ ...apiProdEnv, ADMIN_ALLOWED_CIDRS: undefined, DATABASE_URL: undefined });
     expect(both.issues).toEqual(
       expect.arrayContaining([
         { variable: 'DATABASE_URL', reason: 'thiếu' },
@@ -484,7 +509,7 @@ describe('loadConfig', () => {
     ];
     for (const NODE_ENV of ['production', 'development']) {
       for (const [value, reason] of cases) {
-        const err = issuesOf({ ...apiEnv, NODE_ENV, ADMIN_ALLOWED_CIDRS: value });
+        const err = issuesOf({ ...apiProdEnv, NODE_ENV, ADMIN_ALLOWED_CIDRS: value });
         // Một issue: lỗi định dạng, không thêm "thiếu" ở production.
         expect(err.issues, `${NODE_ENV} ${value}`).toEqual([{ variable: 'ADMIN_ALLOWED_CIDRS', reason }]);
         expect(err.message).not.toContain(SECRET);
@@ -499,5 +524,260 @@ describe('loadConfig', () => {
     ]);
     expect(loadConfig({ ...apiEnv, AUTH_COOKIE_DOMAIN: 'tickee.vn' })).toMatchObject({ AUTH_COOKIE_DOMAIN: 'tickee.vn' });
     expect(loadConfig(apiEnv)).not.toHaveProperty('AUTH_COOKIE_DOMAIN');
+  });
+});
+
+const HTTPS_REASON = 'phải là https khi NODE_ENV=production';
+const EXAMPLE_REASON = 'là giá trị mẫu của .env.example; môi trường thật phải sinh giá trị riêng';
+const SHARED_KEY_REASON = 'dùng chung khóa với TINGEE_CREDENTIAL_KEYS';
+const COOKIE_REASON = 'phải là miền cha của host API_PUBLIC_URL và WEB_ORIGIN';
+
+/** Env production hợp lệ của từng vai, kèm danh sách biến vai đó đọc. */
+const prodRoles = [
+  ['api', apiProdEnv, apiConfigSchema.shape],
+  ['worker', workerProdEnv, workerConfigSchema.shape],
+] as const;
+
+describe('siết cấu hình production (Story 4.7-b)', () => {
+  it('production hợp lệ: api và worker khởi động; OTEL_EXPORTER_OTLP_ENDPOINT http vẫn nhận (collector nội bộ)', () => {
+    expect(loadConfig(apiProdEnv)).toMatchObject({ NODE_ENV: 'production', AUTH_COOKIE_DOMAIN: 'tickee.vn' });
+    expect(loadConfig(workerProdEnv)).toMatchObject({ APP_ROLE: 'worker', NODE_ENV: 'production' });
+    for (const env of [apiProdEnv, workerProdEnv]) {
+      expect(loadConfig({ ...env, OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel-collector:4318' })).toMatchObject({
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel-collector:4318',
+      });
+    }
+  });
+
+  it('NODE_ENV bắt buộc ở cả ba vai: không đặt hoặc rỗng → "thiếu", không mặc định development', () => {
+    const migrateEnv = { APP_ROLE: 'migrate', MIGRATION_DATABASE_URL: 'postgres://m:p@db/tickee' };
+    for (const env of [apiEnv, workerEnv, migrateEnv]) {
+      for (const NODE_ENV of [undefined, '']) {
+        expect(issuesOf({ ...env, NODE_ENV }).issues, `${env.APP_ROLE} ${String(NODE_ENV)}`).toEqual([
+          { variable: 'NODE_ENV', reason: 'thiếu' },
+        ]);
+      }
+    }
+    // Giá trị lạ: một issue ở NODE_ENV, không in giá trị; luật dùng NODE_ENV bỏ qua nên http và secret mẫu không báo thêm.
+    const err = issuesOf({
+      ...apiProdEnv,
+      NODE_ENV: `prod-${SECRET}`,
+      API_PUBLIC_URL: 'http://api.tickee.vn',
+      BETTER_AUTH_SECRET: ENV_EXAMPLE_SECRETS.BETTER_AUTH_SECRET,
+    });
+    expect(err.issues).toEqual([{ variable: 'NODE_ENV', reason: 'giá trị không thuộc danh sách cho phép' }]);
+    expect(err.message).not.toContain(SECRET);
+  });
+
+  it.each([
+    ['api', 'API_PUBLIC_URL', 'http://api.tickee.vn'],
+    ['api', 'WEB_ORIGIN', 'http://tickee.vn'],
+    ['api', 'TINGEE_BASE_URL', 'http://uat-open-api.tingee.vn'],
+    ['api', 'S3_ENDPOINT', 'http://s3.tickee.vn'],
+    ['api', 'S3_PUBLIC_BASE_URL', 'http://anh.tickee.vn/anh'],
+    ['worker', 'WEB_ORIGIN', 'http://tickee.vn'],
+    ['worker', 'TINGEE_BASE_URL', 'http://uat-open-api.tingee.vn'],
+  ])('vai %s: %s http ở production → lỗi, không in giá trị; development/test vẫn nhận', (role, variable, value) => {
+    const prod = role === 'api' ? apiProdEnv : workerProdEnv;
+    const err = issuesOf({ ...prod, [variable]: value });
+    expect(err.issues).toEqual([{ variable, reason: HTTPS_REASON }]);
+    expect(err.message).not.toContain(value);
+    for (const NODE_ENV of ['development', 'test']) {
+      expect(() => loadConfig({ ...prod, NODE_ENV, [variable]: value }), NODE_ENV).not.toThrow();
+    }
+  });
+
+  it.each(Object.entries(ENV_EXAMPLE_SECRETS))(
+    '%s đúng giá trị mẫu ở production → lỗi, không in giá trị; development vẫn nhận',
+    (variable, example) => {
+      let checked = 0;
+      for (const [role, prod, shape] of prodRoles) {
+        if (!(variable in shape)) continue;
+        checked += 1;
+        const err = issuesOf({ ...prod, [variable]: example });
+        expect(err.issues, role).toEqual([{ variable, reason: EXAMPLE_REASON }]);
+        expect(err.message).not.toContain(example);
+        // Khoảng trắng hai đầu (secret tạo từ file kèm dòng mới cuối) vẫn là giá trị mẫu.
+        for (const padded of [`${example}\n`, ` ${example} `]) {
+          expect(issuesOf({ ...prod, [variable]: padded }).issues, `${role} ${JSON.stringify(padded)}`).toEqual([
+            { variable, reason: EXAMPLE_REASON },
+          ]);
+        }
+        expect(() => loadConfig({ ...prod, NODE_ENV: 'development', [variable]: example }), role).not.toThrow();
+      }
+      expect(checked).toBeGreaterThan(0);
+    },
+  );
+
+  it('TINGEE_CREDENTIAL_KEYS, TICKET_QR_KEYS: khóa trùng byte với một trong hai khóa mẫu, bất kể phiên bản → lỗi ở production', () => {
+    const exampleKeys = Object.values(ENV_EXAMPLE_KEYS).map((list) => list.slice(list.indexOf(':') + 1));
+    expect(exampleKeys).toHaveLength(2);
+    for (const [role, prod] of prodRoles) {
+      for (const example of exampleKeys) {
+        for (const [variable, value] of [
+          ['TINGEE_CREDENTIAL_KEYS', `v1:${KEY_1},v2:${example}`],
+          ['TICKET_QR_KEYS', `v7:${example}`],
+        ] as const) {
+          const err = issuesOf({ ...prod, [variable]: value });
+          expect(err.issues, `${role} ${variable}`).toEqual([{ variable, reason: EXAMPLE_REASON }]);
+          expect(err.message).not.toContain(example);
+          expect(() => loadConfig({ ...prod, NODE_ENV: 'development', [variable]: value }), `${role} ${variable}`).not.toThrow();
+        }
+      }
+    }
+  });
+
+  it('TICKET_QR_KEYS có khóa trùng byte với TINGEE_CREDENTIAL_KEYS → lỗi ở TICKET_QR_KEYS, ở mọi môi trường', () => {
+    for (const [role, prod] of prodRoles) {
+      for (const NODE_ENV of ['development', 'test', 'production']) {
+        const err = issuesOf({ ...prod, NODE_ENV, TICKET_QR_KEYS: `v1:${QR_KEY_1},v3:${KEY_2}` });
+        expect(err.issues, `${role} ${NODE_ENV}`).toEqual([{ variable: 'TICKET_QR_KEYS', reason: SHARED_KEY_REASON }]);
+        expect(err.message).not.toContain(KEY_2);
+      }
+    }
+    // Một danh sách sai dạng: chỉ báo lỗi định dạng, không so khóa.
+    const invalid = issuesOf({ ...apiEnv, TINGEE_CREDENTIAL_KEYS: `v1:${QR_KEY_1}x`, TICKET_QR_KEYS: `v1:${QR_KEY_1}` });
+    expect(invalid.issues.map((i) => i.variable)).toEqual(['TINGEE_CREDENTIAL_KEYS']);
+  });
+
+  it('AUTH_COOKIE_DOMAIN đặt thì phải là miền cha của host API_PUBLIC_URL và WEB_ORIGIN, ở mọi môi trường', () => {
+    for (const NODE_ENV of ['development', 'test', 'production']) {
+      for (const domain of ['khac.vn', 'api.tickee.vn', 'ckee.vn', 'tickee.vn.khac.vn']) {
+        const err = issuesOf({ ...apiProdEnv, NODE_ENV, AUTH_COOKIE_DOMAIN: domain });
+        expect(err.issues, `${NODE_ENV} ${domain}`).toEqual([{ variable: 'AUTH_COOKIE_DOMAIN', reason: COOKIE_REASON }]);
+        expect(err.message).not.toContain(domain);
+      }
+      // Không phân biệt hoa thường, bỏ dấu `.` đầu; giá trị giữ nguyên như đã đặt.
+      for (const domain of ['tickee.vn', '.Tickee.VN', 'TICKEE.vn']) {
+        expect(loadConfig({ ...apiProdEnv, NODE_ENV, AUTH_COOKIE_DOMAIN: domain }), `${NODE_ENV} ${domain}`).toMatchObject({
+          AUTH_COOKIE_DOMAIN: domain,
+        });
+      }
+    }
+  });
+
+  it('production, hai host khác nhau mà không đặt AUTH_COOKIE_DOMAIN → "thiếu"; cùng host thì không cần; development/test không bắt buộc', () => {
+    for (const value of [undefined, '']) {
+      expect(issuesOf({ ...apiProdEnv, AUTH_COOKIE_DOMAIN: value }).issues).toEqual([
+        { variable: 'AUTH_COOKIE_DOMAIN', reason: 'thiếu' },
+      ]);
+    }
+    // Cookie không tách theo cổng: cùng host là đủ.
+    for (const API_PUBLIC_URL of ['https://tickee.vn', 'https://tickee.vn:8443']) {
+      expect(loadConfig({ ...apiProdEnv, AUTH_COOKIE_DOMAIN: undefined, API_PUBLIC_URL }), API_PUBLIC_URL).not.toHaveProperty(
+        'AUTH_COOKIE_DOMAIN',
+      );
+    }
+    for (const NODE_ENV of ['development', 'test']) {
+      expect(loadConfig({ ...apiProdEnv, NODE_ENV, AUTH_COOKIE_DOMAIN: undefined }), NODE_ENV).not.toHaveProperty(
+        'AUTH_COOKIE_DOMAIN',
+      );
+    }
+  });
+
+  it('luật cookie bỏ qua khi origin nó dùng đã lỗi: chỉ báo https ở origin đó', () => {
+    for (const [origin, value] of [
+      ['WEB_ORIGIN', 'http://khac.vn'],
+      ['API_PUBLIC_URL', 'http://api.khac.vn'],
+    ] as const) {
+      for (const AUTH_COOKIE_DOMAIN of ['tickee.vn', undefined]) {
+        expect(issuesOf({ ...apiProdEnv, AUTH_COOKIE_DOMAIN, [origin]: value }).issues, `${origin} ${String(AUTH_COOKIE_DOMAIN)}`).toEqual([
+          { variable: origin, reason: HTTPS_REASON },
+        ]);
+      }
+    }
+  });
+
+  it('nhiều lỗi ở production → một ConfigError nêu đủ, mỗi biến một issue, không in giá trị', () => {
+    const err = issuesOf({
+      ...apiProdEnv,
+      API_PUBLIC_URL: 'http://api.tickee.vn',
+      BETTER_AUTH_SECRET: ENV_EXAMPLE_SECRETS.BETTER_AUTH_SECRET,
+      DATABASE_URL: undefined,
+    });
+    expect(err.issues).toEqual([
+      { variable: 'DATABASE_URL', reason: 'thiếu' },
+      { variable: 'API_PUBLIC_URL', reason: HTTPS_REASON },
+      { variable: 'BETTER_AUTH_SECRET', reason: EXAMPLE_REASON },
+    ]);
+    expect(err.message).not.toContain('http://api.tickee.vn');
+    expect(err.message).not.toContain(ENV_EXAMPLE_SECRETS.BETTER_AUTH_SECRET);
+  });
+
+  it('.env.example (NODE_ENV=development): api, worker, migrate khởi động như trước', () => {
+    expect(envExample.NODE_ENV).toBe('development');
+    expect(loadConfig(envExample)).toMatchObject({ APP_ROLE: 'api', NODE_ENV: 'development' });
+    expect(loadConfig({ ...envExample, APP_ROLE: 'worker' })).toMatchObject({ APP_ROLE: 'worker' });
+    expect(loadConfig({ ...envExample, APP_ROLE: 'migrate' })).toMatchObject({ APP_ROLE: 'migrate' });
+  });
+
+  it('.env.example: giá trị mẫu trong file của từng biến bị từ chối ở production (sửa file mà quên sửa code thì đỏ)', () => {
+    for (const variable of [...Object.keys(ENV_EXAMPLE_SECRETS), ...Object.keys(ENV_EXAMPLE_KEYS)]) {
+      const value = envExample[variable];
+      expect(value, `${variable} có trong .env.example`).toBeTruthy();
+      let checked = 0;
+      for (const [role, prod, shape] of prodRoles) {
+        if (!(variable in shape)) continue;
+        checked += 1;
+        expect(issuesOf({ ...prod, [variable]: value }).issues, `${role} ${variable}`).toEqual([
+          { variable, reason: EXAMPLE_REASON },
+        ]);
+      }
+      expect(checked, variable).toBeGreaterThan(0);
+    }
+    // Từng khóa của danh sách mẫu, đứng riêng, cũng bị từ chối: thêm `v2:<khóa mới>` vào file mà quên code thì đỏ.
+    for (const variable of Object.keys(ENV_EXAMPLE_KEYS)) {
+      const entries = (envExample[variable] ?? '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry !== '');
+      expect(entries.length, variable).toBeGreaterThan(0);
+      for (const entry of entries) {
+        for (const [role, prod] of prodRoles) {
+          expect(issuesOf({ ...prod, [variable]: entry }).issues, `${role} ${variable}`).toEqual([
+            { variable, reason: EXAMPLE_REASON },
+          ]);
+        }
+      }
+    }
+  });
+
+  it('env của image (NODE_ENV=production) với giá trị y .env.example → api, worker không khởi động, nêu đủ biến vi phạm, không in giá trị', () => {
+    const expected = {
+      api: [
+        'ADMIN_ALLOWED_CIDRS',
+        'API_PUBLIC_URL',
+        'BETTER_AUTH_SECRET',
+        'GOOGLE_CLIENT_ID',
+        'GOOGLE_CLIENT_SECRET',
+        'S3_ACCESS_KEY_ID',
+        'S3_ENDPOINT',
+        'S3_PUBLIC_BASE_URL',
+        'S3_SECRET_ACCESS_KEY',
+        'TICKET_QR_KEYS',
+        'TINGEE_BASE_URL',
+        'TINGEE_CREDENTIAL_KEYS',
+        'WEB_ORIGIN',
+      ],
+      worker: ['REVALIDATE_SECRET', 'TICKET_QR_KEYS', 'TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS', 'WEB_ORIGIN'],
+    };
+    for (const [role, variables] of Object.entries(expected)) {
+      const env: Record<string, string | undefined> = { ...envExample, APP_ROLE: role, NODE_ENV: 'production' };
+      const err = issuesOf(env);
+      expect(err.issues.map((i) => i.variable).sort(), role).toEqual(variables);
+      for (const { variable } of err.issues) {
+        const value = env[variable];
+        if (value) expect(err.message, `${role} ${variable}`).not.toContain(value);
+      }
+    }
+  });
+
+  it('isCookieParent và sharesKey (hàm thuần dùng chung với schema)', () => {
+    expect(isCookieParent('.Tickee.VN', 'https://API.tickee.vn')).toBe(true);
+    expect(isCookieParent('tickee.vn', 'https://tickee.vn:8443')).toBe(true);
+    expect(isCookieParent('tickee.vn', 'https://xtickee.vn')).toBe(false);
+    expect(isCookieParent('tickee.vn', 'khong-phai-url')).toBe(false);
+    expect(sharesKey(`v1:${KEY_1}`, `v9:${QR_KEY_1},v2:${KEY_1}`)).toBe(true);
+    expect(sharesKey(`v1:${KEY_1},v2:${KEY_2}`, `v1:${QR_KEY_1},v2:${QR_KEY_2}`)).toBe(false);
   });
 });

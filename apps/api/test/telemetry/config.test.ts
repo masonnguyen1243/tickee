@@ -62,6 +62,7 @@ describe('cấu hình OpenTelemetry', () => {
   it('vai migrate không nhận biến OTEL_* (không bật telemetry)', () => {
     const config = loadConfig({
       APP_ROLE: 'migrate',
+      NODE_ENV: 'test',
       MIGRATION_DATABASE_URL: 'postgres://m:p@db/tickee',
       OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
     });

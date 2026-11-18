@@ -68,6 +68,8 @@ jobs:
         run: node apps/api/dist/main.js
         env:
           APP_ROLE: migrate
+          # Bắt buộc ở mọi vai, không có mặc định (Story 4.7-b). Image tự đặt production.
+          NODE_ENV: test
           MIGRATION_DATABASE_URL: postgresql://tickee_migrator:tickee_migrator@localhost:5432/tickee
 
       - name: Vitest (Postgres 18 thật)

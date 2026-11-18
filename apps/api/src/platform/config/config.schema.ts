@@ -1,6 +1,15 @@
 import { z } from 'zod';
 import { CredentialKeysError, parseCredentialKeys } from '../crypto/index.js';
 import { parseCidrList } from './cidr.js';
+import {
+  ENV_EXAMPLE_KEYS,
+  ENV_EXAMPLE_SECRETS,
+  hostOf,
+  isCookieParent,
+  isHttps,
+  sharesKey,
+  usesExampleKey,
+} from './production-rules.js';
 
 export const APP_ROLES = ['api', 'worker', 'migrate'] as const;
 export type AppRole = (typeof APP_ROLES)[number];
@@ -11,7 +20,12 @@ const postgresUrl = z
   .refine((v) => /^postgres(ql)?:\/\//.test(v), { message: 'phải là URL postgres:// hoặc postgresql://' });
 
 const common = {
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  /**
+   * Bắt buộc ở mọi vai, không có mặc định (Story 4.7-b): thiếu thì mọi luật production (https, giá trị mẫu, giới hạn IP
+   * `/v1/admin/*`…) không được phép tự tắt. Image đặt `production` (cả staging); `.env.example` đặt `development`; test
+   * đặt `test`.
+   */
+  NODE_ENV: z.enum(['development', 'test', 'production']),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 };
 
@@ -267,19 +281,120 @@ const apiConfigFields = z.object({
   ...opsAlertApiRules,
 });
 
-/** Vai api: `ADMIN_ALLOWED_CIDRS` bắt buộc khi `NODE_ENV=production` (Story 4.7-a; staging cũng chạy production). */
-export const apiConfigSchema = apiConfigFields.refine(
-  (config) => config.NODE_ENV !== 'production' || config.ADMIN_ALLOWED_CIDRS !== undefined,
-  {
-    // Issue mức object phải gắn đúng tên biến (`toIssues` đọc `path[0]`); biến không đặt thì lý do là "thiếu".
-    path: ['ADMIN_ALLOWED_CIDRS'],
-    message: 'bắt buộc khi NODE_ENV=production',
-    // Chạy cả khi biến khác lỗi để báo đủ trong một lần; bỏ qua khi chính biến này đã lỗi định dạng.
-    when: (payload) => !payload.issues.some((issue) => issue.path?.[0] === 'ADMIN_ALLOWED_CIDRS'),
-  },
-);
+/**
+ * Luật giữa các biến: sai thì issue gắn vào `variable` với lý do `message`. `check` chỉ đọc `variable` và các biến trong
+ * `uses`; luật chỉ chạy khi các biến đó (kể cả `NODE_ENV` nếu luật dùng nó) không có issue khác, nên một biến không bị báo
+ * hai lần và `check` chỉ thấy giá trị đã qua kiểm định dạng. Vai nào không đọc đủ các biến của luật thì bỏ luật đó.
+ */
+interface CrossRule {
+  readonly variable: string;
+  readonly uses: readonly string[];
+  readonly check: (config: Readonly<Record<string, unknown>>) => boolean;
+  readonly message: string;
+}
 
-export const workerConfigSchema = z.object({
+const isProduction = (config: Readonly<Record<string, unknown>>): boolean => config.NODE_ENV === 'production';
+/** Giá trị chuỗi của biến đã qua kiểm định dạng; biến tùy chọn không đặt thì `undefined`. */
+const text = (config: Readonly<Record<string, unknown>>, variable: string): string | undefined => {
+  const value = config[variable];
+  return typeof value === 'string' ? value : undefined;
+};
+
+const EXAMPLE_VALUE_MESSAGE = 'là giá trị mẫu của .env.example; môi trường thật phải sinh giá trị riêng';
+
+/** Biến URL phải là `https:` khi `NODE_ENV=production`. `OTEL_EXPORTER_OTLP_ENDPOINT` không kiểm (collector nội bộ). */
+const HTTPS_VARIABLES = ['API_PUBLIC_URL', 'WEB_ORIGIN', 'TINGEE_BASE_URL', 'S3_ENDPOINT', 'S3_PUBLIC_BASE_URL'];
+
+/** Luật chung cho mọi vai (Story 4.7-a, 4.7-b), theo thứ tự báo lỗi. */
+const CROSS_RULES: readonly CrossRule[] = [
+  // Story 4.7-a; staging cũng chạy production. Biến không đặt thì lý do là "thiếu" (`toIssues`).
+  {
+    variable: 'ADMIN_ALLOWED_CIDRS',
+    uses: ['NODE_ENV'],
+    check: (c) => !isProduction(c) || c.ADMIN_ALLOWED_CIDRS !== undefined,
+    message: 'bắt buộc khi NODE_ENV=production',
+  },
+  ...HTTPS_VARIABLES.map(
+    (variable): CrossRule => ({
+      variable,
+      uses: ['NODE_ENV'],
+      check: (c) => !isProduction(c) || isHttps(text(c, variable) ?? ''),
+      message: 'phải là https khi NODE_ENV=production',
+    }),
+  ),
+  ...Object.entries(ENV_EXAMPLE_SECRETS).map(
+    ([variable, example]): CrossRule => ({
+      variable,
+      uses: ['NODE_ENV'],
+      // So sau khi bỏ khoảng trắng hai đầu: secret tạo từ file (k8s…) hay kèm dòng mới cuối.
+      check: (c) => !isProduction(c) || text(c, variable)?.trim() !== example,
+      message: EXAMPLE_VALUE_MESSAGE,
+    }),
+  ),
+  ...Object.keys(ENV_EXAMPLE_KEYS).map(
+    (variable): CrossRule => ({
+      variable,
+      uses: ['NODE_ENV'],
+      check: (c) => !isProduction(c) || !usesExampleKey(text(c, variable) ?? ''),
+      message: EXAMPLE_VALUE_MESSAGE,
+    }),
+  ),
+  // Mọi môi trường: khóa ký Mã QR vé lộ thì ai cũng giả được Vé, nên không dùng chung với khóa mã hóa credential.
+  {
+    variable: 'TICKET_QR_KEYS',
+    uses: ['TINGEE_CREDENTIAL_KEYS'],
+    check: (c) => !sharesKey(text(c, 'TICKET_QR_KEYS') ?? '', text(c, 'TINGEE_CREDENTIAL_KEYS') ?? ''),
+    message: 'dùng chung khóa với TINGEE_CREDENTIAL_KEYS',
+  },
+  // Mọi môi trường: cookie session đặt ở miền này phải tới được cả api lẫn web.
+  {
+    variable: 'AUTH_COOKIE_DOMAIN',
+    uses: ['API_PUBLIC_URL', 'WEB_ORIGIN'],
+    check: (c) => {
+      const domain = text(c, 'AUTH_COOKIE_DOMAIN');
+      if (domain === undefined) return true;
+      return ['API_PUBLIC_URL', 'WEB_ORIGIN'].every((origin) => isCookieParent(domain, text(c, origin) ?? ''));
+    },
+    message: 'phải là miền cha của host API_PUBLIC_URL và WEB_ORIGIN',
+  },
+  // Production, hai host khác nhau: SSR của web chuyển tiếp cookie của web sang api (`apps/web/lib/api/server.ts`), nên
+  // cookie phải đặt ở miền cha chung. Chỉ báo khi biến không đặt, nên lý do luôn là "thiếu".
+  {
+    variable: 'AUTH_COOKIE_DOMAIN',
+    uses: ['NODE_ENV', 'API_PUBLIC_URL', 'WEB_ORIGIN'],
+    check: (c) =>
+      !isProduction(c) ||
+      c.AUTH_COOKIE_DOMAIN !== undefined ||
+      hostOf(text(c, 'API_PUBLIC_URL') ?? '') === hostOf(text(c, 'WEB_ORIGIN') ?? ''),
+    message: 'bắt buộc khi NODE_ENV=production và API_PUBLIC_URL, WEB_ORIGIN khác host',
+  },
+];
+
+/**
+ * Gắn `CROSS_RULES` vào schema của một vai, mỗi luật một `refine` có `path` và `when`. Bỏ luật có biến mà vai không đọc.
+ * `when` cho luật chạy cả khi biến khác lỗi, để báo đủ mọi lỗi trong một lượt.
+ */
+function withCrossRules<Shape extends z.ZodRawShape>(fields: z.ZodObject<Shape>): z.ZodObject<Shape> {
+  const known = new Set(Object.keys(fields.shape));
+  return CROSS_RULES.filter((rule) => [rule.variable, ...rule.uses].every((name) => known.has(name))).reduce(
+    (schema, rule) => {
+      const watched = new Set([rule.variable, ...rule.uses]);
+      return schema.refine((config) => rule.check(config), {
+        // Issue mức object phải gắn đúng tên biến (`toIssues` đọc `path[0]`); biến không đặt thì lý do là "thiếu".
+        path: [rule.variable],
+        message: rule.message,
+        when: (payload) => !payload.issues.some((issue) => watched.has(String(issue.path?.[0]))),
+      });
+    },
+    fields,
+  );
+}
+
+/** Vai api: luật production, khóa trùng và miền cookie (Story 4.7-a, 4.7-b). */
+export const apiConfigSchema = withCrossRules(apiConfigFields);
+
+/** Biến của vai worker; luật giữa các biến nằm ở `workerConfigSchema`. */
+const workerConfigFields = z.object({
   APP_ROLE: z.literal('worker'),
   ...common,
   DATABASE_URL: postgresUrl,
@@ -309,6 +424,9 @@ export const workerConfigSchema = z.object({
   ...opsAlerts,
   ...opsAlertDelivery,
 });
+
+/** Vai worker: luật production và khóa trùng của các biến worker đọc (Story 4.7-b). */
+export const workerConfigSchema = withCrossRules(workerConfigFields);
 
 export const migrateConfigSchema = z.object({
   APP_ROLE: z.literal('migrate'),

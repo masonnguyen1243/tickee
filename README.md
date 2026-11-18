@@ -331,6 +331,44 @@ staging) thiếu hoặc sai biến này thì api không khởi động; có thì
 `/v1/admin/`, nếu không guard trả 500 (lỗi cấu hình) để route admin không lọt ra ngoài vùng bị chặn. Web `/admin` không
 tự giới hạn IP.
 
+## Cấu hình staging/production
+
+`NODE_ENV` bắt buộc ở cả ba vai (`api`, `worker`, `migrate`) và không có mặc định: thiếu hoặc rỗng thì tiến trình dừng với
+`NODE_ENV (thiếu)`, để không luật production nào tự tắt. Image đặt sẵn `NODE_ENV=production` (staging cũng chạy
+production); `.env.example` đặt `development`; test và bước Migrate của CI đặt `test`. Chạy ngoài image (VM,
+`node dist/main.js`, buildpack) thì phải tự đặt `production`. `pnpm db:seed`, `admin:grant` và `admin:revoke` đọc cấu
+hình như vai `migrate` nên cũng cần `NODE_ENV`: `.env` local tạo từ `.env.example` đã có sẵn, trong image là
+`production`, chạy CLI ở nơi khác thì phải tự đặt.
+
+Khi `NODE_ENV=production`, api và worker kiểm thêm các luật dưới đây lúc khởi động; mỗi vai chỉ kiểm biến nó đọc. Vi
+phạm thì tiến trình thoát mã 1 với một `ConfigError` nêu mọi biến vi phạm trong một lượt, mỗi biến một lý do, không bao
+giờ nêu giá trị.
+
+| Luật | Biến | Lý do trong log |
+| ---- | ---- | --------------- |
+| https | `API_PUBLIC_URL`, `WEB_ORIGIN`, `TINGEE_BASE_URL`, `S3_ENDPOINT`, `S3_PUBLIC_BASE_URL`. `OTEL_EXPORTER_OTLP_ENDPOINT` không kiểm (collector nội bộ có thể dùng http) | `phải là https khi NODE_ENV=production` |
+| Không dùng giá trị mẫu của `.env.example` | `BETTER_AUTH_SECRET`, `REVALIDATE_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`: đúng giá trị mẫu. `TINGEE_CREDENTIAL_KEYS`, `TICKET_QR_KEYS`: mọi khóa trùng byte với một trong hai khóa mẫu, bất kể số phiên bản `v<k>` | `là giá trị mẫu của .env.example; môi trường thật phải sinh giá trị riêng` |
+| Dải IP Quản trị Tingee (Story 4.7-a) | `ADMIN_ALLOWED_CIDRS` | `thiếu` |
+| Cookie dùng chung web và api | `AUTH_COOKIE_DOMAIN`, khi host của `API_PUBLIC_URL` khác host của `WEB_ORIGIN`: SSR của web chuyển tiếp cookie của web sang api (`apps/web/lib/api/server.ts`) | `thiếu` |
+
+Hai luật áp ở mọi môi trường, cả local:
+
+- `TICKET_QR_KEYS` không được có khóa trùng byte với một khóa của `TINGEE_CREDENTIAL_KEYS`, bất kể số phiên bản. Lỗi:
+  `TICKET_QR_KEYS (dùng chung khóa với TINGEE_CREDENTIAL_KEYS)`.
+- `AUTH_COOKIE_DOMAIN`, nếu đặt, phải là miền cha của host `API_PUBLIC_URL` và host `WEB_ORIGIN`: so không phân biệt hoa
+  thường, bỏ dấu `.` đầu; host phải bằng miền này hoặc kết thúc bằng `.<miền>`. Vd. `tickee.vn` (hay `.Tickee.VN`) nhận
+  `https://api.tickee.vn` và `https://tickee.vn`. Không kiểm danh sách hậu tố công khai. Lỗi:
+  `AUTH_COOKIE_DOMAIN (phải là miền cha của host API_PUBLIC_URL và WEB_ORIGIN)`.
+
+Một luật chỉ chạy khi các biến nó dùng (kể cả `NODE_ENV`) không có lỗi khác, nên một biến không bị báo hai lần. Vì vậy
+`API_PUBLIC_URL` còn là `http://` thì luật cookie chỉ báo ở lần khởi động sau khi đã sửa. `DATABASE_URL`,
+`MIGRATION_DATABASE_URL` và `SMTP_URL` không bị kiểm giá trị mẫu.
+
+Image không có `.env.example`, nên giá trị mẫu nằm trong `apps/api/src/platform/config/production-rules.ts`. Sửa giá trị
+mẫu trong `.env.example` thì sửa cả file này: `apps/api/test/config.test.ts` đọc `.env.example` và đỏ nếu hai nơi lệch.
+Mỗi môi trường sinh secret và khóa riêng bằng `openssl rand -base64 32` (khóa viết dạng `v1:<kết quả>`; sinh
+`TINGEE_CREDENTIAL_KEYS` và `TICKET_QR_KEYS` riêng).
+
 ## Kiểm tra
 
 ```sh
@@ -371,7 +409,8 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | Biến                     | Vai         | Ghi chú                        |
 | ------------------------ | ----------- | ------------------------------ |
 | `APP_ROLE`               | tất cả      | `api` \| `worker` \| `migrate` |
-| `NODE_ENV`, `LOG_LEVEL`  | tất cả      | mặc định `development`, `info` |
+| `NODE_ENV`               | tất cả      | bắt buộc, không có mặc định: `development` \| `test` \| `production`. Image đặt `production` (cả staging); `.env.example` đặt `development` (xem "Cấu hình staging/production") |
+| `LOG_LEVEL`              | tất cả      | mặc định `info`                |
 | `DATABASE_URL`           | api, worker | role `tickee_app` (DML)        |
 | `MIGRATION_DATABASE_URL` | migrate     | role `tickee_migrator` (DDL); cả `pnpm db:seed`, `admin:grant`/`admin:revoke` |
 | `PORT`                   | api         | mặc định `3001`                |
@@ -381,7 +420,7 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `API_PUBLIC_URL`         | api         | origin công khai của api; Better Auth ở `/v1/auth`, URL IPN của BTC ở `/v1/payments/tingee/ipn/{ipnKey}`. Tingee fake (local) cũng đọc để biết URL IPN của BTC demo |
 | `WEB_ORIGIN`             | api, worker | api: origin duy nhất được CORS kèm cookie; worker: gốc link trong email (lời mời Admin `<WEB_ORIGIN>/loi-moi-btc#…`) và nơi gọi `<WEB_ORIGIN>/api/revalidate` |
 | `REVALIDATE_SECRET`      | worker, web | worker: bắt buộc, ≥ 32 ký tự; gửi `Authorization: Bearer …` tới `<WEB_ORIGIN>/api/revalidate`. web: server-only, cùng giá trị; thiếu thì route trả 503 (trang chỉ tự làm mới sau 30 giây). Sinh bằng `openssl rand -base64 32` |
-| `AUTH_COOKIE_DOMAIN`     | api         | tùy chọn; tên miền cha cho cookie session (vd. `tickee.vn`) |
+| `AUTH_COOKIE_DOMAIN`     | api         | tùy chọn; tên miền cha cho cookie session (vd. `tickee.vn`). Đặt thì phải là miền cha của host `API_PUBLIC_URL` và `WEB_ORIGIN` (mọi môi trường); bắt buộc ở production khi hai host khác nhau |
 | `SMTP_URL`, `EMAIL_FROM` | api, worker | api gửi email OTP/2FA; worker gửi email từ job (lời mời Admin); local là Mailpit `smtp://localhost:1025` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | api | bắt buộc; OAuth client Google, redirect URI `<API_PUBLIC_URL>/v1/auth/callback/google` |
 | `TINGEE_BASE_URL`        | api, worker | bắt buộc; origin Tingee Open API (UAT `https://uat-open-api.tingee.vn`). Env không có credential Tingee: mỗi BTC nhập API key của mình ở trang Tài khoản nhận tiền. `.env` local phải là `http://localhost:4010` (Tingee fake mà `pnpm dev` chạy sẵn): trỏ Tingee thật thì key demo lỗi và Đơn có phí báo "Chưa tạo được link thanh toán" (xem "Hai bẫy của `.env` local"). Với Tingee fake: BTC demo của `pnpm db:seed` đã liên kết sẵn, hoặc nhập key merchant demo (`demo-btc-co-tai-khoan` / `demo-secret-co-tai-khoan`: có tài khoản; `demo-btc-chua-lien-ket` / `demo-secret-chua-lien-ket`: chưa liên kết ngân hàng). Worker đọc cùng ba biến Tingee/Vé với api (cùng giá trị): Đối soát bù (Story 4.1) đi cùng đường xử lý IPN và phát Vé |
@@ -393,7 +432,7 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | api | bắt buộc; credential ký presigned PUT, chỉ cần quyền `PutObject` trên bucket. Secret: không log, không commit. Local: root user của MinIO trong `docker-compose.yml` |
 | `S3_FORCE_PATH_STYLE`    | api         | mặc định `false`; `true` khi storage cần URL `<endpoint>/<bucket>/<key>` (MinIO, `.env.example`) |
 | `S3_PUBLIC_BASE_URL`     | api (server web phải tới được) | bắt buộc ở api; gốc URL công khai của ảnh: `imageUrl` = `<S3_PUBLIC_BASE_URL>/<key>`. Local: `http://localhost:9000/tickee-event-images`. Server web không đọc biến này nhưng tự tải `imageUrl` để dựng ảnh OG, nên URL phải mở được từ cả server web lẫn trình duyệt (vd. `localhost:9000` không tới được từ trong container web); không tới được thì ảnh OG dùng nền gradient và server web log `warn` `[og-image]` |
-| `TICKET_QR_KEYS`         | api, worker | bắt buộc; khóa HMAC-SHA256 ký Mã QR vé (`t<k>.<ticketId>.<sig>`), cùng dạng `TINGEE_CREDENTIAL_KEYS` nhưng là khóa khác. Ký Vé mới bằng khóa có `k` lớn nhất; Vé lưu `k` (không lưu chuỗi QR) nên xoay khóa thì thêm khóa mới và giữ khóa cũ tới khi không còn Vé nào dùng. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì Mã QR đã gửi không còn khớp và link chia sẻ trả 404 (xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32` |
+| `TICKET_QR_KEYS`         | api, worker | bắt buộc; khóa HMAC-SHA256 ký Mã QR vé (`t<k>.<ticketId>.<sig>`), cùng dạng `TINGEE_CREDENTIAL_KEYS` nhưng là khóa khác (dùng chung một khóa thì api/worker dừng, ở mọi môi trường). Ký Vé mới bằng khóa có `k` lớn nhất; Vé lưu `k` (không lưu chuỗi QR) nên xoay khóa thì thêm khóa mới và giữ khóa cũ tới khi không còn Vé nào dùng. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì Mã QR đã gửi không còn khớp và link chia sẻ trả 404 (xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32` |
 | `OPS_ALERT_EMAILS`       | worker      | tùy chọn; người nhận email cảnh báo vận hành (Story 4.6-b), email cách nhau bằng dấu phẩy. Không đặt: cảnh báo chỉ ghi log, worker log `warn` lúc khởi động và mỗi lần có cảnh báo (xem "Cảnh báo vận hành") |
 | `OPS_ALERT_COOLDOWN_MINUTES` | api, worker | mặc định `30` (1–1440); loại cảnh báo có cooldown (thiếu khóa QR, hàng đợi ùn, IPN lỗi tăng, tạo link chậm, tỉ lệ phát Vé giảm) báo lại cùng đối tượng sau chừng này phút |
 | `OPS_ALERT_QUEUE_WAIT_MINUTES` | worker  | mặc định `5` (1–1440); job pg-boss tới hạn quá chừng này phút mà chưa chạy thì báo hàng đợi ùn |

@@ -50,6 +50,7 @@ function apiEnv(port: number, tingeeBaseUrl = 'http://127.0.0.1:1'): Record<stri
   const c = apiConfig();
   return {
     APP_ROLE: 'api',
+    NODE_ENV: 'test',
     PORT: String(port),
     DATABASE_URL: c.DATABASE_URL,
     BETTER_AUTH_SECRET: c.BETTER_AUTH_SECRET,
@@ -76,6 +77,7 @@ function workerEnv(tingeeBaseUrl = 'http://127.0.0.1:1'): Record<string, string>
   const c = apiConfig();
   return {
     APP_ROLE: 'worker',
+    NODE_ENV: 'test',
     DATABASE_URL: c.DATABASE_URL,
     WEB_ORIGIN: c.WEB_ORIGIN,
     SMTP_URL: c.SMTP_URL,
