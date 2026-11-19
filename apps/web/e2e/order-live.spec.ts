@@ -9,8 +9,9 @@ import { SLUG_BUY, TIER_PAID_ID } from './public-event-api';
 /*
  * Story 3.7: Trang Đơn tự chuyển theo `buyerStatus` (REST là sự thật, SSE chỉ là tín hiệu). API và luồng SSE
  * `GET /v1/me/orders/:code/live` đều giả bằng `page.route`: một lần fulfill là một kết nối SSE (gửi các khung rồi đóng),
- * giữ request lại là kết nối chưa mở. Ca full-stack với api thật và Tingee fake nằm ở test tích hợp của api
- * (`apps/api/test/ordering/order-live.test.ts`); Playwright full-stack để AI-6.
+ * giữ request lại là kết nối chưa mở. Ca full-stack (api, worker, Tingee fake thật; `EventSource` cross-origin kèm cookie,
+ * tab đang mở tự sang Thành công ≤ 3 giây) nằm ở bộ Playwright full-stack: `e2e-fullstack/paid-order.spec.ts`
+ * (`playwright.fullstack.config.ts`, Story 4.7-c). Độ trễ IPN → tín hiệu SSE đo ở `apps/api/test/ordering/order-live.test.ts`.
  */
 
 // Server web có API giả cho SSR (link "Mua lại"/"Về trang Sự kiện" được prefetch), như `purchase.spec.ts`.

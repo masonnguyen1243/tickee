@@ -15,8 +15,9 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-24.04
-    # Lúc bình thường job chạy 20–30 phút (Vitest 5–8, Playwright 11–18). Khi mirror apt của Ubuntu chậm, riêng bước
-    # `playwright install --with-deps` có lúc mất 20 phút (18/11/2026), nên trần 30 phút làm job bị hủy dù test xanh.
+    # Lúc bình thường job chạy 20–30 phút (Vitest 5–8, Playwright 11–18, Playwright full-stack 1–2). Khi mirror apt của
+    # Ubuntu chậm, riêng bước `playwright install --with-deps` có lúc mất 20 phút (18/11/2026), nên trần 30 phút làm job
+    # bị hủy dù test xanh.
     timeout-minutes: 60
 
     services:
@@ -32,6 +33,15 @@ jobs:
           --health-interval 2s
           --health-timeout 3s
           --health-retries 30
+      # Bộ Playwright full-stack: api gửi mã OTP và worker gửi email Vé qua SMTP (1025), test đọc thư qua API HTTP (8025).
+      mailpit:
+        image: axllent/mailpit:v1.29
+        env:
+          MP_SMTP_AUTH_ACCEPT_ANY: '1'
+          MP_SMTP_AUTH_ALLOW_INSECURE: '1'
+        ports:
+          - 1025:1025
+          - 8025:8025
 
     env:
       PGHOST: localhost
@@ -39,7 +49,8 @@ jobs:
       PGPASSWORD: postgres
       # Web nhúng biến này lúc build (bước Build và mọi bước turbo build lại). Đặt ở cấp job để `turbo test`
       # (phụ thuộc build) dùng cùng giá trị, không build lại web thiếu biến trước bước Playwright.
-      # e2e giả lập API bằng page.route nên không cần api chạy thật ở địa chỉ này.
+      # Bộ e2e giả lập (page.route) không gọi địa chỉ này; bộ full-stack chạy api thật đúng ở đây (API_PUBLIC_URL của
+      # .env.example), nên giá trị phải là http://localhost:3001.
       NEXT_PUBLIC_API_BASE_URL: http://localhost:3001
 
     steps:
@@ -84,11 +95,24 @@ jobs:
       - name: Playwright (ios-webkit, android-chromium)
         run: pnpm --filter @tickee/web test:e2e
 
+      # Story 4.7-c (AI-6): web build thật + api, worker từ dist + Tingee fake + Mailpit, DB tickee_e2e tạo lại bằng
+      # superuser postgres (apps/web/playwright.fullstack.config.ts, `pnpm --filter @tickee/api e2e:stack`).
+      - name: Playwright full-stack (ios-webkit, android-chromium)
+        run: pnpm --filter @tickee/web test:e2e:fullstack
+
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: playwright-test-results
           path: apps/web/test-results/
+          retention-days: 7
+
+      # Kết quả và trace của bộ full-stack, kèm log của api, worker, Tingee fake, seed (stack-logs/).
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-fullstack-results
+          path: apps/web/test-results-fullstack/
           retention-days: 7
 
       - name: Build image api
@@ -100,3 +124,41 @@ jobs:
           -e APP_ROLE=migrate
           -e MIGRATION_DATABASE_URL=postgresql://tickee_migrator:tickee_migrator@localhost:5432/tickee
           tickee-api:${{ github.sha }}
+
+      # Image tự chạy ở production (`ENV NODE_ENV` của Dockerfile; Story 4.7-b triage #24): vai worker không đặt NODE_ENV,
+      # mọi biến hợp lệ trừ WEB_ORIGIN là http → phải thoát 1 vì luật https, output nêu WEB_ORIGIN và không có giá trị
+      # secret nào. Secret sinh ngẫu nhiên mỗi lượt (không phải secret thật).
+      - name: Chạy image vai worker ở production (WEB_ORIGIN http bị từ chối)
+        run: |
+          revalidate_secret=$(openssl rand -base64 32)
+          credential_key=$(openssl rand -base64 32)
+          qr_key=$(openssl rand -base64 32)
+          db_password=$(openssl rand -hex 16)
+          smtp_password=$(openssl rand -hex 16)
+          status=0
+          output=$(docker run --rm --network none \
+            -e APP_ROLE=worker \
+            -e WEB_ORIGIN=http://example.test \
+            -e DATABASE_URL="postgresql://tickee_app:${db_password}@db.example.test:5432/tickee" \
+            -e SMTP_URL="smtps://mailer:${smtp_password}@smtp.example.test:465" \
+            -e EMAIL_FROM="Tickee <no-reply@example.test>" \
+            -e REVALIDATE_SECRET="${revalidate_secret}" \
+            -e TINGEE_BASE_URL=https://tingee.example.test \
+            -e TINGEE_CREDENTIAL_KEYS="v1:${credential_key}" \
+            -e TICKET_QR_KEYS="v1:${qr_key}" \
+            tickee-api:${{ github.sha }} 2>&1) || status=$?
+          echo "$output"
+          if [ "$status" -ne 1 ]; then
+            echo "::error::Image vai worker phải thoát mã 1, nhận mã ${status}"
+            exit 1
+          fi
+          if ! grep -qF '"variable":"WEB_ORIGIN"' <<<"$output"; then
+            echo "::error::Output không nêu WEB_ORIGIN"
+            exit 1
+          fi
+          for secret in "$revalidate_secret" "$credential_key" "$qr_key" "$db_password" "$smtp_password"; do
+            if grep -qF -- "$secret" <<<"$output"; then
+              echo "::error::Output lộ giá trị secret"
+              exit 1
+            fi
+          done
