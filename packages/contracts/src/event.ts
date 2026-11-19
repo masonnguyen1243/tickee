@@ -128,6 +128,22 @@ export const eventImagesApiPath = (organizationId: string): string =>
   `/orgs/${encodeURIComponent(organizationId)}/event-images`;
 
 /**
+ * Giới hạn presign ảnh Sự kiện (Story 4.7-d), đếm trong Postgres mọi lần cấp URL thành công trong cửa sổ trượt
+ * `windowSeconds`: tối đa `perOrganization` lần mỗi BTC (mọi thành viên cộng chung) và `perUser` lần mỗi tài khoản (gộp
+ * mọi BTC của tài khoản, chặn đường tạo nhiều BTC). Body sai và lần bị chặn không tính. Mỗi URL là một lần upload tiềm
+ * năng `EVENT_IMAGE_MAX_BYTES`, vì api không biết PUT có xảy ra hay không.
+ */
+export const EVENT_IMAGE_PRESIGN_LIMITS = {
+  windowSeconds: 24 * 60 * 60,
+  perOrganization: 50,
+  perUser: 100,
+} as const;
+
+/** `details` của `429 EVENT_IMAGE_RATE_LIMITED`: số giây tới khi giới hạn chặn lâu nhất cho cấp lại. */
+export const EventImageRateLimitedDetails = z.object({ retryAfterSeconds: z.number().int().positive() });
+export type EventImageRateLimitedDetails = z.infer<typeof EventImageRateLimitedDetails>;
+
+/**
  * `POST /v1/orgs/:orgId/events` và `PATCH /v1/orgs/:orgId/events/:eventId` (thay toàn bộ các trường dưới đây).
  * Lưu nháp cần tên, giờ bắt đầu và giờ kết thúc (`endsAt` > `startsAt`, lỗi ở `endsAt`); các trường khác để trống được,
  * kể cả chính sách hoàn vé (bắt buộc khi mở bán, Story 2.10). `imageKey` (Story 4.8): key do presign cấp cho chính BTC

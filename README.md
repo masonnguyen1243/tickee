@@ -59,6 +59,12 @@ và nêu tên biến thiếu.
 - Api không tải hay đọc byte ảnh nào: `POST /v1/orgs/{orgId}/event-images` (Owner/Admin, body `{ contentType,
   contentLength }`, JPEG/PNG/WebP ≤ 5 MB) trả `{ key, uploadUrl, expiresAt }`. URL ký đúng `content-type` và
   `content-length` đã khai, hạn 5 phút: PUT file khác số byte thì MinIO trả 403.
+- Giới hạn presign (Story 4.7-d, `EVENT_IMAGE_PRESIGN_LIMITS`): 50 lần mỗi BTC và 100 lần mỗi tài khoản (gộp mọi BTC)
+  trong 24 giờ trượt; vượt thì `429 EVENT_IMAGE_RATE_LIMITED` kèm `retryAfterSeconds` (log `warn` marker
+  `event_image_presign_limited`). Mỗi lần cấp log `info` marker `event_image_presign_issued` kèm `userId`,
+  `organizationId`, `key`. Local chạm trần thì `DELETE FROM event_image_presigns`. Staging/production: chỉ gỡ chặn cho
+  một BTC hay một tài khoản, bằng role có quyền `DELETE` trên bảng (`tickee_app` hoặc `tickee_migrator`):
+  `DELETE FROM event_image_presigns WHERE organization_id = '<orgId>'` (hoặc `WHERE user_id = '<userId>'`).
 - Lưu `key` vào Sự kiện bằng trường `imageKey` khi tạo hoặc sửa (`null` hoặc bỏ trường = gỡ ảnh). Detail, danh sách và
   trang công khai trả `imageUrl` = `<S3_PUBLIC_BASE_URL>/<key>`.
 - Web (Story 4.8-b): ô "Ảnh bìa" ở wizard bước 1 và tab "Cài đặt" làm đúng hai bước trên ngay khi chọn file, rồi gửi

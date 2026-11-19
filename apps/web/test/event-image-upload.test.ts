@@ -5,8 +5,11 @@ import { ApiError } from '@/lib/api/errors';
 import {
   EventImagePutError,
   eventImageFileError,
+  eventImageUploadErrorMessage,
   IMAGE_SIZE_ERROR,
   IMAGE_TYPE_ERROR,
+  IMAGE_UPLOAD_ERROR,
+  imageRateLimitedMessage,
   isUploadUrlReusable,
   putEventImage,
   uploadEventImage,
@@ -82,6 +85,39 @@ describe('isUploadUrlReusable', () => {
   });
 });
 
+describe('câu lỗi khi presign bị giới hạn (429 EVENT_IMAGE_RATE_LIMITED)', () => {
+  it.each([
+    [1, '1 phút'],
+    [59, '1 phút'],
+    [61, '2 phút'],
+    [59 * 60, '59 phút'],
+    [59 * 60 + 1, '1 giờ'],
+    [60 * 60, '1 giờ'],
+    [60 * 60 + 1, '2 giờ'],
+    [23 * 3600 + 1, '24 giờ'],
+    [24 * 3600, '24 giờ'],
+  ])('retryAfterSeconds %d → "Thử lại sau %s."', (retryAfterSeconds, wait) => {
+    expect(imageRateLimitedMessage({ retryAfterSeconds })).toBe(`Bạn đã tải quá nhiều ảnh. Thử lại sau ${wait}.`);
+  });
+
+  it('details thiếu hoặc sai dạng → không nêu thời gian chờ', () => {
+    for (const details of [null, {}, { retryAfterSeconds: 0 }, { retryAfterSeconds: 'x' }]) {
+      expect(imageRateLimitedMessage(details)).toBe('Bạn đã tải quá nhiều ảnh. Thử lại sau.');
+    }
+  });
+
+  it('chỉ 429 EVENT_IMAGE_RATE_LIMITED có câu riêng; lỗi khác (kể cả 429 khác mã, PUT lỗi) → "Chưa tải được ảnh."', () => {
+    expect(
+      eventImageUploadErrorMessage(new ApiError('EVENT_IMAGE_RATE_LIMITED', 'x', { retryAfterSeconds: 7_200 }, 429)),
+    ).toBe('Bạn đã tải quá nhiều ảnh. Thử lại sau 2 giờ.');
+    expect(eventImageUploadErrorMessage(new ApiError('ORDER_RATE_LIMITED', 'x', { retryAfterSeconds: 60 }, 429))).toBe(
+      IMAGE_UPLOAD_ERROR,
+    );
+    expect(eventImageUploadErrorMessage(new ApiError('SERVICE_UNAVAILABLE', 'x', null, null))).toBe(IMAGE_UPLOAD_ERROR);
+    expect(eventImageUploadErrorMessage(new EventImagePutError(null, 403))).toBe(IMAGE_UPLOAD_ERROR);
+  });
+});
+
 describe('uploadEventImage', () => {
   const fetchMock = vi.fn<typeof fetch>();
 
@@ -125,6 +161,20 @@ describe('uploadEventImage', () => {
 
     const error = await rejectionOf(uploadEventImage(ORG_ID, png(), { now: NOW }));
     expect(error).toBeInstanceOf(ApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('presign 429 EVENT_IMAGE_RATE_LIMITED → ApiError giữ retryAfterSeconds, không PUT', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(429, {
+        error: { code: 'EVENT_IMAGE_RATE_LIMITED', message: 'Quá nhiều', details: { retryAfterSeconds: 1_800 } },
+      }),
+    );
+
+    const error = await rejectionOf(uploadEventImage(ORG_ID, png(), { now: NOW }));
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ code: 'EVENT_IMAGE_RATE_LIMITED', status: 429 });
+    expect(eventImageUploadErrorMessage(error)).toBe('Bạn đã tải quá nhiều ảnh. Thử lại sau 30 phút.');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
