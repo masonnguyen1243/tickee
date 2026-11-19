@@ -375,6 +375,34 @@ mẫu trong `.env.example` thì sửa cả file này: `apps/api/test/config.test
 Mỗi môi trường sinh secret và khóa riêng bằng `openssl rand -base64 32` (khóa viết dạng `v1:<kết quả>`; sinh
 `TINGEE_CREDENTIAL_KEYS` và `TICKET_QR_KEYS` riêng).
 
+### Vai `migrate` không chạy song song
+
+Vai `migrate` giữ khóa advisory `tickee:migrate` của database suốt cả lượt chạy: migration Drizzle, schema `pgboss`,
+rồi cấp quyền (Story 4.7-e). Khóa nằm trên một kết nối riêng có `application_name` `tickee-migrate-lock`.
+
+- **Chạy chồng:** lượt migrate thứ hai trên cùng database (pipeline chạy lại, hai lượt deploy chồng nhau) log `info`
+  marker `migrate_lock_wait` rồi chờ lượt đầu xong mới chạy. Hai lượt cùng phiên bản thì lượt sau không đổi gì. Khóa chỉ
+  xếp hàng các lượt chạy, không sắp thứ tự deploy. Pipeline vẫn phải chặn deploy chồng nhau giữa hai phiên bản, nếu
+  không bản cũ có thể chạy sau bản mới.
+- **Thời gian chờ:** code không giới hạn, và `statement_timeout`/`lock_timeout` đặt theo role cũng không cắt lượt chờ.
+  Job migrate trên nền tảng deploy cần có timeout.
+- **Kết nối:** `MIGRATION_DATABASE_URL` phải là kết nối thẳng hoặc qua pooler chế độ session. Qua pooler chế độ
+  transaction thì khóa cấp session không giữ được, và lượt migrate thoát mã 1.
+- **Lượt giữ khóa chết:** Postgres nhả khóa khi kết nối đóng. Máy chạy migrate mất mạng mà không kịp đóng kết nối thì
+  keepalive của kết nối giữ khóa phát hiện trong khoảng một phút.
+- **Mất kết nối giữa chừng:** lượt đó log `error` marker `migrate_lock_lost` ngay khi mất, và thoát mã 1 khi chạy xong.
+  Từ lúc mất, một lượt khác có thể đã chạy chồng. Chạy lại vai `migrate`.
+
+Xem ai giữ khóa (`granted = true`) và ai đang chờ:
+
+```sql
+SELECT a.pid, l.granted, a.backend_start, a.state
+FROM pg_stat_activity a JOIN pg_locks l ON l.pid = a.pid AND l.locktype = 'advisory'
+WHERE a.application_name = 'tickee-migrate-lock' AND a.datname = current_database();
+```
+
+Lượt giữ khóa đã chết mà backend vẫn còn thì chạy `SELECT pg_terminate_backend(<pid>)` bằng `tickee_migrator`.
+
 ## Kiểm tra
 
 ```sh
