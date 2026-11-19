@@ -21,6 +21,7 @@
     "db:migrate": "APP_ROLE=migrate node --env-file-if-exists=../../.env dist/main.js",
     "db:seed": "tsc -p test/dev-seed/tsconfig.json && node --env-file-if-exists=../../.env node_modules/.cache/dev-seed/test/dev-seed/main.js",
     "tingee:fake": "tsc -p test/tingee-fake/tsconfig.json && node --env-file-if-exists=../../.env node_modules/.cache/tingee-fake/test/tingee-fake/main.js",
+    "e2e:stack": "tsc -p test/e2e-stack/tsconfig.json && node node_modules/.cache/e2e-stack/test/e2e-stack/main.js",
     "admin:grant": "node --env-file-if-exists=../../.env dist/roles/admin-cli.js grant",
     "admin:revoke": "node --env-file-if-exists=../../.env dist/roles/admin-cli.js revoke"
   },

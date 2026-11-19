@@ -384,13 +384,39 @@ pnpm --filter @tickee/web exec playwright install chromium webkit   # lần đ�
 pnpm test:e2e                      # build web rồi chạy Playwright
 # Đã có bản build từ `pnpm typecheck` hoặc `pnpm test` thì chạy thẳng:
 pnpm --filter @tickee/web test:e2e  # tự chạy next start ở cổng 3100 (TICKEE_UI_KIT=1) và 3101 (tắt)
+
+# Playwright full-stack: api, worker, Tingee fake, Mailpit thật (xem "Playwright full-stack" dưới đây).
+docker compose up -d postgres mailpit   # lần đầu; tắt `pnpm dev` trước khi chạy
+pnpm test:e2e:fullstack            # build api + web rồi chạy
+pnpm --filter @tickee/web test:e2e:fullstack   # đã có bản build: chạy thẳng
 ```
+
+### Playwright full-stack
+
+Bộ `apps/web/e2e-fullstack/` (config `apps/web/playwright.fullstack.config.ts`, Story 4.7-c) không giả lập gì: web chạy
+`next start` ở `localhost:3000`, api ở `localhost:3001`, kèm worker, Tingee fake và Mailpit. Hai luồng, mỗi luồng chạy
+trên `ios-webkit` và `android-chromium`: đăng nhập OTP (`/tickets` → mã từ Mailpit → "Đồng ý" → về `returnTo`, tải lại,
+đăng xuất), và Đơn có phí (Mua → đăng nhập → Gửi Đơn → trả trên trang của Tingee fake ở tab thứ hai → tab đầu tự sang
+Thành công qua SSE trong ≤ 3 giây → email Vé). Sự kiện của test do BTC demo tạo và mở bán qua API thật lúc bắt đầu.
+
+- Điều kiện: `docker compose up -d postgres mailpit` (thiếu dịch vụ nào thì dừng trước khi chạy test và nêu tên dịch
+  vụ đó), và **tắt `pnpm dev`**: bộ này không dùng lại server đang chạy, cổng 3000, 3001 hay 4010 bận thì báo lỗi.
+- Không cần `.env` hay bước tay nào: env lấy từ `.env.example`, chỉ đè `NODE_ENV=test` và URL DB.
+- DB riêng `tickee_e2e`: mỗi lượt xóa và tạo lại bằng superuser Postgres (mặc định `postgres:postgres@localhost:5432`,
+  như `docker-compose.yml` và CI), rồi migrate và `db:seed`. `E2E_POSTGRES_SUPERUSER_URL` chỉ để đổi user/mật khẩu của
+  superuser và phải trỏ cùng server `localhost:5432`: migrate, api và worker luôn dùng host và cổng của `.env.example`.
+  Không đụng DB `tickee` hay `tickee_test`. Mailpit giữ thư của các lượt trước; test chỉ đọc thư mới đến.
+- Kết quả, trace và log của api, worker, Tingee fake, seed: `apps/web/test-results-fullstack/` (log ở `stack-logs/`). CI
+  upload thư mục này khi test lỗi.
+- Chỉ dựng stack (không web, không test) để thử bằng tay: `pnpm --filter @tickee/api e2e:stack` (cần `apps/api/dist`;
+  log ở `apps/api/test-results/e2e-stack/`, Ctrl+C để tắt).
 
 ### Biến build của web
 
 `NEXT_PUBLIC_API_BASE_URL` được nhúng vào bản build web. Các lệnh dev ở gốc repo (`pnpm typecheck`, `pnpm test`,
-`pnpm test:e2e`) chạy turbo qua `scripts/dev-env.sh`, script này đặt `http://localhost:3001` khi shell chưa có biến (e2e
-giả lập API bằng `page.route` nên giá trị nào cũng được). Turbo băm giá trị biến (và các file `apps/web/.env.production.local`,
+`pnpm test:e2e`, `pnpm test:e2e:fullstack`) chạy turbo qua `scripts/dev-env.sh`, script này đặt `http://localhost:3001`
+khi shell chưa có biến. Bộ e2e giả lập API bằng `page.route` nên nhận mọi giá trị; bộ full-stack gọi api thật nên bản build
+phải dùng đúng `http://localhost:3001`. Turbo băm giá trị biến (và các file `apps/web/.env.production.local`,
 `.env.local`, `.env.production`, `.env` nếu có) vào hash của build web, nên cache không trả lại bản build thiếu biến.
 
 Build để deploy (`pnpm build`, `pnpm turbo build`) không đi qua script trên: phải tự đặt biến, vd.
