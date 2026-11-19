@@ -4,3 +4,4 @@ export * from './database.js';
 export * from './db.module.js';
 export * from './schema.js';
 export * from './grants.js';
+export * from './migration-lock.js';
