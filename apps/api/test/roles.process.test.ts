@@ -231,6 +231,40 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
     }
   });
 
+  describe('NODE_ENV khác production mà origin trông như môi trường thật (Story 4.7-f)', () => {
+    /** Chạy vai api tới khi nghe cổng, rồi SIGTERM; trả output. */
+    async function bootApi(env: Record<string, string>): Promise<string> {
+      const port = await freePort();
+      const p = start({ ...env, PORT: String(port) });
+      try {
+        await waitForOutput(p, `api đang nghe cổng ${port}`);
+        p.child.kill('SIGTERM');
+        expect(await p.exit, p.output()).toBe(0);
+        return p.output();
+      } finally {
+        if (p.child.exitCode === null && p.child.signalCode === null) p.child.kill('SIGKILL');
+      }
+    }
+
+    it('vai api, NODE_ENV=development, API_PUBLIC_URL https host thật → vẫn khởi động, log warn kèm marker và tên biến, không giá trị', async () => {
+      const output = await bootApi({ ...apiRoleEnv(), NODE_ENV: 'development', API_PUBLIC_URL: 'https://api.tickee.vn' });
+      const warns = logLines(output).filter((line) => line.marker === 'node_env_not_production');
+      expect(warns, output).toHaveLength(1);
+      expect(warns[0]).toMatchObject({ level: 40, context: 'Bootstrap', variables: ['API_PUBLIC_URL'] });
+      expect(JSON.stringify(warns[0])).not.toContain('api.tickee.vn');
+    });
+
+    it('vai api, NODE_ENV=development, origin local → không warn', async () => {
+      const output = await bootApi({
+        ...apiRoleEnv(),
+        NODE_ENV: 'development',
+        API_PUBLIC_URL: 'http://localhost:3001',
+        WEB_ORIGIN: 'http://localhost:3000',
+      });
+      expect(output).not.toContain('node_env_not_production');
+    });
+  });
+
   it('vai worker: chạy, không mở HTTP, SIGTERM → stop graceful, exit 0', async () => {
     const c = apiConfig();
     const p = start({

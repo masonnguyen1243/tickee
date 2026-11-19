@@ -1,6 +1,12 @@
 import 'reflect-metadata';
 import { pino } from 'pino';
-import { ConfigError, loadConfig, type AppConfig } from './platform/config/index.js';
+import {
+  ConfigError,
+  loadConfig,
+  NODE_ENV_NOT_PRODUCTION,
+  productionLookingOrigins,
+  type AppConfig,
+} from './platform/config/index.js';
 // Thẳng `pino-options` (không qua `logging/index`, vốn nạp pg): trước khi telemetry đăng ký hook, chưa nạp express hay pg.
 import { basePinoOptions } from './platform/logging/pino-options.js';
 // Thẳng `state.js` (không qua `telemetry/index`, vốn nạp @nestjs/common và @opentelemetry/core trước hook).
@@ -38,6 +44,17 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     throw err;
+  }
+
+  // Story 4.7-f: env runtime đặt `NODE_ENV=development` (chép từ `.env.example`) đè `production` của image thì mọi luật
+  // production tắt mà không lỗi gì. Chỉ cảnh báo, không chặn khởi động; log tên biến, không log giá trị.
+  const productionLooking = productionLookingOrigins(config);
+  if (productionLooking.length > 0) {
+    bootLog.warn(
+      { marker: NODE_ENV_NOT_PRODUCTION, variables: productionLooking },
+      'NODE_ENV khác production nhưng origin là https trên host thật: mọi luật production đang tắt. ' +
+        'Môi trường thật phải đặt NODE_ENV=production',
+    );
   }
 
   await startTelemetryIfConfigured(config);

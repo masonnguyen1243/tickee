@@ -11,7 +11,8 @@ const nextConfig: NextConfig = {
   agentRules: false,
 };
 
-// `next build` thiếu NEXT_PUBLIC_API_BASE_URL thì dừng ngay, không bao giờ ra (và bị turbo cache) bản build hỏng.
+// `next build` thiếu NEXT_PUBLIC_API_BASE_URL, hoặc biến trỏ host thật mà không phải https (Story 4.7-f), thì dừng ngay,
+// không bao giờ ra (và bị turbo cache) bản build hỏng. Luật lúc server khởi động nằm ở `instrumentation.ts`.
 export default function config(phase: string): NextConfig {
   assertBuildEnv(phase, process.argv, process.env);
   return nextConfig;

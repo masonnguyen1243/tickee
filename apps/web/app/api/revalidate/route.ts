@@ -4,12 +4,16 @@ import { EVENT_SLUG_PATTERN, publicEventTag } from '@tickee/contracts';
 import { revalidateTag } from 'next/cache';
 import { z } from 'zod';
 
+import { usableRevalidateSecret, webRuntimeEnv } from '@/lib/production-env';
+
 /*
  * Route nội bộ cho worker (Story 2.11-c): khi BTC sửa Sự kiện đã mở bán, job `event.revalidate-public-page` gọi
  * `POST /api/revalidate` với `Authorization: Bearer <REVALIDATE_SECRET>` và body `{ "tag": "event:{slug}" }`. Route xóa
  * cache phần tĩnh của trang `/e/{slug}` (và ảnh OG, cùng tag) để request kế tiếp lấy bản mới, không chờ 30 giây.
  *
- * `REVALIDATE_SECRET` chỉ đọc ở server. Thiếu biến → 503; sai/thiếu header → 401; body sai → 400; hợp lệ → 204.
+ * `REVALIDATE_SECRET` chỉ đọc ở server. Thiếu biến → 503; web chạy thật (Story 4.7-f) mà secret là giá trị mẫu của
+ * `.env.example` hay ngắn hơn 32 ký tự → cũng 503 (`usableRevalidateSecret`); sai/thiếu header → 401; body sai → 400;
+ * hợp lệ → 204.
  */
 
 export const dynamic = 'force-dynamic';
@@ -38,7 +42,7 @@ function eventTagOf(body: unknown): string | null {
 const empty = (status: number) => new Response(null, { status, headers: { 'cache-control': 'no-store' } });
 
 export async function POST(request: Request): Promise<Response> {
-  const secret = process.env.REVALIDATE_SECRET;
+  const secret = usableRevalidateSecret(webRuntimeEnv());
   if (!secret) return empty(503);
   if (!sameSecret(request.headers.get('authorization') ?? '', `Bearer ${secret}`)) return empty(401);
 
