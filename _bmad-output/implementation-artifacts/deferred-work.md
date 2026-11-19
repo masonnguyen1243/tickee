@@ -887,3 +887,12 @@ Phần code của 4.7 không cần chọn nhà cung cấp hạ tầng được t
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-7-d-gioi-han-presign-anh-su-kien.md`
   summary: E2-8. E2E `apps/web/e2e/public-event-revalidate.spec.ts:15` › "BTC đổi tên: trang vẫn trả bản cache cho tới khi gọi /api/revalidate…" chập chờn khi chạy cả bộ: sau `revalidate` trả 204 và `page.reload()`, tiêu đề vẫn là tên cũ quá 5 giây (android-chromium).
   evidence: Kiểm chứng 4.7-d (19/11/2026): fail 1 lần trong lượt chạy toàn bộ e2e giả lập (1117/1118); chạy riêng `--repeat-each=3` 6/6 pass; lượt chạy toàn bộ của agent triển khai cùng nhánh 1118/1118. Diff 4.7-d không chạm trang Sự kiện công khai hay revalidate.
+
+## Deferred from: code review of spec-ci-cai-playwright-khong-treo.md (2026-11-19)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-ci-cai-playwright-khong-treo.md`
+  summary: Bỏ `~/.cache/ms-playwright` khỏi cache Playwright của CI, chỉ giữ gói `.deb`. Tải Chromium và WebKit từ CDN của Playwright chỉ mất khoảng 15 giây, trong khi thư mục trình duyệt khoảng 870 MB giải nén, tốn quota cache 10 GB của repo. Hướng dẫn CI của Playwright cũng khuyên không cache trình duyệt.
+  evidence: Review CI (BH) #7, low. Quyết định trong Intent của spec chốt giữ cache trình duyệt "cho tiện", nên không sửa trong lượt review; người dùng quyết.
+- source_spec: `_bmad-output/implementation-artifacts/spec-ci-cai-playwright-khong-treo.md`
+  summary: Đo lại thời gian job `ci` sau khi bước cài Playwright dùng cache gói `.deb`, rồi cân nhắc hạ `timeout-minutes: 60` của job (trước đây 30 phút, nâng ngày 18/11 vì apt chậm).
+  evidence: Review CI (BH) #10. Comment ở đầu job trong `ci.yml` giữ trần 60 phút "tới khi có số đo mới"; cần vài run trên `main` có cache trúng.

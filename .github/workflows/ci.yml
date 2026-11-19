@@ -91,13 +91,19 @@ jobs:
           MIGRATION_DATABASE_URL: postgresql://tickee_migrator:tickee_migrator@localhost:5432/tickee_test
 
       # Cache gói .deb của thư viện hệ thống và thư mục trình duyệt Playwright (xem .github/scripts/install-playwright.sh).
-      # Khóa đổi khi image runner hay phiên bản Playwright đổi, để không cài gói cũ lên image mới. `ImageOS`/`ImageVersion`
-      # là biến môi trường của runner, không có trong context `env` của biểu thức, nên tính trong shell.
+      # Khóa: tiền tố v<n> (tăng tay để bỏ một cache hỏng: entry cache không ghi đè được), hệ điều hành, kiến trúc, phiên
+      # bản Playwright, hash của script cài; cuối cùng là phiên bản image runner. Image mới thì khóa đúng trượt, nhưng
+      # `restore-keys` vẫn lấy cache của image trước. Script thử cài từ đó, gói cũ hơn hay thiếu thì apt dừng trước khi cài,
+      # và script chuyển sang mirror. `ImageOS`/`ImageVersion` là biến môi trường của runner, không có trong context `env`
+      # của biểu thức, nên tính trong shell.
       - name: Khóa cache Playwright
         id: playwright-cache-key
         run: |
           version=$(node -p "require('./apps/web/node_modules/@playwright/test/package.json').version")
-          echo "key=playwright-${ImageOS:-unknown}-${ImageVersion:-unknown}-$(dpkg --print-architecture)-${version}" >> "$GITHUB_OUTPUT"
+          script=$(sha256sum .github/scripts/install-playwright.sh | cut -c1-12)
+          prefix="playwright-v1-${ImageOS:-unknown}-$(dpkg --print-architecture)-${version}-${script}-"
+          echo "prefix=${prefix}" >> "$GITHUB_OUTPUT"
+          echo "key=${prefix}${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
 
       - name: Khôi phục cache Playwright
         id: playwright-cache
@@ -107,17 +113,19 @@ jobs:
             ~/.cache/playwright-debs
             ~/.cache/ms-playwright
           key: ${{ steps.playwright-cache-key.outputs.key }}
+          restore-keys: ${{ steps.playwright-cache-key.outputs.prefix }}
 
       - name: Cài trình duyệt Playwright (Chromium, WebKit)
         id: playwright-install
         run: bash .github/scripts/install-playwright.sh
         env:
-          PLAYWRIGHT_CACHE_HIT: ${{ steps.playwright-cache.outputs.cache-hit }}
+          # `cache-hit` chỉ là 'true' khi khớp đúng khóa, không phải khi khớp qua `restore-keys`.
+          PLAYWRIGHT_CACHE_EXACT: ${{ steps.playwright-cache.outputs.cache-hit }}
 
-      # Lưu ngay khi cache trượt, không chờ cuối job: bước Playwright sau có đỏ thì lượt sau vẫn cài từ cache. Cache tạo
-      # trên nhánh PR chỉ PR đó dùng; cache tạo trên `main` thì mọi PR dùng chung.
+      # Lưu ngay khi cần, không chờ cuối job: bước Playwright sau có đỏ thì lượt sau vẫn cài từ cache. Cache tạo trên
+      # nhánh PR chỉ PR đó dùng; cache tạo trên `main` thì mọi PR dùng chung.
       - name: Lưu cache Playwright
-        if: steps.playwright-cache.outputs.cache-hit != 'true' && steps.playwright-install.outputs.debs != '0'
+        if: steps.playwright-install.outputs.save == 'true'
         uses: actions/cache/save@v4
         with:
           path: |
