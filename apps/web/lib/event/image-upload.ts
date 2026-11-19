@@ -1,6 +1,8 @@
 import {
+  ErrorCode,
   EVENT_IMAGE_MAX_BYTES,
   EVENT_IMAGE_TYPES,
+  EventImageRateLimitedDetails,
   EventImageUpload,
   eventImagesApiPath,
   type EventImageType,
@@ -8,6 +10,7 @@ import {
 
 import { apiRequest } from '@/lib/api/client';
 import { serviceUnavailableError } from '@/lib/api/errors';
+import { hasErrorCode } from '@/lib/auth/api';
 
 /*
  * Ảnh Sự kiện (Story 4.8-b): kiểm file tại chỗ, xin presigned PUT của api theo BTC (`POST /v1/orgs/:orgId/event-images`)
@@ -20,6 +23,25 @@ export const IMAGE_SIZE_ERROR = 'Ảnh tối đa 5 MB.';
 export const IMAGE_UPLOAD_ERROR = 'Chưa tải được ảnh.';
 /** Lưu Sự kiện bị từ chối ở trường `imageKey` (key sai dạng hoặc của BTC khác). */
 export const IMAGE_REJECTED_ERROR = 'Ảnh không hợp lệ. Chọn lại ảnh.';
+
+/**
+ * Câu báo khi presign bị `429 EVENT_IMAGE_RATE_LIMITED` (Story 4.7-d): số phút chờ làm tròn lên, tối thiểu 1; từ 60
+ * phút trở lên thì đổi ra giờ, làm tròn lên. `details` thiếu hoặc sai dạng → không nêu thời gian chờ.
+ */
+export function imageRateLimitedMessage(details: unknown): string {
+  const parsed = EventImageRateLimitedDetails.safeParse(details);
+  if (!parsed.success) return 'Bạn đã tải quá nhiều ảnh. Thử lại sau.';
+  const minutes = Math.max(1, Math.ceil(parsed.data.retryAfterSeconds / 60));
+  const wait = minutes < 60 ? `${minutes} phút` : `${Math.ceil(minutes / 60)} giờ`;
+  return `Bạn đã tải quá nhiều ảnh. Thử lại sau ${wait}.`;
+}
+
+/**
+ * Lỗi tại ô ảnh khi upload thất bại (presign hoặc PUT): presign bị giới hạn → `imageRateLimitedMessage`; còn lại →
+ * `IMAGE_UPLOAD_ERROR`. Cả hai đều kèm "Thử lại".
+ */
+export const eventImageUploadErrorMessage = (error: unknown): string =>
+  hasErrorCode(error, ErrorCode.EVENT_IMAGE_RATE_LIMITED) ? imageRateLimitedMessage(error.details) : IMAGE_UPLOAD_ERROR;
 
 /** "Thử lại" PUT lại cùng URL nếu URL còn hạn ít nhất chừng này; không thì xin presign mới. */
 export const UPLOAD_URL_REUSE_MARGIN_MS = 30_000;

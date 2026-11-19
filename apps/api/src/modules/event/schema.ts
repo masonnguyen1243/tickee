@@ -158,3 +158,25 @@ export const eventFormQuestions = pgTable(
     check('event_form_questions_options_check', sql`jsonb_typeof(${t.options}) = 'array'`),
   ],
 );
+
+/**
+ * Bộ đếm presign ảnh Sự kiện (Story 4.7-d): một dòng cho mỗi lần cấp URL upload thành công, theo BTC và tài khoản xin.
+ * `EventImagePresignLimiter` đọc trong cửa sổ `EVENT_IMAGE_PRESIGN_LIMITS.windowSeconds`, và mỗi lần presign xóa một
+ * lô dòng đã ra khỏi cửa sổ của mọi tài khoản và BTC. `user_id` không khai FK: `event` không được phụ thuộc
+ * `identity` (AD-10).
+ */
+export const eventImagePresigns = pgTable(
+  'event_image_presigns',
+  {
+    id: id(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id),
+    userId: uuid('user_id').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('event_image_presigns_organization_id_created_at_idx').on(t.organizationId, t.createdAt),
+    index('event_image_presigns_user_id_created_at_idx').on(t.userId, t.createdAt),
+  ],
+);

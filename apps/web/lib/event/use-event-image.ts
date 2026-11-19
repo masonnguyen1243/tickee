@@ -8,7 +8,12 @@ import { handledElsewhere } from '@/lib/api/handled-elsewhere';
 import { hasErrorCode } from '@/lib/auth/api';
 import { useGoToLogin } from '@/lib/auth/use-go-to-login';
 
-import { EventImagePutError, eventImageFileError, IMAGE_UPLOAD_ERROR, uploadEventImage } from './image-upload';
+import {
+  EventImagePutError,
+  eventImageFileError,
+  eventImageUploadErrorMessage,
+  uploadEventImage,
+} from './image-upload';
 
 /*
  * Ô "Ảnh bìa" (Story 4.8-b) dùng chung cho wizard bước 1 và tab "Cài đặt": chọn file thì kiểm tại chỗ rồi upload ngay
@@ -31,7 +36,7 @@ type ImageState = {
   /** Ảnh ứng với `key`: URL công khai của server hoặc object URL của file đã upload xong. */
   url: string | null;
   pending: Pending | null;
-  /** Lỗi tại ô (sai loại, quá dung lượng, upload lỗi). */
+  /** Lỗi tại ô (sai loại, quá dung lượng, upload lỗi, tải quá nhiều ảnh). */
   error: string | null;
 };
 
@@ -85,8 +90,9 @@ export function useEventImage({ orgId, initialKey, initialUrl, onEdit }: UseEven
       setState((s) => ({
         ...s,
         pending: { file, previewUrl, upload: error instanceof EventImagePutError ? error.upload : null },
-        // 2FA, đồng ý, 401, bị xóa khỏi BTC: nơi khác báo (2FA xong thì tự gửi lại đúng lần upload này).
-        error: handledElsewhere(error) ? null : IMAGE_UPLOAD_ERROR,
+        // 2FA, đồng ý, 401, bị xóa khỏi BTC: nơi khác báo (2FA xong thì tự gửi lại đúng lần upload này). Bị giới hạn
+        // presign (Story 4.7-d): báo thời gian chờ, vẫn giữ "Thử lại".
+        error: handledElsewhere(error) ? null : eventImageUploadErrorMessage(error),
       }));
     },
   });

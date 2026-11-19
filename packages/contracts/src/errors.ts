@@ -235,6 +235,11 @@ export const ErrorCode = {
    * không dò được mã Đơn của BTC khác. Không đổi gì.
    */
   MATCH_ORDER_NOT_ELIGIBLE: 'MATCH_ORDER_NOT_ELIGIBLE',
+  /**
+   * Presign ảnh Sự kiện (Story 4.7-d) vượt `EVENT_IMAGE_PRESIGN_LIMITS` theo BTC hoặc theo tài khoản (gộp mọi BTC). Không
+   * cấp URL, không đếm. `details`: `EventImageRateLimitedDetails` (`retryAfterSeconds` theo giới hạn chặn lâu nhất).
+   */
+  EVENT_IMAGE_RATE_LIMITED: 'EVENT_IMAGE_RATE_LIMITED',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

@@ -343,6 +343,46 @@ test('wizard, presign lỗi rồi mất mạng khi PUT: lỗi tại chỗ, các 
   expect(writes(calls)[0]!.body).toMatchObject({ imageKey: eventImageKey(2, 'png') });
 });
 
+test('presign bị giới hạn (429 EVENT_IMAGE_RATE_LIMITED): "Bạn đã tải quá nhiều ảnh. Thử lại sau …" (giờ, rồi phút) + "Thử lại", không PUT, ảnh cũ và ô khác giữ nguyên; hết chờ thì "Thử lại" tải được', async ({
+  page,
+}) => {
+  const limited = (retryAfterSeconds: number) => apiError(429, 'EVENT_IMAGE_RATE_LIMITED', { retryAfterSeconds });
+  const { calls } = await openApi(page, {
+    event: { imageKey: OLD_KEY },
+    presign: (n) => (n === 1 ? limited(5_400) : n === 2 ? limited(90) : undefined),
+  });
+  const puts = await mockImageStorage(page, { objects: [OLD_KEY] });
+  await page.goto(settingsUrl);
+  await nameInput(page).fill('Giải chạy Hà Nội 2026 — mùa thu');
+
+  await choose(page, 'anh-moi.webp', 'image/webp', await solidImage('webp'));
+  // 5.400 giây = 90 phút: từ 60 phút trở lên thì đổi ra giờ, làm tròn lên.
+  await expect(imageError(page)).toHaveText('Bạn đã tải quá nhiều ảnh. Thử lại sau 2 giờ.');
+  await expect(retryButton(page)).toBeVisible();
+  await expect(nameInput(page)).toHaveValue('Giải chạy Hà Nội 2026 — mùa thu');
+  await expect(preview(page)).toHaveAttribute('src', eventImageUrl(OLD_KEY));
+  expect(puts).toEqual([]);
+
+  await retryButton(page).click();
+  await expect(imageError(page)).toHaveText('Bạn đã tải quá nhiều ảnh. Thử lại sau 2 phút.');
+  await expect(retryButton(page)).toBeVisible();
+  expect(puts).toEqual([]);
+
+  await retryButton(page).click();
+  await expect(imageError(page)).toBeEmpty();
+  await expect(retryButton(page)).toHaveCount(0);
+  await expect(preview(page)).toHaveAttribute('src', /^blob:/);
+  expect(presignCalls(calls)).toHaveLength(3);
+  expect(puts.map((p) => p.key)).toEqual([eventImageKey(3, 'webp')]);
+
+  await page.getByRole('button', { name: 'Lưu thay đổi' }).click();
+  await expect.poll(() => writes(calls).length).toBe(1);
+  expect(writes(calls)[0]!.body).toMatchObject({
+    name: 'Giải chạy Hà Nội 2026 — mùa thu',
+    imageKey: eventImageKey(3, 'webp'),
+  });
+});
+
 test('presign đã (gần) hết hạn: "Thử lại" xin presign mới và PUT URL mới', async ({ page }) => {
   // Hạn 10 giây (< 30 giây dự phòng): coi như hết hạn khi thử lại.
   const { calls } = await openApi(page, { event: {}, presignTtlMs: 10_000 });
