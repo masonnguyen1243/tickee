@@ -29,7 +29,7 @@
 # - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-19-2026 08:51
+last_updated: 11-19-2026 16:33
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -80,7 +80,7 @@ development_status:
   4-4-duyệt-tay-từ-chối-và-đánh-dấu-đã-hoàn-tay: done
   4-5-token-và-cảnh-báo-token: done
   4-6-giám-sát-và-lưới-an-toàn-vận-hành: done
-  4-7-môi-trường-staging-production-deploy-và-diễn-tập-khôi-phục: in-progress
+  4-7-siết-cấu-hình-production-và-ci-trước-khi-deploy: in-progress
   4-8-ảnh-sự-kiện-trên-object-storage: done
   epic-4-retrospective: optional
 
@@ -92,7 +92,6 @@ development_status:
   5-5-tra-tay-và-check-in-tay: backlog
   5-6-thu-hồi-khôi-phục-ctv-và-hết-quyền: backlog
   5-7-theo-dõi-check-in-realtime: backlog
-  5-8-kiểm-thử-tải-nfr-3-trên-staging: backlog
   epic-5-retrospective: optional
 
   epic-6: backlog
@@ -118,6 +117,11 @@ development_status:
   8-1-social-ticket-card-để-đăng-story: backlog
   8-2-dòng-giới-thiệu-tickee: backlog
   epic-8-retrospective: optional
+
+  epic-9: backlog
+  9-1-môi-trường-staging-production-deploy-và-diễn-tập-khôi-phục: backlog
+  9-2-kiểm-thử-tải-nfr-3-trên-staging: backlog
+  epic-9-retrospective: optional
 action_items:
   - epic: 4
     action: "Chốt với Tingee: API tra trạng thái theo orderId (Story 4.1); API đọc
@@ -141,9 +145,14 @@ action_items:
     ref: "_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-03.md"
   - epic: 4
     action: "Chốt nhà cung cấp hạ tầng/email/giám sát theo pháp chế NĐ 53/2022 trước
-      Story 4.7 và Closed Beta"
+      Story 9.1 và Closed Beta"
     owner: "Mason"
     status: open
+    ref: "_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-19-tach-story-4-7.md"
+    note: "Hoãn tới khi code xong Epic 5–8 (Mason, 19/11/2026). Làm ngay vì có thời gian
+      chờ: gửi câu hỏi Điều 26 cho pháp chế; chuẩn bị domain gửi email (SPF, DKIM,
+      DMARC). Khi có ý kiến pháp chế: bmad-deep-recon (select, technical) để chọn
+      nhà cung cấp"
   - epic: 3
     action: "Quyết định có thêm qr_version vào phần ký của AD-16 hay không trước khi
       làm Story 3.8"

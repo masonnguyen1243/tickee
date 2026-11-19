@@ -393,7 +393,7 @@ Hiện thực (Story 3.11):
 - **Binds:** NFR-4, NFR-5, NFR-6, NFR-10; vận hành
 - **Prevents:** Mỗi story tự dựng pipeline một kiểu; deploy làm mất IPN hay SSE; không khôi phục được khi cần.
 - **Rule:**
-  - CI: GitHub Actions trên mỗi PR chạy typecheck, dependency-cruiser (AD-10), Vitest với Postgres thật, bộ test cách ly (AD-13), Playwright với Tingee fake. Image gắn tag theo commit SHA. Staging tự deploy từ `main`; production deploy thủ công theo tag. Migration chạy bằng vai `migrate` của cùng image, trước khi đổi phiên bản `api`/`worker`, và luôn tương thích ngược.
+  - CI: GitHub Actions trên mỗi PR chạy typecheck, dependency-cruiser (AD-10), Vitest với Postgres thật, bộ test cách ly (AD-13), Playwright với Tingee fake. Image gắn tag theo commit SHA. Staging tự deploy từ `main`; production deploy thủ công theo tag. Migration chạy bằng vai `migrate` của cùng image, trước khi đổi phiên bản `api`/`worker`, và luôn tương thích ngược. Vai `migrate` giữ khóa advisory cấp session `tickee:migrate` suốt migration Drizzle, schema `pgboss` và cấp quyền; lượt chạy song song chờ chứ không bỏ qua. `MIGRATION_DATABASE_URL` phải là kết nối thẳng hoặc qua pooler chế độ session. Khóa không sắp thứ tự deploy giữa hai phiên bản, nên pipeline phải chặn deploy chồng nhau.
   - Topology tối thiểu: ≥ 2 instance `api` sau load balancer, ≥ 1 instance `worker`. `/healthz` (liveness), `/readyz` (DB và `LISTEN`). Nhận `SIGTERM`: ngừng nhận SSE mới, đóng SSE đang mở, `boss.stop({ graceful })`.
   - Sao lưu: RPO ≤ 5 phút, RTO ≤ 1 giờ, giữ 14 ngày, diễn tập khôi phục trước Closed Beta.
   - Secret tiêm từ secret store của nền tảng; tên và danh sách biến cố định trong schema Zod của `config`. Hai role DB: `tickee_migrator` (DDL), `tickee_app` (DML). drizzle-kit bỏ qua schema `pgboss`.
@@ -555,7 +555,7 @@ erDiagram
 
 | Hạng mục | Lý do chưa chốt | Xem lại khi |
 | --- | --- | --- |
-| Nhà cung cấp hạ tầng, email, backend giám sát | Chờ ý kiến pháp chế về NĐ 53/2022 (lưu dữ liệu tại Việt Nam). Tiêu chí bắt buộc: AD-22 và AD-36 (PITR, failover, kết nối session, ≥ 2 instance api, RPO/RTO) | Trước Closed Beta |
+| Nhà cung cấp hạ tầng, email, backend giám sát | Chờ ý kiến pháp chế về NĐ 53/2022 (lưu dữ liệu tại Việt Nam). Tiêu chí bắt buộc: AD-22 và AD-36 (PITR, failover, kết nối session, ≥ 2 instance api, RPO/RTO) | Trước Story 9.1 (Epic 9), trước Closed Beta |
 | Phòng chờ (NFR-3) | Chờ Câu hỏi mở #5 của PRD; tạm có giới hạn tốc độ (AD-31) và cache trang (AD-37) | Kiểm thử tải ở staging không đạt, hoặc có Sự kiện dự kiến > 5.000 người cùng mua |
 | SSO cho Quản trị Tingee | Chưa biết hệ SSO nội bộ của Tingee; tạm dùng Better Auth + step-up TOTP + giới hạn IP (AD-26) | Tingee cung cấp thông tin SSO |
 | Row Level Security của Postgres | AD-13 + AD-26 đủ cho MVP; RLS là lớp phòng thủ thêm | Bộ test cách ly phát hiện lỗi |

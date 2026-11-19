@@ -645,7 +645,8 @@ Các mã trong cột BRD (FR-xx, BR-xx, R-xx) là mã của BRD, không phải m
 | Phase | Nội dung | Điều kiện hoàn thành |
 |---|---|---|
 | Phase 1, tuần 1–2 | Tài khoản, BTC, Sự kiện, Hạng vé, form, Checkout, Giữ chỗ, link thanh toán Gateway, IPN, Đối soát bù, "Cần xử lý", kiểm tra Token, phát Vé, gửi email | Trên sandbox Tingee: mua Vé qua Gateway thành công, không bán quá số suất, IPN lặp không phát Vé trùng, hết Token thì "Tạm ngừng bán" |
-| Phase 2, tuần 3–4 | Check-in, CTV, Dashboard, CSV, Sheets, hiển thị và cảnh báo Token, báo cáo và khóa, các mục Should/Could | Check-in tại cổng đạt yêu cầu. Sheets cập nhật trong vòng 1 phút. Kiểm thử tải NFR-3 đạt |
+| Phase 2, tuần 3–4 | Check-in, CTV, Dashboard, CSV, Sheets, hiển thị và cảnh báo Token, báo cáo và khóa, các mục Should/Could | Check-in tại cổng đạt yêu cầu. Sheets cập nhật trong vòng 1 phút |
+| Trước Closed Beta | Chốt nhà cung cấp hạ tầng, email và giám sát theo pháp chế (NĐ 53/2022); staging và production; diễn tập khôi phục; kiểm thử tải NFR-3 trên staging (Epic 9) | Diễn tập khôi phục đạt RTO ≤ 1 giờ. Kiểm thử tải NFR-3 đạt |
 | Phase 3, tuần 5–6 | Closed Beta với 2–5 Sự kiện thật | Không còn lỗi nghiêm trọng nào chưa xử lý |
 
 **Điều kiện mở công khai:**
