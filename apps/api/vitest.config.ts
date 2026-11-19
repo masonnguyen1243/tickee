@@ -9,7 +9,8 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     exclude: ['test/fixtures/**'],
     globalSetup: ['test/global-setup.ts'],
-    // db.test và roles.process.test cùng chạy migrate trên tickee_test: không chạy song song.
+    // Không chạy song song: nhiều file chạy migrate trên tickee_test (db.test, roles.process.test…), và migrate-lock.test
+    // giữ khóa migrate của cả database rồi ngắt backend theo application_name.
     fileParallelism: false,
     testTimeout: 30_000,
     hookTimeout: 30_000,

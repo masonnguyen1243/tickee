@@ -36,6 +36,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-1-dung-monorepo-structural-seed.md`
   summary: Bảo đảm vai `migrate` chỉ chạy một lần mỗi lần deploy (pipeline tuần tự hoặc advisory lock trong migrate).
   evidence: Triage 1.1 #11: hai tiến trình migrate chạy cùng lúc chưa được chặn; spine (AD-36) giả định pipeline chạy migrate một lần trước deploy.
+- Đã xử lý (19/11/2026): mục ngay trên được giải quyết bằng `_bmad-output/implementation-artifacts/spec-4-7-e-khoa-migrate-mot-lan.md`. `runMigrations` giữ khóa advisory cấp session `tickee:migrate` (`platform/db/migration-lock.ts`) suốt ba bước, trên một kết nối riêng. Lượt thứ hai chờ lượt đầu xong rồi mới chạy. Khóa không sắp thứ tự deploy giữa hai phiên bản.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-2-he-thong-giao-dien-rap-toi-va-khung-web.md`
   summary: Quyết định server component của web gọi api qua URL công khai hay URL nội bộ, theo topology deploy.
   evidence: Triage 1.2 #5 (maybe-false): spine đặt api ở `api.<domain>` công khai; cần topology thật để biết có cần biến URL nội bộ riêng không.
@@ -858,6 +859,10 @@ Phần code của 4.7 không cần chọn nhà cung cấp hạ tầng được t
 - source_spec: none
   summary: Story 4.7 con — vai `migrate` chỉ chạy một lần mỗi lượt deploy (advisory lock trong migrate) để hai tiến trình migrate không chạy cùng lúc.
   evidence: Mục tiêu giao riêng được, tách khỏi 4.7-a theo quyết định của Mason (18/11/2026). Triage 1.1 #11, đã ghi ở checklist Story 4.7 trong file này.
+- Đã xử lý (19/11/2026): story con ngay trên được làm bằng `_bmad-output/implementation-artifacts/spec-4-7-e-khoa-migrate-mot-lan.md`.
+  - Khóa: `withMigrationLock` (`apps/api/src/platform/db/migration-lock.ts`) giữ khóa advisory cấp session `tickee:migrate` trên một kết nối riêng, bao trọn migration Drizzle, schema `pgboss` và cấp quyền. Kết nối này có `application_name` `tickee-migrate-lock`, bỏ `statement_timeout`/`lock_timeout`/`idle_session_timeout`, và bật keepalive phía client lẫn phía server.
+  - Hành vi: lượt thứ hai log `info` marker `migrate_lock_wait` rồi chờ, không giới hạn thời gian. Mất kết nối giữ khóa giữa chừng thì log `error` marker `migrate_lock_lost` ngay, và lượt đó báo lỗi khi xong. Nhả khóa trả `false` (pooler chế độ transaction) cũng báo lỗi.
+  - Bằng chứng: trước khi sửa, ba `runMigrations` song song làm một lượt lỗi `tuple concurrently updated`. Test ở `apps/api/test/migrate-lock.test.ts`.
 
 ## Deferred from: code review of spec-4-7-a-gioi-han-ip-admin.md (2026-11-18)
 
@@ -887,3 +892,9 @@ Phần code của 4.7 không cần chọn nhà cung cấp hạ tầng được t
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-7-d-gioi-han-presign-anh-su-kien.md`
   summary: E2-8. E2E `apps/web/e2e/public-event-revalidate.spec.ts:15` › "BTC đổi tên: trang vẫn trả bản cache cho tới khi gọi /api/revalidate…" chập chờn khi chạy cả bộ: sau `revalidate` trả 204 và `page.reload()`, tiêu đề vẫn là tên cũ quá 5 giây (android-chromium).
   evidence: Kiểm chứng 4.7-d (19/11/2026): fail 1 lần trong lượt chạy toàn bộ e2e giả lập (1117/1118); chạy riêng `--repeat-each=3` 6/6 pass; lượt chạy toàn bộ của agent triển khai cùng nhánh 1118/1118. Diff 4.7-d không chạm trang Sự kiện công khai hay revalidate.
+
+## Deferred from: code review of spec-4-7-e-khoa-migrate-mot-lan.md (2026-11-19)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-7-e-khoa-migrate-mot-lan.md`
+  summary: Ghi luật mới của vai `migrate` vào AD-36 của `ARCHITECTURE-SPINE.md`. Vai `migrate` giữ khóa advisory cấp session `tickee:migrate`. Lượt chạy song song chờ chứ không bỏ qua. `MIGRATION_DATABASE_URL` phải là kết nối thẳng hoặc qua pooler chế độ session. Khóa không sắp thứ tự deploy giữa hai phiên bản, nên pipeline phải chặn deploy chồng nhau.
+  evidence: Review 4.7-e (BH) #15, low. Hiện AD-36 chỉ giả định pipeline chạy migrate một lần. Luật bước Classify của Build không cho sửa spec/spine trong lượt sửa review. Nên gom vào lần cập nhật spine kế tiếp của 4.7 (deploy staging/production).
