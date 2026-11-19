@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseEnv } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Database } from '../src/platform/db/index.js';
 import { apiConfig, databaseUrl, migrationDatabaseUrl, TEST_REVALIDATE_SECRET } from './helpers.js';
@@ -15,6 +16,7 @@ function apiRoleEnv(): Record<string, string> {
   const c = apiConfig();
   return {
     APP_ROLE: 'api',
+    NODE_ENV: 'test',
     DATABASE_URL: c.DATABASE_URL,
     BETTER_AUTH_SECRET: c.BETTER_AUTH_SECRET,
     API_PUBLIC_URL: c.API_PUBLIC_URL,
@@ -34,6 +36,24 @@ function apiRoleEnv(): Record<string, string> {
     S3_FORCE_PATH_STYLE: String(c.S3_FORCE_PATH_STYLE),
     S3_PUBLIC_BASE_URL: c.S3_PUBLIC_BASE_URL,
   };
+}
+
+/** `.env.example` ở gốc repo, như `.env` local được tạo từ nó (Story 4.7-b). */
+function envExample(): Record<string, string> {
+  const parsed = parseEnv(readFileSync(new URL('../../../.env.example', import.meta.url), 'utf8'));
+  return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => entry[1] !== undefined));
+}
+
+/** Dòng log JSON trong output của tiến trình (bỏ dòng không phải JSON). */
+function logLines(output: string): Record<string, unknown>[] {
+  return output.split('\n').flatMap((line) => {
+    try {
+      const parsed: unknown = JSON.parse(line);
+      return typeof parsed === 'object' && parsed !== null ? [parsed as Record<string, unknown>] : [];
+    } catch {
+      return [];
+    }
+  });
 }
 
 // Chạy đúng artefact sẽ vào image: dist/main.js (turbo `test` phụ thuộc `build`).
@@ -98,7 +118,11 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
 
   describe('vai migrate', () => {
     it('MIGRATION_DATABASE_URL hợp lệ → exit 0', async () => {
-      const { code, output } = await run({ APP_ROLE: 'migrate', MIGRATION_DATABASE_URL: migrationDatabaseUrl() });
+      const { code, output } = await run({
+        APP_ROLE: 'migrate',
+        NODE_ENV: 'test',
+        MIGRATION_DATABASE_URL: migrationDatabaseUrl(),
+      });
       expect(code, output).toBe(0);
       expect(output).toContain('migrate xong');
     });
@@ -106,6 +130,7 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
     it('DB không tới được → exit ≠ 0, không in mật khẩu', async () => {
       const { code, output } = await run({
         APP_ROLE: 'migrate',
+        NODE_ENV: 'test',
         MIGRATION_DATABASE_URL: `postgresql://tickee_migrator:${SECRET}@127.0.0.1:1/tickee_test`,
       });
       expect(code).not.toBe(0);
@@ -116,13 +141,19 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
   describe('thiếu/sai env → dừng ngay, nêu tên biến, không in giá trị', () => {
     it.each([
       ['APP_ROLE=foo', { APP_ROLE: `foo-${SECRET}` }, 'APP_ROLE'],
-      ['APP_ROLE=api thiếu DATABASE_URL', { APP_ROLE: 'api' }, 'DATABASE_URL'],
-      ['DATABASE_URL mysql://', { APP_ROLE: 'api', DATABASE_URL: `mysql://root:${SECRET}@db/x` }, 'DATABASE_URL'],
-      ['APP_ROLE=migrate thiếu MIGRATION_DATABASE_URL', { APP_ROLE: 'migrate' }, 'MIGRATION_DATABASE_URL'],
+      ['APP_ROLE=api thiếu DATABASE_URL', { APP_ROLE: 'api', NODE_ENV: 'test' }, 'DATABASE_URL'],
+      ['DATABASE_URL mysql://', { APP_ROLE: 'api', NODE_ENV: 'test', DATABASE_URL: `mysql://root:${SECRET}@db/x` }, 'DATABASE_URL'],
+      ['APP_ROLE=migrate thiếu MIGRATION_DATABASE_URL', { APP_ROLE: 'migrate', NODE_ENV: 'test' }, 'MIGRATION_DATABASE_URL'],
+      [
+        'vai migrate thiếu NODE_ENV (Story 4.7-b)',
+        { APP_ROLE: 'migrate', MIGRATION_DATABASE_URL: `postgresql://tickee_migrator:${SECRET}@127.0.0.1:1/tickee_test` },
+        'NODE_ENV (thiếu)',
+      ],
       [
         'APP_ROLE=worker thiếu REVALIDATE_SECRET',
         {
           APP_ROLE: 'worker',
+          NODE_ENV: 'test',
           DATABASE_URL: `postgresql://tickee_app:${SECRET}@127.0.0.1:1/tickee_test`,
           WEB_ORIGIN: 'http://web.tickee.test',
           SMTP_URL: 'smtp://127.0.0.1:1',
@@ -143,6 +174,45 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
       expect(output).toContain('ADMIN_ALLOWED_CIDRS (thiếu)');
       expect(output).not.toContain('đang nghe cổng');
     });
+
+    it.each([
+      [
+        'api',
+        [
+          'ADMIN_ALLOWED_CIDRS',
+          'API_PUBLIC_URL',
+          'BETTER_AUTH_SECRET',
+          'GOOGLE_CLIENT_ID',
+          'GOOGLE_CLIENT_SECRET',
+          'S3_ACCESS_KEY_ID',
+          'S3_ENDPOINT',
+          'S3_PUBLIC_BASE_URL',
+          'S3_SECRET_ACCESS_KEY',
+          'TICKET_QR_KEYS',
+          'TINGEE_BASE_URL',
+          'TINGEE_CREDENTIAL_KEYS',
+          'WEB_ORIGIN',
+        ],
+      ],
+      ['worker', ['REVALIDATE_SECRET', 'TICKET_QR_KEYS', 'TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS', 'WEB_ORIGIN']],
+    ])(
+      'vai %s: env của image (NODE_ENV=production) với giá trị y .env.example (Story 4.7-b) → exit 1, nêu đủ biến vi phạm, không in giá trị',
+      async (role, variables) => {
+        const env: Record<string, string> = { ...envExample(), APP_ROLE: role, NODE_ENV: 'production' };
+        const { code, output } = await run(env);
+        expect(code, output).toBe(1);
+        const fatal = logLines(output).find((line) => Array.isArray(line.issues));
+        expect(fatal, output).toBeDefined();
+        const issues = fatal!.issues as { variable: string }[];
+        expect(issues.map((i) => i.variable).sort()).toEqual(variables);
+        for (const variable of variables) {
+          const value = env[variable];
+          if (value) expect(output, variable).not.toContain(value);
+        }
+        expect(output).not.toContain('đang nghe cổng');
+        expect(output).not.toContain('worker đã chạy');
+      },
+    );
   });
 
   it('vai api: /healthz 200 có x-request-id, /readyz 200 (DB + LISTEN realtime), SIGTERM → exit 0', async () => {
@@ -165,6 +235,7 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
     const c = apiConfig();
     const p = start({
       APP_ROLE: 'worker',
+      NODE_ENV: 'test',
       DATABASE_URL: databaseUrl(),
       WEB_ORIGIN: c.WEB_ORIGIN,
       SMTP_URL: c.SMTP_URL,
@@ -201,8 +272,10 @@ describe('CLI admin:grant / admin:revoke (tiến trình thật, role tickee_migr
     await db.close();
   });
 
-  const cli = (args: readonly string[], env: Record<string, string> = { MIGRATION_DATABASE_URL: migrationDatabaseUrl() }) =>
-    run(env, ADMIN_CLI, args);
+  const cli = (
+    args: readonly string[],
+    env: Record<string, string> = { NODE_ENV: 'test', MIGRATION_DATABASE_URL: migrationDatabaseUrl() },
+  ) => run(env, ADMIN_CLI, args);
 
   /** Tài khoản mới; mặc định đã bật 2FA (`admin:grant` chỉ cấp cho tài khoản đã bật, AD-26). */
   async function createUser({ twoFactor = true } = {}): Promise<{ id: string; email: string }> {
@@ -318,11 +391,12 @@ describe('CLI admin:grant / admin:revoke (tiến trình thật, role tickee_migr
 
   it('thiếu MIGRATION_DATABASE_URL hoặc DB không tới được → thoát ≠ 0, không in mật khẩu', async () => {
     const user = await createUser();
-    const missing = await cli(['grant', user.email, '--by', user.email], {});
+    const missing = await cli(['grant', user.email, '--by', user.email], { NODE_ENV: 'test' });
     expect(missing.code).not.toBe(0);
     expect(missing.output).toContain('MIGRATION_DATABASE_URL');
 
     const unreachable = await cli(['grant', user.email, '--by', user.email], {
+      NODE_ENV: 'test',
       MIGRATION_DATABASE_URL: `postgresql://tickee_migrator:${SECRET}@127.0.0.1:1/tickee_test`,
     });
     expect(unreachable.code).not.toBe(0);
@@ -336,10 +410,13 @@ describe('CLI admin:grant / admin:revoke (tiến trình thật, role tickee_migr
       const link = join(dir, 'admin-cli.js');
       symlinkSync(ADMIN_CLI, link);
       const user = await createUser();
-      const missingBy = await run({ MIGRATION_DATABASE_URL: migrationDatabaseUrl() }, link, ['grant', user.email]);
+      const missingBy = await run({ NODE_ENV: 'test', MIGRATION_DATABASE_URL: migrationDatabaseUrl() }, link, [
+        'grant',
+        user.email,
+      ]);
       expect(missingBy.code, missingBy.output).toBe(2);
       expect(missingBy.output).toContain('--by');
-      const granted = await run({ MIGRATION_DATABASE_URL: migrationDatabaseUrl() }, link, [
+      const granted = await run({ NODE_ENV: 'test', MIGRATION_DATABASE_URL: migrationDatabaseUrl() }, link, [
         'grant',
         user.email,
         '--by',
@@ -354,7 +431,10 @@ describe('CLI admin:grant / admin:revoke (tiến trình thật, role tickee_migr
 
   it('chạy bằng DATABASE_URL của tickee_app thì Postgres từ chối (không có UPDATE trên cột)', async () => {
     const user = await createUser();
-    const { code, output } = await cli(['grant', user.email, '--by', user.email], { MIGRATION_DATABASE_URL: databaseUrl() });
+    const { code, output } = await cli(['grant', user.email, '--by', user.email], {
+      NODE_ENV: 'test',
+      MIGRATION_DATABASE_URL: databaseUrl(),
+    });
     expect(code, output).not.toBe(0);
     expect(output).toContain('42501');
     expect(await flagOf(user.id)).toBe(false);
