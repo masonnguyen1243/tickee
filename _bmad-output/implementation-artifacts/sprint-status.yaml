@@ -29,7 +29,7 @@
 # - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-20-2026 08:58
+last_updated: 11-20-2026 11:42
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -73,7 +73,7 @@ development_status:
   3-11-tổng-quan-sự-kiện-thấy-đơn-đầu-tiên-ngay-lập-tức: done
   epic-3-retrospective: done
 
-  epic-4: in-progress
+  epic-4: done
   4-1-đối-soát-bù-khi-ipn-trễ-hoặc-mất: done
   4-2-tự-tạm-ngừng-bán-và-tự-mở-lại-khi-dịch-vụ-thanh-toán-của-btc: done
   4-3-hàng-cần-xử-lý-của-btc: done
@@ -82,7 +82,7 @@ development_status:
   4-6-giám-sát-và-lưới-an-toàn-vận-hành: done
   4-7-siết-cấu-hình-production-và-ci-trước-khi-deploy: done
   4-8-ảnh-sự-kiện-trên-object-storage: done
-  epic-4-retrospective: optional
+  epic-4-retrospective: done
 
   epic-5: backlog
   5-1-link-mời-ctv-và-tab-check-in: backlog
@@ -149,10 +149,10 @@ action_items:
     owner: "Mason"
     status: open
     ref: "_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-19-tach-story-4-7.md"
-    note: "Hoãn tới khi code xong Epic 5–8 (Mason, 19/11/2026). Làm ngay vì có thời gian
-      chờ: gửi câu hỏi Điều 26 cho pháp chế; chuẩn bị domain gửi email (SPF, DKIM,
-      DMARC). Khi có ý kiến pháp chế: bmad-deep-recon (select, technical) để chọn
-      nhà cung cấp"
+    note: "Hoãn tới khi code xong Epic 5–8 (Mason, 19/11/2026). Làm ngay vì có thời
+      gian chờ: gửi câu hỏi Điều 26 cho pháp chế; chuẩn bị domain gửi email (SPF,
+      DKIM, DMARC). Khi có ý kiến pháp chế: bmad-deep-recon (select, technical) để
+      chọn nhà cung cấp"
   - epic: 3
     action: "Quyết định có thêm qr_version vào phần ký của AD-16 hay không trước khi
       làm Story 3.8"
@@ -219,10 +219,10 @@ action_items:
     ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-10-29.md"
     note: "E2E lỗi lẻ khi từ chối đồng ý đã sửa ở 3cfbe52 (PR #20); bước đăng xuất
       đã gom vào lib/auth/use-sign-out.ts qua spec-epic-2-e2-5-refactor-web.md. E2e
-      full-stack xong qua spec-4-7-c-ci-e2e-full-stack.md: bước \"Playwright full-stack\"
-      của job ci chạy web build thật + api, worker + Tingee fake + Mailpit, luồng OTP →
-      đồng ý → returnTo → đăng xuất và Đơn có phí (SSE, email Vé) trên ios-webkit và
-      android-chromium"
+      full-stack xong qua spec-4-7-c-ci-e2e-full-stack.md: bước \"Playwright full-stack\"\
+      \ của job ci chạy web build thật + api, worker + Tingee fake + Mailpit, luồng
+      OTP → đồng ý → returnTo → đăng xuất và Đơn có phí (SSE, email Vé) trên ios-webkit
+      và android-chromium"
   - id: "epic-2-retro-e2-1-va-lo-hong-xac-nhan-lai"
     epic: 2
     action: "E2-1 (gate Epic 3): vá lỗ hổng xác nhận lại liên quan tới bật 2FA, kèm
@@ -397,12 +397,12 @@ action_items:
     owner: "Mason"
     status: done
     ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
-    note: "Mason tách E3-7 ngày 12/11. D3 + gom điều kiện \"Sự kiện còn dùng được\"
-      làm qua spec-epic-3-e3-7-trang-don-an-qr-sau-ket-thuc.md. B6 + C7 xong qua spec-epic-3-e3-7-b6-c7-nha-cho-link-va-test-notify.md.
-      E2 + E3 xong qua spec-epic-3-e3-7-e2-e3-tach-orders-service-va-dong-ho-db.md:
+    note: "Mason tách E3-7 ngày 12/11. D3 + gom điều kiện \"Sự kiện còn dùng được\"\
+      \ làm qua spec-epic-3-e3-7-trang-don-an-qr-sau-ket-thuc.md. B6 + C7 xong qua
+      spec-epic-3-e3-7-b6-c7-nha-cho-link-va-test-notify.md. E2 + E3 xong qua spec-epic-3-e3-7-e2-e3-tach-orders-service-va-dong-ho-db.md:
       TX1 sang place-order.ts, BuyerOrderView sang order-view.ts (orders.service.ts
-      còn 273 dòng), đồng hồ DB về platform/db/clock.ts (dbNow/dbClock) kèm test
-      chặn chép tay, releaseOrderHeld sang inventory.service.ts và thôi export releaseHeld.
+      còn 273 dòng), đồng hồ DB về platform/db/clock.ts (dbNow/dbClock) kèm test chặn
+      chép tay, releaseOrderHeld sang inventory.service.ts và thôi export releaseHeld.
       buyerScope (E4) hoãn theo quyết định của Mason, ghi ở deferred-work.md"
   - id: "epic-3-retro-e3-8-email-doi-gio-nguoi-di-cung"
     epic: 3
@@ -422,8 +422,100 @@ action_items:
     status: done
     ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md"
     note: "Xong qua _bmad-output/implementation-artifacts/spec-epic-3-e3-9-moi-truong-dev-va-quy-trinh.md:
-      cherry-pick 08520a6 thành cddd902 (Tingee fake gửi IPN); db:seed mã hóa lại Secret Token của
-      merchant demo khi không giải mã được, key merchant khác thì thoát 1 kèm hướng
-      dẫn; README thêm hai bẫy .env local và mục Quy trình PR; override _bmad/custom/bmad-build.toml
-      đặt done trong nhánh của story; PR template ghi luật CI đỏ. Bảo vệ nhánh main
-      bật qua gh api ngày 13/11: bắt buộc check ci và đi qua PR, không enforce admin"
+      cherry-pick 08520a6 thành cddd902 (Tingee fake gửi IPN); db:seed mã hóa lại
+      Secret Token của merchant demo khi không giải mã được, key merchant khác thì
+      thoát 1 kèm hướng dẫn; README thêm hai bẫy .env local và mục Quy trình PR; override
+      _bmad/custom/bmad-build.toml đặt done trong nhánh của story; PR template ghi
+      luật CI đỏ. Bảo vệ nhánh main bật qua gh api ngày 13/11: bắt buộc check ci và
+      đi qua PR, không enforce admin"
+  - id: "epic-4-retro-e4-1-doi-soat-bu-ben-hon"
+    epic: 4
+    action: "E4-1 (trước khi bật TINGEE_ORDER_STATUS_QUERY ở staging): worker payment
+      bật cờ dịch vụ khi lời tra bằng credential hiện hành nhận mã ngắt để job dò
+      tự mở lại và fan-out; gom cảnh báo payment_reconciliation_stopped theo BTC/lý
+      do; giao lệnh tra lại tay theo mã Đơn cho story có tên; sửa deferred-work.md:613
+      (retro B1, B4)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+  - id: "epic-4-retro-e4-2-chan-chung-merchant"
+    epic: 4
+    action: "E4-2 (trước khi bán Vé có phí thật): chặn hai BTC dùng chung một merchant
+      Tingee: unique một phần trên tingee_credentials.client_id hiện hành + 409 ở
+      2.6 và 2.13-b (retro B3)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+  - id: "epic-4-retro-e4-3-siet-cau-hinh-va-goi-tingee"
+    epic: 4
+    action: "E4-3 (sửa ngay, trước Epic 5): OPS_ALERT_EMAILS bắt buộc ở production;
+      single-flight + cooldown cho GET /v1/orgs/:orgId/token; luật production giữ
+      TINGEE_ORDER_STATUS_QUERY tắt tới khi có hợp đồng thật; luật local không nhận
+      IPN thật (retro D1, D2, E5, E8, G4)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+  - id: "epic-4-retro-e4-4-bao-mat-cong-khai"
+    epic: 4
+    action: "E4-4 (bảo mật; Next: ngay, còn lại trước Closed Beta): đối chiếu advisory
+      Next 16.4.3 và nâng nếu đúng; cache ảnh OG ở origin + cache-control không immutable;
+      giới hạn tốc độ theo IP cho funnel-events. Chi tiết ở ghi chú bảo mật local
+      (retro E1, D3, E4)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+  - id: "epic-4-retro-e4-5-quyet-dinh-can-xu-ly"
+    epic: 4
+    action: "E4-5 (trước Epic 6 và 7.1): Mason chốt doanh thu Tổng quan theo paid_amount
+      hay total_amount (+ assert revenue trong test); sửa closesOnly/reviewActionsFor
+      cho Đơn cancelled(event_cancelled) đã Ghép hoặc ghi cho 7.1; Trang Đơn có còn
+      mời trả qua link khi BTC Tạm ngừng bán (retro C1, C2, C3, B2)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+  - id: "epic-4-retro-e4-6-giu-cho-hang-loat"
+    epic: 4
+    action: "E4-6 (bảo mật, trước Closed Beta): chốt cách chặn giữ chỗ hàng loạt (trần
+      Vé đang giữ theo IP/Sự kiện, hay tạo link khi bấm Thanh toán) và gán story nhận;
+      cần đổi schema order_create_attempts (retro D4, A2 của Epic 3)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+  - id: "epic-4-retro-e4-7-doi-chieu-spec"
+    epic: 4
+    action: "E4-7 (epics.md và spine trước Story 5.1; AC 9.1 trước 9.1): sửa epics.md
+      theo spec 4.1/4.2/4.4/4.6-e/4.7-g, :1530 font OG, câu Phase 1; spine AD-8, AD-32,
+      bảng sở hữu platform, quy ước tên audit/queue; thêm vào AC 9.1 TRUST_PROXY_HOPS
+      + kiểm sau deploy, image/deploy web, font OG, bucket + kiểm tay presign trên
+      nhà cung cấp thật, purge CDN ảnh OG, edge bỏ traceparent/tracestate, TimeZone
+      DB, https cho OTLP (retro E2, E3, D6, F1, F4-F6)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+  - id: "epic-4-retro-e4-8-ve-sinh-deferred-work"
+    epic: 4
+    action: "E4-8 (trước Story 5.1): gán story cho mọi mục mồ côi trong deferred-work.md;
+      ghi Đã xử lý cho :357, :430, :484, :555, :583; chuyển :463 sang 7.1; spec-ci-cai-playwright-khong-treo.md
+      sang done; thêm vào bước đặt done (bmad-build.toml): grep deferred-work.md theo
+      số story; lời bác triage để story X xét phải thành một dòng deferred-work (retro
+      G1, C4, D5, E4, E7, G9)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+  - id: "epic-4-retro-e4-9-quy-trinh-pr-ci"
+    epic: 4
+    action: "E4-9 (trước Story 5.1): stacked PR đổi base sang main trước khi merge,
+      hoặc bước đặt done kiểm base là main; cancel-in-progress của ci.yml không áp
+      cho main (retro G2, E6)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+  - id: "epic-4-retro-e4-10-no-ky-thuat"
+    epic: 4
+    action: "E4-10 (test cùng E4-3; tách file trước story đầu tiên chạm lại): test
+      giả Date cho chốt link/checkoutUrl và dbClock của markPaid; tách payment-service.ts,
+      review-queue.tsx, contracts/organizer.ts; defineCronQueue chung kèm dead-letter
+      cho queue cron (retro B5, C5, F2, F3)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
