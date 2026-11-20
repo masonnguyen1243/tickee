@@ -27,7 +27,8 @@ const sharedTicketNotFound = () =>
 
 /**
  * Marker `alert` của dòng log khi link chia sẻ hợp lệ nhưng khóa QR của Vé đã bị gỡ khỏi `TICKET_QR_KEYS` (xoay khóa sai,
- * AD-29); cũng là loại cảnh báo của kênh `platform/alerts` (Story 4.6-b: chống lặp `cooldown` theo cặp
+ * AD-29), và khi lần kiểm lúc khởi động thấy Vé còn dùng một phiên bản khóa instance không có (`TicketQrKeyCheck`, Story
+ * 4.7-g); cũng là loại cảnh báo của kênh `platform/alerts` (Story 4.6-b: chống lặp `cooldown` theo cặp
  * `qrKeyVersion:currentVersion`).
  */
 export const TICKET_QR_KEY_MISSING_ALERT = 'ticket_qr_key_missing';

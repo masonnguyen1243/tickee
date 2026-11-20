@@ -14,7 +14,7 @@ function cruise(cwd: string, dirs: string[]) {
 
 describe('dependency-cruiser apps/web (AD-11)', () => {
   it('mã nguồn thật không vi phạm', () => {
-    const { status, output } = cruise(webRoot, ['app', 'components', 'lib']);
+    const { status, output } = cruise(webRoot, ['app', 'components', 'lib', 'instrumentation.ts']);
     expect(output).toContain('no dependency violations');
     expect(status).toBe(0);
   });

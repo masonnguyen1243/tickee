@@ -62,3 +62,42 @@ export function isCookieParent(domain: string, origin: string): boolean {
   if (host === null || parent === '') return false;
   return host === parent || host.endsWith(`.${parent}`);
 }
+
+/** `127.0.0.0/8` dạng chấm thập phân đầy đủ (dạng `URL.hostname` trả sau khi chuẩn hóa). */
+function isLoopbackV4(host: string): boolean {
+  const parts = host.split('.');
+  return parts.length === 4 && parts[0] === '127' && parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255);
+}
+
+/**
+ * Host local (Story 4.7-f): `localhost`, `*.localhost`, `127.0.0.0/8`, `::1` (có hoặc không ngoặc vuông: `URL.hostname`
+ * trả `[::1]`). Không phân biệt hoa thường. Mọi host khác là host thật. Web có bản riêng (`apps/web/lib/production-env.ts`):
+ * web không import code của api.
+ */
+export function isLocalHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === 'localhost' || host.endsWith('.localhost') || isLoopbackV4(host) || host === '::1' || host === '[::1]';
+}
+
+/** Marker của dòng log `warn` lúc khởi động khi `productionLookingOrigins` khác rỗng (Story 4.7-f). */
+export const NODE_ENV_NOT_PRODUCTION = 'node_env_not_production';
+
+/** Origin công khai mà `productionLookingOrigins` xét, theo thứ tự báo. */
+const PUBLIC_ORIGIN_VARIABLES = ['API_PUBLIC_URL', 'WEB_ORIGIN'] as const;
+
+/**
+ * Origin trông như môi trường thật (`https:` trên host không phải local) trong khi `NODE_ENV` khác `production` (Story
+ * 4.7-f): env runtime chép `NODE_ENV=development` từ `.env.example` thì mọi luật production tắt mà không có lỗi gì. Trả
+ * tên biến, không trả giá trị. `NODE_ENV=production`, hoặc vai không đọc origin nào (`migrate`), thì `[]`.
+ */
+export function productionLookingOrigins(
+  config: Readonly<{ NODE_ENV: string; API_PUBLIC_URL?: string; WEB_ORIGIN?: string }>,
+): string[] {
+  if (config.NODE_ENV === 'production') return [];
+  return PUBLIC_ORIGIN_VARIABLES.filter((variable) => {
+    const origin = config[variable];
+    if (origin === undefined || !isHttps(origin)) return false;
+    const host = hostOf(origin);
+    return !!host && !isLocalHost(host);
+  });
+}

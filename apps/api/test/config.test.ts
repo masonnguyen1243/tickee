@@ -7,7 +7,9 @@ import {
   ENV_EXAMPLE_KEYS,
   ENV_EXAMPLE_SECRETS,
   isCookieParent,
+  isLocalHost,
   loadConfig,
+  productionLookingOrigins,
   sharesKey,
   workerConfigSchema,
 } from '../src/platform/config/index.js';
@@ -779,5 +781,58 @@ describe('siết cấu hình production (Story 4.7-b)', () => {
     expect(isCookieParent('tickee.vn', 'khong-phai-url')).toBe(false);
     expect(sharesKey(`v1:${KEY_1}`, `v9:${QR_KEY_1},v2:${KEY_1}`)).toBe(true);
     expect(sharesKey(`v1:${KEY_1},v2:${KEY_2}`, `v1:${QR_KEY_1},v2:${QR_KEY_2}`)).toBe(false);
+  });
+});
+
+describe('productionLookingOrigins — NODE_ENV khác production mà origin trông như môi trường thật (Story 4.7-f)', () => {
+  const migrateEnv = { APP_ROLE: 'migrate', MIGRATION_DATABASE_URL: 'postgres://m:p@db/tickee' };
+
+  it('development/test với API_PUBLIC_URL, WEB_ORIGIN là https trên host thật → nêu tên biến, không nêu giá trị', () => {
+    for (const NODE_ENV of ['development', 'test']) {
+      // `apiEnv`: https://api.tickee.vn, https://tickee.vn.
+      const api = productionLookingOrigins(loadConfig({ ...apiEnv, NODE_ENV }));
+      expect(api, NODE_ENV).toEqual(['API_PUBLIC_URL', 'WEB_ORIGIN']);
+      expect(api.join(' ')).not.toContain('tickee.vn');
+      // Worker chỉ đọc WEB_ORIGIN.
+      expect(productionLookingOrigins(loadConfig({ ...workerEnv, NODE_ENV })), NODE_ENV).toEqual(['WEB_ORIGIN']);
+    }
+    expect(
+      productionLookingOrigins(loadConfig({ ...apiEnv, NODE_ENV: 'development', WEB_ORIGIN: 'http://localhost:3000' })),
+    ).toEqual(['API_PUBLIC_URL']);
+  });
+
+  it('NODE_ENV=production → [] (luật production đã chạy)', () => {
+    expect(productionLookingOrigins(loadConfig(apiProdEnv))).toEqual([]);
+    expect(productionLookingOrigins(loadConfig(workerProdEnv))).toEqual([]);
+  });
+
+  it('origin local hoặc http → [], kể cả http trên host thật', () => {
+    for (const origin of [
+      'https://localhost:3001',
+      'https://api.localhost',
+      'https://127.0.0.1:3001',
+      'https://127.8.9.10',
+      'https://[::1]:3001',
+      'http://api.tickee.vn',
+      'http://localhost:3001',
+    ]) {
+      const config = loadConfig({ ...apiEnv, NODE_ENV: 'development', API_PUBLIC_URL: origin, WEB_ORIGIN: origin });
+      expect(productionLookingOrigins(config), origin).toEqual([]);
+    }
+  });
+
+  it('.env.example (development, localhost) và vai migrate → []', () => {
+    expect(productionLookingOrigins(loadConfig(envExample))).toEqual([]);
+    expect(productionLookingOrigins(loadConfig({ ...envExample, APP_ROLE: 'worker' }))).toEqual([]);
+    expect(productionLookingOrigins(loadConfig({ ...migrateEnv, NODE_ENV: 'development' }))).toEqual([]);
+  });
+
+  it('isLocalHost: localhost, *.localhost, 127.0.0.0/8, ::1; mọi host khác là host thật', () => {
+    for (const host of ['localhost', 'LocalHost', 'api.localhost', '127.0.0.1', '127.255.0.9', '::1', '[::1]']) {
+      expect(isLocalHost(host), host).toBe(true);
+    }
+    for (const host of ['tickee.vn', 'localhost.tickee.vn', 'mylocalhost', '128.0.0.1', '0.0.0.0', '[::2]', 'api.tickee.test']) {
+      expect(isLocalHost(host), host).toBe(false);
+    }
   });
 });

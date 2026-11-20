@@ -4,6 +4,7 @@ const { revalidateTag } = vi.hoisted(() => ({ revalidateTag: vi.fn() }));
 vi.mock('next/cache', () => ({ revalidateTag }));
 
 import { dynamic, POST } from '@/app/api/revalidate/route';
+import { ENV_EXAMPLE_REVALIDATE_SECRET } from '@/lib/production-env';
 
 /** Route nội bộ `POST /api/revalidate` (Story 2.11-c): worker gọi để xóa cache trang `/e/{slug}`. */
 
@@ -23,6 +24,8 @@ function call(body: unknown, authorization: string | null = `Bearer ${SECRET}`):
 
 describe('POST /api/revalidate', () => {
   beforeEach(() => {
+    // Như `next start` (NODE_ENV=production): chế độ chạy thật chỉ do host quyết định.
+    vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('REVALIDATE_SECRET', SECRET);
   });
 
@@ -47,6 +50,49 @@ describe('POST /api/revalidate', () => {
     const res = await call({ tag: 'event:giai-chay-ab12' });
     expect(res.status).toBe(503);
     expect(revalidateTag).not.toHaveBeenCalled();
+  });
+
+  describe('web chạy thật (Story 4.7-f): host của NEXT_PUBLIC_API_BASE_URL hoặc WEB_ORIGIN không phải local', () => {
+    it.each([
+      ['NEXT_PUBLIC_API_BASE_URL', 'https://api.tickee.vn'],
+      ['WEB_ORIGIN', 'https://tickee.vn'],
+    ])('%s host thật, secret là giá trị mẫu, header đúng secret mẫu → 503, không revalidate', async (variable, value) => {
+      vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', 'http://localhost:3001');
+      vi.stubEnv('WEB_ORIGIN', undefined);
+      vi.stubEnv(variable, value);
+      vi.stubEnv('REVALIDATE_SECRET', ENV_EXAMPLE_REVALIDATE_SECRET);
+      const res = await call({ tag: 'event:giai-chay-ab12' }, `Bearer ${ENV_EXAMPLE_REVALIDATE_SECRET}`);
+      expect(res.status).toBe(503);
+      expect(revalidateTag).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['20 ký tự', 'abcdefghij0123456789'],
+      ['giá trị mẫu kèm dòng mới cuối', `${ENV_EXAMPLE_REVALIDATE_SECRET}\n`],
+    ])('secret %s → 503, không revalidate', async (_name, secret) => {
+      vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', 'https://api.tickee.vn');
+      vi.stubEnv('REVALIDATE_SECRET', secret);
+      const res = await call({ tag: 'event:giai-chay-ab12' }, `Bearer ${secret}`);
+      expect(res.status).toBe(503);
+      expect(revalidateTag).not.toHaveBeenCalled();
+    });
+
+    it('secret riêng ≥ 32 ký tự → 204 như cũ', async () => {
+      vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', 'https://api.tickee.vn');
+      vi.stubEnv('WEB_ORIGIN', 'https://tickee.vn');
+      const res = await call({ tag: 'event:giai-chay-ab12' });
+      expect(res.status).toBe(204);
+      expect(revalidateTag).toHaveBeenCalledWith('event:giai-chay-ab12', { expire: 0 });
+    });
+  });
+
+  it('không chạy thật (local, e2e): secret mẫu → 204 như cũ', async () => {
+    vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', 'http://localhost:3001');
+    vi.stubEnv('WEB_ORIGIN', 'http://localhost:3000');
+    vi.stubEnv('REVALIDATE_SECRET', ENV_EXAMPLE_REVALIDATE_SECRET);
+    const res = await call({ tag: 'event:giai-chay-ab12' }, `Bearer ${ENV_EXAMPLE_REVALIDATE_SECRET}`);
+    expect(res.status).toBe(204);
+    expect(revalidateTag).toHaveBeenCalledTimes(1);
   });
 
   it.each([

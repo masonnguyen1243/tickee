@@ -9,7 +9,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test:e2e": "playwright test",
     "test:e2e:fullstack": "playwright test --config playwright.fullstack.config.ts",
-    "lint:deps": "depcruise app components lib --config .dependency-cruiser.cjs",
+    "lint:deps": "depcruise app components lib instrumentation.ts --config .dependency-cruiser.cjs",
     "test": "vitest run"
   },
   "dependencies": {
