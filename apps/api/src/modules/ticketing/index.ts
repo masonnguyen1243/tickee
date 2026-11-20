@@ -3,7 +3,7 @@ export { issuedTicketCountsByType } from './issued-counts.js';
 export { type OwnTicket, type OwnTicketDetail } from './my-tickets.js';
 export { signTicketQr, TICKET_QR_KEYS, TicketQrKeys, verifyTicketQr, type VerifiedTicketQr } from './qr.js';
 export { hashShareToken, shareTokenOf } from './share-token.js';
-export { TicketingModule, TicketingRoutesModule, type TicketingConfig } from './ticketing.module.js';
+export { TicketingModule, TicketingRoutesModule, TicketQrKeyCheck, type TicketingConfig } from './ticketing.module.js';
 export {
   TICKET_QR_KEY_MISSING_ALERT,
   TicketsService,

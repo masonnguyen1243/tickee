@@ -228,7 +228,7 @@ Kênh `platform/alerts` (Story 4.6-b) gửi email `[Tickee vận hành] <tiêu �
 | ---- | ------- | --------- |
 | `payment_unmatched` | tiền về tài khoản BTC mà không khớp Đơn nào của BTC (IPN hay Đối soát bù) | một lần mỗi khoản tiền |
 | `payment_reconciliation_stopped` | Đối soát bù dừng tra một Đơn | một lần mỗi mã Đơn |
-| `ticket_qr_key_missing` | link chia sẻ Vé trả 404 vì `TICKET_QR_KEYS` của instance thiếu khóa của Vé | mỗi cặp phiên bản khóa, `OPS_ALERT_COOLDOWN_MINUTES` |
+| `ticket_qr_key_missing` | `TICKET_QR_KEYS` của instance thiếu khóa của Vé còn dùng: phát hiện lúc api hoặc worker khởi động (xem "Xoay khóa Mã QR vé"), hoặc khi link chia sẻ Vé trả 404 | mỗi cặp phiên bản khóa, `OPS_ALERT_COOLDOWN_MINUTES` |
 | `queue_backlog` | queue pg-boss có job tới hạn quá `OPS_ALERT_QUEUE_WAIT_MINUTES` mà chưa chạy | mỗi queue, `OPS_ALERT_COOLDOWN_MINUTES` |
 | `dead_letter` | có job mới trong một queue `*.dead-letter` (một email mỗi queue mỗi lượt quét) | một lần mỗi job |
 | `pending_order_overdue` | lưới an toàn `ordering.safety-sweep` (mỗi phút) cho hết hạn Đơn `pending` quá hạn hơn 2 phút mà job hết hạn chưa xử lý | một lần mỗi mã Đơn |
@@ -346,6 +346,13 @@ production); `.env.example` đặt `development`; test và bước Migrate của
 hình như vai `migrate` nên cũng cần `NODE_ENV`: `.env` local tạo từ `.env.example` đã có sẵn, trong image là
 `production`, chạy CLI ở nơi khác thì phải tự đặt.
 
+**Không chép `NODE_ENV=development` của `.env.example` lên môi trường thật** (env file, secret store): biến đặt lúc chạy
+đè `production` của image, và mọi luật dưới đây tắt mà không có lỗi nào. Để dễ phát hiện (Story 4.7-f): khi `NODE_ENV`
+khác `production` mà `API_PUBLIC_URL` hoặc `WEB_ORIGIN` là `https:` trên host không phải local (`localhost`,
+`*.localhost`, `127.0.0.0/8`, `::1`), vai `api` và `worker` vẫn khởi động nhưng log `warn` có marker
+`node_env_not_production` kèm `variables` (tên biến, không có giá trị). Thấy dòng này trên staging hay production thì sửa
+`NODE_ENV` về `production`.
+
 Khi `NODE_ENV=production`, api và worker kiểm thêm các luật dưới đây lúc khởi động; mỗi vai chỉ kiểm biến nó đọc. Vi
 phạm thì tiến trình thoát mã 1 với một `ConfigError` nêu mọi biến vi phạm trong một lượt, mỗi biến một lý do, không bao
 giờ nêu giá trị.
@@ -375,6 +382,29 @@ mẫu trong `.env.example` thì sửa cả file này: `apps/api/test/config.test
 Mỗi môi trường sinh secret và khóa riêng bằng `openssl rand -base64 32` (khóa viết dạng `v1:<kết quả>`; sinh
 `TINGEE_CREDENTIAL_KEYS` và `TICKET_QR_KEYS` riêng).
 
+### Web chạy thật
+
+`next build` và `next start` luôn đặt `NODE_ENV=production`, kể cả trong e2e, nên web không dựa vào biến này. Web nhận
+biết "bản chạy thật" theo host (Story 4.7-f, luật ở `apps/web/lib/production-env.ts`): `NEXT_PUBLIC_API_BASE_URL` (giá
+trị nhúng lúc build) hoặc `WEB_ORIGIN` có host không phải local. Host local là `localhost`, `*.localhost`, `127.0.0.0/8`,
+`::1`; mọi host khác là host thật, kể cả `*.test`. Tính cả `WEB_ORIGIN` để bản build local bị đem đi chạy thật vẫn bị kiểm.
+
+| Lúc | Luật | Lỗi |
+| --- | ---- | --- |
+| `next build` (`apps/web/lib/build-env.ts`) | `NEXT_PUBLIC_API_BASE_URL` có host thật thì phải là `https:` | `NEXT_PUBLIC_API_BASE_URL (phải là https khi host không phải local)`, build dừng |
+| Server khởi động, web chạy thật (`register()` của `apps/web/instrumentation.ts`: `next start` và server standalone) | `WEB_ORIGIN` bắt buộc và phải là `https:`: thiếu thì `metadataBase` của `/e/{slug}` rơi về localhost, preview Zalo/Facebook mất ảnh | `WEB_ORIGIN (thiếu)`, `WEB_ORIGIN (phải là https)` |
+| như trên | `REVALIDATE_SECRET` bắt buộc, ≥ 32 ký tự như worker, khác giá trị mẫu của `.env.example` (so sau khi bỏ khoảng trắng hai đầu) | `REVALIDATE_SECRET (thiếu)`, `(ngắn hơn 32 ký tự)`, `(là giá trị mẫu của .env.example; …)` |
+| `POST /api/revalidate`, web chạy thật | `REVALIDATE_SECRET` vi phạm luật trên | `503`, như khi thiếu biến |
+
+Vi phạm lúc khởi động thì server in một thông báo nêu mọi biến vi phạm, mỗi biến một lý do, không bao giờ nêu giá trị,
+rồi thoát mã 1. Kiểm ở `instrumentation.ts` chứ không ở `next.config.ts`, vì server standalone dùng config đã serialize
+lúc build. Server dev (`next dev`, `pnpm dev`: Next đặt `NODE_ENV=development`) không bao giờ bị kiểm, kể cả khi
+`apps/web/.env.local` trỏ host thật; `pnpm test:e2e`, `pnpm test:e2e:fullstack` và CI chạy mọi origin ở localhost nên
+cũng không. Khi đó hành vi như cũ, route nhận mọi secret khác rỗng. `apps/web/test/start.process.test.ts` chạy
+`next start` thật trên bản build có sẵn để giữ các luật này. Giá trị mẫu nằm trong `apps/web/lib/production-env.ts` (web không import
+code của api); `apps/web/test/production-env.test.ts` đọc `.env.example` và đỏ nếu hai nơi lệch. Font OG trong image web
+kiểm ở Story 9.1, lúc dựng image.
+
 ### Vai `migrate` không chạy song song
 
 Vai `migrate` giữ khóa advisory `tickee:migrate` của database suốt cả lượt chạy: migration Drizzle, schema `pgboss`,
@@ -402,6 +432,43 @@ WHERE a.application_name = 'tickee-migrate-lock' AND a.datname = current_databas
 ```
 
 Lượt giữ khóa đã chết mà backend vẫn còn thì chạy `SELECT pg_terminate_backend(<pid>)` bằng `tickee_migrator`.
+
+### Xoay khóa Mã QR vé
+
+Vé lưu phiên bản khóa đã ký (`tickets.qr_key_version`), không lưu Mã QR; token link chia sẻ cũng suy ra từ khóa đó. Một
+instance thiếu khóa của Vé còn dùng thì trên instance đó Trang Đơn và Chi tiết Vé trả 500, link chia sẻ trả 404, email Vé
+vào dead-letter, check-in (`verifyTicketQr`, Epic 5) từ chối Mã QR của các Vé đó. Vé còn dùng là Vé `valid` của Sự kiện
+chưa hủy và chưa quá `effective_end_at`.
+
+1. Thêm khóa mới (`v<k+1>`) vào `TICKET_QR_KEYS` của **mọi** instance api và worker trước, giữ nguyên khóa cũ. Instance
+   ký Vé mới bằng khóa có `k` lớn nhất, nên khi đang deploy dần, instance chưa có khóa mới không đọc được Vé vừa ký ở
+   instance đã có. Instance cũ đang chạy đã kiểm lúc nó khởi động, trước khi có Vé ký bằng khóa mới, nên không báo:
+   trong lúc deploy chỉ cảnh báo của link chia sẻ trả 404 phát hiện được. Lần kiểm lúc khởi động chỉ bắt instance khởi
+   động sau khi đã có Vé ký bằng khóa mới (rollback, thêm instance, khởi động lại), với `qrKeyVersion` lớn hơn
+   `currentVersion`.
+2. Chỉ gỡ khóa cũ khi lần khởi động của mọi instance không còn báo, và câu SQL dưới đây không còn Vé nào dùng phiên bản
+   cũ. Gỡ xong mà lần khởi động báo phiên bản cũ (`qrKeyVersion` nhỏ hơn `currentVersion`) thì thêm lại khóa đó.
+
+Mỗi lần vai `api` hoặc `worker` khởi động (Story 4.7-g; vai `migrate` không kiểm), instance so phiên bản khóa của Vé còn
+dùng với `TICKET_QR_KEYS` của nó. Thiếu phiên bản nào thì log `error` có marker `alert: 'ticket_qr_key_missing'`,
+`qrKeyVersion` (phiên bản của Vé), `currentVersion` (phiên bản lớn nhất của instance) và `tickets` (số Vé bị ảnh
+hưởng), rồi báo kênh cảnh báo vận hành. `qrKeyVersion` nhỏ hơn `currentVersion` là khóa cũ đã bị gỡ; lớn hơn là
+instance chưa có khóa mới. Instance vẫn khởi động và chạy bình thường (Checkout, IPN, check-in, rollback vẫn lên được):
+thêm lại khóa còn thiếu rồi khởi động lại. Mỗi câu truy vấn của lần kiểm tối đa 30 giây; truy vấn lỗi (DB lỗi, câu quá
+30 giây) thì chỉ log `warn`. Lần kiểm chạy nền; tắt (SIGTERM) chờ nó tối đa 5 giây, quá thì log `warn` rồi tắt tiếp.
+
+Tra phiên bản khóa còn dùng (cùng điều kiện với lần kiểm lúc khởi động):
+
+```sql
+SELECT t.qr_key_version, count(*) AS tickets
+FROM tickets t JOIN events e ON e.id = t.event_id
+WHERE t.status = 'valid' AND e.status <> 'cancelled' AND now() <= e.effective_end_at
+GROUP BY 1 ORDER BY 1;
+```
+
+Không ký lại Vé sang khóa mới bằng `UPDATE tickets SET qr_key_version = …`: token link chia sẻ đổi theo nên mọi link đã
+gửi trả 404. Phương án xoay khóa cho môi trường thật (giữ khóa cũ tới khi Vé hết hạn, công cụ ký lại kèm gửi lại email
+Vé, hay tách khóa link chia sẻ) chốt ở runbook của Story 9.1.
 
 ## Kiểm tra
 
@@ -454,8 +521,10 @@ phải dùng đúng `http://localhost:3001`. Turbo băm giá trị biến (và c
 `.env.local`, `.env.production`, `.env` nếu có) vào hash của build web, nên cache không trả lại bản build thiếu biến.
 
 Build để deploy (`pnpm build`, `pnpm turbo build`) không đi qua script trên: phải tự đặt biến, vd.
-`NEXT_PUBLIC_API_BASE_URL=https://api.tickee.vn pnpm turbo build --filter @tickee/web`. Thiếu biến thì `next build` dừng
-ngay và nêu tên biến (`apps/web/lib/build-env.ts`), không ra bản build nào để turbo cache. `next typegen` không bị kiểm.
+`NEXT_PUBLIC_API_BASE_URL=https://api.tickee.vn pnpm turbo build --filter @tickee/web`. Thiếu biến, hoặc biến trỏ host
+không phải local mà không phải `https:` (Story 4.7-f), thì `next build` dừng ngay và nêu tên biến kèm lý do, không nêu
+giá trị (`apps/web/lib/build-env.ts`), không ra bản build nào để turbo cache. `next typegen` không bị kiểm. Bản build trỏ
+host thật là bản "chạy thật": `next start` còn đòi `WEB_ORIGIN` và `REVALIDATE_SECRET` hợp lệ (xem "Web chạy thật").
 
 ### Dọn `.turbo`
 
@@ -478,8 +547,8 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `ADMIN_ALLOWED_CIDRS`    | api         | bắt buộc khi `NODE_ENV=production` (cả staging; thiếu hoặc sai thì api không khởi động); dải IP được gọi `/v1/admin/*`: CIDR IPv4/IPv6 cách nhau bằng dấu phẩy (`203.0.113.0/24,2001:db8::/32`; IP trần = `/32`/`/128`; không nhận `/0` hay dải IPv6 chồng lên `::ffff:0:0/96`). Có biến thì api log `info` số dải lúc khởi động; development/test để trống = không giới hạn, api log `warn`. Không bao giờ thêm dải nội bộ của LB/VPC (xem "Quản trị Tingee") |
 | `BETTER_AUTH_SECRET`     | api         | ≥ 32 ký tự; ký session/cookie và khóa gốc HMAC bộ đếm OTP |
 | `API_PUBLIC_URL`         | api         | origin công khai của api; Better Auth ở `/v1/auth`, URL IPN của BTC ở `/v1/payments/tingee/ipn/{ipnKey}`. Tingee fake (local) cũng đọc để biết URL IPN của BTC demo |
-| `WEB_ORIGIN`             | api, worker | api: origin duy nhất được CORS kèm cookie; worker: gốc link trong email (lời mời Admin `<WEB_ORIGIN>/loi-moi-btc#…`) và nơi gọi `<WEB_ORIGIN>/api/revalidate` |
-| `REVALIDATE_SECRET`      | worker, web | worker: bắt buộc, ≥ 32 ký tự; gửi `Authorization: Bearer …` tới `<WEB_ORIGIN>/api/revalidate`. web: server-only, cùng giá trị; thiếu thì route trả 503 (trang chỉ tự làm mới sau 30 giây). Sinh bằng `openssl rand -base64 32` |
+| `WEB_ORIGIN`             | api, worker, web | api: origin duy nhất được CORS kèm cookie; worker: gốc link trong email (lời mời Admin `<WEB_ORIGIN>/loi-moi-btc#…`) và nơi gọi `<WEB_ORIGIN>/api/revalidate`; web: server-only, `metadataBase` cho `og:image` của `/e/{slug}`, bắt buộc và phải `https` khi web chạy thật (xem "Web chạy thật") |
+| `REVALIDATE_SECRET`      | worker, web | worker: bắt buộc, ≥ 32 ký tự; gửi `Authorization: Bearer …` tới `<WEB_ORIGIN>/api/revalidate`. web: server-only, cùng giá trị; thiếu thì route trả 503 (trang chỉ tự làm mới sau 30 giây). Web chạy thật thì bắt buộc, ≥ 32 ký tự, khác giá trị mẫu: sai thì server không khởi động và route trả 503. Sinh bằng `openssl rand -base64 32` |
 | `AUTH_COOKIE_DOMAIN`     | api         | tùy chọn; tên miền cha cho cookie session (vd. `tickee.vn`). Đặt thì phải là miền cha của host `API_PUBLIC_URL` và `WEB_ORIGIN` (mọi môi trường); bắt buộc ở production khi hai host khác nhau |
 | `SMTP_URL`, `EMAIL_FROM` | api, worker | api gửi email OTP/2FA; worker gửi email từ job (lời mời Admin); local là Mailpit `smtp://localhost:1025` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | api | bắt buộc; OAuth client Google, redirect URI `<API_PUBLIC_URL>/v1/auth/callback/google` |
@@ -501,7 +570,7 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `OPS_ALERT_LINK_MIN_SAMPLES` | api     | mặc định `20` (số nguyên ≥ 1); `payment_link_slow` chỉ xét khi có từ chừng này lần gọi `create-link` trong 5 phút |
 | `OPS_ALERT_ISSUANCE_MIN_ORDERS` | worker | mặc định `10` (số nguyên ≥ 1); `ticket_issuance_drop` chỉ xét khi khung 75 → 15 phút trước có từ chừng này Đơn có lượt tạo link |
 | `OPS_ALERT_ISSUANCE_RATIO` | worker    | mặc định `0.5` (số trong (0, 1]); báo `ticket_issuance_drop` khi tỉ lệ Đơn đã được trả tiền dưới chừng này lần tỉ lệ của cùng khung 7 ngày trước |
-| `NEXT_PUBLIC_API_BASE_URL` | web       | gốc REST của api; client thêm `/v1`; nhúng lúc build. `next build` thiếu biến thì dừng; lệnh dev ở gốc tự đặt `http://localhost:3001` (xem "Biến build của web") |
+| `NEXT_PUBLIC_API_BASE_URL` | web       | gốc REST của api; client thêm `/v1`; nhúng lúc build. `next build` dừng khi thiếu biến, hoặc khi biến trỏ host không phải local mà không phải `https`; lệnh dev ở gốc tự đặt `http://localhost:3001` (xem "Biến build của web", "Web chạy thật") |
 | `TICKEE_UI_KIT`          | web         | `1` bật `/ui-kit`; production không đặt (404) |
 
 Nếu volume Postgres đã tồn tại từ trước khi có `docker/postgres/init.sql`, chạy `docker compose down -v` để khởi tạo lại.

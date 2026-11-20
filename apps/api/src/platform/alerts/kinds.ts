@@ -11,7 +11,10 @@ export const OpsAlertKind = {
   PAYMENT_UNMATCHED: 'payment_unmatched',
   /** Chuỗi Đối soát bù của một Đơn dừng (lỗi liên tiếp, key sai, không đọc được credential). Subject: mã Đơn. */
   PAYMENT_RECONCILIATION_STOPPED: 'payment_reconciliation_stopped',
-  /** Link chia sẻ Vé trả 404 vì `TICKET_QR_KEYS` của instance thiếu khóa của Vé. Subject: `qrKeyVersion:currentVersion`. */
+  /**
+   * `TICKET_QR_KEYS` của một instance thiếu khóa của Vé còn dùng: phát hiện lúc vai api hoặc worker khởi động (Story
+   * 4.7-g), hoặc khi link chia sẻ Vé trả 404. Subject: `qrKeyVersion:currentVersion`.
+   */
   TICKET_QR_KEY_MISSING: 'ticket_qr_key_missing',
   /** Queue pg-boss có job tới hạn mà chưa chạy quá `OPS_ALERT_QUEUE_WAIT_MINUTES`. Subject: tên queue. */
   QUEUE_BACKLOG: 'queue_backlog',
@@ -90,7 +93,7 @@ export const OPS_ALERT_KINDS: Readonly<Record<OpsAlertKind, OpsAlertKindSpec>> =
   ticket_qr_key_missing: {
     title: 'Thiếu khóa Mã QR vé',
     summary:
-      'Link chia sẻ Vé trả 404 vì TICKET_QR_KEYS của một instance api không có khóa của Vé (xoay khóa sai, hoặc instance chưa có khóa mới). Kiểm tra TICKET_QR_KEYS của mọi instance.',
+      'TICKET_QR_KEYS của một instance api hoặc worker không có khóa của Vé còn dùng (xoay khóa sai, hoặc instance chưa có khóa mới khi deploy dần). Phát hiện lúc instance khởi động (chi tiết có số Vé bị ảnh hưởng), hoặc khi link chia sẻ Vé trả 404 (chi tiết có id Vé). Trên instance đó, Trang Đơn và Chi tiết Vé của các Vé này lỗi, link chia sẻ trả 404, email Vé vào dead-letter, check-in từ chối Mã QR vé. Kiểm tra TICKET_QR_KEYS của mọi instance và thêm lại khóa còn thiếu.',
     subjectLabel: 'Phiên bản khóa của Vé:phiên bản hiện hành của instance',
     dedupe: 'cooldown',
   },
