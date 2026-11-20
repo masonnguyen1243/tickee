@@ -585,6 +585,7 @@ Mỗi mục dưới đây có đúng một story nhận. Story nhận đọc m�
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-3-e3-5-link-chia-se-thieu-khoa-qr.md`
   summary: Story 4.6/4.7. Khi thiếu khóa QR, các đường còn lại (Chi tiết Vé `ownTicket`, Trang Đơn và email Vé qua `ticketsOfOrder`, "Tạo lại link") vẫn ném `Error` thường; `ErrorFilter` log "Lỗi không bắt được" không có marker. 4.6 nên gắn marker `ticket_qr_key_missing` cho các lỗi này (tại chỗ ném hoặc trong filter), mã trạng thái giữ nguyên. 4.7 nên thêm kiểm lúc khởi động: `SELECT DISTINCT qr_key_version FROM tickets WHERE status = 'valid'` so với `keys.has`, để bắt xoay khóa sai trước khi người dùng gặp.
   evidence: `ticketing/my-tickets.ts:128-129`, `ticketing/tickets.service.ts` › `ticketsOfOrder`/`regenerateShareLink`, `platform/http/error.filter.ts:57`. Có từ trước spec E3-5 D1; spec giữ các đường này là lỗi cấu hình (Sprint Change Proposal 13/11/2026 §4.6). Review E3-5 D1 #2 (medium, defer).
+- Đã xử lý (20/11/2026), phần 4.7 (kiểm lúc khởi động) của mục ngay trên: `_bmad-output/implementation-artifacts/spec-4-7-g-kiem-khoa-qr-luc-khoi-dong.md`. Mỗi lần vai api hoặc worker khởi động, `TicketQrKeyCheck` (`ticketing/ticketing.module.ts`, chạy nền từ `onApplicationBootstrap`) gọi `missingQrKeyVersions` (`ticketing/qr-key-check.ts`): phiên bản khóa của Vé `valid` thuộc Sự kiện còn mở (`eventOpenForTickets`) mà `TICKET_QR_KEYS` không có. Mỗi phiên bản thiếu: log `error` marker `ticket_qr_key_missing` kèm `qrKeyVersion`, `currentVersion`, `tickets` (số Vé), rồi `OpsAlerts.raise` subject `qrKeyVersion:currentVersion`. Chỉ cảnh báo, không thoát (Mason chốt 20/11/2026); truy vấn lỗi thì log `warn`. Phần 4.6 (marker cho lỗi của Chi tiết Vé, Trang Đơn, email và "Tạo lại link") vẫn mở; các đường đọc Vé không đổi.
 
 ## Deferred from: code review of spec-epic-3-e3-9-moi-truong-dev-va-quy-trinh.md (2026-11-13)
 
@@ -925,6 +926,7 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
 - source_spec: none
   summary: Story 4.7-g — lúc khởi động, kiểm mọi `qr_key_version` còn dùng ở bảng `tickets` có trong `TICKET_QR_KEYS`; thiếu thì báo kèm marker `ticket_qr_key_missing`, chốt dừng hay chỉ cảnh báo khi lập spec (AC 4.7, AD-29, mục review E3-5 D1 #2 phần 4.7).
   evidence: Tách khỏi 4.7-f theo quyết định của Mason (19/11/2026): giao riêng được, cần truy vấn DB lúc khởi động và quyết định dừng hay cảnh báo. 4.7-f chỉ làm cấu hình production phía web và cảnh báo `NODE_ENV` sai giá trị. Xong 4.7-f và 4.7-g thì 4.7 `done`.
+- Đã xử lý (20/11/2026): mục ngay trên được giải quyết bằng `_bmad-output/implementation-artifacts/spec-4-7-g-kiem-khoa-qr-luc-khoi-dong.md`. Mason chốt chỉ cảnh báo (instance thiếu khóa vẫn khởi động), và "còn dùng" là Vé `valid` của Sự kiện chưa kết thúc, chưa hủy. Log `error` marker `ticket_qr_key_missing` kèm `OpsAlerts.raise` cho từng phiên bản thiếu, cả hai chiều (khóa cũ đã gỡ, instance chưa có khóa mới). README có mục "Xoay khóa Mã QR vé" (thêm khóa mới cho mọi instance trước, chỉ gỡ khóa cũ khi lần khởi động không còn báo, câu SQL tra phiên bản còn dùng). Runbook chọn phương án xoay khóa vẫn thuộc Story 9.1.
 
 ## Deferred from: code review of spec-4-7-f-cau-hinh-production-web.md (2026-11-20)
 
@@ -937,3 +939,12 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-7-f-cau-hinh-production-web.md`
   summary: Next 16.4.3: khi build 4.7-f, Next CLI dừng một lần với "SecurityFatalError" báo phiên bản có lỗ hổng đã biết, và gợi ý chạy `next upgrade --agent=security`. Chạy lại đúng lệnh cũ thì qua. Cần đối chiếu với advisory chính thức rồi quyết định có nâng `next` không; CI có thể gặp cùng lần dừng này.
   evidence: Review 4.7-f (BH) #17, maybe-false; nếu đúng thì có thể high. Mới chỉ thấy qua output CLI, chưa đối chiếu nguồn chính thức. Cách chốt: tra GitHub Security Advisories của `vercel/next.js` cho 16.4.3, hoặc chạy `pnpm audit --prod`.
+
+## Deferred from: code review of spec-4-7-g-kiem-khoa-qr-luc-khoi-dong.md (2026-11-20)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-7-g-kiem-khoa-qr-luc-khoi-dong.md`
+  summary: Kiểm lúc khởi động (4.7-g) chỉ so phiên bản khóa (`keys.has`). Nếu một instance có cùng phiên bản `v1` nhưng khác byte khóa (sinh lại, chép nhầm), thì mọi Mã QR vé và link chia sẻ trên instance đó đều hỏng mà lần kiểm vẫn sạch. Hướng làm: mỗi phiên bản còn dùng lấy mẫu một Vé có `share_token_hash`, so `hashShareToken(shareTokenOf(...))` với hash đã lưu. Không cần thêm cột.
+  evidence: Review 4.7-g (BH) #4, medium. Loại sai cấu hình này khác với việc thiếu phiên bản mà intent của 4.7-g nhắm tới, và đã có từ trước. Nên gom vào runbook xoay khóa của Story 9.1.
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-7-g-kiem-khoa-qr-luc-khoi-dong.md`
+  summary: Nhánh `statement_timeout` 30 giây của `TicketQrKeyCheck` chưa có test: bỏ dòng `set_config('statement_timeout', …)` thì mọi test vẫn xanh, và một lần kiểm bị khóa chặn sẽ chờ mãi mà không log `warn`.
+  evidence: Review 4.7-g (VG) #21, medium (regression gap đã kiểm). Test thật phải chờ hơn 30 giây, hoặc phải biến timeout thành tham số; spec cấm thêm biến env. Trần chờ khi tắt (vá ở #8) đã giới hạn được hậu quả khi shutdown.

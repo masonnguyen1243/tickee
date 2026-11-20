@@ -228,7 +228,7 @@ Kênh `platform/alerts` (Story 4.6-b) gửi email `[Tickee vận hành] <tiêu �
 | ---- | ------- | --------- |
 | `payment_unmatched` | tiền về tài khoản BTC mà không khớp Đơn nào của BTC (IPN hay Đối soát bù) | một lần mỗi khoản tiền |
 | `payment_reconciliation_stopped` | Đối soát bù dừng tra một Đơn | một lần mỗi mã Đơn |
-| `ticket_qr_key_missing` | link chia sẻ Vé trả 404 vì `TICKET_QR_KEYS` của instance thiếu khóa của Vé | mỗi cặp phiên bản khóa, `OPS_ALERT_COOLDOWN_MINUTES` |
+| `ticket_qr_key_missing` | `TICKET_QR_KEYS` của instance thiếu khóa của Vé còn dùng: phát hiện lúc api hoặc worker khởi động (xem "Xoay khóa Mã QR vé"), hoặc khi link chia sẻ Vé trả 404 | mỗi cặp phiên bản khóa, `OPS_ALERT_COOLDOWN_MINUTES` |
 | `queue_backlog` | queue pg-boss có job tới hạn quá `OPS_ALERT_QUEUE_WAIT_MINUTES` mà chưa chạy | mỗi queue, `OPS_ALERT_COOLDOWN_MINUTES` |
 | `dead_letter` | có job mới trong một queue `*.dead-letter` (một email mỗi queue mỗi lượt quét) | một lần mỗi job |
 | `pending_order_overdue` | lưới an toàn `ordering.safety-sweep` (mỗi phút) cho hết hạn Đơn `pending` quá hạn hơn 2 phút mà job hết hạn chưa xử lý | một lần mỗi mã Đơn |
@@ -432,6 +432,43 @@ WHERE a.application_name = 'tickee-migrate-lock' AND a.datname = current_databas
 ```
 
 Lượt giữ khóa đã chết mà backend vẫn còn thì chạy `SELECT pg_terminate_backend(<pid>)` bằng `tickee_migrator`.
+
+### Xoay khóa Mã QR vé
+
+Vé lưu phiên bản khóa đã ký (`tickets.qr_key_version`), không lưu Mã QR; token link chia sẻ cũng suy ra từ khóa đó. Một
+instance thiếu khóa của Vé còn dùng thì trên instance đó Trang Đơn và Chi tiết Vé trả 500, link chia sẻ trả 404, email Vé
+vào dead-letter, check-in (`verifyTicketQr`, Epic 5) từ chối Mã QR của các Vé đó. Vé còn dùng là Vé `valid` của Sự kiện
+chưa hủy và chưa quá `effective_end_at`.
+
+1. Thêm khóa mới (`v<k+1>`) vào `TICKET_QR_KEYS` của **mọi** instance api và worker trước, giữ nguyên khóa cũ. Instance
+   ký Vé mới bằng khóa có `k` lớn nhất, nên khi đang deploy dần, instance chưa có khóa mới không đọc được Vé vừa ký ở
+   instance đã có. Instance cũ đang chạy đã kiểm lúc nó khởi động, trước khi có Vé ký bằng khóa mới, nên không báo:
+   trong lúc deploy chỉ cảnh báo của link chia sẻ trả 404 phát hiện được. Lần kiểm lúc khởi động chỉ bắt instance khởi
+   động sau khi đã có Vé ký bằng khóa mới (rollback, thêm instance, khởi động lại), với `qrKeyVersion` lớn hơn
+   `currentVersion`.
+2. Chỉ gỡ khóa cũ khi lần khởi động của mọi instance không còn báo, và câu SQL dưới đây không còn Vé nào dùng phiên bản
+   cũ. Gỡ xong mà lần khởi động báo phiên bản cũ (`qrKeyVersion` nhỏ hơn `currentVersion`) thì thêm lại khóa đó.
+
+Mỗi lần vai `api` hoặc `worker` khởi động (Story 4.7-g; vai `migrate` không kiểm), instance so phiên bản khóa của Vé còn
+dùng với `TICKET_QR_KEYS` của nó. Thiếu phiên bản nào thì log `error` có marker `alert: 'ticket_qr_key_missing'`,
+`qrKeyVersion` (phiên bản của Vé), `currentVersion` (phiên bản lớn nhất của instance) và `tickets` (số Vé bị ảnh
+hưởng), rồi báo kênh cảnh báo vận hành. `qrKeyVersion` nhỏ hơn `currentVersion` là khóa cũ đã bị gỡ; lớn hơn là
+instance chưa có khóa mới. Instance vẫn khởi động và chạy bình thường (Checkout, IPN, check-in, rollback vẫn lên được):
+thêm lại khóa còn thiếu rồi khởi động lại. Mỗi câu truy vấn của lần kiểm tối đa 30 giây; truy vấn lỗi (DB lỗi, câu quá
+30 giây) thì chỉ log `warn`. Lần kiểm chạy nền; tắt (SIGTERM) chờ nó tối đa 5 giây, quá thì log `warn` rồi tắt tiếp.
+
+Tra phiên bản khóa còn dùng (cùng điều kiện với lần kiểm lúc khởi động):
+
+```sql
+SELECT t.qr_key_version, count(*) AS tickets
+FROM tickets t JOIN events e ON e.id = t.event_id
+WHERE t.status = 'valid' AND e.status <> 'cancelled' AND now() <= e.effective_end_at
+GROUP BY 1 ORDER BY 1;
+```
+
+Không ký lại Vé sang khóa mới bằng `UPDATE tickets SET qr_key_version = …`: token link chia sẻ đổi theo nên mọi link đã
+gửi trả 404. Phương án xoay khóa cho môi trường thật (giữ khóa cũ tới khi Vé hết hạn, công cụ ký lại kèm gửi lại email
+Vé, hay tách khóa link chia sẻ) chốt ở runbook của Story 9.1.
 
 ## Kiểm tra
 

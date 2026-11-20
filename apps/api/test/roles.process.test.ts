@@ -8,8 +8,25 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { TICKET_QR_KEY_MISSING_ALERT } from '../src/modules/ticketing/index.js';
 import { Database } from '../src/platform/db/index.js';
-import { apiConfig, databaseUrl, migrationDatabaseUrl, TEST_REVALIDATE_SECRET } from './helpers.js';
+import {
+  apiConfig,
+  databaseUrl,
+  migrationDatabaseUrl,
+  TEST_REVALIDATE_SECRET,
+  TEST_TICKET_QR_KEY_V2,
+} from './helpers.js';
+import { createHarness, signUp } from './identity/harness.js';
+import {
+  eventOnSale,
+  orderBody,
+  paidReadyOrg,
+  parseOrder,
+  postOrder,
+  rejectingTingee,
+  resetOrderRateLimit,
+} from './ordering/order-fixtures.js';
 
 /** Env tối thiểu cho vai api, lấy từ cấu hình test (không kế thừa env của tiến trình test). */
 function apiRoleEnv(): Record<string, string> {
@@ -262,6 +279,61 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
         WEB_ORIGIN: 'http://localhost:3000',
       });
       expect(output).not.toContain('node_env_not_production');
+    });
+  });
+
+  describe('kiểm khóa Mã QR vé lúc khởi động (Story 4.7-g)', () => {
+    let ticketId: string;
+
+    beforeAll(async () => {
+      // Một Vé phát thật (khóa test mặc định v1) ở Sự kiện còn mở. Job email Vé ký bằng v1: worker của file sau gửi được.
+      const h = await createHarness({}, { overrides: [rejectingTingee] });
+      try {
+        await resetOrderRateLimit(h);
+        const org = await paidReadyOrg(h, { name: 'CLB Bơi lội Quận 7' });
+        const sale = await eventOnSale(org, [{ name: 'Vé tham dự', price: 0, capacity: 5 }]);
+        const buyer = await signUp(h);
+        const res = await postOrder(h, buyer, sale.event.slug, orderBody([{ ticketTypeId: sale.tiers[0]!.id, quantity: 1 }]));
+        expect(res.status, JSON.stringify(res.body)).toBe(201);
+        ticketId = parseOrder(res.body).tickets[0]!.id;
+      } finally {
+        await h.close();
+      }
+    });
+
+    it('vai api, TICKET_QR_KEYS chỉ có v2 (khóa v1 của Vé đã seed bị gỡ) → vẫn nghe cổng; dòng error kèm marker, không id Vé hay khóa', async () => {
+      const port = await freePort();
+      const p = start({ ...apiRoleEnv(), TICKET_QR_KEYS: TEST_TICKET_QR_KEY_V2, PORT: String(port) });
+      try {
+        await waitForOutput(p, `api đang nghe cổng ${port}`);
+        const checkLine = () =>
+          logLines(p.output()).find(
+            (l) => l.context === 'TicketQrKeyCheck' && l.alert === TICKET_QR_KEY_MISSING_ALERT && l.qrKeyVersion === 1,
+          );
+        await expect.poll(checkLine, { timeout: 10_000 }).toBeDefined();
+        expect(checkLine()).toMatchObject({ level: 50, currentVersion: 2, tickets: expect.any(Number) });
+        expect(checkLine()!.tickets).toBeGreaterThanOrEqual(1);
+        expect(p.output()).not.toContain(ticketId);
+        expect(p.output()).not.toContain(TEST_TICKET_QR_KEY_V2.slice(3));
+        // Chỉ cảnh báo: instance vẫn sẵn sàng và tắt êm.
+        expect((await fetch(`http://127.0.0.1:${port}/readyz`)).status).toBe(200);
+        p.child.kill('SIGTERM');
+        expect(await p.exit, p.output()).toBe(0);
+      } finally {
+        if (p.child.exitCode === null && p.child.signalCode === null) p.child.kill('SIGKILL');
+      }
+    });
+
+    it('vai migrate trên cùng DB, kèm TICKET_QR_KEYS chỉ có v2 → không kiểm (không có marker), exit 0', async () => {
+      const { code, output } = await run({
+        APP_ROLE: 'migrate',
+        NODE_ENV: 'test',
+        MIGRATION_DATABASE_URL: migrationDatabaseUrl(),
+        TICKET_QR_KEYS: TEST_TICKET_QR_KEY_V2,
+      });
+      expect(code, output).toBe(0);
+      expect(output).toContain('migrate xong');
+      expect(output).not.toContain(TICKET_QR_KEY_MISSING_ALERT);
     });
   });
 

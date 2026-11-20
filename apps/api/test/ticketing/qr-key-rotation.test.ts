@@ -6,7 +6,12 @@ import { Logger as PinoNestLogger } from 'nestjs-pino';
 import pg from 'pg';
 import type { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { TICKET_QR_KEY_MISSING_ALERT, TicketQrKeys, verifyTicketQr } from '../../src/modules/ticketing/index.js';
+import {
+  TICKET_QR_KEY_MISSING_ALERT,
+  TicketQrKeyCheck,
+  TicketQrKeys,
+  verifyTicketQr,
+} from '../../src/modules/ticketing/index.js';
 import { EMAIL_TRANSPORT } from '../../src/platform/email/index.js';
 import { BOSS } from '../../src/platform/jobs/index.js';
 import { REDACTED } from '../../src/platform/logging/index.js';
@@ -40,6 +45,10 @@ import {
  * `hNew2` là api thứ hai chỉ có v2, cùng thiếu khóa v1 với `hNew`). Một worker v1 + v2 chạy suốt file, để
  * mọi job email Vé (kể cả Vé v2) xong trong file này, không để lại cho file sau (worker chỉ có v1).
  * Trang Đơn, Chi tiết Vé và email khi thiếu khóa vẫn là lỗi cấu hình (runbook Story 4.7), ngoài phạm vi.
+ *
+ * Kiểm khóa lúc khởi động (Story 4.7-g) tắt ở bốn app api: `hNew`/`hNew2` (chỉ v2) luôn thấy Vé v1 còn dùng, và lần raise
+ * `1:2` lúc khởi động nằm trong bộ nhớ chống lặp của instance, chặn đúng email (và lỗi DB) của đường link chia sẻ mà file
+ * này kiểm. Kiểm lúc khởi động có test riêng (`qr-key-check.test.ts`).
  */
 
 const KEYS_BOTH = `${TEST_TICKET_QR_KEYS},${TEST_TICKET_QR_KEY_V2}`;
@@ -57,11 +66,14 @@ let org: Org;
 let worker: INestApplicationContext;
 let workerEmail: FakeEmailTransport;
 
+/** App api của file này: Tingee luôn từ chối `create-link`, không kiểm khóa QR lúc khởi động (xem đầu file). */
+const OVERRIDES = [rejectingTingee, { provide: TicketQrKeyCheck, useValue: {} }];
+
 beforeAll(async () => {
-  hOld = await createHarness({}, { overrides: [rejectingTingee] });
-  hBoth = await createHarness({ TICKET_QR_KEYS: KEYS_BOTH }, { overrides: [rejectingTingee] });
-  hNew = await createHarness({ TICKET_QR_KEYS: TEST_TICKET_QR_KEY_V2 }, { overrides: [rejectingTingee] });
-  hNew2 = await createHarness({ TICKET_QR_KEYS: TEST_TICKET_QR_KEY_V2 }, { overrides: [rejectingTingee] });
+  hOld = await createHarness({}, { overrides: OVERRIDES });
+  hBoth = await createHarness({ TICKET_QR_KEYS: KEYS_BOTH }, { overrides: OVERRIDES });
+  hNew = await createHarness({ TICKET_QR_KEYS: TEST_TICKET_QR_KEY_V2 }, { overrides: OVERRIDES });
+  hNew2 = await createHarness({ TICKET_QR_KEYS: TEST_TICKET_QR_KEY_V2 }, { overrides: OVERRIDES });
   org = await paidReadyOrg(hOld, { name: 'CLB Bóng bàn Quận 5' });
   workerEmail = new FakeEmailTransport();
   const moduleRef = await Test.createTestingModule({
@@ -77,6 +89,13 @@ beforeEach(async () => {
   await resetOrderRateLimit(hOld);
 });
 afterAll(async () => {
+  // Vé ký khác v1 (Vé v2 của file này, kể cả của lần chạy trước) không được còn dùng sau file này: app và worker của file
+  // khác chỉ có v1, nên kiểm khóa lúc khởi động (Story 4.7-g) sẽ báo thiếu khóa. Cho Sự kiện của các Vé đó kết thúc.
+  await hOld?.db.pool.query(
+    `UPDATE events SET effective_end_at = now() - interval '1 second'
+      WHERE effective_end_at >= now()
+        AND id IN (SELECT event_id FROM tickets WHERE status = 'valid' AND qr_key_version <> 1)`,
+  );
   await worker?.close();
   await hNew2?.close();
   await hNew?.close();
