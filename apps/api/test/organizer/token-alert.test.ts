@@ -15,14 +15,20 @@ import {
 import { sql } from 'drizzle-orm';
 import pg from 'pg';
 import type { PgBoss } from 'pg-boss';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TokenAlertScanWorker, sendTokenAlertEmail } from '../../src/modules/organizer/token-alert-jobs.js';
 import {
   TOKEN_ALERT_EMAIL_QUEUE,
   TokenAlertQueues,
   tokenAlertEmailJobId,
 } from '../../src/modules/organizer/token-alert.js';
-import { TokenReader } from '../../src/modules/organizer/token.service.js';
+import {
+  TOKEN_SETTINGS,
+  TokenReader,
+  tokenSettings,
+  type TokenReadResult,
+  type TokenSettings,
+} from '../../src/modules/organizer/token.service.js';
 import {
   HttpTingeeClient,
   TINGEE_CLIENT,
@@ -34,7 +40,7 @@ import { EMAIL_TRANSPORT } from '../../src/platform/email/index.js';
 import { BOSS } from '../../src/platform/jobs/index.js';
 import { REALTIME_CHANNEL } from '../../src/platform/realtime/index.js';
 import { WorkerModule } from '../../src/worker.module.js';
-import { databaseUrl, TEST_WEB_ORIGIN, workerConfig } from '../helpers.js';
+import { apiConfig, databaseUrl, TEST_WEB_ORIGIN, workerConfig } from '../helpers.js';
 import { createHarness, FakeEmailTransport, signUp, type Harness } from '../identity/harness.js';
 import { linkPayoutAccount, resetPaymentService, type Org, type User } from '../ordering/order-fixtures.js';
 import { fakeAccount, startTingeeFake, TOKEN_BALANCE_PATH, type TingeeFake } from '../tingee-fake/server.js';
@@ -45,7 +51,9 @@ import { fakeAccount, startTingeeFake, TOKEN_BALANCE_PATH, type TingeeFake } fro
  * (mốc DB, đúng một job email, `org_status_changed`, banner Owner), vẫn dưới ngưỡng, lên rồi xuống lại, đọc đồng thời,
  * đọc không được, tắt khi đang dưới, đổi ngưỡng khi vẫn dưới, email đến muộn, Tạm ngừng bán vì Token, Admin ở
  * dashboard, ngoài BTC. Job dò mỗi giờ (tuần tự, lỗi một BTC thì đi tiếp, bỏ qua BTC `suspended`) và worker thật. Không
- * số dư, hạn mức hay Token khả dụng trong log, job hay email. Mỗi test một BTC mới.
+ * số dư, hạn mức hay Token khả dụng trong log, job hay email. Mỗi test một BTC mới. Harness và worker thật đặt cooldown
+ * đọc Token về 0 (E4-3 phần B): các chuỗi 300 → 900 → 300 và hai lượt dò đọc lại cùng BTC và mong một lần đọc mới; các
+ * lần đọc đồng thời vẫn chung một lời gọi.
  */
 
 const MAIN: TingeeCredential = { clientId: 'tg-alert-main-1a2b', secretToken: 'tg-alert-main-secret-Zx9Cv8Bn7' };
@@ -55,6 +63,8 @@ const PAUSED: TingeeCredential = { clientId: 'tg-alert-paused-3c4d', secretToken
 const BROKEN: TingeeCredential = { clientId: 'tg-alert-broken-5e6f', secretToken: 'tg-alert-broken-Gf4Ds3' };
 /** Lời gọi bằng key này ném lỗi (giả lỗi bất ngờ ở một BTC giữa lượt dò). */
 const THROWING: TingeeCredential = { clientId: 'tg-alert-throw-7a8b', secretToken: 'tg-alert-throw-Qw2Er1' };
+/** BTC của test worker thật: key riêng để đếm đúng lời gọi đọc Token của BTC đó. */
+const SCANNED: TingeeCredential = { clientId: 'tg-alert-scanned-9c0d', secretToken: 'tg-alert-scanned-Mn5Bv4' };
 const PORTAL = 'https://baas.tingee.vn';
 const account = fakeAccount({ accountName: 'LE VAN CUONG' });
 const payout = {
@@ -76,10 +86,10 @@ const notified: Record<string, unknown>[] = [];
 /** BTC tạo trong file này: tắt cảnh báo và đặt lại cờ khi xong (job dò của lần chạy sau không phải đọc chúng). */
 const created: string[] = [];
 /**
- * Chặn mọi lời gọi đọc Token tới khi đủ `count` lời gọi đang chờ, rồi thả cùng lúc: các lần đọc đều xong trước khi lần
- * đánh giá nào bắt đầu (đọc đồng thời).
+ * Cổng giữ mọi lời gọi đọc Token (sau khi fake đã phản hồi) tới khi test mở: các lần đọc đồng thời của một BTC dùng chung
+ * lời gọi đang chạy, nên cùng nhận kết quả khi cổng mở, trước khi lần đánh giá nào bắt đầu (đọc đồng thời).
  */
-let barrier: { count: number; waiting: (() => void)[] } | null = null;
+let gate: Promise<void> | null = null;
 
 beforeAll(async () => {
   fake = await startTingeeFake({
@@ -88,9 +98,10 @@ beforeAll(async () => {
       { ...PAUSED, accounts: [account] },
       { ...BROKEN, accounts: [account], behavior: 'error' },
       { ...THROWING, accounts: [account] },
+      { ...SCANNED, accounts: [account] },
     ],
   });
-  // Client HTTP thật trỏ vào fake, bọc thêm rào chặn và lỗi bất ngờ cho đọc Token.
+  // Client HTTP thật trỏ vào fake, bọc thêm cổng và lỗi bất ngờ cho đọc Token.
   const http = new HttpTingeeClient({ baseUrl: fake.url });
   const client: TingeeClient = {
     listAccounts: (credential) => http.listAccounts(credential),
@@ -100,20 +111,21 @@ beforeAll(async () => {
     async getTokenBalance(credential) {
       if (credential.clientId === THROWING.clientId) throw new Error('Lỗi bất ngờ khi đọc Token');
       const result = await http.getTokenBalance(credential);
-      const gate = barrier;
-      if (gate) {
-        await new Promise<void>((resolve) => {
-          gate.waiting.push(resolve);
-          if (gate.waiting.length >= gate.count) {
-            barrier = null;
-            for (const release of gate.waiting) release();
-          }
-        });
-      }
+      if (gate) await gate;
       return result;
     },
   };
-  h = await createHarness({ TINGEE_BASE_URL: fake.url }, { overrides: [{ provide: TINGEE_CLIENT, useValue: client }] });
+  // Cooldown 0: mỗi lần đọc tuần tự là một lời gọi mới (chỉ gộp lời gọi đồng thời).
+  const settings: TokenSettings = { ...tokenSettings(apiConfig({ TINGEE_BASE_URL: fake.url })), readCooldownMs: 0 };
+  h = await createHarness(
+    { TINGEE_BASE_URL: fake.url },
+    {
+      overrides: [
+        { provide: TINGEE_CLIENT, useValue: client },
+        { provide: TOKEN_SETTINGS, useValue: settings },
+      ],
+    },
+  );
   boss = h.app.get<PgBoss>(BOSS);
   reader = h.app.get(TokenReader);
   scanWorker = new TokenAlertScanWorker(h.app.get<Database>(DATABASE), boss, reader);
@@ -128,7 +140,7 @@ beforeEach(() => {
   const main = fake.merchant(MAIN.clientId);
   main.token = undefined;
   main.tokenReplies = [];
-  barrier = null;
+  gate = null;
 });
 afterAll(async () => {
   for (const orgId of created) {
@@ -412,18 +424,35 @@ describe('đánh giá ngưỡng sau mỗi lần đọc Token', () => {
     expect(notices[0]!.version).not.toBe(firstVersion);
   });
 
-  it('đọc đồng thời: job dò (TokenReader) và trang (Owner, Admin) cùng thấy dưới ngưỡng → đúng 1 job email, 1 tín hiệu, cùng mốc', async () => {
+  it('đọc đồng thời: job dò (TokenReader) và trang (Owner, Admin) cùng thấy dưới ngưỡng → đúng 1 lời gọi Tingee, 1 job email, 1 tín hiệu, cùng mốc', async () => {
     const org = await newOrg();
     await setThreshold(org, 500);
     setAvailable(300);
-    barrier = { count: 4, waiting: [] };
-    const [job, owner, admin, again] = await Promise.all([
-      reader.readAndEvaluate(org.orgId),
-      overviewOf(org, org.owner.cookie),
-      overviewOf(org, org.admin.cookie),
-      reader.readAndEvaluate(org.orgId),
-    ]);
-    expect(barrier).toBeNull();
+    let open!: () => void;
+    gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    // `sharedRead` (private): mỗi lần đọc tới bước gọi Tingee là một lần gọi, kể cả khi dùng chung lời gọi đang chạy.
+    const entered = vi.spyOn(reader as unknown as { sharedRead(...args: unknown[]): Promise<unknown> }, 'sharedRead');
+    let reads: [TokenReadResult, TokenOverview, TokenOverview, TokenReadResult];
+    try {
+      const pending = Promise.all([
+        reader.readAndEvaluate(org.orgId),
+        overviewOf(org, org.owner.cookie),
+        overviewOf(org, org.admin.cookie),
+        reader.readAndEvaluate(org.orgId),
+      ]);
+      // Cooldown 0: lần đọc đến sau khi lời gọi xong sẽ gọi Tingee lần hai, nên chờ cả bốn vào rồi mới mở cổng.
+      await expect.poll(() => entered.mock.calls.length, { timeout: 5_000, interval: 10 }).toBe(4);
+      open();
+      reads = await pending;
+    } finally {
+      open();
+      gate = null;
+      entered.mockRestore();
+    }
+    const [job, owner, admin, again] = reads;
+    expect(fake.calls(TOKEN_BALANCE_PATH)).toHaveLength(1);
     expect([job.transition, again.transition].filter((t) => t === 'crossed').length).toBeLessThanOrEqual(1);
     const since = (await alertRow(org.orgId)).since!;
     for (const alert of [owner.alert, admin.alert]) expect(alert.belowThresholdSince).toBe(since.toISOString());
@@ -765,11 +794,14 @@ describe('worker thật (pg-boss)', () => {
     // Job email còn chờ của các test trên không được chen vào.
     await boss.deleteQueuedJobs(JobQueue.TOKEN_ALERT_EMAIL);
     workerEmail = new FakeEmailTransport();
-    const moduleRef = await Test.createTestingModule({
-      imports: [WorkerModule.forRoot(workerConfig({ TINGEE_BASE_URL: fake.url }))],
-    })
+    const config = workerConfig({ TINGEE_BASE_URL: fake.url });
+    // Cooldown 0 như harness: lượt dò thứ hai phải đọc Tingee lại, không dùng lại lần đọc của lượt đầu.
+    const settings: TokenSettings = { ...tokenSettings(config), readCooldownMs: 0 };
+    const moduleRef = await Test.createTestingModule({ imports: [WorkerModule.forRoot(config)] })
       .overrideProvider(EMAIL_TRANSPORT)
       .useValue(workerEmail)
+      .overrideProvider(TOKEN_SETTINGS)
+      .useValue(settings)
       .compile();
     app = await moduleRef.init();
   });
@@ -781,9 +813,10 @@ describe('worker thật (pg-boss)', () => {
     const schedules = await boss.getSchedules();
     expect(schedules.find((s) => s.name === JobQueue.TOKEN_ALERT_SCAN)).toMatchObject({ cron: TOKEN_ALERT_SCAN_CRON });
 
-    const org = await newOrg(MAIN, 'CLB Lướt sóng');
+    const org = await newOrg(SCANNED, 'CLB Lướt sóng');
     await setThreshold(org, 500);
-    setAvailable(300);
+    fake.merchant(SCANNED.clientId).token = { balance: 100, creditLimit: 200 };
+    const tokenCallsOfOrg = () => fake.calls(TOKEN_BALANCE_PATH).filter((c) => c.clientId === SCANNED.clientId);
     const toOwner = () => workerEmail.sent.filter((m) => m.to === org.owner.email);
 
     const scanCompleted = async (jobId: string | null) =>
@@ -796,6 +829,7 @@ describe('worker thật (pg-boss)', () => {
 
     await scanCompleted(await boss.send(JobQueue.TOKEN_ALERT_SCAN, null));
     expect((await alertRow(org.orgId)).since).toBeInstanceOf(Date);
+    expect(tokenCallsOfOrg()).toHaveLength(1);
     await expect.poll(() => toOwner().length, { timeout: 20_000, interval: 200 }).toBe(1);
     const delivered = toOwner()[0]!;
     expect(delivered.subject).toBe('Token của CLB Lướt sóng dưới ngưỡng cảnh báo');
@@ -811,6 +845,7 @@ describe('worker thật (pg-boss)', () => {
       .toBe('completed');
 
     await scanCompleted(await boss.send(JobQueue.TOKEN_ALERT_SCAN, null));
+    expect(tokenCallsOfOrg()).toHaveLength(2);
     await sleep(2_500);
     expect(toOwner()).toHaveLength(1);
     expect(await emailJobsOf(org.orgId)).toHaveLength(1);
