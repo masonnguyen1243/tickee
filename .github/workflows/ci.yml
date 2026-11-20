@@ -168,7 +168,8 @@ jobs:
 
       # Image tự chạy ở production (`ENV NODE_ENV` của Dockerfile; Story 4.7-b triage #24): vai worker không đặt NODE_ENV,
       # mọi biến hợp lệ trừ WEB_ORIGIN là http → phải thoát 1 vì luật https, output nêu WEB_ORIGIN và không có giá trị
-      # secret nào. Secret sinh ngẫu nhiên mỗi lượt (không phải secret thật).
+      # secret nào. Secret sinh ngẫu nhiên mỗi lượt (không phải secret thật). OPS_ALERT_EMAILS bắt buộc ở production (E4-3)
+      # nên phải đặt; TINGEE_ORDER_STATUS_QUERY không đặt (mặc định tắt, đúng luật production).
       - name: Chạy image vai worker ở production (WEB_ORIGIN http bị từ chối)
         run: |
           revalidate_secret=$(openssl rand -base64 32)
@@ -187,6 +188,7 @@ jobs:
             -e TINGEE_BASE_URL=https://tingee.example.test \
             -e TINGEE_CREDENTIAL_KEYS="v1:${credential_key}" \
             -e TICKET_QR_KEYS="v1:${qr_key}" \
+            -e OPS_ALERT_EMAILS=van-hanh@example.test \
             tickee-api:${{ github.sha }} 2>&1) || status=$?
           echo "$output"
           if [ "$status" -ne 1 ]; then
@@ -195,6 +197,12 @@ jobs:
           fi
           if ! grep -qF '"variable":"WEB_ORIGIN"' <<<"$output"; then
             echo "::error::Output không nêu WEB_ORIGIN"
+            exit 1
+          fi
+          # Mọi biến khác hợp lệ: output chỉ được nêu đúng một biến.
+          issue_count=$(grep -oF '"variable":"' <<<"$output" | wc -l)
+          if [ "$issue_count" -ne 1 ]; then
+            echo "::error::Output phải nêu đúng một biến (WEB_ORIGIN), nhận ${issue_count// /}"
             exit 1
           fi
           for secret in "$revalidate_secret" "$credential_key" "$qr_key" "$db_password" "$smtp_password"; do

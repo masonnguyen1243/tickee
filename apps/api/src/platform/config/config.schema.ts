@@ -7,6 +7,7 @@ import {
   hostOf,
   isCookieParent,
   isHttps,
+  isLocalUrl,
   sharesKey,
   usesExampleKey,
 } from './production-rules.js';
@@ -70,9 +71,15 @@ const tingeeAndTickets = {
   /**
    * Open API của Tingee (AD-9, Story 2.6): origin thuần, vd. `https://uat-open-api.tingee.vn`. Mọi lời gọi ký bằng API
    * key của từng BTC (lưu mã hóa trong DB); env không có credential Tingee nào. Local chạy
-   * `pnpm --filter @tickee/api tingee:fake` và trỏ vào fake.
+   * `pnpm --filter @tickee/api tingee:fake` và trỏ vào fake. `NODE_ENV=development` thì phải có host local (AD-36:
+   * `local` dùng Tingee fake), trừ khi bật `TINGEE_ALLOW_REAL_IN_DEVELOPMENT` (E4-3).
    */
   TINGEE_BASE_URL: httpOrigin,
+  /**
+   * Cờ opt-in (E4-3): `true` cho `NODE_ENV=development` gọi Tingee thật (host không phải local, kể cả UAT), vd. thử UAT
+   * qua đường hầm cho E3-3. Chỉ có tác dụng khi `NODE_ENV=development`; `test` và `production` bỏ qua cờ. Mặc định tắt.
+   */
+  TINGEE_ALLOW_REAL_IN_DEVELOPMENT: z.stringbool().default(false),
   /**
    * Khóa AES-256-GCM mã hóa Secret Token Tingee của BTC (AD-9, AD-23): `v<k>:<base64 của 32 byte>`, nhiều khóa cách
    * nhau bằng dấu phẩy, không trùng `k`. Mã hóa bằng khóa có `k` lớn nhất; giữ khóa cũ tới khi không còn dòng nào dùng.
@@ -179,8 +186,9 @@ const opsAlertApiRules = {
 /** Cảnh báo vận hành, chỉ vai worker: gửi email và job quét mỗi phút. */
 const opsAlertDelivery = {
   /**
-   * Người nhận email cảnh báo vận hành (đội vận hành), cách nhau bằng dấu phẩy. Không đặt: cảnh báo chỉ ghi log (worker
-   * log `warn` một lần lúc khởi động và mỗi job).
+   * Người nhận email cảnh báo vận hành (đội vận hành), cách nhau bằng dấu phẩy. Bắt buộc khi `NODE_ENV=production` (kể cả
+   * staging; E4-3): cảnh báo phát hiện lúc không có người nhận vẫn ghi dấu chống lặp, đặt biến sau cũng không gửi lại.
+   * `development`/`test` không đặt: cảnh báo chỉ ghi log (worker log `warn` một lần lúc khởi động và mỗi job).
    */
   OPS_ALERT_EMAILS: emailList.optional(),
   /** Luật `queue_backlog`: job tới hạn (`start_after`) quá chừng này phút mà chưa chạy thì báo hàng đợi ùn. */
@@ -305,7 +313,7 @@ const EXAMPLE_VALUE_MESSAGE = 'là giá trị mẫu của .env.example; môi tr�
 /** Biến URL phải là `https:` khi `NODE_ENV=production`. `OTEL_EXPORTER_OTLP_ENDPOINT` không kiểm (collector nội bộ). */
 const HTTPS_VARIABLES = ['API_PUBLIC_URL', 'WEB_ORIGIN', 'TINGEE_BASE_URL', 'S3_ENDPOINT', 'S3_PUBLIC_BASE_URL'];
 
-/** Luật chung cho mọi vai (Story 4.7-a, 4.7-b), theo thứ tự báo lỗi. */
+/** Luật chung cho mọi vai (Story 4.7-a, 4.7-b, E4-3), theo thứ tự báo lỗi. */
 const CROSS_RULES: readonly CrossRule[] = [
   // Story 4.7-a; staging cũng chạy production. Biến không đặt thì lý do là "thiếu" (`toIssues`).
   {
@@ -313,6 +321,34 @@ const CROSS_RULES: readonly CrossRule[] = [
     uses: ['NODE_ENV'],
     check: (c) => !isProduction(c) || c.ADMIN_ALLOWED_CIDRS !== undefined,
     message: 'bắt buộc khi NODE_ENV=production',
+  },
+  // E4-3, chỉ worker đọc: không có người nhận thì cảnh báo vận hành chỉ ra log mà dấu chống lặp vẫn ghi. Biến không đặt
+  // (hoặc rỗng) thì lý do là "thiếu".
+  {
+    variable: 'OPS_ALERT_EMAILS',
+    uses: ['NODE_ENV'],
+    check: (c) => !isProduction(c) || c.OPS_ALERT_EMAILS !== undefined,
+    message: 'bắt buộc khi NODE_ENV=production',
+  },
+  // E4-3, chỉ worker đọc: API tra đơn Gateway mới có hợp đồng tạm mà chỉ Tingee fake hiểu. Không có đường thoát ở
+  // production; story thay bằng hợp đồng thật gỡ luật này.
+  {
+    variable: 'TINGEE_ORDER_STATUS_QUERY',
+    uses: ['NODE_ENV'],
+    check: (c) => !isProduction(c) || c.TINGEE_ORDER_STATUS_QUERY !== true,
+    message: 'phải tắt khi NODE_ENV=production cho tới khi API tra đơn của Tingee có hợp đồng thật',
+  },
+  // E4-3, AD-36: `local` dùng Tingee fake. Mọi host không phải local là Tingee thật, kể cả UAT. Không áp cho `test` (test
+  // dùng URL UAT làm giá trị giả; e2e full-stack chạy `test` với fake).
+  {
+    variable: 'TINGEE_BASE_URL',
+    uses: ['NODE_ENV', 'TINGEE_ALLOW_REAL_IN_DEVELOPMENT'],
+    check: (c) =>
+      c.NODE_ENV !== 'development' ||
+      c.TINGEE_ALLOW_REAL_IN_DEVELOPMENT === true ||
+      isLocalUrl(text(c, 'TINGEE_BASE_URL') ?? ''),
+    message:
+      'phải trỏ Tingee fake trên host local khi NODE_ENV=development; staging/production phải đặt NODE_ENV=production; cố ý gọi Tingee thật từ máy dev thì đặt TINGEE_ALLOW_REAL_IN_DEVELOPMENT=true',
   },
   ...HTTPS_VARIABLES.map(
     (variable): CrossRule => ({
@@ -390,7 +426,7 @@ function withCrossRules<Shape extends z.ZodRawShape>(fields: z.ZodObject<Shape>)
   );
 }
 
-/** Vai api: luật production, khóa trùng và miền cookie (Story 4.7-a, 4.7-b). */
+/** Vai api: luật production, khóa trùng, miền cookie (Story 4.7-a, 4.7-b) và Tingee fake ở development (E4-3). */
 export const apiConfigSchema = withCrossRules(apiConfigFields);
 
 /** Biến của vai worker; luật giữa các biến nằm ở `workerConfigSchema`. */
@@ -417,7 +453,8 @@ const workerConfigFields = z.object({
    * Cờ Đối soát bù (Story 4.1): `true` thì job tra gọi API tra đơn Gateway của Tingee. Tingee chưa công bố API này
    * (13/11/2026): `tingee` làm theo hợp đồng tạm và Tingee fake giả lập đúng hợp đồng đó. Tắt (mặc định): job tra xong
    * ngay, không gọi Tingee, không enqueue mốc kế. Nhận `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off`. Bật ở local
-   * (`.env.example`, Tingee fake) và trong test; staging chỉ bật khi hợp đồng thật đã thay hợp đồng tạm.
+   * (`.env.example`, Tingee fake) và trong test. `NODE_ENV=production` (kể cả staging) bật thì worker không khởi động
+   * (E4-3); story thay hợp đồng tạm bằng hợp đồng thật gỡ luật đó.
    */
   TINGEE_ORDER_STATUS_QUERY: z.stringbool().default(false),
   ...telemetry,
@@ -425,7 +462,10 @@ const workerConfigFields = z.object({
   ...opsAlertDelivery,
 });
 
-/** Vai worker: luật production và khóa trùng của các biến worker đọc (Story 4.7-b). */
+/**
+ * Vai worker: luật production và khóa trùng của các biến worker đọc (Story 4.7-b), cùng người nhận cảnh báo, cờ Đối soát
+ * bù ở production và Tingee fake ở development (E4-3).
+ */
 export const workerConfigSchema = withCrossRules(workerConfigFields);
 
 export const migrateConfigSchema = z.object({

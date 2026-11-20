@@ -79,6 +79,12 @@ export function isLocalHost(hostname: string): boolean {
   return host === 'localhost' || host.endsWith('.localhost') || isLoopbackV4(host) || host === '::1' || host === '[::1]';
 }
 
+/** URL có host local (`isLocalHost`) không; chuỗi không phải URL thì `false` (E4-3). */
+export function isLocalUrl(url: string): boolean {
+  const host = hostOf(url);
+  return host !== null && isLocalHost(host);
+}
+
 /** Marker của dòng log `warn` lúc khởi động khi `productionLookingOrigins` khác rỗng (Story 4.7-f). */
 export const NODE_ENV_NOT_PRODUCTION = 'node_env_not_production';
 

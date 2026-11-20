@@ -29,7 +29,7 @@
 # - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-20-2026 13:48
+last_updated: 11-20-2026 15:08
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -453,8 +453,12 @@ action_items:
       TINGEE_ORDER_STATUS_QUERY tắt tới khi có hợp đồng thật; luật local không nhận
       IPN thật (retro D1, D2, E5, E8, G4)"
     owner: "Mason"
-    status: open
+    status: in-progress
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+    note: "Phần A (luật cấu hình) xong qua _bmad-output/implementation-artifacts/spec-epic-4-e4-3-luat-cau-hinh-tingee-va-canh-bao.md:
+      production bắt buộc OPS_ALERT_EMAILS và giữ TINGEE_ORDER_STATUS_QUERY tắt; development
+      từ chối TINGEE_BASE_URL không phải host local trừ khi đặt TINGEE_ALLOW_REAL_IN_DEVELOPMENT=true.
+      Còn lại phần B: single-flight + cooldown cho GET /v1/orgs/:orgId/token (ghi ở deferred-work.md)"
   - id: "epic-4-retro-e4-4-bao-mat-cong-khai"
     epic: 4
     action: "E4-4 (bảo mật; Next: ngay, còn lại trước Closed Beta): đối chiếu advisory

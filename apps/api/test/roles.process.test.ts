@@ -211,9 +211,21 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
           'WEB_ORIGIN',
         ],
       ],
-      ['worker', ['REVALIDATE_SECRET', 'TICKET_QR_KEYS', 'TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS', 'WEB_ORIGIN']],
+      [
+        'worker',
+        // E4-3: `.env.example` để trống người nhận cảnh báo và bật Đối soát bù (hợp đồng tạm).
+        [
+          'OPS_ALERT_EMAILS',
+          'REVALIDATE_SECRET',
+          'TICKET_QR_KEYS',
+          'TINGEE_BASE_URL',
+          'TINGEE_CREDENTIAL_KEYS',
+          'TINGEE_ORDER_STATUS_QUERY',
+          'WEB_ORIGIN',
+        ],
+      ],
     ])(
-      'vai %s: env của image (NODE_ENV=production) với giá trị y .env.example (Story 4.7-b) → exit 1, nêu đủ biến vi phạm, không in giá trị',
+      'vai %s: env của image (NODE_ENV=production) với giá trị y .env.example (Story 4.7-b, E4-3) → exit 1, nêu đủ biến vi phạm, không in giá trị',
       async (role, variables) => {
         const env: Record<string, string> = { ...envExample(), APP_ROLE: role, NODE_ENV: 'production' };
         const { code, output } = await run(env);
@@ -223,6 +235,8 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
         const issues = fatal!.issues as { variable: string }[];
         expect(issues.map((i) => i.variable).sort()).toEqual(variables);
         for (const variable of variables) {
+          // Cờ boolean (`true`) không phải secret: chuỗi đó có thể xuất hiện hợp lệ trong output.
+          if (variable === 'TINGEE_ORDER_STATUS_QUERY') continue;
           const value = env[variable];
           if (value) expect(output, variable).not.toContain(value);
         }

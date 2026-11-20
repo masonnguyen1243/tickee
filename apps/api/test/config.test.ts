@@ -8,6 +8,7 @@ import {
   ENV_EXAMPLE_SECRETS,
   isCookieParent,
   isLocalHost,
+  isLocalUrl,
   loadConfig,
   productionLookingOrigins,
   sharesKey,
@@ -60,7 +61,20 @@ const apiProdEnv = {
   ADMIN_ALLOWED_CIDRS: '203.0.113.0/24',
   AUTH_COOKIE_DOMAIN: 'tickee.vn',
 };
-const workerProdEnv = { ...workerEnv, NODE_ENV: 'production' };
+/** Worker production hợp lệ: thêm người nhận cảnh báo vận hành, bắt buộc ở production (E4-3). */
+const workerProdEnv = { ...workerEnv, NODE_ENV: 'production', OPS_ALERT_EMAILS: 'ops@tickee.vn' };
+
+/** Tingee fake của `.env.example`: host local, nên `NODE_ENV=development` nhận (E4-3). */
+const TINGEE_FAKE_URL = 'http://localhost:4010';
+const TINGEE_UAT_URL = 'https://uat-open-api.tingee.vn';
+
+/**
+ * `env` chạy ở `NODE_ENV`. `development` thì trỏ thêm Tingee fake: các env mẫu ở đây dùng URL UAT, mà development từ chối
+ * Tingee thật khi không bật `TINGEE_ALLOW_REAL_IN_DEVELOPMENT` (E4-3), nên test luật khác không bị báo thêm.
+ */
+function inNodeEnv(env: Record<string, string | undefined>, NODE_ENV: string): Record<string, string | undefined> {
+  return NODE_ENV === 'development' ? { ...env, NODE_ENV, TINGEE_BASE_URL: TINGEE_FAKE_URL } : { ...env, NODE_ENV };
+}
 
 /** `.env.example` ở gốc repo, đúng như `.env` local được tạo từ nó. */
 const envExample = parseEnv(readFileSync(new URL('../../../.env.example', import.meta.url), 'utf8'));
@@ -150,7 +164,7 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...apiEnv, TINGEE_ORDER_STATUS_QUERY: 'true' })).not.toHaveProperty('TINGEE_ORDER_STATUS_QUERY');
   });
 
-  it('cảnh báo vận hành (Story 4.6-b): mặc định cooldown 30 phút (api, worker), ngưỡng ùn 5 phút và không người nhận (worker)', () => {
+  it('cảnh báo vận hành (Story 4.6-b): mặc định cooldown 30 phút (api, worker), ngưỡng ùn 5 phút và không người nhận (worker, test/development)', () => {
     const api = loadConfig(apiEnv);
     expect(api).toMatchObject({ OPS_ALERT_COOLDOWN_MINUTES: 30 });
     // Vai api chỉ raise: không gửi email, không quét.
@@ -158,8 +172,13 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...apiEnv, OPS_ALERT_QUEUE_WAIT_MINUTES: '9' })).not.toHaveProperty('OPS_ALERT_QUEUE_WAIT_MINUTES');
     const worker = loadConfig(workerEnv);
     expect(worker).toMatchObject({ OPS_ALERT_COOLDOWN_MINUTES: 30, OPS_ALERT_QUEUE_WAIT_MINUTES: 5 });
-    expect(worker).not.toHaveProperty('OPS_ALERT_EMAILS');
-    expect(loadConfig({ ...workerEnv, OPS_ALERT_EMAILS: '' })).not.toHaveProperty('OPS_ALERT_EMAILS');
+    // Người nhận chỉ bắt buộc ở production (E4-3): test/development không đặt hoặc rỗng thì không có.
+    for (const NODE_ENV of ['test', 'development']) {
+      expect(loadConfig(inNodeEnv(workerEnv, NODE_ENV)), NODE_ENV).not.toHaveProperty('OPS_ALERT_EMAILS');
+      expect(loadConfig({ ...inNodeEnv(workerEnv, NODE_ENV), OPS_ALERT_EMAILS: '' }), NODE_ENV).not.toHaveProperty(
+        'OPS_ALERT_EMAILS',
+      );
+    }
     expect(
       loadConfig({ ...workerEnv, OPS_ALERT_COOLDOWN_MINUTES: '45', OPS_ALERT_QUEUE_WAIT_MINUTES: '10' }),
     ).toMatchObject({ OPS_ALERT_COOLDOWN_MINUTES: 45, OPS_ALERT_QUEUE_WAIT_MINUTES: 10 });
@@ -350,12 +369,18 @@ describe('loadConfig', () => {
     const err = issuesOf({ ...apiEnv, TINGEE_CREDENTIAL_KEYS: '', TINGEE_BASE_URL: 'https://uat-open-api.tingee.vn/v1' });
     expect(err.issues.map((i) => i.variable)).toEqual(['TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS']);
     expect(err.issues[1]?.reason).toBe('thiếu');
-    // Key Tingee là của từng BTC (lưu mã hóa trong DB): env Tingee chỉ còn URL và khóa mã hóa.
+    // Key Tingee là của từng BTC (lưu mã hóa trong DB): env Tingee chỉ còn URL, khóa mã hóa và cờ opt-in Tingee thật ở
+    // development (E4-3), không phải credential.
     const tingeeKeys = Object.keys(loadConfig(apiEnv)).filter((k) => k.startsWith('TINGEE_'));
-    expect(tingeeKeys.sort()).toEqual(['TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS']);
+    expect(tingeeKeys.sort()).toEqual(['TINGEE_ALLOW_REAL_IN_DEVELOPMENT', 'TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS']);
     // Worker thêm cờ Đối soát bù (Story 4.1), không phải credential.
     const workerTingeeKeys = Object.keys(loadConfig(workerEnv)).filter((k) => k.startsWith('TINGEE_'));
-    expect(workerTingeeKeys.sort()).toEqual(['TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS', 'TINGEE_ORDER_STATUS_QUERY']);
+    expect(workerTingeeKeys.sort()).toEqual([
+      'TINGEE_ALLOW_REAL_IN_DEVELOPMENT',
+      'TINGEE_BASE_URL',
+      'TINGEE_CREDENTIAL_KEYS',
+      'TINGEE_ORDER_STATUS_QUERY',
+    ]);
   });
 
   it('vai worker (Story 3.5): cần TINGEE_BASE_URL, TINGEE_CREDENTIAL_KEYS, TICKET_QR_KEYS như vai api; lỗi không in giá trị', () => {
@@ -471,8 +496,8 @@ describe('loadConfig', () => {
       '198.51.100.7/32',
     ]);
     for (const NODE_ENV of ['development', 'test']) {
-      expect(cidrsOf({ ...apiEnv, NODE_ENV }), String(NODE_ENV)).toBeUndefined();
-      expect(cidrsOf({ ...apiEnv, NODE_ENV, ADMIN_ALLOWED_CIDRS: '' }), String(NODE_ENV)).toBeUndefined();
+      expect(cidrsOf(inNodeEnv(apiEnv, NODE_ENV)), NODE_ENV).toBeUndefined();
+      expect(cidrsOf({ ...inNodeEnv(apiEnv, NODE_ENV), ADMIN_ALLOWED_CIDRS: '' }), NODE_ENV).toBeUndefined();
     }
     expect(loadConfig({ ...workerEnv, ADMIN_ALLOWED_CIDRS: '203.0.113.0/24' })).not.toHaveProperty('ADMIN_ALLOWED_CIDRS');
     // Worker ở production không cần biến này.
@@ -511,7 +536,7 @@ describe('loadConfig', () => {
     ];
     for (const NODE_ENV of ['production', 'development']) {
       for (const [value, reason] of cases) {
-        const err = issuesOf({ ...apiProdEnv, NODE_ENV, ADMIN_ALLOWED_CIDRS: value });
+        const err = issuesOf({ ...inNodeEnv(apiProdEnv, NODE_ENV), ADMIN_ALLOWED_CIDRS: value });
         // Một issue: lỗi định dạng, không thêm "thiếu" ở production.
         expect(err.issues, `${NODE_ENV} ${value}`).toEqual([{ variable: 'ADMIN_ALLOWED_CIDRS', reason }]);
         expect(err.message).not.toContain(SECRET);
@@ -584,8 +609,10 @@ describe('siết cấu hình production (Story 4.7-b)', () => {
     const err = issuesOf({ ...prod, [variable]: value });
     expect(err.issues).toEqual([{ variable, reason: HTTPS_REASON }]);
     expect(err.message).not.toContain(value);
+    // `TINGEE_BASE_URL` là host thật: development cần cờ opt-in (E4-3).
     for (const NODE_ENV of ['development', 'test']) {
-      expect(() => loadConfig({ ...prod, NODE_ENV, [variable]: value }), NODE_ENV).not.toThrow();
+      const optIn = variable === 'TINGEE_BASE_URL' && NODE_ENV === 'development' ? { TINGEE_ALLOW_REAL_IN_DEVELOPMENT: 'true' } : {};
+      expect(() => loadConfig({ ...inNodeEnv(prod, NODE_ENV), ...optIn, [variable]: value }), NODE_ENV).not.toThrow();
     }
   });
 
@@ -605,7 +632,7 @@ describe('siết cấu hình production (Story 4.7-b)', () => {
             { variable, reason: EXAMPLE_REASON },
           ]);
         }
-        expect(() => loadConfig({ ...prod, NODE_ENV: 'development', [variable]: example }), role).not.toThrow();
+        expect(() => loadConfig({ ...inNodeEnv(prod, 'development'), [variable]: example }), role).not.toThrow();
       }
       expect(checked).toBeGreaterThan(0);
     },
@@ -623,7 +650,10 @@ describe('siết cấu hình production (Story 4.7-b)', () => {
           const err = issuesOf({ ...prod, [variable]: value });
           expect(err.issues, `${role} ${variable}`).toEqual([{ variable, reason: EXAMPLE_REASON }]);
           expect(err.message).not.toContain(example);
-          expect(() => loadConfig({ ...prod, NODE_ENV: 'development', [variable]: value }), `${role} ${variable}`).not.toThrow();
+          expect(
+            () => loadConfig({ ...inNodeEnv(prod, 'development'), [variable]: value }),
+            `${role} ${variable}`,
+          ).not.toThrow();
         }
       }
     }
@@ -632,7 +662,7 @@ describe('siết cấu hình production (Story 4.7-b)', () => {
   it('TICKET_QR_KEYS có khóa trùng byte với TINGEE_CREDENTIAL_KEYS → lỗi ở TICKET_QR_KEYS, ở mọi môi trường', () => {
     for (const [role, prod] of prodRoles) {
       for (const NODE_ENV of ['development', 'test', 'production']) {
-        const err = issuesOf({ ...prod, NODE_ENV, TICKET_QR_KEYS: `v1:${QR_KEY_1},v3:${KEY_2}` });
+        const err = issuesOf({ ...inNodeEnv(prod, NODE_ENV), TICKET_QR_KEYS: `v1:${QR_KEY_1},v3:${KEY_2}` });
         expect(err.issues, `${role} ${NODE_ENV}`).toEqual([{ variable: 'TICKET_QR_KEYS', reason: SHARED_KEY_REASON }]);
         expect(err.message).not.toContain(KEY_2);
       }
@@ -645,13 +675,13 @@ describe('siết cấu hình production (Story 4.7-b)', () => {
   it('AUTH_COOKIE_DOMAIN đặt thì phải là miền cha của host API_PUBLIC_URL và WEB_ORIGIN, ở mọi môi trường', () => {
     for (const NODE_ENV of ['development', 'test', 'production']) {
       for (const domain of ['khac.vn', 'api.tickee.vn', 'ckee.vn', 'tickee.vn.khac.vn']) {
-        const err = issuesOf({ ...apiProdEnv, NODE_ENV, AUTH_COOKIE_DOMAIN: domain });
+        const err = issuesOf({ ...inNodeEnv(apiProdEnv, NODE_ENV), AUTH_COOKIE_DOMAIN: domain });
         expect(err.issues, `${NODE_ENV} ${domain}`).toEqual([{ variable: 'AUTH_COOKIE_DOMAIN', reason: COOKIE_REASON }]);
         expect(err.message).not.toContain(domain);
       }
       // Không phân biệt hoa thường, bỏ dấu `.` đầu; giá trị giữ nguyên như đã đặt.
       for (const domain of ['tickee.vn', '.Tickee.VN', 'TICKEE.vn']) {
-        expect(loadConfig({ ...apiProdEnv, NODE_ENV, AUTH_COOKIE_DOMAIN: domain }), `${NODE_ENV} ${domain}`).toMatchObject({
+        expect(loadConfig({ ...inNodeEnv(apiProdEnv, NODE_ENV), AUTH_COOKIE_DOMAIN: domain }), `${NODE_ENV} ${domain}`).toMatchObject({
           AUTH_COOKIE_DOMAIN: domain,
         });
       }
@@ -671,7 +701,7 @@ describe('siết cấu hình production (Story 4.7-b)', () => {
       );
     }
     for (const NODE_ENV of ['development', 'test']) {
-      expect(loadConfig({ ...apiProdEnv, NODE_ENV, AUTH_COOKIE_DOMAIN: undefined }), NODE_ENV).not.toHaveProperty(
+      expect(loadConfig({ ...inNodeEnv(apiProdEnv, NODE_ENV), AUTH_COOKIE_DOMAIN: undefined }), NODE_ENV).not.toHaveProperty(
         'AUTH_COOKIE_DOMAIN',
       );
     }
@@ -761,7 +791,16 @@ describe('siết cấu hình production (Story 4.7-b)', () => {
         'TINGEE_CREDENTIAL_KEYS',
         'WEB_ORIGIN',
       ],
-      worker: ['REVALIDATE_SECRET', 'TICKET_QR_KEYS', 'TINGEE_BASE_URL', 'TINGEE_CREDENTIAL_KEYS', 'WEB_ORIGIN'],
+      // E4-3: `.env.example` để trống người nhận cảnh báo và bật Đối soát bù (hợp đồng tạm).
+      worker: [
+        'OPS_ALERT_EMAILS',
+        'REVALIDATE_SECRET',
+        'TICKET_QR_KEYS',
+        'TINGEE_BASE_URL',
+        'TINGEE_CREDENTIAL_KEYS',
+        'TINGEE_ORDER_STATUS_QUERY',
+        'WEB_ORIGIN',
+      ],
     };
     for (const [role, variables] of Object.entries(expected)) {
       const env: Record<string, string | undefined> = { ...envExample, APP_ROLE: role, NODE_ENV: 'production' };
@@ -784,20 +823,181 @@ describe('siết cấu hình production (Story 4.7-b)', () => {
   });
 });
 
+const ORDER_QUERY_REASON = 'phải tắt khi NODE_ENV=production cho tới khi API tra đơn của Tingee có hợp đồng thật';
+const REAL_TINGEE_REASON =
+  'phải trỏ Tingee fake trên host local khi NODE_ENV=development; staging/production phải đặt NODE_ENV=production; cố ý gọi Tingee thật từ máy dev thì đặt TINGEE_ALLOW_REAL_IN_DEVELOPMENT=true';
+
+describe('luật cấu hình cảnh báo vận hành, Đối soát bù và Tingee ở local (E4-3)', () => {
+  const roleEnvs = [
+    ['api', apiEnv],
+    ['worker', workerEnv],
+  ] as const;
+
+  it('worker production thiếu hoặc rỗng OPS_ALERT_EMAILS → "thiếu", báo cùng lượt với biến khác; api production không đọc biến này', () => {
+    for (const value of [undefined, '']) {
+      const err = issuesOf({ ...workerProdEnv, OPS_ALERT_EMAILS: value });
+      expect(err.issues, String(value)).toEqual([{ variable: 'OPS_ALERT_EMAILS', reason: 'thiếu' }]);
+      expect(err.message).toContain('OPS_ALERT_EMAILS (thiếu)');
+    }
+    expect(loadConfig(workerProdEnv)).toMatchObject({ NODE_ENV: 'production', OPS_ALERT_EMAILS: ['ops@tickee.vn'] });
+    // Sai dạng: chỉ một issue định dạng, không thêm "thiếu".
+    expect(issuesOf({ ...workerProdEnv, OPS_ALERT_EMAILS: ' , ' }).issues).toEqual([
+      { variable: 'OPS_ALERT_EMAILS', reason: 'phải là danh sách email cách nhau bằng dấu phẩy' },
+    ]);
+    const both = issuesOf({ ...workerProdEnv, OPS_ALERT_EMAILS: undefined, DATABASE_URL: undefined });
+    expect(both.issues).toEqual(
+      expect.arrayContaining([
+        { variable: 'DATABASE_URL', reason: 'thiếu' },
+        { variable: 'OPS_ALERT_EMAILS', reason: 'thiếu' },
+      ]),
+    );
+    expect(both.issues).toHaveLength(2);
+    // Vai api chỉ raise, không gửi email cảnh báo.
+    expect(loadConfig(apiProdEnv)).not.toHaveProperty('OPS_ALERT_EMAILS');
+  });
+
+  it('worker production bật TINGEE_ORDER_STATUS_QUERY → lỗi "phải tắt khi NODE_ENV=production", không in giá trị; tắt thì khởi động', () => {
+    for (const value of ['true', '1', 'yes', 'on']) {
+      const err = issuesOf({ ...workerProdEnv, TINGEE_ORDER_STATUS_QUERY: value });
+      expect(err.issues, value).toEqual([{ variable: 'TINGEE_ORDER_STATUS_QUERY', reason: ORDER_QUERY_REASON }]);
+      expect(err.issues[0]?.reason).toContain('phải tắt khi NODE_ENV=production');
+      // `1`, `on` là chuỗi con của chữ thường gặp ("production"), nên chỉ kiểm hai giá trị dài.
+      if (value === 'true' || value === 'yes') expect(err.message).not.toContain(value);
+    }
+    for (const value of [undefined, '', 'false', '0']) {
+      expect(loadConfig({ ...workerProdEnv, TINGEE_ORDER_STATUS_QUERY: value }), String(value)).toMatchObject({
+        TINGEE_ORDER_STATUS_QUERY: false,
+      });
+    }
+    // Giá trị sai dạng: một issue định dạng, luật production không báo thêm.
+    const invalid = issuesOf({ ...workerProdEnv, TINGEE_ORDER_STATUS_QUERY: SECRET });
+    expect(invalid.issues.map((i) => i.variable)).toEqual(['TINGEE_ORDER_STATUS_QUERY']);
+    expect(invalid.issues[0]?.reason).not.toBe(ORDER_QUERY_REASON);
+    expect(invalid.message).not.toContain(SECRET);
+    // test/development (Tingee fake) vẫn bật được; vai api không đọc cờ.
+    for (const NODE_ENV of ['test', 'development']) {
+      expect(loadConfig({ ...inNodeEnv(workerProdEnv, NODE_ENV), TINGEE_ORDER_STATUS_QUERY: 'true' }), NODE_ENV).toMatchObject({
+        TINGEE_ORDER_STATUS_QUERY: true,
+      });
+    }
+    expect(loadConfig({ ...apiProdEnv, TINGEE_ORDER_STATUS_QUERY: 'true' })).not.toHaveProperty('TINGEE_ORDER_STATUS_QUERY');
+  });
+
+  it.each(roleEnvs)(
+    'vai %s, development, TINGEE_BASE_URL host không phải local → lỗi nêu cờ TINGEE_ALLOW_REAL_IN_DEVELOPMENT, không in URL',
+    (_role, env) => {
+      for (const url of [TINGEE_UAT_URL, 'https://open-api.tingee.vn', 'http://192.168.1.20:4010', 'http://localhost.tingee.vn']) {
+        const err = issuesOf({ ...env, NODE_ENV: 'development', TINGEE_BASE_URL: url });
+        expect(err.issues, url).toEqual([{ variable: 'TINGEE_BASE_URL', reason: REAL_TINGEE_REASON }]);
+        expect(err.issues[0]?.reason).toContain('TINGEE_ALLOW_REAL_IN_DEVELOPMENT');
+        expect(err.message).not.toContain(url);
+        expect(err.message).not.toContain(new URL(url).host);
+      }
+    },
+  );
+
+  it.each(roleEnvs)('vai %s, development + TINGEE_ALLOW_REAL_IN_DEVELOPMENT=true → khởi động với Tingee thật; cờ tắt thì vẫn chặn', (_role, env) => {
+    const dev = { ...env, NODE_ENV: 'development', TINGEE_BASE_URL: TINGEE_UAT_URL };
+    for (const flag of ['true', '1']) {
+      expect(loadConfig({ ...dev, TINGEE_ALLOW_REAL_IN_DEVELOPMENT: flag }), flag).toMatchObject({
+        NODE_ENV: 'development',
+        TINGEE_BASE_URL: TINGEE_UAT_URL,
+        TINGEE_ALLOW_REAL_IN_DEVELOPMENT: true,
+      });
+    }
+    for (const flag of [undefined, '', 'false', '0']) {
+      expect(issuesOf({ ...dev, TINGEE_ALLOW_REAL_IN_DEVELOPMENT: flag }).issues, String(flag)).toEqual([
+        { variable: 'TINGEE_BASE_URL', reason: REAL_TINGEE_REASON },
+      ]);
+    }
+    // Cờ sai dạng: chỉ báo ở cờ, không in giá trị; luật Tingee thật bỏ qua (không báo hai lần).
+    const invalid = issuesOf({ ...dev, TINGEE_ALLOW_REAL_IN_DEVELOPMENT: SECRET });
+    expect(invalid.issues.map((i) => i.variable)).toEqual(['TINGEE_ALLOW_REAL_IN_DEVELOPMENT']);
+    expect(invalid.message).not.toContain(SECRET);
+  });
+
+  it('development với Tingee fake trên host local (.env.example nguyên trạng) → api, worker khởi động như trước, cờ mặc định tắt', () => {
+    expect(envExample.TINGEE_BASE_URL).toBe(TINGEE_FAKE_URL);
+    // `.env.example` không bật cờ opt-in.
+    expect(envExample.TINGEE_ALLOW_REAL_IN_DEVELOPMENT).toBeUndefined();
+    for (const APP_ROLE of ['api', 'worker']) {
+      expect(loadConfig({ ...envExample, APP_ROLE }), APP_ROLE).toMatchObject({
+        NODE_ENV: 'development',
+        TINGEE_BASE_URL: TINGEE_FAKE_URL,
+        TINGEE_ALLOW_REAL_IN_DEVELOPMENT: false,
+      });
+    }
+    for (const url of ['http://127.0.0.1:4010', 'http://127.8.9.10:4010', 'http://[::1]:4010', 'https://tingee.localhost']) {
+      for (const [role, env] of roleEnvs) {
+        expect(() => loadConfig({ ...env, NODE_ENV: 'development', TINGEE_BASE_URL: url }), `${role} ${url}`).not.toThrow();
+      }
+    }
+  });
+
+  it('test với URL Tingee thật → khởi động như trước (luật chỉ áp development)', () => {
+    for (const [role, env] of roleEnvs) {
+      expect(env.NODE_ENV).toBe('test');
+      expect(loadConfig({ ...env, TINGEE_BASE_URL: TINGEE_UAT_URL }), role).toMatchObject({
+        NODE_ENV: 'test',
+        TINGEE_BASE_URL: TINGEE_UAT_URL,
+        TINGEE_ALLOW_REAL_IN_DEVELOPMENT: false,
+      });
+    }
+  });
+
+  it('production đặt cờ opt-in → cờ bị bỏ qua: https host thật khởi động, http (kể cả localhost) vẫn bị luật https từ chối', () => {
+    for (const [role, prod] of prodRoles) {
+      expect(loadConfig({ ...prod, TINGEE_ALLOW_REAL_IN_DEVELOPMENT: 'true' }), role).toMatchObject({ NODE_ENV: 'production' });
+      for (const url of ['http://uat-open-api.tingee.vn', TINGEE_FAKE_URL]) {
+        const err = issuesOf({ ...prod, TINGEE_ALLOW_REAL_IN_DEVELOPMENT: 'true', TINGEE_BASE_URL: url });
+        expect(err.issues, `${role} ${url}`).toEqual([{ variable: 'TINGEE_BASE_URL', reason: HTTPS_REASON }]);
+      }
+    }
+  });
+
+  it('nhiều vi phạm → một ConfigError nêu đủ, mỗi biến một issue', () => {
+    const prod = issuesOf({
+      ...workerProdEnv,
+      OPS_ALERT_EMAILS: undefined,
+      TINGEE_ORDER_STATUS_QUERY: 'true',
+      WEB_ORIGIN: 'http://tickee.vn',
+    });
+    expect(prod.issues).toEqual([
+      { variable: 'OPS_ALERT_EMAILS', reason: 'thiếu' },
+      { variable: 'TINGEE_ORDER_STATUS_QUERY', reason: ORDER_QUERY_REASON },
+      { variable: 'WEB_ORIGIN', reason: HTTPS_REASON },
+    ]);
+    const dev = issuesOf({ ...apiEnv, NODE_ENV: 'development', DATABASE_URL: undefined });
+    expect(dev.issues).toEqual([
+      { variable: 'DATABASE_URL', reason: 'thiếu' },
+      { variable: 'TINGEE_BASE_URL', reason: REAL_TINGEE_REASON },
+    ]);
+  });
+
+  it('isLocalUrl: URL có host local (isLocalHost); mọi host khác và chuỗi không phải URL → false', () => {
+    for (const url of ['http://localhost:4010', 'http://127.0.0.1:4010', 'http://[::1]:4010', 'https://tingee.localhost']) {
+      expect(isLocalUrl(url), url).toBe(true);
+    }
+    for (const url of [TINGEE_UAT_URL, 'http://192.168.1.20:4010', 'http://localhost.tingee.vn', 'khong-phai-url', '']) {
+      expect(isLocalUrl(url), url).toBe(false);
+    }
+  });
+});
+
 describe('productionLookingOrigins — NODE_ENV khác production mà origin trông như môi trường thật (Story 4.7-f)', () => {
   const migrateEnv = { APP_ROLE: 'migrate', MIGRATION_DATABASE_URL: 'postgres://m:p@db/tickee' };
 
   it('development/test với API_PUBLIC_URL, WEB_ORIGIN là https trên host thật → nêu tên biến, không nêu giá trị', () => {
     for (const NODE_ENV of ['development', 'test']) {
       // `apiEnv`: https://api.tickee.vn, https://tickee.vn.
-      const api = productionLookingOrigins(loadConfig({ ...apiEnv, NODE_ENV }));
+      const api = productionLookingOrigins(loadConfig(inNodeEnv(apiEnv, NODE_ENV)));
       expect(api, NODE_ENV).toEqual(['API_PUBLIC_URL', 'WEB_ORIGIN']);
       expect(api.join(' ')).not.toContain('tickee.vn');
       // Worker chỉ đọc WEB_ORIGIN.
-      expect(productionLookingOrigins(loadConfig({ ...workerEnv, NODE_ENV })), NODE_ENV).toEqual(['WEB_ORIGIN']);
+      expect(productionLookingOrigins(loadConfig(inNodeEnv(workerEnv, NODE_ENV))), NODE_ENV).toEqual(['WEB_ORIGIN']);
     }
     expect(
-      productionLookingOrigins(loadConfig({ ...apiEnv, NODE_ENV: 'development', WEB_ORIGIN: 'http://localhost:3000' })),
+      productionLookingOrigins(loadConfig({ ...inNodeEnv(apiEnv, 'development'), WEB_ORIGIN: 'http://localhost:3000' })),
     ).toEqual(['API_PUBLIC_URL']);
   });
 
@@ -816,7 +1016,7 @@ describe('productionLookingOrigins — NODE_ENV khác production mà origin trô
       'http://api.tickee.vn',
       'http://localhost:3001',
     ]) {
-      const config = loadConfig({ ...apiEnv, NODE_ENV: 'development', API_PUBLIC_URL: origin, WEB_ORIGIN: origin });
+      const config = loadConfig({ ...inNodeEnv(apiEnv, 'development'), API_PUBLIC_URL: origin, WEB_ORIGIN: origin });
       expect(productionLookingOrigins(config), origin).toEqual([]);
     }
   });

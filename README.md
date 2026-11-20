@@ -87,9 +87,19 @@ và nêu tên biến thiếu.
 
 ### Hai bẫy của `.env` local
 
-- **`TINGEE_BASE_URL` phải là `http://localhost:4010`** (Tingee fake, như `.env.example`). Trỏ Tingee thật (UAT hay
-  production) thì `pnpm dev` vẫn chạy fake nhưng api không gọi nó: Tingee thật không biết key demo, Đơn có phí báo
-  "Chưa tạo được link thanh toán". Hay gặp khi chép `.env` từ máy khác hoặc từ môi trường khác.
+- **`TINGEE_BASE_URL` phải là `http://localhost:4010`** (Tingee fake, như `.env.example`). Hay gặp khi chép `.env` từ
+  máy khác hoặc từ môi trường khác. Với `NODE_ENV=development`, `TINGEE_BASE_URL` có host không phải local (`localhost`,
+  `*.localhost`, `127.0.0.0/8`, `::1`) bị coi là Tingee thật, kể cả UAT (AD-36: local dùng Tingee fake), và api, worker
+  không khởi động: `TINGEE_BASE_URL (phải trỏ Tingee fake trên host local khi NODE_ENV=development; staging/production
+  phải đặt NODE_ENV=production; cố ý gọi Tingee thật từ máy dev thì đặt TINGEE_ALLOW_REAL_IN_DEVELOPMENT=true)`. Không
+  có luật này thì `pnpm dev` vẫn chạy fake nhưng api gọi Tingee thật,
+  vốn không biết key demo: Đơn có phí báo "Chưa tạo được link thanh toán".
+
+  Cố ý gọi Tingee thật từ máy dev (vd. thử UAT qua đường hầm cho E3-3, để Tingee gửi IPN tới URL IPN dựng từ
+  `API_PUBLIC_URL`) thì đặt thêm `TINGEE_ALLOW_REAL_IN_DEVELOPMENT=true`. Khi đó dùng key của merchant UAT thật (key
+  demo chỉ fake hiểu) và tắt `TINGEE_ORDER_STATUS_QUERY` (API tra đơn mới có hợp đồng tạm mà chỉ fake hiểu).
+  `API_PUBLIC_URL` đặt URL `https:` của đường hầm thì api log `warn` `node_env_not_production`, đúng dự kiến. Xong thì
+  bỏ cờ. Cờ chỉ có tác dụng ở `development`: `test` không áp luật này, `production` bỏ qua cờ (luật https vẫn áp).
 - **Không bao giờ đổi giá trị của một phiên bản khóa đã dùng** trong `TINGEE_CREDENTIAL_KEYS` và `TICKET_QR_KEYS` (vd.
   `v1:<giá trị A>` thành `v1:<giá trị B>`), cũng không gỡ phiên bản còn dữ liệu dùng. Muốn đổi khóa thì thêm
   `v<k+1>:<khóa mới>` (`openssl rand -base64 32`) và giữ khóa cũ: dữ liệu mới dùng khóa mới, dữ liệu cũ vẫn đọc bằng khóa
@@ -244,9 +254,10 @@ quét); `pending_order_overdue`, `inventory_drift` do lưới an toàn của `or
 instance, nên lỗi rải đều qua load balancer có thể báo chậm hơn. Ba loại của Story 4.6-e có một đối tượng chung cho cả
 hệ thống: tối đa một email mỗi loại mỗi `OPS_ALERT_COOLDOWN_MINUTES`. Mỗi lần có đối tượng mới còn có một dòng log
 `error` kèm `alert: <loại>`. Email chỉ có loại, id, mã Đơn, tên queue, số đếm, lý do, và với ba loại của Story 4.6-e
-thêm số đo và ngưỡng (`p95Ms`, `thresholdMs`, `thresholdRatio`, `windowMinutes`, `threshold`). Không đặt
-`OPS_ALERT_EMAILS` thì chỉ có log (worker log `warn`); cảnh báo phát hiện trong lúc đó vẫn được ghi dấu, nên đặt người
-nhận sau sẽ không được gửi email lại. Email gửi lỗi thì retry 8 lần rồi vào `platform.ops-alert.dead-letter`; job quét
+thêm số đo và ngưỡng (`p95Ms`, `thresholdMs`, `thresholdRatio`, `windowMinutes`, `threshold`). `OPS_ALERT_EMAILS` bắt
+buộc khi `NODE_ENV=production` (cả staging): thiếu thì worker không khởi động (`OPS_ALERT_EMAILS (thiếu)`). Ở
+development/test, không đặt thì chỉ có log (worker log `warn`); cảnh báo phát hiện trong lúc đó vẫn được ghi dấu, nên
+đặt người nhận sau sẽ không được gửi email lại. Email gửi lỗi thì retry 8 lần rồi vào `platform.ops-alert.dead-letter`; job quét
 chỉ log `error` cho queue này, và cho chính `platform.ops-alert` khi nó ùn. Worker chết thì không có lượt quét nào.
 
 Thử ở local: đặt `OPS_ALERT_EMAILS=van-hanh@tickee.local` trong `.env`, chạy `pnpm dev`, rồi chép tay một job vào
@@ -363,6 +374,8 @@ giờ nêu giá trị.
 | Không dùng giá trị mẫu của `.env.example` | `BETTER_AUTH_SECRET`, `REVALIDATE_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`: đúng giá trị mẫu. `TINGEE_CREDENTIAL_KEYS`, `TICKET_QR_KEYS`: mọi khóa trùng byte với một trong hai khóa mẫu, bất kể số phiên bản `v<k>` | `là giá trị mẫu của .env.example; môi trường thật phải sinh giá trị riêng` |
 | Dải IP Quản trị Tingee (Story 4.7-a) | `ADMIN_ALLOWED_CIDRS` | `thiếu` |
 | Cookie dùng chung web và api | `AUTH_COOKIE_DOMAIN`, khi host của `API_PUBLIC_URL` khác host của `WEB_ORIGIN`: SSR của web chuyển tiếp cookie của web sang api (`apps/web/lib/api/server.ts`) | `thiếu` |
+| Người nhận cảnh báo vận hành (E4-3), chỉ worker | `OPS_ALERT_EMAILS` không đặt hoặc rỗng: cảnh báo phát hiện lúc không có người nhận chỉ ra log mà vẫn ghi dấu chống lặp, đặt biến sau cũng không gửi lại | `thiếu` |
+| Đối soát bù tắt (E4-3), chỉ worker | `TINGEE_ORDER_STATUS_QUERY` bật: API tra đơn Gateway mới có hợp đồng tạm mà chỉ Tingee fake hiểu. Không có cờ thoát; story thay hợp đồng tạm bằng hợp đồng thật sẽ gỡ luật này | `phải tắt khi NODE_ENV=production cho tới khi API tra đơn của Tingee có hợp đồng thật` |
 
 Hai luật áp ở mọi môi trường, cả local:
 
@@ -372,6 +385,11 @@ Hai luật áp ở mọi môi trường, cả local:
   thường, bỏ dấu `.` đầu; host phải bằng miền này hoặc kết thúc bằng `.<miền>`. Vd. `tickee.vn` (hay `.Tickee.VN`) nhận
   `https://api.tickee.vn` và `https://tickee.vn`. Không kiểm danh sách hậu tố công khai. Lỗi:
   `AUTH_COOKIE_DOMAIN (phải là miền cha của host API_PUBLIC_URL và WEB_ORIGIN)`.
+
+Một luật chỉ áp khi `NODE_ENV=development` (E4-3, AD-36: local dùng Tingee fake), ở api và worker: `TINGEE_BASE_URL`
+phải có host local (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`), trừ khi đặt
+`TINGEE_ALLOW_REAL_IN_DEVELOPMENT=true`. Mọi host khác là Tingee thật, kể cả UAT. `test` không áp luật này (test dùng URL
+UAT làm giá trị giả, e2e full-stack chạy `test` với fake); `production` bỏ qua cờ. Xem "Hai bẫy của `.env` local".
 
 Một luật chỉ chạy khi các biến nó dùng (kể cả `NODE_ENV`) không có lỗi khác, nên một biến không bị báo hai lần. Vì vậy
 `API_PUBLIC_URL` còn là `http://` thì luật cookie chỉ báo ở lần khởi động sau khi đã sửa. `DATABASE_URL`,
@@ -552,9 +570,10 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `AUTH_COOKIE_DOMAIN`     | api         | tùy chọn; tên miền cha cho cookie session (vd. `tickee.vn`). Đặt thì phải là miền cha của host `API_PUBLIC_URL` và `WEB_ORIGIN` (mọi môi trường); bắt buộc ở production khi hai host khác nhau |
 | `SMTP_URL`, `EMAIL_FROM` | api, worker | api gửi email OTP/2FA; worker gửi email từ job (lời mời Admin); local là Mailpit `smtp://localhost:1025` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | api | bắt buộc; OAuth client Google, redirect URI `<API_PUBLIC_URL>/v1/auth/callback/google` |
-| `TINGEE_BASE_URL`        | api, worker | bắt buộc; origin Tingee Open API (UAT `https://uat-open-api.tingee.vn`). Env không có credential Tingee: mỗi BTC nhập API key của mình ở trang Tài khoản nhận tiền. `.env` local phải là `http://localhost:4010` (Tingee fake mà `pnpm dev` chạy sẵn): trỏ Tingee thật thì key demo lỗi và Đơn có phí báo "Chưa tạo được link thanh toán" (xem "Hai bẫy của `.env` local"). Với Tingee fake: BTC demo của `pnpm db:seed` đã liên kết sẵn, hoặc nhập key merchant demo (`demo-btc-co-tai-khoan` / `demo-secret-co-tai-khoan`: có tài khoản; `demo-btc-chua-lien-ket` / `demo-secret-chua-lien-ket`: chưa liên kết ngân hàng). Worker đọc cùng ba biến Tingee/Vé với api (cùng giá trị): Đối soát bù (Story 4.1) đi cùng đường xử lý IPN và phát Vé |
+| `TINGEE_BASE_URL`        | api, worker | bắt buộc; origin Tingee Open API (UAT `https://uat-open-api.tingee.vn`). Env không có credential Tingee: mỗi BTC nhập API key của mình ở trang Tài khoản nhận tiền. `.env` local phải là `http://localhost:4010` (Tingee fake mà `pnpm dev` chạy sẵn): `NODE_ENV=development` mà host không phải local (Tingee thật, kể cả UAT) thì api và worker không khởi động, trừ khi đặt `TINGEE_ALLOW_REAL_IN_DEVELOPMENT=true` (xem "Hai bẫy của `.env` local"). Với Tingee fake: BTC demo của `pnpm db:seed` đã liên kết sẵn, hoặc nhập key merchant demo (`demo-btc-co-tai-khoan` / `demo-secret-co-tai-khoan`: có tài khoản; `demo-btc-chua-lien-ket` / `demo-secret-chua-lien-ket`: chưa liên kết ngân hàng). Worker đọc cùng ba biến Tingee/Vé với api (cùng giá trị): Đối soát bù (Story 4.1) đi cùng đường xử lý IPN và phát Vé |
 | `TINGEE_CREDENTIAL_KEYS` | api, worker | bắt buộc; khóa AES-256-GCM mã hóa Secret Token Tingee của BTC: `v<k>:<base64 của 32 byte>`, nhiều khóa cách nhau bằng dấu phẩy, không trùng `k`. Mã hóa bằng khóa có `k` lớn nhất, giải mã theo tiền tố `v<k>:` của ciphertext; xoay khóa thì thêm khóa mới và giữ khóa cũ. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì api không giải mã được Secret Token đã lưu (local: `pnpm db:seed` mã hóa lại key demo, xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32`. `pnpm db:seed` cũng đọc biến này để mã hóa key demo |
-| `TINGEE_ORDER_STATUS_QUERY` | worker   | mặc định tắt; `true` bật Đối soát bù (Story 4.1): worker tra trạng thái đơn Gateway khi IPN trễ hoặc mất, kết quả đi cùng đường xử lý IPN. Tingee chưa công bố API tra đơn: adapter theo hợp đồng tạm mà chỉ Tingee fake hiểu, nên chỉ bật ở local (`.env.example`) và test; staging bật khi đã thay bằng hợp đồng thật. Tắt: job tra xong ngay, không gọi Tingee |
+| `TINGEE_ALLOW_REAL_IN_DEVELOPMENT` | api, worker | mặc định tắt; cờ opt-in (E4-3): `true` cho `NODE_ENV=development` gọi Tingee thật (`TINGEE_BASE_URL` có host không phải local, kể cả UAT), vd. thử UAT qua đường hầm cho E3-3. Chỉ có tác dụng ở `development`; `test` và `production` bỏ qua cờ. `.env.example` để comment (xem "Hai bẫy của `.env` local") |
+| `TINGEE_ORDER_STATUS_QUERY` | worker   | mặc định tắt; `true` bật Đối soát bù (Story 4.1): worker tra trạng thái đơn Gateway khi IPN trễ hoặc mất, kết quả đi cùng đường xử lý IPN. Tingee chưa công bố API tra đơn: adapter theo hợp đồng tạm mà chỉ Tingee fake hiểu, nên chỉ bật ở local (`.env.example`) và test. `NODE_ENV=production` (cả staging) bật thì worker không khởi động (E4-3), cho tới khi story thay hợp đồng tạm bằng hợp đồng thật gỡ luật này. Tắt: job tra xong ngay, không gọi Tingee |
 | `S3_ENDPOINT`            | api         | bắt buộc; endpoint S3 mà trình duyệt PUT ảnh Sự kiện tới (URL presign trỏ vào đây). Local: MinIO `http://localhost:9000`. Api chỉ ký URL, không gọi mạng tới storage (Story 4.8-a) |
 | `S3_REGION`              | api         | mặc định `us-east-1`; region ký SigV4 |
 | `S3_BUCKET`              | api         | bắt buộc; bucket ảnh Sự kiện: đọc ẩn danh từng object (`s3:GetObject`, không liệt kê), CORS `GET`/`PUT` cho origin web. Local: `tickee-event-images` (`minio-init` tạo sẵn) |
@@ -562,7 +581,7 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `S3_FORCE_PATH_STYLE`    | api         | mặc định `false`; `true` khi storage cần URL `<endpoint>/<bucket>/<key>` (MinIO, `.env.example`) |
 | `S3_PUBLIC_BASE_URL`     | api (server web phải tới được) | bắt buộc ở api; gốc URL công khai của ảnh: `imageUrl` = `<S3_PUBLIC_BASE_URL>/<key>`. Local: `http://localhost:9000/tickee-event-images`. Server web không đọc biến này nhưng tự tải `imageUrl` để dựng ảnh OG, nên URL phải mở được từ cả server web lẫn trình duyệt (vd. `localhost:9000` không tới được từ trong container web); không tới được thì ảnh OG dùng nền gradient và server web log `warn` `[og-image]` |
 | `TICKET_QR_KEYS`         | api, worker | bắt buộc; khóa HMAC-SHA256 ký Mã QR vé (`t<k>.<ticketId>.<sig>`), cùng dạng `TINGEE_CREDENTIAL_KEYS` nhưng là khóa khác (dùng chung một khóa thì api/worker dừng, ở mọi môi trường). Ký Vé mới bằng khóa có `k` lớn nhất; Vé lưu `k` (không lưu chuỗi QR) nên xoay khóa thì thêm khóa mới và giữ khóa cũ tới khi không còn Vé nào dùng. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì Mã QR đã gửi không còn khớp và link chia sẻ trả 404 (xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32` |
-| `OPS_ALERT_EMAILS`       | worker      | tùy chọn; người nhận email cảnh báo vận hành (Story 4.6-b), email cách nhau bằng dấu phẩy. Không đặt: cảnh báo chỉ ghi log, worker log `warn` lúc khởi động và mỗi lần có cảnh báo (xem "Cảnh báo vận hành") |
+| `OPS_ALERT_EMAILS`       | worker      | người nhận email cảnh báo vận hành (Story 4.6-b), email cách nhau bằng dấu phẩy. Bắt buộc khi `NODE_ENV=production` (cả staging; thiếu thì worker không khởi động, E4-3). Development/test không đặt: cảnh báo chỉ ghi log, worker log `warn` lúc khởi động và mỗi lần có cảnh báo (xem "Cảnh báo vận hành") |
 | `OPS_ALERT_COOLDOWN_MINUTES` | api, worker | mặc định `30` (1–1440); loại cảnh báo có cooldown (thiếu khóa QR, hàng đợi ùn, IPN lỗi tăng, tạo link chậm, tỉ lệ phát Vé giảm) báo lại cùng đối tượng sau chừng này phút |
 | `OPS_ALERT_QUEUE_WAIT_MINUTES` | worker  | mặc định `5` (1–1440); job pg-boss tới hạn quá chừng này phút mà chưa chạy thì báo hàng đợi ùn |
 | `OPS_ALERT_IPN_FAILURES` | api         | mặc định `5` (số nguyên ≥ 1); số IPN lỗi (401, 400 body hỏng, 5xx) trong 5 phút ở một instance api để báo `ipn_failures` |
