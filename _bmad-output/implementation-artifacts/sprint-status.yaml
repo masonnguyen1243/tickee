@@ -80,7 +80,7 @@ development_status:
   4-4-duyệt-tay-từ-chối-và-đánh-dấu-đã-hoàn-tay: done
   4-5-token-và-cảnh-báo-token: done
   4-6-giám-sát-và-lưới-an-toàn-vận-hành: done
-  4-7-siết-cấu-hình-production-và-ci-trước-khi-deploy: review
+  4-7-siết-cấu-hình-production-và-ci-trước-khi-deploy: done
   4-8-ảnh-sự-kiện-trên-object-storage: done
   epic-4-retrospective: optional
 
