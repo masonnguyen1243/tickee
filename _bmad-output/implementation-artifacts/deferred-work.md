@@ -948,6 +948,7 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-7-f-cau-hinh-production-web.md`
   summary: Next 16.4.3: khi build 4.7-f, Next CLI dừng một lần với "SecurityFatalError" báo phiên bản có lỗ hổng đã biết, và gợi ý chạy `next upgrade --agent=security`. Chạy lại đúng lệnh cũ thì qua. Cần đối chiếu với advisory chính thức rồi quyết định có nâng `next` không; CI có thể gặp cùng lần dừng này.
   evidence: Review 4.7-f (BH) #17, maybe-false; nếu đúng thì có thể high. Mới chỉ thấy qua output CLI, chưa đối chiếu nguồn chính thức. Cách chốt: tra GitHub Security Advisories của `vercel/next.js` cho 16.4.3, hoặc chạy `pnpm audit --prod`.
+- Đã xử lý (20/11/2026): mục ngay trên được giải quyết bằng `_bmad-output/implementation-artifacts/spec-epic-4-e4-4-nang-next-16-4-6.md`. Advisory có thật: GitHub Advisory Database ghi 7 mục medium cho `next@16.4.3`, vá từ 16.4.5. `apps/web` đã nâng lên 16.4.6, bản này không còn advisory nào.
 
 ## Deferred from: code review of spec-4-7-g-kiem-khoa-qr-luc-khoi-dong.md (2026-11-20)
 
@@ -957,3 +958,12 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-7-g-kiem-khoa-qr-luc-khoi-dong.md`
   summary: Nhánh `statement_timeout` 30 giây của `TicketQrKeyCheck` chưa có test: bỏ dòng `set_config('statement_timeout', …)` thì mọi test vẫn xanh, và một lần kiểm bị khóa chặn sẽ chờ mãi mà không log `warn`.
   evidence: Review 4.7-g (VG) #21, medium (regression gap đã kiểm). Test thật phải chờ hơn 30 giây, hoặc phải biến timeout thành tham số; spec cấm thêm biến env. Trần chờ khi tắt (vá ở #8) đã giới hạn được hậu quả khi shutdown.
+
+## Deferred from: code review of spec-epic-4-e4-4-nang-next-16-4-6.md (2026-11-20)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-4-e4-4-nang-next-16-4-6.md`
+  summary: Không có gì tự báo khi một phụ thuộc production dính advisory. CI không có bước `pnpm audit --prod`, repo không có Dependabot/Renovate. Lỗ hổng của Next 16.4.3 chỉ lộ ra vì Next CLI dừng khi chạy dưới agent; CI và người chạy tay không bị dừng. Cần chốt cách theo dõi: bước audit trong CI (chặn hay chỉ cảnh báo, ngưỡng mức độ), Dependabot security updates, hoặc lịch kiểm định kỳ.
+  evidence: Review E4-4 (BH) #5, medium. `.github/workflows/ci.yml` không có bước audit; không có `.github/dependabot.yml`. Bước chặn có thể làm đỏ CI vì advisory ở gói không liên quan, nên cần Mason quyết chính sách trước khi thêm.
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-4-e4-4-nang-next-16-4-6.md`
+  summary: Web không dùng `next/image`, nhưng endpoint tối ưu ảnh `/_next/image` vẫn bật mặc định (có `sharp`), thành bề mặt cho advisory về sau (như GHSA-7qx7-33qx-rqx2). Có thể đặt `images: { unoptimized: true }` trong `apps/web/next.config.ts`, rồi kiểm `/_next/image` trả 404.
+  evidence: Review E4-4 (BH) #7, low (hardening, không phải lỗi). Advisory hiện tại đã vá ở 16.4.6. Nên xét cùng phần cache ảnh OG của E4-4 (trước Closed Beta) hoặc AC edge của 9.1.
