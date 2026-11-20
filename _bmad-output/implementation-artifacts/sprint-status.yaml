@@ -29,7 +29,7 @@
 # - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-20-2026 11:42
+last_updated: 11-20-2026 13:48
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -462,8 +462,11 @@ action_items:
       giới hạn tốc độ theo IP cho funnel-events. Chi tiết ở ghi chú bảo mật local
       (retro E1, D3, E4)"
     owner: "Mason"
-    status: open
+    status: in-progress
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+    note: "Phần Next xong qua _bmad-output/implementation-artifacts/spec-epic-4-e4-4-nang-next-16-4-6.md:
+      advisory có thật (7 mục medium, vá từ 16.4.5), apps/web nâng lên 16.4.6. Còn
+      lại cache ảnh OG và giới hạn tốc độ funnel-events (trước Closed Beta)"
   - id: "epic-4-retro-e4-5-quyet-dinh-can-xu-ly"
     epic: 4
     action: "E4-5 (trước Epic 6 và 7.1): Mason chốt doanh thu Tổng quan theo paid_amount
