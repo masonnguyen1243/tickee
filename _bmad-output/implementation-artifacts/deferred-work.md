@@ -898,3 +898,12 @@ Phần code của 4.7 không cần chọn nhà cung cấp hạ tầng được t
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-7-e-khoa-migrate-mot-lan.md`
   summary: Ghi luật mới của vai `migrate` vào AD-36 của `ARCHITECTURE-SPINE.md`. Vai `migrate` giữ khóa advisory cấp session `tickee:migrate`. Lượt chạy song song chờ chứ không bỏ qua. `MIGRATION_DATABASE_URL` phải là kết nối thẳng hoặc qua pooler chế độ session. Khóa không sắp thứ tự deploy giữa hai phiên bản, nên pipeline phải chặn deploy chồng nhau.
   evidence: Review 4.7-e (BH) #15, low. Hiện AD-36 chỉ giả định pipeline chạy migrate một lần. Luật bước Classify của Build không cho sửa spec/spine trong lượt sửa review. Nên gom vào lần cập nhật spine kế tiếp của 4.7 (deploy staging/production).
+
+## Deferred from: code review of spec-ci-cai-playwright-khong-treo.md (2026-11-19)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-ci-cai-playwright-khong-treo.md`
+  summary: Bỏ `~/.cache/ms-playwright` khỏi cache Playwright của CI, chỉ giữ gói `.deb`. Tải Chromium và WebKit từ CDN của Playwright chỉ mất khoảng 15 giây, trong khi thư mục trình duyệt khoảng 870 MB giải nén, tốn quota cache 10 GB của repo. Hướng dẫn CI của Playwright cũng khuyên không cache trình duyệt.
+  evidence: Review CI (BH) #7, low. Quyết định trong Intent của spec chốt giữ cache trình duyệt "cho tiện", nên không sửa trong lượt review; người dùng quyết.
+- source_spec: `_bmad-output/implementation-artifacts/spec-ci-cai-playwright-khong-treo.md`
+  summary: Đo lại thời gian job `ci` sau khi bước cài Playwright dùng cache gói `.deb`, rồi cân nhắc hạ `timeout-minutes: 60` của job (trước đây 30 phút, nâng ngày 18/11 vì apt chậm).
+  evidence: Review CI (BH) #10. Comment ở đầu job trong `ci.yml` giữ trần 60 phút "tới khi có số đo mới"; cần vài run trên `main` có cache trúng.
