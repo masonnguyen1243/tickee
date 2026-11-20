@@ -4,7 +4,7 @@
 
 ## Goal
 
-Tiền Người mua đã trả không bao giờ bị lạc, kể cả khi Tingee hay hệ thống gặp sự cố. IPN trễ hoặc mất thì Đối soát bù chủ động hỏi Tingee rồi phát Vé bù. BTC bị ngắt dịch vụ thanh toán thì mọi Hạng vé có phí tự "Tạm ngừng bán", và tự bán lại khi dịch vụ mở. Owner/Admin xử lý từng mục "Cần xử lý" bằng một thao tác. Owner theo dõi Token và được cảnh báo trước khi chạm hạn mức. Đội vận hành nhận cảnh báo trước khi khách phàn nàn. Epic còn dựng staging/production, deploy không mất IPN và diễn tập khôi phục dữ liệu. Hai phần chuyển từ Epic 2 cũng nằm ở đây: giới hạn IP cho `/admin` và ảnh Sự kiện trên object storage. Xong epic là đạt tiêu chí hoàn thành Phase 1 trên sandbox Tingee: mua qua Gateway thành công, không bán quá số suất, IPN lặp không phát Vé trùng, hết Token thì "Tạm ngừng bán". Mọi story còn ở backlog, nên AC trong `epics.md` và spine áp dụng trực tiếp. Riêng hành vi đã ship ở Epic 3 (IPN, `markPaid`, `review_items`, Trang Đơn) thì spec của story đó và spine thắng.
+Tiền Người mua đã trả không bao giờ bị lạc, kể cả khi Tingee hay hệ thống gặp sự cố. IPN trễ hoặc mất thì Đối soát bù chủ động hỏi Tingee rồi phát Vé bù. BTC bị ngắt dịch vụ thanh toán thì mọi Hạng vé có phí tự "Tạm ngừng bán", và tự bán lại khi dịch vụ mở. Owner/Admin xử lý từng mục "Cần xử lý" bằng một thao tác. Owner theo dõi Token và được cảnh báo trước khi chạm hạn mức. Đội vận hành nhận cảnh báo trước khi khách phàn nàn. Epic còn siết cấu hình production và CI: api, worker và web từ chối cấu hình sai, CI chặn bản hỏng trước khi có môi trường thật. Từ 19/11/2026, phần hạ tầng (staging/production, deploy, sao lưu và diễn tập khôi phục, đo uptime) chuyển sang Story 9.1 của Epic 9, vì phải chờ chốt nhà cung cấp theo pháp chế. Hai phần chuyển từ Epic 2 cũng nằm ở đây: giới hạn IP cho `/v1/admin/*` và ảnh Sự kiện trên object storage. Xong epic là đạt tiêu chí hoàn thành Phase 1 trên sandbox Tingee: mua qua Gateway thành công, không bán quá số suất, IPN lặp không phát Vé trùng, hết Token thì "Tạm ngừng bán". Mọi story trừ 4.7 đã ship; trong 4.7, 4.7-a đến 4.7-e đã xong, chỉ còn 4.7-f. Với hành vi đã ship (gồm cả IPN, `markPaid`, `review_items`, Trang Đơn của Epic 3), spec của story đó và spine thắng. Với 4.7-f, AC trong `epics.md` và spine áp dụng trực tiếp.
 
 ## Stories
 
@@ -14,7 +14,7 @@ Tiền Người mua đã trả không bao giờ bị lạc, kể cả khi Tingee
 - Story 4.4: Duyệt tay, từ chối và đánh dấu đã hoàn tay
 - Story 4.5: Token và cảnh báo Token
 - Story 4.6: Giám sát và lưới an toàn vận hành
-- Story 4.7: Môi trường staging/production, deploy và diễn tập khôi phục
+- Story 4.7: Siết cấu hình production và CI trước khi deploy (phần hạ tầng chuyển sang Story 9.1, 19/11/2026)
 - Story 4.8: Ảnh Sự kiện trên object storage
 
 ## Requirements & Constraints
@@ -45,12 +45,20 @@ Tiền Người mua đã trả không bao giờ bị lạc, kể cả khi Tingee
   - hàng đợi pg-boss ùn hoặc có dead-letter;
   - có Đơn `pending` quá hạn mà chưa xác nhận;
   - p95 tạo link > 2 giây.
-- **Sẵn sàng và toàn vẹn:**
-  - Checkout, IPN và check-in đạt uptime 99,9%/tháng, đo bằng kiểm tra từ bên ngoài, báo cáo theo tháng.
-  - Không mất IPN nào trong lúc deploy.
-  - PITR với RPO ≤ 5 phút, RTO ≤ 1 giờ, giữ 14 ngày.
-  - Trước Closed Beta phải diễn tập khôi phục và ghi biên bản trong `docs/`. Không đạt RTO thì chưa mở Closed Beta.
-- **`/v1/admin/*`** chỉ nhận request từ dải IP trong `ADMIN_ALLOWED_CIDRS`. Ở production, biến này thiếu hoặc sai định dạng thì api không khởi động. IP client lấy qua trusted proxy (`TRUST_PROXY_HOPS`).
+- **Cấu hình production của `api`, `worker`, `migrate`:** mọi biến env kiểm bằng schema Zod của `config`. Tiến trình dừng và nêu tên biến, không nêu giá trị, khi:
+  - thiếu `NODE_ENV` hoặc sai định dạng;
+  - ở production mà dùng giá trị mẫu của `.env.example`, hoặc origin không phải `https`;
+  - `TICKET_QR_KEYS` dùng chung khóa với `TINGEE_CREDENTIAL_KEYS`.
+
+  `local` không nhận IPN thật.
+- **Cấu hình production phía web:** thiếu `WEB_ORIGIN`, `WEB_ORIGIN` hoặc `NEXT_PUBLIC_API_BASE_URL` không phải `https`, hoặc `REVALIDATE_SECRET` là giá trị mẫu hay quá ngắn thì build hoặc khởi động dừng và nêu tên biến.
+  - Route revalidate không nhận giá trị mẫu.
+  - Font OG có trong image.
+- **`NODE_ENV` sai giá trị:** api và worker cảnh báo khi `NODE_ENV` khác `production` mà `API_PUBLIC_URL` hoặc `WEB_ORIGIN` là `https` trên host không phải local.
+- **Khóa QR lúc khởi động:** mọi `qr_key_version` còn dùng ở bảng `tickets` phải có trong `TICKET_QR_KEYS`. Thiếu thì báo kèm marker `ticket_qr_key_missing`. Dừng hay chỉ cảnh báo do spec 4.7-g chốt.
+- **CI chặn bản hỏng:** Playwright full-stack với api thật, worker, Tingee fake, Mailpit và bộ test cách ly. Image chạy được vai `migrate`; vai `worker` ở production từ chối cấu hình sai. Hai tiến trình `migrate` chạy cùng lúc thì lượt sau chờ khóa, không chạy song song.
+- **Tắt êm:** `api`/`worker` nhận `SIGTERM` thì ngừng nhận SSE mới, đóng SSE đang mở để client tự nối lại, rồi `boss.stop({ graceful })`; có test.
+- **`/v1/admin/*`** chỉ nhận request từ dải IP trong `ADMIN_ALLOWED_CIDRS`. Ở production, biến này thiếu hoặc sai định dạng thì api không khởi động. IP client lấy qua trusted proxy (`TRUST_PROXY_HOPS` đúng số proxy thật trước api).
 - **Ảnh Sự kiện:** JPEG, PNG hoặc WebP, tối đa 5 MB. Ảnh OG dùng ảnh Sự kiện; không có ảnh thì giữ nền gradient.
 - **Cách ly:** mọi route mới đi qua bộ test cách ly. BTC khác không đọc được dữ liệu của BTC này; CTV không truy cập được Cần xử lý hay Token.
 
@@ -68,13 +76,13 @@ Tiền Người mua đã trả không bao giờ bị lạc, kể cả khi Tingee
   - cùng whitelist field;
   - cùng khóa unique của `payment_events` (`(organization_id, providerTransactionCode)` cho thanh toán, `(organization_id, orderId, status)` cho trạng thái);
   - cùng thứ tự kiểm 7 bước.
-- **Gọi `markPaid` với `source` = `reconciliation`:** khóa Sự kiện `FOR SHARE` và khóa Đơn `FOR NO KEY UPDATE` như nguồn `ipn`. Hàm xử lý IPN hiện cố định nguồn `ipn`, nên phải nhận nguồn làm tham số.
+- **Gọi `markPaid` với `source` = `reconciliation`:** khóa Sự kiện `FOR SHARE` và khóa Đơn `FOR NO KEY UPDATE` như nguồn `ipn`. Hàm xử lý IPN phải nhận nguồn làm tham số, không cố định `ipn`.
 - **Tingee xác nhận chưa trả và link đã hết hạn:** `payment` gọi `ordering.markExpired(tx, …)`, Đơn chuyển `expired` và nhả chỗ.
 - **Credential cũ trả `TINGEE_CREDENTIAL_INVALID`:**
   - dừng tra Đơn đó và cảnh báo vận hành kèm mã Đơn;
   - Đơn hết hạn theo trần cứng (`expires_at` + 5 phút, job của `ordering`);
   - **không** bật `payment_service_status`, nên BTC vẫn bán bằng key mới.
-- **Rủi ro mở:** Tingee chưa xác nhận tên endpoint và field của API tra trạng thái theo `orderId`. Tingee cũng chưa xác nhận `providerTransactionCode` có trùng giữa kết quả tra và IPN hay không. Việc chống phát trùng giữa IPN và Đối soát bù dựa vào điểm này. Spec phải ghi phương án dự phòng, và Tingee fake phải giả lập được việc tra trạng thái.
+- **Rủi ro mở:** Tingee chưa xác nhận tên endpoint và field của API tra trạng thái theo `orderId`. Tingee cũng chưa xác nhận `providerTransactionCode` có trùng giữa kết quả tra và IPN hay không. Việc chống phát trùng giữa IPN và Đối soát bù dựa vào điểm này. Tingee fake phải giả lập được việc tra trạng thái.
 
 **Trạng thái dịch vụ thanh toán**
 
@@ -89,7 +97,7 @@ Tiền Người mua đã trả không bao giờ bị lạc, kể cả khi Tingee
   - với `credential_invalid`: Owner lưu key mới hợp lệ.
 
   Tắt cờ thì enqueue Đối soát bù cho mọi Đơn còn mở của BTC.
-- `ordering.sellability` là nguồn duy nhất của trạng thái bán; cờ này đang là stub `active`. Cờ chỉ gây "Tạm ngừng bán" sau khi đã mở bán, không chặn `publishReadiness`.
+- `ordering.sellability` là nguồn duy nhất của trạng thái bán. Cờ chỉ gây "Tạm ngừng bán" sau khi đã mở bán, không chặn `publishReadiness`.
 - `reporting.notices(scope)` là nguồn duy nhất cho `status-banner`. Enum `code` và thứ tự ưu tiên khai báo trong `packages/contracts`; web chỉ ánh xạ `code` sang nội dung.
 
 **Cần xử lý**
@@ -116,28 +124,32 @@ Tiền Người mua đã trả không bao giờ bị lạc, kể cả khi Tingee
 - **Tín hiệu realtime:** mọi chỗ mới ghi `orders.status` phát `order_changed` và `event_orders_changed` trong cùng `tx`. Mục thay đổi thì phát `org_review_items_changed`.
 - **Đọc dữ liệu:** màn đọc qua read model (hàm query xuất từ `index.ts`, theo mẫu `openReviewsOf`), trong `orgScope`. Audit ghi trong cùng transaction và không chứa PII.
 
-**Vận hành và hạ tầng**
+**Vận hành (4.6)**
 
 - **Quan sát:** api và worker xuất trace và metrics OpenTelemetry. Log pino kèm `requestId`, `organizationId` và mã Đơn; không có secret hay chữ ký; che SĐT và email.
 - **Job định kỳ:**
   - Đối chiếu tồn kho: so `held` với Vé của Đơn `pending`, `sold` với số Vé đã phát. Lệch thì cảnh báo, không tự sửa.
   - Quét cấp phút cho Đơn `pending` đã quá mốc hết hạn mà job hoãn bỏ sót. Đây chỉ là lưới an toàn.
 - **Dead-letter:** Quản trị Tingee xem ở `/admin` và requeue từng job; mọi thao tác ghi audit.
-- **Môi trường:** có ba môi trường: `local` (Tingee fake), `staging` (UAT) và `production` (PROD).
-  - Mỗi nơi một `TINGEE_BASE_URL` và một bộ `TINGEE_CREDENTIAL_KEYS` riêng. Credential Tingee là của từng BTC, không nằm trong env.
-  - Secret tiêm từ secret store và kiểm bằng schema Zod của `config`.
-  - Có hai role DB: `tickee_migrator` và `tickee_app`.
-- **Deploy:**
-  - CI thêm Playwright với Tingee fake và bộ test cách ly.
-  - Image gắn tag theo commit SHA. Staging tự deploy từ `main`; production deploy thủ công theo tag.
-  - Vai `migrate` chạy trước khi đổi `api`/`worker`. Migration luôn tương thích ngược.
-  - Topology tối thiểu: ≥ 2 `api` sau load balancer (dùng `/readyz`: DB và `LISTEN`), ≥ 1 `worker`.
-  - Khi nhận `SIGTERM`: ngừng SSE mới, đóng SSE đang mở, gọi `boss.stop({ graceful })`.
-  - Test hợp đồng với Tingee UAT chạy ở staging bằng một tài khoản merchant UAT, chạy được bằng một lệnh và theo lịch; lỗi thì cảnh báo.
-- **Ảnh:**
-  - Object storage tương thích S3 (MinIO trong docker-compose ở local). Biến `S3_*` kiểm bằng Zod. Dùng `@aws-sdk/client-s3` cùng presigner. Bucket bật CORS `GET` cho origin web.
-  - API cấp presigned PUT với key `orgs/{orgId}/events/{uuid}.{ext}`. Lưu Sự kiện chỉ nhận key đúng tiền tố BTC, vào `events.image_key`, có audit.
-  - Ảnh OG do `apps/web` sinh. Không dùng dịch vụ độc quyền của cloud nào.
+
+**Cấu hình, CI và migrate (4.7)**
+
+- **Không phụ thuộc nhà cung cấp:** deploy bằng image Docker `web` và `api`; image `api` chạy vai `api`, `worker` hoặc `migrate`. Postgres 18 chuẩn, cần kết nối session trực tiếp cho `LISTEN` và pg-boss (pooler chế độ transaction chỉ đứng trước truy vấn thường). Email qua `EmailTransport` (SMTP; Mailpit ở local). Không dùng dịch vụ độc quyền của cloud nào.
+- **Môi trường:** `local` (Tingee fake), `staging` (UAT), `production` (PROD), mỗi nơi một `TINGEE_BASE_URL` và một bộ `TINGEE_CREDENTIAL_KEYS`. Credential Tingee là của từng BTC, không nằm trong env. Tên và danh sách biến cố định trong schema Zod của `config`. Hai role DB: `tickee_migrator` (DDL), `tickee_app` (DML).
+- **CI** (GitHub Actions, mỗi PR): typecheck, dependency-cruiser, Vitest với Postgres thật, bộ test cách ly, Playwright với Tingee fake. Image gắn tag theo commit SHA.
+- **Vai `migrate`:**
+  - chạy trước khi đổi phiên bản `api`/`worker`; migration luôn tương thích ngược; drizzle-kit bỏ qua schema `pgboss`;
+  - giữ khóa advisory cấp session `tickee:migrate` suốt migration Drizzle, schema `pgboss` và cấp quyền; lượt chạy song song chờ chứ không bỏ qua;
+  - `MIGRATION_DATABASE_URL` phải là kết nối thẳng hoặc qua pooler chế độ session;
+  - khóa không sắp thứ tự deploy giữa hai phiên bản, nên pipeline (Story 9.1) phải chặn deploy chồng nhau.
+- **Health:** `/healthz` (liveness), `/readyz` (DB và `LISTEN`).
+- **Khóa QR và link chia sẻ:** Mã QR vé ký HMAC bằng khóa đánh số phiên bản trong `TICKET_QR_KEYS`; giữ khóa cũ để verify khi xoay. Token link chia sẻ suy ra từ khóa QR theo `tickets.qr_key_version` của Vé. Gỡ một phiên bản khóa còn dùng thì Vé ký bằng khóa đó không verify được và mọi link chia sẻ của chúng trả `404` chung; ký lại Vé sang khóa mới cũng đổi token.
+
+**Ảnh (4.8)**
+
+- Object storage tương thích S3 (MinIO trong docker-compose ở local). Biến `S3_*` kiểm bằng Zod. Dùng `@aws-sdk/client-s3` cùng presigner. Bucket bật CORS `GET` cho origin web.
+- API cấp presigned PUT với key `orgs/{orgId}/events/{uuid}.{ext}`. Lưu Sự kiện chỉ nhận key đúng tiền tố BTC, vào `events.image_key`, có audit.
+- Ảnh OG do `apps/web` sinh.
 
 ## UX & Interaction Patterns
 
@@ -171,26 +183,37 @@ Tiền Người mua đã trả không bao giờ bị lạc, kể cả khi Tingee
   - `review_items` do 3.6 tạo;
   - Trang Đơn với `useLiveResource` (3.7);
   - Tổng quan Sự kiện (3.11);
-  - `sellability` còn stub (2.11);
+  - `sellability` (2.11);
   - xác nhận lại khi đổi key (2.13).
 - **Bàn giao cho 4.1 từ retro Epic 3:**
-  - IPN `expired`/`canceled` hiện nhả chỗ ngay, bỏ qua 5 phút ân hạn của trần cứng. 4.1 quyết giữ cách này, hay để Đối soát bù tra lại trước khi nhả.
-  - Nguồn `reconciliation` phải truyền được vào hàm xử lý IPN.
+  - IPN `expired`/`canceled` nhả chỗ ngay, bỏ qua 5 phút ân hạn của trần cứng. 4.1 quyết giữ cách này, hay để Đối soát bù tra lại trước khi nhả.
   - Trang Đơn thôi polling khi Đơn `expired`, và thẻ "Hết hạn" ở Vé của tôi chỉ hiện 30 phút. Trong khi đó 4.1 tra tiếp tới 24 giờ, nên màn vẫn phải nhận được thay đổi trong cửa sổ này.
 - **Trong epic:**
   - 4.1 dùng kênh cảnh báo vận hành của 4.6.
   - 4.2 kích hoạt Đối soát bù của 4.1 khi mở lại dịch vụ. Hành động "Mua thêm Token" trên banner của 4.2 mở portal Tingee như ở 4.5.
   - 4.4 dựng trên hàng và `Sheet` của 4.3.
-- **4.6:** phải chốt trước cách chặn giữ chỗ hàng loạt bằng nhiều tài khoản: đặt trần số Vé đang giữ, hay chỉ tạo link khi Người mua bấm "Thanh toán". 4.6 nhận phần cảnh báo; 5.8 đo.
-- **4.7:**
-  - Checklist deploy: edge phục vụ API bằng HTTP/2, vì nhiều trang giữ SSE dài hạn.
-  - Runbook xoay khóa Mã QR vé phải tính cả link chia sẻ: gỡ khóa làm hỏng link, ký lại thì đổi token. Chọn một trong ba: giữ khóa cũ tới khi Vé hết hạn, công cụ ký lại kèm gửi lại email Vé, hoặc tách khóa link chia sẻ.
+  - 4.6 phải chốt trước cách chặn giữ chỗ hàng loạt bằng nhiều tài khoản: đặt trần số Vé đang giữ, hay chỉ tạo link khi Người mua bấm "Thanh toán". 4.6 nhận phần cảnh báo; Story 9.2 (trước là 5.8) đo.
+- **4.7 và Epic 9** (tách ngày 19/11/2026):
+  - 4.7-f nhận các mục hoãn không cần nhà cung cấp: cấu hình production phía web, `NODE_ENV` sai giá trị. 4.7-g nhận kiểm khóa QR lúc khởi động (tách khi build 4.7-f, 19/11/2026). Xong 4.7-f và 4.7-g thì 4.7 `done` và Epic 4 đóng được.
+  - Story 9.1 nhận phần hạ tầng, chỉ bắt đầu khi đã chốt nhà cung cấp:
+    - secret của từng môi trường tiêm từ secret store;
+    - staging tự deploy từ `main` theo SHA khi CI xanh; production deploy thủ công theo tag; pipeline không chạy hai lượt deploy chồng nhau;
+    - topology ≥ 2 `api` sau load balancer dùng `/readyz`, ≥ 1 `worker`; edge phục vụ API bằng HTTP/2 vì nhiều trang giữ SSE dài hạn;
+    - không mất IPN khi deploy, kiểm bằng test gửi IPN liên tục trong một lượt deploy staging;
+    - test hợp đồng Tingee UAT ở staging, chạy bằng một lệnh và theo lịch;
+    - email qua nhà cung cấp SMTP, domain có SPF, DKIM, DMARC;
+    - PITR (RPO ≤ 5 phút, RTO ≤ 1 giờ, giữ 14 ngày) và diễn tập khôi phục ghi biên bản trong `docs/`; không đạt RTO thì chưa mở Closed Beta;
+    - uptime 99,9%/tháng của Checkout, IPN và check-in, đo từ bên ngoài.
+  - Runbook xoay khóa Mã QR vé (9.1) phải tính cả link chia sẻ. Chọn một trong ba: giữ khóa cũ tới khi Vé hết hạn, công cụ ký lại kèm gửi lại email Vé, hoặc tách khóa link chia sẻ.
+  - Mục trong `deferred-work.md` ghi "Story 4.7" là checklist deploy hoặc hạ tầng thì thuộc 9.1; mục ghi "5.8" thuộc 9.2.
 - **Epic sau:**
   - 6.5 đồng bộ cả Đơn do `markPaid` của Epic 4 phát;
   - 7.1 dựa vào Đối soát bù;
   - 7.2 dùng "Đã hoàn tay" của 4.4 (phần 2 của danh sách hoàn tiền là mọi `review_item` còn `open` gắn Đơn của Sự kiện);
   - 7.4 dùng `notices` và banner;
-  - 8.1 dùng ảnh của 4.8.
+  - 8.1 dùng ảnh của 4.8;
+  - Epic 9 dựa trên 4.7 (CI xanh); 9.2 cần staging của 9.1.
 - **Phụ thuộc ngoài:**
-  - Tingee chưa xác nhận API tra trạng thái theo `orderId` (4.1), và API Token cùng trạng thái dịch vụ gọi bằng key merchant (4.2, 4.5). Spec phải ghi phương án dự phòng trước khi làm.
-  - Nhà cung cấp hạ tầng, email và giám sát chờ pháp chế (NĐ 53/2022), phải chốt trước Closed Beta (4.6, 4.7).
+  - Tingee chưa xác nhận API tra trạng thái theo `orderId` (4.1), và API Token cùng trạng thái dịch vụ gọi bằng key merchant (4.2, 4.5).
+  - IPN `status` chữ hoa hay thường, và `get-va-paging` khi `data` rỗng, chốt qua test hợp đồng Tingee UAT ở 9.1.
+  - Nhà cung cấp hạ tầng, email và giám sát chờ pháp chế (NĐ 53/2022), phải chốt trước Story 9.1 và Closed Beta. Code của 4.7 không cần nhà cung cấp.

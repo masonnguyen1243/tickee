@@ -175,7 +175,7 @@ Tài liệu này chia toàn bộ epic và story của Tickee MVP v1. Nguồn là
 **Phụ thuộc bên ngoài và rủi ro:**
 
 - Câu hỏi mở với Tingee (API Token và trạng thái dịch vụ gọi bằng key merchant, API tra trạng thái theo `orderId`, gọi lại `create-link`, hủy link, `create-link` với VA ngoài "Tài khoản cho phép thanh toán", URL IPN qua API) không chặn việc chia Epic, nhưng chặn test hợp đồng ở staging. Riêng câu key merchant có giới hạn quyền được không (không cho Chi hộ) chặn bán Vé có phí ở Closed Beta.
-- Nhà cung cấp hạ tầng/email/giám sát đang hoãn chờ pháp chế (NĐ 53/2022). Phải chốt trước Closed Beta.
+- Nhà cung cấp hạ tầng/email/giám sát đang hoãn chờ pháp chế (NĐ 53/2022). Phải chốt trước Story 9.1 và Closed Beta.
 
 ### UX Design Requirements
 
@@ -299,8 +299,9 @@ Phủ 37/38 FR (FR-6 do Tingee đảm nhận).
 - E6 dựa trên E3 và E4: Story 6.5 đồng bộ cả Đơn do `markPaid` của E4 phát (Đối soát bù, duyệt tay) và trạng thái Cần xử lý.
 - E7 dựa trên E4 và E6: Story 7.1 dựa vào Đối soát bù (4.1); Story 7.2 dùng thao tác "Đã hoàn tay" (4.4) và chuẩn CSV (6.3); Story 7.4 dùng `notices` và banner của E4.
 - E8 chỉ dựa trên E3.
+- E9 dựa trên E4 (Story 4.7) và làm sau E5–E8, vì phải chốt nhà cung cấp hạ tầng trước. Story 9.2 cần staging của Story 9.1.
 
-Phase 1 = E1–E4; Phase 2 = E5–E8. E7 thuộc Phase 2 về thứ tự làm, nhưng là điều kiện bắt buộc trước khi mở Closed Beta.
+Phase 1 = E1–E4; Phase 2 = E5–E8. E7 thuộc Phase 2 về thứ tự làm, nhưng là điều kiện bắt buộc trước khi mở Closed Beta. E9 làm cuối, cũng là điều kiện bắt buộc trước Closed Beta.
 
 ## Epic List
 
@@ -320,12 +321,12 @@ Người mua chọn Vé, đăng nhập, điền form, thanh toán qua Gateway, t
 **UX-DR chính:** UX-DR15–22, UX-DR35 (một phần)
 
 ### Epic 4: Thanh toán đáng tin khi có sự cố
-Đối soát bù khi IPN trễ/mất; Sự kiện tự "Tạm ngừng bán" khi BTC hết Token hoặc bị ngắt dịch vụ và tự mở lại; BTC xử lý hàng Cần xử lý; Owner theo dõi Token và nhận cảnh báo; cảnh báo giám sát NFR-10; staging/production, deploy an toàn và diễn tập khôi phục (NFR-4, NFR-5); giới hạn IP cho `/admin` và ảnh Sự kiện trên object storage (chuyển từ Epic 2, E2-4). Xong E4 là đạt tiêu chí hoàn thành Phase 1.
+Đối soát bù khi IPN trễ/mất; Sự kiện tự "Tạm ngừng bán" khi BTC hết Token hoặc bị ngắt dịch vụ và tự mở lại; BTC xử lý hàng Cần xử lý; Owner theo dõi Token và nhận cảnh báo; cảnh báo giám sát NFR-10; siết cấu hình production và CI trước khi deploy (phần hạ tầng ở Epic 9); giới hạn IP cho `/admin` và ảnh Sự kiện trên object storage (chuyển từ Epic 2, E2-4). Xong E4 là đạt tiêu chí hoàn thành Phase 1.
 **FRs covered:** FR-15, FR-20, FR-21, FR-34; FR-4, FR-7, FR-10 (một phần)
 **UX-DR chính:** UX-DR38, UX-DR40 (Token, Closed Beta bị thu hồi), UX-DR7 và UX-DR10 (ảnh Sự kiện, Story 4.8)
 
 ### Epic 5: Check-in tại cổng
-CTV nhận link mời, quét Vé xanh/đỏ dưới 1 giây, tra tay; Owner/Admin theo dõi check-in realtime và thu hồi CTV. Story cuối: kiểm thử tải NFR-3 trên staging.
+CTV nhận link mời, quét Vé xanh/đỏ dưới 1 giây, tra tay; Owner/Admin theo dõi check-in realtime và thu hồi CTV. Kiểm thử tải NFR-3 chuyển sang Story 9.2.
 **FRs covered:** FR-26, FR-27, FR-28, FR-29, FR-30
 **UX-DR chính:** UX-DR27–33, UX-DR39
 
@@ -343,6 +344,11 @@ Người mua báo cáo Sự kiện; Quản trị Tingee khóa/mở khóa Sự ki
 Social Ticket Card cho Story; dòng giới thiệu Tickee ở trang Sự kiện và email Vé.
 **FRs covered:** FR-25, FR-36
 **UX-DR chính:** UX-DR23, UX-DR26
+
+### Epic 9: Lên môi trường thật *(bắt buộc trước Closed Beta)*
+Chốt nhà cung cấp hạ tầng, email và giám sát theo pháp chế (NĐ 53/2022); staging tự deploy, production deploy theo tag, diễn tập khôi phục (NFR-4, NFR-5); email vào hộp thư chính; test hợp đồng Tingee UAT; đo uptime; kiểm thử tải NFR-3 trên staging. *(Tách từ Story 4.7 và chuyển Story 5.8 sang, 19/11/2026.)*
+**FRs covered:** không có FR mới (NFR-3, NFR-4, NFR-5, NFR-10)
+**UX-DR chính:** không có
 
 ## Epic 1: Nền móng & Tài khoản Tickee
 
@@ -1492,45 +1498,38 @@ So that chúng tôi xử lý trước khi khách bị ảnh hưởng.
 **When** xem dead-letter queue
 **Then** thấy danh sách job lỗi và requeue được từng job; mọi thao tác ghi audit (AD-12)
 
-### Story 4.7: Môi trường staging/production, deploy và diễn tập khôi phục
+### Story 4.7: Siết cấu hình production và CI trước khi deploy
+
+*(Tách ngày 19/11/2026, `sprint-change-proposal-2026-11-19-tach-story-4-7.md`: phần cần nhà cung cấp hạ tầng chuyển sang Story 9.1. Story con: 4.7-a giới hạn IP admin, 4.7-b siết cấu hình production, 4.7-c CI e2e full-stack, 4.7-d giới hạn presign ảnh Sự kiện, 4.7-e khóa migrate, 4.7-f cấu hình production phía web và cảnh báo `NODE_ENV` sai giá trị, 4.7-g kiểm khóa QR lúc khởi động.)*
 
 As a đội vận hành Tickee,
-I want deploy an toàn lên staging và production và chứng minh khôi phục được dữ liệu,
-So that Checkout, IPN và check-in luôn chạy, và một sự cố DB không làm mất tiền hay Vé.
+I want api, worker và web từ chối cấu hình sai, và CI chặn bản hỏng trước khi có môi trường thật,
+So that khi lên staging và production ở Story 9.1 chỉ còn việc hạ tầng, không phải sửa code.
 
 **Acceptance Criteria:**
 
-**Given** ba môi trường `local` (Tingee fake), `staging` (Tingee UAT), `production` (Tingee PROD)
-**When** cấu hình
-**Then** mỗi nơi một `TINGEE_BASE_URL` và một bộ `TINGEE_CREDENTIAL_KEYS` riêng; credential Tingee là của từng BTC; secret tiêm từ secret store của nền tảng, danh sách biến khớp schema Zod của `config`; local không nhận IPN thật (AD-36)
+**Given** vai `api`, `worker` hoặc `migrate` khởi động
+**When** đọc env
+**Then** mọi biến kiểm bằng schema Zod của `config`; thiếu `NODE_ENV`, sai định dạng, ở production mà dùng giá trị mẫu của `.env.example` hoặc origin không phải `https`, hoặc `TICKET_QR_KEYS` dùng chung khóa với `TINGEE_CREDENTIAL_KEYS` thì tiến trình dừng và nêu tên biến, không nêu giá trị; `local` không nhận IPN thật (AD-36) *(4.7-b)*
 
 **Given** `/v1/admin/*` trên staging và production
 **When** api khởi động và nhận request
 **Then** chỉ nhận request từ dải IP trong env `ADMIN_ALLOWED_CIDRS`, kiểm bằng schema Zod khi khởi động; thiếu hoặc sai định dạng ở production thì api không khởi động (FR-4, AD-26)
-**And** IP client lấy qua trusted proxy (`TRUST_PROXY_HOPS` đúng số proxy thật trước api); có test *(chuyển từ Story 2.5, E2-4)*
+**And** IP client lấy qua trusted proxy (`TRUST_PROXY_HOPS` đúng số proxy thật trước api); có test *(chuyển từ Story 2.5, E2-4; 4.7-a)*
 
-**Given** PR được merge vào `main`
-**When** CI xanh (thêm Playwright với Tingee fake và bộ test cách ly vào pipeline của Story 1.1)
-**Then** staging tự deploy image tag theo commit SHA: vai `migrate` chạy trước, rồi đổi phiên bản `api`/`worker`; migration luôn tương thích ngược (AD-36)
+**Given** một PR
+**When** CI chạy
+**Then** CI gồm Playwright full-stack với api thật, worker, Tingee fake, Mailpit và bộ test cách ly; image chạy được vai `migrate`, và vai `worker` ở production từ chối cấu hình sai; hai tiến trình `migrate` chạy cùng lúc thì lượt sau chờ khóa, không chạy song song (AD-36) *(4.7-c, 4.7-e)*
 
-**Given** một tag release
-**When** người có quyền bấm deploy production
-**Then** deploy thủ công theo tag với cùng trình tự; topology tối thiểu ≥ 2 `api` sau load balancer, ≥ 1 `worker`; load balancer dùng `/readyz` (DB và `LISTEN`) (AD-36, NFR-4)
+**Given** instance `api` hoặc `worker` nhận `SIGTERM`
+**When** tắt
+**Then** ngừng nhận SSE mới, đóng SSE đang mở để client tự nối lại, `boss.stop({ graceful })`; có test (AD-36, NFR-4) *(có từ Epic 1–3)*
 
-**Given** đang deploy
-**When** instance cũ nhận `SIGTERM`
-**Then** ngừng nhận SSE mới, đóng SSE đang mở để client tự nối lại, `boss.stop({ graceful })`; không mất IPN nào trong lúc deploy, kiểm bằng test gửi IPN liên tục trong một lượt deploy staging (AD-36, NFR-4)
-
-**Given** staging
-**When** chạy bộ test hợp đồng với Tingee UAT bằng một tài khoản merchant UAT để thử (tạo link, IPN ký thật, tra trạng thái theo `orderId`, đọc danh sách tài khoản (`get-va-paging`))
-**Then** bộ test chạy được bằng một lệnh và theo lịch; lỗi thì cảnh báo vận hành (AD-36)
-
-**Given** Postgres production có PITR và failover tự động
-**When** cấu hình sao lưu
-**Then** RPO ≤ 5 phút, RTO ≤ 1 giờ, giữ 14 ngày (NFR-5)
-**And** trước Closed Beta có một lần diễn tập khôi phục về một thời điểm sang môi trường riêng, đo thời gian thực tế và ghi biên bản trong `docs/`; không đạt RTO thì Closed Beta chưa mở
-
-**And** uptime của Checkout, IPN và check-in được đo bằng kiểm tra từ bên ngoài, báo cáo theo tháng so với mục tiêu 99,9% (NFR-4, NFR-10)
+**Given** web build hoặc chạy ở production
+**When** thiếu `WEB_ORIGIN`, `WEB_ORIGIN` hoặc `NEXT_PUBLIC_API_BASE_URL` không phải `https`, hoặc `REVALIDATE_SECRET` là giá trị mẫu hay quá ngắn
+**Then** build hoặc khởi động dừng và nêu tên biến; route revalidate không nhận giá trị mẫu; font OG có trong image *(4.7-f)*
+**And** api và worker cảnh báo khi `NODE_ENV` khác `production` mà `API_PUBLIC_URL` hoặc `WEB_ORIGIN` là `https` trên host không phải local *(4.7-f)*
+**And** lúc khởi động, mọi `qr_key_version` còn dùng ở bảng `tickets` phải có trong `TICKET_QR_KEYS`; thiếu thì báo kèm marker `ticket_qr_key_missing`, dừng hay chỉ cảnh báo chốt ở spec 4.7-g (AD-29) *(4.7-g)*
 
 ### Story 4.8: Ảnh Sự kiện trên object storage
 
@@ -1562,7 +1561,7 @@ So that trang Sự kiện và preview khi chia sẻ lên Zalo/Facebook hiện đ
 
 ## Epic 5: Check-in tại cổng
 
-CTV nhận link mời, quét Vé xanh/đỏ dưới 1 giây, tra tay; Owner/Admin theo dõi check-in realtime và thu hồi CTV. Story cuối: kiểm thử tải NFR-3 trên staging.
+CTV nhận link mời, quét Vé xanh/đỏ dưới 1 giây, tra tay; Owner/Admin theo dõi check-in realtime và thu hồi CTV. Kiểm thử tải NFR-3 chuyển sang Story 9.2.
 
 ### Story 5.1: Link mời CTV và tab Check-in
 
@@ -1759,30 +1758,6 @@ So that tôi biết cổng nào đông và còn bao nhiêu người chưa tới.
 **Then** refetch số liệu; mất SSE thì polling dự phòng theo `useLiveResource` (AD-17)
 
 **And** CTV chỉ nhận topic của Sự kiện được giao; Owner/Admin chỉ nhận của BTC mình (NFR-7)
-
-### Story 5.8: Kiểm thử tải NFR-3 trên staging
-
-As a đội Tickee,
-I want chứng minh hệ thống chịu được một đợt mở bán đông người trước Closed Beta,
-So that chúng tôi biết không bán quá số suất và biết khi nào phải làm phòng chờ.
-
-**Acceptance Criteria:**
-
-**Given** staging với topology tối thiểu (≥ 2 `api`, ≥ 1 `worker`) và Tingee UAT hoặc fake Gateway có độ trễ giống thật
-**When** chạy kịch bản tải 5.000 người dùng ảo cùng mua một Sự kiện 300 Vé (tải trang công khai → availability → tạo Đơn → IPN giả lập)
-**Then** tổng Vé đã phát ≤ 300, `sold + held` không bao giờ vượt `capacity`, job đối chiếu tồn kho không báo lệch (NFR-3, AD-2)
-
-**Given** cùng lượt chạy
-**When** đo
-**Then** báo cáo p95 trang công khai, availability, tạo Đơn, tạo link Gateway (< 2 giây) và IPN → Vé hiện trên trình duyệt (< 3 giây); tỉ lệ lỗi 5xx; số request bị giới hạn tốc độ (NFR-1, NFR-2, AD-31, AD-37)
-**And** đo thời gian tải `/e/{slug}` với mạng 4G giả lập (throttling) trên cấu hình thiết bị di động tầm trung, mục tiêu dưới 2 giây; kết quả ghi trong cùng báo cáo (FR-10, NFR-1) *(chuyển từ Story 2.11, E2-4)*
-
-**Given** kịch bản check-in song song (vd. 20 CTV quét 300 Vé, có quét trùng)
-**When** chạy
-**Then** p95 quét < 1 giây và không Vé nào check-in hai lần (NFR-2, FR-28)
-
-**And** script tải nằm trong repo, chạy lại được bằng một lệnh; kết quả lưu thành báo cáo trong `docs/`
-**And** nếu không đạt, báo cáo ghi rõ điểm nghẽn và kích hoạt điều kiện xem lại phòng chờ (AD-37, Câu hỏi mở #5 của PRD)
 
 ## Epic 6: Báo cáo Đơn và Google Sheets
 
@@ -2187,3 +2162,74 @@ So that người mua và BTC khác biết tới Tickee mà không làm phiền t
 
 **And** dòng giới thiệu không nằm trên `ticket-card`, màn thanh toán hay Màn quét; dùng `typography.meta`, không cạnh tranh với hành động chính (UX-DR46)
 **And** tham số nguồn không chứa thông tin cá nhân hay mã Đơn (NFR-8)
+
+## Epic 9: Lên môi trường thật *(bắt buộc trước Closed Beta)*
+
+Tickee chạy trên staging và production của nhà cung cấp đã chốt theo ý kiến pháp chế: deploy an toàn, sao lưu và khôi phục được, email vào hộp thư chính, uptime đo từ bên ngoài, và chịu được một đợt mở bán đông người. Epic làm sau Epic 5–8, vì phải chốt nhà cung cấp hạ tầng, email và giám sát (NĐ 53/2022) trước. Code không phụ thuộc nhà cung cấp nhờ AD-22. *(Tách từ Story 4.7 và chuyển Story 5.8 sang, 19/11/2026, `sprint-change-proposal-2026-11-19-tach-story-4-7.md`.)*
+
+### Story 9.1: Môi trường staging/production, deploy và diễn tập khôi phục
+
+*(Tách từ Story 4.7 ngày 19/11/2026. Điều kiện bắt đầu: đã chốt nhà cung cấp hạ tầng, email và giám sát theo ý kiến pháp chế về NĐ 53/2022, và ghi vào AD-22, AD-36. Các mục checklist deploy và hạ tầng ghi "Story 4.7" trong `deferred-work.md` thuộc story này.)*
+
+As a đội vận hành Tickee,
+I want deploy an toàn lên staging và production và chứng minh khôi phục được dữ liệu,
+So that Checkout, IPN và check-in luôn chạy, và một sự cố DB không làm mất tiền hay Vé.
+
+**Acceptance Criteria:**
+
+**Given** ba môi trường `local` (Tingee fake), `staging` (Tingee UAT), `production` (Tingee PROD)
+**When** cấu hình
+**Then** mỗi nơi một `TINGEE_BASE_URL` và một bộ `TINGEE_CREDENTIAL_KEYS` riêng; credential Tingee là của từng BTC; secret tiêm từ secret store của nền tảng, danh sách biến khớp schema Zod của `config` (AD-36)
+
+**Given** PR được merge vào `main` và CI xanh (Story 4.7)
+**When** pipeline chạy
+**Then** staging tự deploy image tag theo commit SHA: vai `migrate` chạy trước, rồi đổi phiên bản `api`/`worker`; migration luôn tương thích ngược; pipeline không chạy hai lượt deploy chồng nhau (AD-36)
+
+**Given** một tag release
+**When** người có quyền bấm deploy production
+**Then** deploy thủ công theo tag với cùng trình tự; topology tối thiểu ≥ 2 `api` sau load balancer, ≥ 1 `worker`; load balancer dùng `/readyz` (DB và `LISTEN`); edge phục vụ API bằng HTTP/2 vì nhiều trang giữ SSE dài hạn (AD-36, NFR-4)
+
+**Given** đang deploy
+**When** instance cũ nhận `SIGTERM`
+**Then** không mất IPN nào trong lúc deploy, kiểm bằng test gửi IPN liên tục trong một lượt deploy staging (AD-36, NFR-4)
+
+**Given** staging
+**When** chạy bộ test hợp đồng với Tingee UAT bằng một tài khoản merchant UAT để thử (tạo link, IPN ký thật, tra trạng thái theo `orderId`, đọc danh sách tài khoản (`get-va-paging`))
+**Then** bộ test chạy được bằng một lệnh và theo lịch; lỗi thì cảnh báo vận hành (AD-36)
+
+**Given** staging và production
+**When** gửi email OTP, email Vé và cảnh báo vận hành
+**Then** email đi qua nhà cung cấp SMTP đã chốt, qua `EmailTransport`; domain gửi có SPF, DKIM và DMARC; email OTP và email Vé thử gửi tới Gmail và Outlook không rơi vào spam (AD-22) *(mới, 19/11/2026)*
+
+**Given** Postgres production có PITR và failover tự động
+**When** cấu hình sao lưu
+**Then** RPO ≤ 5 phút, RTO ≤ 1 giờ, giữ 14 ngày (NFR-5)
+**And** trước Closed Beta có một lần diễn tập khôi phục về một thời điểm sang môi trường riêng, đo thời gian thực tế và ghi biên bản trong `docs/`; không đạt RTO thì Closed Beta chưa mở
+
+**And** uptime của Checkout, IPN và check-in được đo bằng kiểm tra từ bên ngoài, báo cáo theo tháng so với mục tiêu 99,9% (NFR-4, NFR-10)
+
+### Story 9.2: Kiểm thử tải NFR-3 trên staging
+
+*(Chuyển từ Story 5.8 ngày 19/11/2026, AC giữ nguyên. Các mục ghi "5.8" trong `deferred-work.md` thuộc story này. Cần staging của Story 9.1.)*
+
+As a đội Tickee,
+I want chứng minh hệ thống chịu được một đợt mở bán đông người trước Closed Beta,
+So that chúng tôi biết không bán quá số suất và biết khi nào phải làm phòng chờ.
+
+**Acceptance Criteria:**
+
+**Given** staging với topology tối thiểu (≥ 2 `api`, ≥ 1 `worker`) và Tingee UAT hoặc fake Gateway có độ trễ giống thật
+**When** chạy kịch bản tải 5.000 người dùng ảo cùng mua một Sự kiện 300 Vé (tải trang công khai → availability → tạo Đơn → IPN giả lập)
+**Then** tổng Vé đã phát ≤ 300, `sold + held` không bao giờ vượt `capacity`, job đối chiếu tồn kho không báo lệch (NFR-3, AD-2)
+
+**Given** cùng lượt chạy
+**When** đo
+**Then** báo cáo p95 trang công khai, availability, tạo Đơn, tạo link Gateway (< 2 giây) và IPN → Vé hiện trên trình duyệt (< 3 giây); tỉ lệ lỗi 5xx; số request bị giới hạn tốc độ (NFR-1, NFR-2, AD-31, AD-37)
+**And** đo thời gian tải `/e/{slug}` với mạng 4G giả lập (throttling) trên cấu hình thiết bị di động tầm trung, mục tiêu dưới 2 giây; kết quả ghi trong cùng báo cáo (FR-10, NFR-1) *(chuyển từ Story 2.11, E2-4)*
+
+**Given** kịch bản check-in song song (vd. 20 CTV quét 300 Vé, có quét trùng)
+**When** chạy
+**Then** p95 quét < 1 giây và không Vé nào check-in hai lần (NFR-2, FR-28)
+
+**And** script tải nằm trong repo, chạy lại được bằng một lệnh; kết quả lưu thành báo cáo trong `docs/`
+**And** nếu không đạt, báo cáo ghi rõ điểm nghẽn và kích hoạt điều kiện xem lại phòng chờ (AD-37, Câu hỏi mở #5 của PRD)

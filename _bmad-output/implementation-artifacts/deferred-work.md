@@ -898,6 +898,7 @@ Phần code của 4.7 không cần chọn nhà cung cấp hạ tầng được t
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-7-e-khoa-migrate-mot-lan.md`
   summary: Ghi luật mới của vai `migrate` vào AD-36 của `ARCHITECTURE-SPINE.md`. Vai `migrate` giữ khóa advisory cấp session `tickee:migrate`. Lượt chạy song song chờ chứ không bỏ qua. `MIGRATION_DATABASE_URL` phải là kết nối thẳng hoặc qua pooler chế độ session. Khóa không sắp thứ tự deploy giữa hai phiên bản, nên pipeline phải chặn deploy chồng nhau.
   evidence: Review 4.7-e (BH) #15, low. Hiện AD-36 chỉ giả định pipeline chạy migrate một lần. Luật bước Classify của Build không cho sửa spec/spine trong lượt sửa review. Nên gom vào lần cập nhật spine kế tiếp của 4.7 (deploy staging/production).
+- Đã xử lý (19/11/2026): ghi vào AD-36 của `ARCHITECTURE-SPINE.md` qua `_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-19-tach-story-4-7.md`.
 
 ## Deferred from: code review of spec-ci-cai-playwright-khong-treo.md (2026-11-19)
 
@@ -907,3 +908,26 @@ Phần code của 4.7 không cần chọn nhà cung cấp hạ tầng được t
 - source_spec: `_bmad-output/implementation-artifacts/spec-ci-cai-playwright-khong-treo.md`
   summary: Đo lại thời gian job `ci` sau khi bước cài Playwright dùng cache gói `.deb`, rồi cân nhắc hạ `timeout-minutes: 60` của job (trước đây 30 phút, nâng ngày 18/11 vì apt chậm).
   evidence: Review CI (BH) #10. Comment ở đầu job trong `ci.yml` giữ trần 60 phút "tới khi có số đo mới"; cần vài run trên `main` có cache trúng.
+
+## Bàn giao sau khi tách Story 4.7 (Sprint Change Proposal 2026-11-19)
+
+Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ tầng (4.7-a đến 4.7-g). Phần hạ tầng sang Story 9.1, Story 5.8 đổi thành Story 9.2 (`_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-19-tach-story-4-7.md`). Các mục cũ trong file này giữ nguyên chữ; đọc theo luật sau:
+
+- Mục ghi "Story 4.7" là checklist deploy hoặc hạ tầng → Story 9.1.
+- Mục ghi "5.8" → Story 9.2.
+
+**4.7-f nhận** (không cần nhà cung cấp):
+
+- Cấu hình production phía web: `REVALIDATE_SECRET` mẫu hoặc ngắn, `NEXT_PUBLIC_API_BASE_URL` là `http://` (review 4.7-b triage #10).
+- `WEB_ORIGIN` bắt buộc ở production thay vì rơi về localhost; font OG có trong image (review 2.11-b #2).
+- `NODE_ENV` đặt sai giá trị trên môi trường thật (review 4.7-b triage #11–12).
+
+**4.7-g nhận:** kiểm lúc khởi động mọi `qr_key_version` còn dùng có trong `TICKET_QR_KEYS` (mục review E3-5 D1 #2, phần 4.7). Tách khỏi 4.7-f ngày 19/11/2026, xem mục ngay dưới.
+
+**Story 9.1 nhận** (cần nhà cung cấp): luôn có ít nhất một `worker` và cảnh báo `identity.purge-expired` (retro Epic 1); cách chạy `admin-cli` trong image; biến origin công khai khi tách host; revalidate với nhiều instance web và `REVALIDATE_SECRET` chung cho worker và web; purge CDN cho `/e/*`; runbook xoay khóa QR (phần 2); edge HTTP/2 (C4 và 4.2-b); thứ tự deploy worker trước api khi thêm loại cảnh báo; api trước web khi contract thêm trường bắt buộc; bucket ảnh staging/production; giới hạn tốc độ ở edge cho route có khóa advisory (đo ở 9.2); chốt IPN `status` và `get-va-paging` khi `data` rỗng qua test hợp đồng UAT.
+
+## Deferred from: tách phạm vi Story 4.7-f khi build (2026-11-19)
+
+- source_spec: none
+  summary: Story 4.7-g — lúc khởi động, kiểm mọi `qr_key_version` còn dùng ở bảng `tickets` có trong `TICKET_QR_KEYS`; thiếu thì báo kèm marker `ticket_qr_key_missing`, chốt dừng hay chỉ cảnh báo khi lập spec (AC 4.7, AD-29, mục review E3-5 D1 #2 phần 4.7).
+  evidence: Tách khỏi 4.7-f theo quyết định của Mason (19/11/2026): giao riêng được, cần truy vấn DB lúc khởi động và quyết định dừng hay cảnh báo. 4.7-f chỉ làm cấu hình production phía web và cảnh báo `NODE_ENV` sai giá trị. Xong 4.7-f và 4.7-g thì 4.7 `done`.
