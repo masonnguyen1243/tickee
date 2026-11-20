@@ -7,7 +7,7 @@ paradigm: 'Modular monolith (NestJS) — một codebase, ba vai chạy: api, wor
 scope: 'Toàn bộ Tickee MVP v1: trang mua Vé, dashboard BTC, check-in CTV, Quản trị Tingee, tích hợp Tingee Payment Gateway'
 status: final
 created: '2026-10-28'
-updated: '2026-11-13'
+updated: '2026-11-20'
 binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37, FR-38, NFR-1, NFR-2, NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-8, NFR-9, NFR-10, NFR-11, NFR-12]
 sources:
   - _bmad-output/planning-artifacts/prds/prd-tickee-2026-10-27/prd.md
@@ -434,7 +434,7 @@ Hiện thực (Story 3.11):
 | pnpm | 12.15.0 (cài riêng, Node 25+ không kèm Corepack) |
 | Turborepo | 2.11.10 |
 | TypeScript | 6.0.3 |
-| Next.js | 16.4.3 |
+| Next.js | 16.4.6 |
 | React | 19.3.1 |
 | Tailwind CSS | 4.3.3 |
 | TanStack Query | 5.105.0 |
