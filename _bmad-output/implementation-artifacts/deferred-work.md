@@ -904,6 +904,15 @@ Phần code của 4.7 không cần chọn nhà cung cấp hạ tầng được t
   evidence: Review 4.7-e (BH) #15, low. Hiện AD-36 chỉ giả định pipeline chạy migrate một lần. Luật bước Classify của Build không cho sửa spec/spine trong lượt sửa review. Nên gom vào lần cập nhật spine kế tiếp của 4.7 (deploy staging/production).
 - Đã xử lý (19/11/2026): ghi vào AD-36 của `ARCHITECTURE-SPINE.md` qua `_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-19-tach-story-4-7.md`.
 
+## Deferred from: code review of spec-ci-cai-playwright-khong-treo.md (2026-11-19)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-ci-cai-playwright-khong-treo.md`
+  summary: Bỏ `~/.cache/ms-playwright` khỏi cache Playwright của CI, chỉ giữ gói `.deb`. Tải Chromium và WebKit từ CDN của Playwright chỉ mất khoảng 15 giây, trong khi thư mục trình duyệt khoảng 870 MB giải nén, tốn quota cache 10 GB của repo. Hướng dẫn CI của Playwright cũng khuyên không cache trình duyệt.
+  evidence: Review CI (BH) #7, low. Quyết định trong Intent của spec chốt giữ cache trình duyệt "cho tiện", nên không sửa trong lượt review; người dùng quyết.
+- source_spec: `_bmad-output/implementation-artifacts/spec-ci-cai-playwright-khong-treo.md`
+  summary: Đo lại thời gian job `ci` sau khi bước cài Playwright dùng cache gói `.deb`, rồi cân nhắc hạ `timeout-minutes: 60` của job (trước đây 30 phút, nâng ngày 18/11 vì apt chậm).
+  evidence: Review CI (BH) #10. Comment ở đầu job trong `ci.yml` giữ trần 60 phút "tới khi có số đo mới"; cần vài run trên `main` có cache trúng.
+
 ## Bàn giao sau khi tách Story 4.7 (Sprint Change Proposal 2026-11-19)
 
 Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ tầng (4.7-a đến 4.7-g). Phần hạ tầng sang Story 9.1, Story 5.8 đổi thành Story 9.2 (`_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-19-tach-story-4-7.md`). Các mục cũ trong file này giữ nguyên chữ; đọc theo luật sau:
