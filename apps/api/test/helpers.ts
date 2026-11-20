@@ -48,6 +48,7 @@ export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
   GOOGLE_CLIENT_SECRET: 'test-only-google-client-secret',
   // Không bao giờ gọi Tingee thật: cổng 1 để lỡ gọi thì lỗi ngay; test tài khoản nhận tiền trỏ vào `test/tingee-fake`.
   TINGEE_BASE_URL: 'http://127.0.0.1:1',
+  TINGEE_ALLOW_REAL_IN_DEVELOPMENT: false,
   TINGEE_CREDENTIAL_KEYS: TEST_CREDENTIAL_KEYS,
   TICKET_QR_KEYS: TEST_TICKET_QR_KEYS,
   // Ảnh Sự kiện (Story 4.8-a): path-style như MinIO local; credential giả chỉ dùng để ký.
@@ -89,6 +90,7 @@ export const workerConfig = (overrides: Partial<WorkerConfig> = {}): WorkerConfi
     EMAIL_FROM: api.EMAIL_FROM,
     REVALIDATE_SECRET: TEST_REVALIDATE_SECRET,
     TINGEE_BASE_URL: api.TINGEE_BASE_URL,
+    TINGEE_ALLOW_REAL_IN_DEVELOPMENT: api.TINGEE_ALLOW_REAL_IN_DEVELOPMENT,
     TINGEE_CREDENTIAL_KEYS: api.TINGEE_CREDENTIAL_KEYS,
     TICKET_QR_KEYS: api.TICKET_QR_KEYS,
     TINGEE_ORDER_STATUS_QUERY: true,

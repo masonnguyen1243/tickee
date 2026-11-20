@@ -601,6 +601,7 @@ Mỗi mục dưới đây có đúng một story nhận. Story nhận đọc m�
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-1-doi-soat-bu-khi-ipn-tre-hoac-mat.md`
   summary: Thay hợp đồng tạm của API tra đơn Gateway bằng hợp đồng thật khi Tingee trả lời: đường dẫn, body, tên trường của `data`, mã "không tìm thấy" và cách ký. Chỉ sửa `apps/api/src/modules/tingee/tingee.client.ts` (`TINGEE_GET_ORDER_PATH`, `getGatewayOrder`), `tingee/errors.ts` (`TINGEE_ORDER_NOT_FOUND_CODE`) và Tingee fake (`apps/api/test/tingee-fake/server.ts`), rồi bật `TINGEE_ORDER_STATUS_QUERY` ở staging. Nếu `data` không dùng tên trường của IPN thì `getGatewayOrder` đổi sang dạng IPN trước khi trả (worker đưa kết quả qua `TingeeIpn`).
   evidence: Tài liệu công khai của Tingee đọc ngày 13/11/2026 chỉ có `create-link`. Hợp đồng tạm ở spec 4.1 › Design Notes: `POST /v1/payment-gateway/get-order` `{requestId, orderId}` → `00` + `data` tên trường IPN, `2004` không tìm thấy. Cờ worker mặc định tắt; `.env.example` và `workerConfig()` của test bật.
+- Ghi thêm cho mục trên (20/11/2026, E4-3 phần A): story nào thay hợp đồng tạm của API tra đơn cũng phải gỡ luật production của `TINGEE_ORDER_STATUS_QUERY` (`CrossRule` trong `apps/api/src/platform/config/config.schema.ts`, lý do "phải tắt khi NODE_ENV=production…"), cùng test (`test/config.test.ts`, `test/roles.process.test.ts`) và tài liệu (`.env.example`, README › bảng luật production, bảng biến); không gỡ thì staging không bật được cờ, worker không khởi động.
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-1-doi-soat-bu-khi-ipn-tre-hoac-mat.md`
   summary: Rủi ro "Thanh toán trùng" giả: Đối soát bù phát Vé trước, rồi IPN của cùng khoản tiền tới sau mang `providerTransactionCode` khác mã của kết quả tra → IPN đi bước 4 của AD-7 thành mục `duplicate_payment` dù Người mua chỉ trả một lần. Chỉ đóng được khi Tingee xác nhận mã giao dịch của kết quả tra trùng mã của IPN (khi đó unique `(organization_id, provider_transaction_code)` của `payment_events` chặn). Nếu Tingee xác nhận mã khác nhau thì cần khóa chống lặp khác (vd. `billId`, hoặc `(orderId, paidAmount)` cho Đơn đã `paid` qua `reconciliation`).
   evidence: Spec 4.1 › Design Notes "Vì sao `already_settled` thay vì `duplicate_payment`". Chiều ngược lại (IPN tới trước, kết quả tra mang mã khác) đã đóng bằng `already_settled` (`test/payment/reconciliation.test.ts` › "Đua khác mã"). Retro Epic 3 B5.
@@ -967,3 +968,12 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-4-e4-4-nang-next-16-4-6.md`
   summary: Web không dùng `next/image`, nhưng endpoint tối ưu ảnh `/_next/image` vẫn bật mặc định (có `sharp`), thành bề mặt cho advisory về sau (như GHSA-7qx7-33qx-rqx2). Có thể đặt `images: { unoptimized: true }` trong `apps/web/next.config.ts`, rồi kiểm `/_next/image` trả 404.
   evidence: Review E4-4 (BH) #7, low (hardening, không phải lỗi). Advisory hiện tại đã vá ở 16.4.6. Nên xét cùng phần cache ảnh OG của E4-4 (trước Closed Beta) hoặc AC edge của 9.1.
+
+## Deferred from: tách phạm vi E4-3 khi build (2026-11-20)
+
+- source_spec: none
+  summary: E4-3 phần B — single-flight theo `organizationId` và cooldown vài giây cho `GET /v1/orgs/:orgId/token` (`organizer/token.service.ts:124`), để Owner/Admin mở nhiều tab hay bấm "Tải lại" không ăn hết hạn mức 20 request/10 giây của key merchant, vốn cũng là key `create-link`; cập nhật `deferred-work.md:740` (retro Epic 4 D2).
+  evidence: Mục tiêu giao riêng được, tách khỏi phần luật cấu hình của E4-3 theo quyết định của Mason (20/11/2026). E4-3 giữ `in-progress` tới khi phần này xong.
+- source_spec: none
+  summary: E4-10 phần test — test giả `Date` chứng minh chốt link và `checkoutUrl` (`payment-link.ts:157`) cùng `dbClock` của `markPaid` đi theo đồng hồ DB, theo mẫu `test/ordering/event-sale-status.test.ts:214`; đóng `deferred-work.md:630-631` (retro Epic 4 B5).
+  evidence: Retro ghi "test cùng E4-3"; tách khỏi E4-3 theo quyết định của Mason (20/11/2026) vì là phần test độc lập, giao riêng được.
