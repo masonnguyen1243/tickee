@@ -67,8 +67,10 @@ export class OrganizerModule {
         PaymentServiceProber,
         PaymentServiceService,
         { provide: PAYMENT_SERVICE_SETTINGS, useFactory: () => paymentServiceSettings(config) },
-        // Trang Token (Story 4.5-a): đọc số dư và hạn mức từ Tingee mỗi lần xem; ngưỡng cảnh báo (Story 4.5-b): đánh
-        // giá sau mỗi lần đọc, email enqueue cùng `tx` vượt ngưỡng.
+        // Trang Token (Story 4.5-a): đọc số dư và hạn mức từ Tingee; các lần xem cùng BTC, cùng credential dùng chung
+        // lời gọi đang chạy và dùng lại kết quả của nó thêm `TOKEN_READ_COOLDOWN_SECONDS` sau khi lời gọi xong (E4-3
+        // phần B; chỉ trong bộ nhớ, mỗi tiến trình một bản). Ngưỡng cảnh báo (Story 4.5-b): đánh giá ở mọi request, kể
+        // cả khi dùng lại kết quả; email enqueue cùng `tx` vượt ngưỡng.
         TokenAlertQueues,
         TokenReader,
         TokenService,

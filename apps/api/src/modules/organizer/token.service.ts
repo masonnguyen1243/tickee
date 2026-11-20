@@ -16,7 +16,7 @@ import { parseCredentialKeys, SecretBox, SecretBoxError } from '../../platform/c
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { BOSS, errorName } from '../../platform/jobs/index.js';
-import { TINGEE_CLIENT, tingeePortalUrl, type TingeeClient } from '../tingee/index.js';
+import { TINGEE_CLIENT, tingeePortalUrl, type TingeeClient, type TingeeCredential } from '../tingee/index.js';
 import { defaultPayoutTargetOf, type PayoutTarget } from './payout-targets.js';
 import {
   evaluateTokenAlert,
@@ -30,13 +30,24 @@ import {
 
 /*
  * Token của BTC (Story 4.5-a, FR-34, AD-32): số dư và hạn mức đọc thẳng từ Tingee bằng key hiện hành của tài khoản
- * nhận tiền mặc định, mỗi lần xem một lần đọc (adapter timeout 3 giây, không retry), NGOÀI transaction. Không lưu số dư,
- * hạn mức hay Token khả dụng ở DB, audit hay cache; log chỉ ghi kết quả đọc (`status`), không ghi số.
+ * nhận tiền mặc định (adapter timeout 3 giây, không retry), NGOÀI transaction. Không lưu số dư, hạn mức hay Token khả
+ * dụng ở DB, Redis, audit hay log; log chỉ ghi kết quả đọc (`status`), không ghi số.
  *
- * Cảnh báo Token (Story 4.5-b): mỗi lần đọc `ok` (trang Token và job dò mỗi giờ dùng chung `TokenReader`) đánh giá ngưỡng
- * sau lời gọi Tingee (`evaluateTokenAlert`): chỉ ghi `token_below_threshold_since` khi vượt ngưỡng hoặc về trên ngưỡng,
- * không bao giờ ghi số. BTC chưa đặt ngưỡng (và không dưới ngưỡng) thì đọc Token không ghi gì vào DB, không mở
- * transaction. Đọc `unavailable` hay `no_payout_account` không đổi gì.
+ * Gộp lời gọi và cooldown (E4-3 phần B, retro Epic 4 D2): key đọc Token cũng là key ký `create-link`, mà Tingee giới
+ * hạn 20 request/10 giây theo key. Các lần xem cùng BTC, cùng credential dùng chung lời gọi Tingee đang chạy, và dùng
+ * lại kết quả của nó (`ok` lẫn `unavailable`, giữ `readAt` của lần đọc thật) thêm `TOKEN_READ_COOLDOWN_SECONDS` sau khi
+ * lời gọi xong. Chỉ giữ trong bộ nhớ tiến trình (mỗi instance api, worker một bản riêng), xóa bằng timer khi hết
+ * cooldown, nên không số nào nằm lại quá `TOKEN_READ_COOLDOWN_SECONDS` sau khi lời gọi xong, kể cả ở tiến trình rảnh.
+ * Lời gọi ném lỗi bất ngờ thì mọi request đang chờ nhận cùng lỗi đó và bản ghi bị xóa ngay. Đọc DB và giải mã key vẫn
+ * chạy ở mọi request: đổi key hay đổi tài khoản mặc định thì lần xem sau gọi Tingee bằng key mới ngay;
+ * `no_payout_account` và "không giải mã được key" không gọi Tingee nên không có bản ghi. Không chia sẻ giữa hai BTC, kể
+ * cả khi dùng chung một merchant.
+ *
+ * Cảnh báo Token (Story 4.5-b): mỗi lần đọc `ok` (trang Token và job dò mỗi giờ dùng chung `TokenReader`, cùng bản ghi
+ * gộp lời gọi nếu ở cùng tiến trình) đánh giá ngưỡng ở chính request đó, kể cả khi dùng lại kết quả trong cooldown
+ * (`evaluateTokenAlert`): chỉ ghi `token_below_threshold_since` khi vượt ngưỡng hoặc về trên ngưỡng, không bao giờ ghi
+ * số. BTC chưa đặt ngưỡng (và không dưới ngưỡng) thì đọc Token không ghi gì vào DB, không mở transaction. Đọc
+ * `unavailable` hay `no_payout_account` không đổi gì.
  *
  * Lời gọi đọc Token không bao giờ bật hay tắt cờ dịch vụ thanh toán (`payment_service_*`), kể cả khi Tingee từ chối key:
  * đường dẫn của Tingee là hợp đồng tạm, Tingee thật có thể trả mã key sai cho một đường dẫn không tồn tại, và khi đó mọi
@@ -46,11 +57,16 @@ import {
 /** Token DI của cấu hình trang Token. */
 export const TOKEN_SETTINGS = Symbol('TOKEN_SETTINGS');
 
+/** Cooldown của lần đọc Token: kết quả một lời gọi Tingee được dùng lại chừng này giây sau khi lời gọi xong. */
+export const TOKEN_READ_COOLDOWN_SECONDS = 5;
+
 export interface TokenSettings {
   /** Giải mã Secret Token Tingee của BTC (khóa `TINGEE_CREDENTIAL_KEYS`). */
   secretBox: SecretBox;
   /** Portal Tingee (nơi mua Token) ứng với `TINGEE_BASE_URL`. */
   tingeePortalUrl: string;
+  /** Cooldown (ms) tính từ lúc lời gọi Tingee xong; `0` = chỉ gộp các lời gọi đồng thời (test). */
+  readCooldownMs: number;
 }
 
 /** Dựng cấu hình từ env đã kiểm (như `payoutAccountSettings`). */
@@ -58,10 +74,18 @@ export function tokenSettings(config: Pick<ApiConfig, 'TINGEE_BASE_URL' | 'TINGE
   return {
     secretBox: new SecretBox(parseCredentialKeys(config.TINGEE_CREDENTIAL_KEYS)),
     tingeePortalUrl: tingeePortalUrl(config.TINGEE_BASE_URL),
+    readCooldownMs: TOKEN_READ_COOLDOWN_SECONDS * 1_000,
   };
 }
 
 const UNAVAILABLE: TokenReading = { status: TokenReadingStatus.UNAVAILABLE };
+
+/** Lời gọi đọc Token đang chạy hoặc vừa xong của một BTC với một credential. */
+interface SharedRead {
+  promise: Promise<TokenReading>;
+  /** `null` khi lời gọi còn chạy; xong thì là mốc (ms, `Date.now()`) hết cooldown. */
+  expiresAt: number | null;
+}
 
 const notAMember = () => new AppError(ErrorCode.NOT_A_MEMBER, 'Bạn không phải thành viên của BTC này.');
 
@@ -78,6 +102,8 @@ export interface TokenReadResult {
 @Injectable()
 export class TokenReader {
   private readonly logger = new Logger('Token');
+  /** Khóa `${organizationId}:${credentialId}` → lời gọi đang chạy, hoặc kết quả còn trong cooldown. */
+  private readonly shared = new Map<string, SharedRead>();
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -88,8 +114,9 @@ export class TokenReader {
   ) {}
 
   /**
-   * Một lần đọc Token từ Tingee (ngoài transaction), rồi — khi đọc `ok` — đánh giá ngưỡng. Lỗi DB → ném; mọi lỗi phía
-   * Tingee hay khóa giải mã là `unavailable` (không đổi trạng thái cảnh báo).
+   * Một lần đọc Token từ Tingee (ngoài transaction; dùng chung lời gọi đang chạy hay kết quả còn trong cooldown), rồi —
+   * khi đọc `ok` — đánh giá ngưỡng ở chính request này. Lỗi DB → ném; mọi lỗi phía Tingee hay khóa giải mã là
+   * `unavailable` (không đổi trạng thái cảnh báo).
    */
   async readAndEvaluate(organizationId: string): Promise<TokenReadResult> {
     const reading = await this.read(organizationId);
@@ -120,8 +147,43 @@ export class TokenReader {
     }
     // Không có key để đọc: không gọi Tingee.
     if (!target) return { status: TokenReadingStatus.NO_PAYOUT_ACCOUNT };
+    return this.sharedRead(organizationId, target.credentialId, target.credential);
+  }
 
-    const result = await this.tingee.getTokenBalance(target.credential);
+  /** Số bản ghi đang giữ (lời gọi đang chạy hoặc còn trong cooldown); chỉ cho test. */
+  get sharedReadCount(): number {
+    return this.shared.size;
+  }
+
+  /**
+   * Lời gọi Tingee của BTC với credential này: dùng chung lời gọi đang chạy, hoặc kết quả còn trong cooldown; không có
+   * thì gọi mới. Xong thì giữ kết quả `readCooldownMs` rồi timer xóa; ném lỗi thì xóa ngay (lần sau gọi lại).
+   */
+  private sharedRead(organizationId: string, credentialId: string, credential: TingeeCredential): Promise<TokenReading> {
+    const key = `${organizationId}:${credentialId}`;
+    const hit = this.shared.get(key);
+    if (hit && (hit.expiresAt === null || hit.expiresAt > Date.now())) return hit.promise;
+
+    const entry: SharedRead = { promise: this.readFromTingee(organizationId, credential), expiresAt: null };
+    this.shared.set(key, entry);
+    const forget = () => {
+      if (this.shared.get(key) === entry) this.shared.delete(key);
+    };
+    entry.promise.then(
+      () => {
+        const cooldownMs = this.settings.readCooldownMs;
+        entry.expiresAt = Date.now() + cooldownMs;
+        // Timer bảo đảm số không nằm lại trong bộ nhớ quá cooldown, kể cả khi không có lần đọc nào sau đó.
+        setTimeout(forget, cooldownMs).unref();
+      },
+      forget,
+    );
+    return entry.promise;
+  }
+
+  /** Một lời gọi Tingee bằng `credential` → `TokenReading` (lỗi phía Tingee là `unavailable`; log không có số). */
+  private async readFromTingee(organizationId: string, credential: TingeeCredential): Promise<TokenReading> {
+    const result = await this.tingee.getTokenBalance(credential);
     if (result.status !== 'ok') {
       this.logger.warn({ organizationId, status: TokenReadingStatus.UNAVAILABLE }, 'Đọc Token: chưa đọc được số dư');
       return UNAVAILABLE;
