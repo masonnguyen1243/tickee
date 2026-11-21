@@ -29,7 +29,7 @@
 # - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-21-2026 09:37
+last_updated: 11-21-2026 12:53
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -513,8 +513,9 @@ action_items:
       số story; lời bác triage để story X xét phải thành một dòng deferred-work (retro
       G1, C4, D5, E4, E7, G9)"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+    note: "Xong qua _bmad-output/implementation-artifacts/spec-epic-4-e4-8-ve-sinh-deferred-work.md"
   - id: "epic-4-retro-e4-9-quy-trinh-pr-ci"
     epic: 4
     action: "E4-9 (trước Story 5.1): stacked PR đổi base sang main trước khi merge,
@@ -533,3 +534,11 @@ action_items:
     owner: "Mason"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+  - id: "epic-4-retro-e4-11-no-nho-tu-deferred-work"
+    epic: 4
+    action: "E4-11 (trước Closed Beta): nợ nhỏ gom từ deferred-work.md ở E4-8 (test
+      còn thiếu, tách file, câu chữ mà không story nào chạm); grep E4-11 trong deferred-work.md
+      để thấy danh sách"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/spec-epic-4-e4-8-ve-sinh-deferred-work.md"
