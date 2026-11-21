@@ -7,7 +7,7 @@ paradigm: 'Modular monolith (NestJS) — một codebase, ba vai chạy: api, wor
 scope: 'Toàn bộ Tickee MVP v1: trang mua Vé, dashboard BTC, check-in CTV, Quản trị Tingee, tích hợp Tingee Payment Gateway'
 status: final
 created: '2026-10-28'
-updated: '2026-11-20'
+updated: '2026-11-21'
 binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37, FR-38, NFR-1, NFR-2, NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-8, NFR-9, NFR-10, NFR-11, NFR-12]
 sources:
   - _bmad-output/planning-artifacts/prds/prd-tickee-2026-10-27/prd.md
@@ -40,7 +40,7 @@ companions:
 | `integration` | Kết nối Google Sheets và ánh xạ dòng, danh mục thông báo |
 | `admin` | Báo cáo vi phạm; endpoint của Quản trị Tingee. Ghi dữ liệu của mô-đun khác bằng service công khai của mô-đun đó (vd. Closed Beta qua `organizer`); chỉ luồng ghi từ hai mô-đun trở lên mới qua `flows` (AD-25: `lockEvent`/`lockOrganization`, `voidTickets`) |
 | `tingee` | Adapter Tingee — không sở hữu bảng |
-| `platform` (shared kernel) | DB và transaction, cổng `AccessResolver` và guard quyền, `orgScope`, `audit_events`, hàng đợi job, realtime (SSE/NOTIFY), cổng gửi email `EmailTransport` (SMTP; Mailpit ở local) và `escapeHtml`, config, log |
+| `platform` (shared kernel) | DB và transaction (`db`: đồng hồ DB, khóa migrate `tickee:migrate`), cổng `AccessResolver` và guard quyền, `orgScope` (`access`), `audit_events` (`audit`), hàng đợi job và dead-letter (`jobs`), realtime (SSE/NOTIFY), cổng gửi email `EmailTransport` (SMTP; Mailpit ở local) và `escapeHtml` (`email`), config (schema Zod và luật production), log, `SecretBox` (`crypto`), lỗi HTTP và health (`http`), cảnh báo vận hành (`alerts`: bảng `ops_alert_marks`, `OpsAlerts.raise`, queue `platform.ops-alert`, `platform.ops-alert-scan`), OpenTelemetry (`telemetry`: span qua `RedactingSpanExporter`), cổng object storage `ObjectStorage` (`storage`: S3) |
 
 **Email theo mô-đun** *(E3-5, 13/11/2026)*. Mô-đun sở hữu nghiệp vụ kích hoạt email thì sở hữu mẫu email, queue và handler. Queue khai báo tên trong `packages/contracts` (AD-12). Handler gửi qua `EmailTransport` của `platform` và chỉ đọc dữ liệu của mô-đun khác qua read model (AD-33). Email mới theo cùng luật.
 
@@ -180,7 +180,12 @@ IPN của Cổng thanh toán không có trường số tài khoản/VA, nên kh�
 
 - **Binds:** FR-20, NFR-4; `payment`, `tingee`
 - **Prevents:** Hai cách hiểu khác nhau về cùng một giao dịch; mất Vé khi IPN không tới (Tingee chỉ retry 5 lần × 1 phút).
-- **Rule:** Khi gắn link, enqueue job hoãn tra trạng thái đơn Gateway theo `orderId` sau 2 phút, lặp theo backoff đến khi Đơn rời `pending`; thêm một lần tra tại `expires_at`. Khi BTC được mở lại dịch vụ (AD-32), enqueue tra cho mọi Đơn còn mở của BTC. Kết quả đi qua đúng hàm xử lý IPN: cùng whitelist, cùng khóa `payment_events`, cùng bảng ở AD-7.
+- **Rule:**
+  - Khi gắn link, enqueue job hoãn tra trạng thái đơn Gateway theo `orderId`, theo lịch cố định (không backoff): 2, 5, 10 phút sau lần tạo link, rồi tại `expires_at`. Đơn `expired` từng có link được tra thêm sau 30 phút, 2 giờ, 24 giờ kể từ khi hết hạn. Lịch nằm ở `ordering/reconciliation-jobs.ts`.
+  - Tra lỗi thì tra lại cùng mốc sau 1, 2, 4 phút. Lỗi lần thứ 4 liên tiếp, hoặc nhận `TINGEE_CREDENTIAL_INVALID` (kể cả credential cũ), thì dừng chuỗi và cảnh báo `payment_reconciliation_stopped` kèm mã Đơn.
+  - Khi BTC được mở lại dịch vụ (AD-32), enqueue tra cho mọi Đơn `pending` của BTC và Đơn `expired` hết hạn trong 24 giờ trước.
+  - Kết quả đi qua đúng hàm xử lý IPN: cùng whitelist, cùng khóa `payment_events`, cùng bảng ở AD-7.
+  - Tingee chưa công bố API tra đơn, nên adapter theo hợp đồng tạm. Cờ worker `TINGEE_ORDER_STATUS_QUERY` (mặc định tắt; luật production bắt buộc tắt) tắt thì job xong ngay, không gọi Tingee. Chỉ bật ở staging khi đã có hợp đồng thật và xong E4-1 *(cập nhật 21/11/2026, E4-7)*.
 
 ### AD-9 — Một adapter Tingee duy nhất
 
@@ -199,7 +204,7 @@ IPN của Cổng thanh toán không có trường số tài khoản/VA, nên kh�
 
 - **Binds:** tất cả; `apps/api`
 - **Prevents:** Hai mô-đun cùng sửa một bảng; phụ thuộc vòng.
-- **Rule:** Mỗi bảng có đúng một mô-đun sở hữu (bảng ở Design Paradigm) và chỉ mô-đun đó ghi. Mô-đun khác gọi service công khai xuất từ `modules/<name>/index.ts`, truyền `tx` để tham gia cùng transaction, hoặc đọc read model (AD-33). Ngoại lệ duy nhất cho import schema: `schema.ts` của mô-đun khác chỉ được import để khai báo khóa ngoại. Phụ thuộc theo đúng sơ đồ, không vòng; CI kiểm bằng dependency-cruiser với cấu hình sinh từ sơ đồ. Tên queue `<module>.<action>` với `module` là mô-đun xử lý.
+- **Rule:** Mỗi bảng có đúng một mô-đun sở hữu (bảng ở Design Paradigm) và chỉ mô-đun đó ghi. Mô-đun khác gọi service công khai xuất từ `modules/<name>/index.ts`, truyền `tx` để tham gia cùng transaction, hoặc đọc read model (AD-33). Ngoại lệ duy nhất cho import schema: `schema.ts` của mô-đun khác chỉ được import để khai báo khóa ngoại. Phụ thuộc theo đúng sơ đồ, không vòng; CI kiểm bằng dependency-cruiser với cấu hình sinh từ sơ đồ. Tên queue `<module>.<action>` với `module` là mô-đun xử lý. Job do shared kernel xử lý dùng tiền tố `platform` (hiện có `platform.ops-alert`, `platform.ops-alert-scan` của cảnh báo vận hành).
 
 ### AD-11 — Next.js không chạm vào DB
 
@@ -270,7 +275,7 @@ Hiện thực (Story 3.11):
 
 - **Binds:** FR-2, FR-7, FR-21, FR-26, FR-35, FR-37, FR-38, NFR-8, NFR-11; mọi mô-đun
 - **Prevents:** Thay đổi đã xảy ra mà không có nhật ký; nhật ký chỉ-append giữ thông tin cá nhân không xóa được.
-- **Rule:** `audit_events` chỉ cho INSERT (role DB `tickee_app` không có UPDATE/DELETE trên bảng này), ghi qua `audit.record(tx, …)` gồm actor, `organization_id` (nullable cho thao tác cấp nền tảng), hành động, đối tượng, và danh sách tên trường đã đổi — chỉ id và tên trường, không ghi giá trị cá nhân. Bắt buộc cho: thay đổi Sự kiện, phân quyền và CTV, xử lý hàng Cần xử lý, đánh dấu hoàn tay, duyệt/thu hồi Closed Beta, khóa/mở khóa, vô hiệu Vé, mọi truy cập của Quản trị Tingee.
+- **Rule:** `audit_events` chỉ cho INSERT (role DB `tickee_app` không có UPDATE/DELETE trên bảng này), ghi qua `audit.record(tx, …)` gồm actor, `organization_id` (nullable cho thao tác cấp nền tảng), hành động, đối tượng, và danh sách tên trường đã đổi — chỉ id và tên trường, không ghi giá trị cá nhân. Bắt buộc cho: thay đổi Sự kiện, phân quyền và CTV, xử lý hàng Cần xử lý, đánh dấu hoàn tay, duyệt/thu hồi Closed Beta, khóa/mở khóa, vô hiệu Vé, mọi truy cập của Quản trị Tingee. Tên hành động theo dạng `<loại đối tượng snake_case>.<động từ quá khứ>` (vd. `order.paid`, `member.invited`, `dead_letter_job.requeued`), khai báo trong union `AuditAction` (`platform/audit/audit.ts`). Có 9 tên dạng mệnh lệnh từ Story 4.4–4.5: `review_item.approve`, `review_item.approve_sold_out`, `review_item.reject`, `review_item.refund`, `review_item.dismiss`, `review_item.match`, `review_item.match_sold_out`, `payment_event.match`, `organization.token_alert_threshold_update`. Các tên này giữ nguyên, vì `audit_events` chỉ cho INSERT nên đổi tên sẽ làm lệch dòng cũ. Tên mới từ Epic 5 dùng thì quá khứ *(quyết định 21/11/2026, E4-7)*.
 
 ### AD-19 — Danh tính và session
 
@@ -361,13 +366,28 @@ Hiện thực (Story 3.11):
 
 - **Binds:** FR-12, FR-13, FR-21, FR-27, FR-29, NFR-3; `ordering`, `payment`, `checkin`
 - **Prevents:** Mạng chập chờn sinh hai Đơn giữ gấp đôi chỗ; bấm hai lần ra hai thao tác.
-- **Rule:** Mọi `POST` tạo tài nguyên hoặc đổi trạng thái từ trình duyệt (tạo Đơn, thao tác Cần xử lý, đánh dấu hoàn tay, check-in tay) nhận header `Idempotency-Key` (UUID do client sinh). Tạo Đơn: `UNIQUE (user_id, idempotency_key)` trên `orders`; request trùng khóa trả Đơn đã có với trạng thái hiện tại và link nếu có. Mỗi người mua tối đa một Đơn `pending` cho mỗi Sự kiện (unique index một phần). Quét dùng `scanId` theo AD-15. Giới hạn tốc độ tạo Đơn và tra tay theo user và IP, đếm trong Postgres.
+- **Rule:** Mọi `POST` tạo tài nguyên hoặc đổi trạng thái từ trình duyệt (tạo Đơn, thao tác Cần xử lý, đánh dấu hoàn tay, check-in tay) nhận header `Idempotency-Key` (UUID do client sinh). Tạo Đơn: `UNIQUE (user_id, idempotency_key)` trên `orders`; request trùng khóa trả Đơn đã có với trạng thái hiện tại và link nếu có. Mỗi người mua tối đa một Đơn `pending` cho mỗi Sự kiện (unique index một phần). Quét dùng `scanId` theo AD-15. Giới hạn tốc độ tạo Đơn và tra tay theo user và IP, đếm trong Postgres. Thao tác Cần xử lý (Story 4.4) bắt buộc `Idempotency-Key` nhưng không lưu khóa. Chống trùng dựa vào trạng thái mục: gửi lại đúng thao tác cho mục đã ở kết quả đó thì trả trạng thái hiện tại; thao tác không còn hợp lệ thì trả `409`.
 
 ### AD-32 — Trạng thái dịch vụ thanh toán của BTC
 
 - **Binds:** FR-15, FR-20, FR-34, FR-37; `organizer`, `tingee`, `payment`
 - **Prevents:** "Tạm ngừng bán" kẹt mãi vì không ai tắt; Đối soát bù sau khi mở lại dịch vụ không bao giờ chạy; lượt xem trang Token (nhiều tab, "Tải lại", script) ăn hết hạn mức 20 request/10 giây theo key merchant mà `create-link` dùng chung.
-- **Rule:** `organizer` sở hữu `payment_service_status` của BTC (`active` | `suspended`, `reason` `token` | `tingee_disabled` | `credential_invalid`, `since`, `last_checked_at`) và `token_alert_threshold`. Bật `suspended` khi adapter trả `MERCHANT_SUSPENDED` (trong transaction bù của AD-5); bật với `reason` `credential_invalid` khi lời gọi bằng credential hiện hành của BTC trả `TINGEE_CREDENTIAL_INVALID`. Lời gọi bằng credential cũ, tức tra trạng thái hoặc Đối soát bù cho Đơn có link tạo trước khi đổi key (AD-35), trả mã này thì không bật cờ: Đơn đó hết hạn theo AD-4 (c) và vận hành được cảnh báo. Tắt bằng: job dò `tingee.getMerchantServiceStatus(credential)` mỗi 5 phút khi đang `suspended`, nút "Kiểm tra lại" của Owner, hoặc Quản trị Tingee; riêng `credential_invalid` tắt khi Owner lưu credential mới hợp lệ, hoặc bấm "Kiểm tra lại" mà Tingee chấp nhận key. Tắt cờ → enqueue Đối soát bù cho mọi Đơn còn mở của BTC (AD-8). Thu hồi Closed Beta là trường riêng (`closed_beta_status`), không dùng cờ này. Số dư và hạn mức Token đọc trực tiếp từ Tingee bằng credential của BTC (timeout 3 giây, lỗi → "Chưa đọc được số dư"); các lần xem cùng BTC, cùng credential dùng chung lời gọi đang chạy và kết quả của nó, kể cả `unavailable`, thêm 5 giây sau khi lời gọi xong (chỉ trong bộ nhớ, mỗi tiến trình một bản, xóa khi hết hạn); không lưu.
+- **Rule:**
+  - `organizer` sở hữu trạng thái dịch vụ thanh toán của BTC (cột `payment_service_status` `active` | `suspended`, `payment_service_reason`, `payment_service_since`, `payment_service_checked_at`) và `token_alert_threshold`.
+  - **Năm lý do** (enum `PaymentServiceReason` ở `packages/contracts`; chỉ `tingee` biết mã):
+    - `token`: 1033 (chưa được Tingee xác nhận);
+    - `tingee_disabled`: 1007, 1034;
+    - `credential_invalid`: 92, 97, 1009;
+    - `gateway_permission_missing`: 1133, key chưa được cấp quyền "Cổng thanh toán";
+    - `payout_account_not_allowed`: 2023, 1023, 1045, 1024, 1072, chỉ khi tài khoản vừa gọi vẫn là mặc định hiện hành.
+  - **Bật:** chỉ khi `create-link` bằng credential hiện hành bị từ chối với các mã trên, trong transaction bù của AD-5. Dùng CAS `active → suspended`; đã `suspended` thì chỉ đổi lý do, giữ `since`. Lời gọi bằng credential cũ (Đơn có link tạo trước khi đổi key, AD-35) không bật cờ: Đơn đó hết hạn theo AD-4 (c) và vận hành được cảnh báo. Job dò, đọc Token và Đối soát bù không bật cờ. *E4-1 (trước khi bật Đối soát bù ở staging) sẽ cho Đối soát bù bằng credential hiện hành nhận mã ngắt bật cờ; spec của E4-1 sửa câu này.*
+  - **Tắt:**
+    - `token`, `tingee_disabled`, `credential_invalid`: job dò `tingee.getMerchantServiceStatus(credential)` (`get-va-paging`) mỗi 5 phút, hoặc "Kiểm tra lại" của Owner. Hai đường giành lượt bằng `payment_service_checked_at` (quá 30 giây), nên chạy chồng nhau chỉ gọi Tingee một lần.
+    - `gateway_permission_missing`, `payout_account_not_allowed`: `get-va-paging` không phát hiện được, nên job dò bỏ qua. "Kiểm tra lại" của Owner tắt cờ mà không gọi Tingee; nếu lỗi vẫn còn thì lần tạo link kế bật lại.
+    - Mọi lý do: Quản trị Tingee tắt được. Owner lưu credential mới hợp lệ thì tắt `credential_invalid`, `gateway_permission_missing`, `payout_account_not_allowed`. Đổi hoặc hủy tài khoản mặc định thì tắt `payout_account_not_allowed`.
+    - Mọi đường tắt ghi audit `organization.payment_service_resumed` kèm tên đường.
+  - Tắt cờ → enqueue Đối soát bù cho mọi Đơn còn mở của BTC (AD-8). *(Cập nhật 21/11/2026, E4-7: năm lý do của 4.2-a, 4.2-d.)*
+  - Thu hồi Closed Beta là trường riêng (`closed_beta_status`), không dùng cờ này. Số dư và hạn mức Token đọc trực tiếp từ Tingee bằng credential của BTC (timeout 3 giây, lỗi → "Chưa đọc được số dư"); các lần xem cùng BTC, cùng credential dùng chung lời gọi đang chạy và kết quả của nó, kể cả `unavailable`, thêm 5 giây sau khi lời gọi xong (chỉ trong bộ nhớ, mỗi tiến trình một bản, xóa khi hết hạn); không lưu.
 
 ### AD-33 — Read model cho đọc chéo mô-đun
 
@@ -411,7 +431,7 @@ Hiện thực (Story 3.11):
 | --- | --- |
 | Thuật ngữ trong code | Tài khoản Tickee = `user`; BTC = `organization`; Owner/Admin = `member.role` `owner`/`admin`; CTV = `checker`; Sự kiện = `event`; Hạng vé = `ticket_type`; Đơn = `order`; dòng Đơn = `order_item`; Vé = `ticket`; Giữ chỗ = `hold`; Cần xử lý = `review_item`; Đối soát bù = `reconciliation`; Quản trị Tingee = `platform_admin` |
 | Loại `review_item` | `amount_mismatch`, `orphan` (lý do `event_ended`, `event_locked`, `sold_out`), `event_cancelled`, `duplicate_payment`, `unmatched` |
-| Đặt tên | Bảng và cột `snake_case`, tên bảng số nhiều; TypeScript `camelCase`; thư mục mô-đun `kebab-case`; mã lỗi miền `UPPER_SNAKE` khai báo trong `packages/contracts`; queue `<module xử lý>.<action>`; topic realtime theo AD-17 |
+| Đặt tên | Bảng và cột `snake_case`, tên bảng số nhiều; TypeScript `camelCase`; thư mục mô-đun `kebab-case`; mã lỗi miền `UPPER_SNAKE` khai báo trong `packages/contracts`; queue `<module xử lý>.<action>` (`platform.<action>` cho job của shared kernel, AD-10); action audit `<loại đối tượng>.<động từ quá khứ>` (AD-18); topic realtime theo AD-17 |
 | ID | Khóa chính UUIDv7 (`uuidv7()` của PG 18, Better Auth cấu hình sinh UUIDv7); mã Đơn theo AD-20 |
 | Tiền | `bigint` theo đồng, không dùng số thực; tổng tiền chỉ tính ở server, từ bản chụp (AD-35) |
 | Thời gian | Lưu `timestamptz` (UTC); tính theo lịch với `Asia/Ho_Chi_Minh`; API trả ISO 8601 có offset; response có hạn chót kèm `serverNow` |

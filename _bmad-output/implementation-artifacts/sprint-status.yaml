@@ -29,7 +29,7 @@
 # - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-20-2026 17:04
+last_updated: 11-21-2026 08:38
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -498,8 +498,13 @@ action_items:
       nhà cung cấp thật, purge CDN ảnh OG, edge bỏ traceparent/tracestate, TimeZone
       DB, https cho OTLP (retro E2, E3, D6, F1, F4-F6)"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+    note: "Xong qua _bmad-output/planning-artifacts/sprint-change-proposal-2026-11-21-doi-chieu-spec-epic-4.md
+      (21/11/2026), gồm cả phần AC 9.1. Mason chốt: câu Phase 1 thành \"đạt trên Tingee
+      fake, phần sandbox chờ Tingee và UAT (E3-3)\"; tên action audit mới dùng thì quá
+      khứ, giữ 9 tên mệnh lệnh cũ; queue của shared kernel dùng tiền tố platform. deferred-work.md
+      để E4-8 ghi \"Đã có AC 9.1\""
   - id: "epic-4-retro-e4-8-ve-sinh-deferred-work"
     epic: 4
     action: "E4-8 (trước Story 5.1): gán story cho mọi mục mồ côi trong deferred-work.md;

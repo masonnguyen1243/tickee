@@ -321,7 +321,7 @@ Người mua chọn Vé, đăng nhập, điền form, thanh toán qua Gateway, t
 **UX-DR chính:** UX-DR15–22, UX-DR35 (một phần)
 
 ### Epic 4: Thanh toán đáng tin khi có sự cố
-Đối soát bù khi IPN trễ/mất; Sự kiện tự "Tạm ngừng bán" khi BTC hết Token hoặc bị ngắt dịch vụ và tự mở lại; BTC xử lý hàng Cần xử lý; Owner theo dõi Token và nhận cảnh báo; cảnh báo giám sát NFR-10; siết cấu hình production và CI trước khi deploy (phần hạ tầng ở Epic 9); giới hạn IP cho `/admin` và ảnh Sự kiện trên object storage (chuyển từ Epic 2, E2-4). Xong E4 là đạt tiêu chí hoàn thành Phase 1.
+Đối soát bù khi IPN trễ/mất; Sự kiện tự "Tạm ngừng bán" khi BTC hết Token hoặc bị ngắt dịch vụ và tự mở lại; BTC xử lý hàng Cần xử lý; Owner theo dõi Token và nhận cảnh báo; cảnh báo giám sát NFR-10; siết cấu hình production và CI trước khi deploy (phần hạ tầng ở Epic 9); giới hạn IP cho `/admin` và ảnh Sự kiện trên object storage (chuyển từ Epic 2, E2-4). Xong E4, bốn tiêu chí hoàn thành Phase 1 đạt trên Tingee fake; phần "trên sandbox Tingee" chờ Tingee và UAT (E3-3).
 **FRs covered:** FR-15, FR-20, FR-21, FR-34; FR-4, FR-7, FR-10 (một phần)
 **UX-DR chính:** UX-DR38, UX-DR40 (Token, Closed Beta bị thu hồi), UX-DR7 và UX-DR10 (ảnh Sự kiện, Story 4.8)
 
@@ -1319,7 +1319,7 @@ So that tôi biết tiền đã về mà không phải dò sao kê.
 
 ## Epic 4: Thanh toán đáng tin khi có sự cố
 
-Tiền đã trả không bao giờ bị lạc: Đối soát bù khi IPN trễ hoặc mất, Sự kiện có phí tự "Tạm ngừng bán" khi BTC bị ngắt dịch vụ rồi tự mở lại, BTC xử lý hàng "Cần xử lý" bằng vài thao tác, Owner theo dõi Token, và đội vận hành được cảnh báo trước khi khách phàn nàn. Xong epic này là đạt tiêu chí hoàn thành Phase 1.
+Tiền đã trả không bao giờ bị lạc: Đối soát bù khi IPN trễ hoặc mất, Sự kiện có phí tự "Tạm ngừng bán" khi BTC bị ngắt dịch vụ rồi tự mở lại, BTC xử lý hàng "Cần xử lý" bằng vài thao tác, Owner theo dõi Token, và đội vận hành được cảnh báo trước khi khách phàn nàn. Xong epic này, bốn tiêu chí hoàn thành Phase 1 đạt trên Tingee fake. Phần "trên sandbox Tingee" chờ Tingee trả lời các câu hỏi về API (action item Epic 4) và UAT với Tingee thật (E3-3). *(Sửa 21/11/2026, E4-7: retro Epic 4 xác nhận `accepted-with-open-items`.)*
 
 ### Story 4.1: Đối soát bù khi IPN trễ hoặc mất
 
@@ -1331,9 +1331,9 @@ So that tôi không bao giờ trả tiền mà không có Vé.
 
 **Given** TX2 vừa gắn link cho một Đơn
 **When** commit
-**Then** enqueue job hoãn để tra trạng thái giao dịch trên Gateway theo `orderId` (gọi Tingee bằng credential chụp trong `orders.payout_account_id`) sau 2 phút, lặp theo backoff đến khi Đơn rời `pending`, và thêm một lần tra tại `expires_at` (FR-20, AD-8)
+**Then** enqueue job hoãn để tra trạng thái giao dịch trên Gateway theo `orderId` (gọi Tingee bằng credential chụp trong `orders.payout_account_id`) theo lịch cố định: 2, 5 và 10 phút sau lần tạo link, rồi tại `expires_at`. Đơn rời `pending` thì bỏ các mốc còn lại, trừ các mốc sau hết hạn ở dưới (FR-20, AD-8)
 **And** Đơn đã từng có link mà chuyển `expired` vẫn được tra tiếp thêm 3 lần (sau 30 phút, 2 giờ, 24 giờ kể từ khi hết hạn), để bắt khoản tiền về muộn mà IPN bị mất
-**And** mỗi Đơn có số lần tra tối đa; khi tra lỗi hoặc kết quả mơ hồ liên tục vượt mức này, job dừng và đẩy cảnh báo vận hành (Story 4.6) kèm mã Đơn, không lặp vô hạn
+**And** tra lỗi (Tingee tạm lỗi, timeout, `MERCHANT_SUSPENDED`, không tìm thấy đơn, kết quả không đọc được) thì tra lại cùng mốc sau 1, 2, 4 phút. Lỗi lần thứ 4 liên tiếp thì dừng chuỗi và đẩy cảnh báo vận hành `payment_reconciliation_stopped` kèm mã Đơn (Story 4.6), không lặp vô hạn
 
 **Given** kết quả tra trạng thái
 **When** xử lý
@@ -1353,7 +1353,13 @@ So that tôi không bao giờ trả tiền mà không có Vé.
 **When** chạy test tích hợp
 **Then** Vé vẫn được phát qua Đối soát bù; giả lập IPN và Đối soát bù đến đồng thời thì chỉ một lần phát Vé
 
+**Given** Tingee chưa công bố API tra đơn Gateway (adapter theo hợp đồng tạm, Tingee fake giả lập đúng hợp đồng đó)
+**When** cờ worker `TINGEE_ORDER_STATUS_QUERY` tắt (mặc định; ở production luật cấu hình bắt buộc cờ tắt, E4-3)
+**Then** job tra xong ngay, không gọi Tingee, không enqueue mốc kế; cờ chỉ bật ở local và test, và chỉ bật ở staging khi đã có hợp đồng thật và xong E4-1 *(spec 4.1)*
+
 ### Story 4.2: Tự "Tạm ngừng bán" và tự mở lại khi dịch vụ thanh toán của BTC bị ngắt
+
+*(Story con: 4.2-a cờ và tự mở lại, 4.2-b giao diện Tạm ngừng bán, 4.2-c nhãn trạng thái bán trên dashboard, 4.2-d lý do tài khoản nhận tiền.)*
 
 As a Owner,
 I want Sự kiện có phí tự dừng bán khi Tingee ngắt dịch vụ và tự bán lại khi được mở,
@@ -1361,15 +1367,20 @@ So that không ai trả tiền vào lúc tôi không nhận được thông báo
 
 **Acceptance Criteria:**
 
-**Given** `organizer` sở hữu `payment_service_status` (`active` | `suspended`, `reason` `token` | `tingee_disabled` | `credential_invalid`, `since`, `last_checked_at`)
-**When** tạo link trả `MERCHANT_SUSPENDED`, hoặc một lời gọi bằng credential hiện hành của BTC trả `TINGEE_CREDENTIAL_INVALID` (lời gọi bằng credential cũ không bật cờ, xem Story 4.1)
-**Then** trong transaction bù sau lời gọi, cờ chuyển `suspended` (lý do `credential_invalid` với trường hợp sau); phát `org_status_changed` (FR-15, AD-32)
+**Given** `organizer` sở hữu `payment_service_status` (`active` | `suspended`), `payment_service_reason` (`token` | `tingee_disabled` | `credential_invalid` | `gateway_permission_missing` | `payout_account_not_allowed`), `payment_service_since`, `payment_service_checked_at`
+**When** `create-link` bằng credential hiện hành bị Tingee từ chối: 1033 (`token`), 1007/1034 (`tingee_disabled`), 92/97/1009 (`credential_invalid`), 1133 (`gateway_permission_missing`: key chưa được cấp quyền "Cổng thanh toán"), hoặc nhóm VA 2023/1023/1045/1024/1072 khi tài khoản vừa gọi vẫn là mặc định hiện hành (`payout_account_not_allowed`, 4.2-d)
+**Then** trong transaction bù sau lời gọi, cờ chuyển `suspended` kèm lý do (đã `suspended` thì chỉ đổi lý do, giữ `since`); audit; phát `org_status_changed` (FR-15, AD-32)
+**And** chỉ `create-link` bật cờ: lời gọi bằng credential cũ (Story 4.1), job dò, đọc Token và Đối soát bù không bật cờ. E4-1 sẽ thêm đường Đối soát bù bằng credential hiện hành nhận mã ngắt thì bật cờ
 **And** `sellability` trả "Tạm ngừng bán" cho mọi Hạng vé > 0đ của BTC; Hạng vé 0đ vẫn bán; trang Sự kiện hiện banner warning "Tạm ngừng bán", stepper và "Mua" tắt
 
-**Given** cờ `suspended`
-**When** job dò `tingee.getMerchantServiceStatus(credential)` bằng credential hiện hành của BTC mỗi 5 phút, hoặc Owner bấm "Kiểm tra lại", hoặc Quản trị Tingee tắt cờ, hoặc (với `credential_invalid`) Owner lưu key mới hợp lệ
+**Given** cờ `suspended` lý do `token`, `tingee_disabled` hoặc `credential_invalid`
+**When** job dò `tingee.getMerchantServiceStatus(credential)` (`get-va-paging`) bằng credential hiện hành của BTC mỗi 5 phút, hoặc Owner bấm "Kiểm tra lại", hoặc Quản trị Tingee tắt cờ, hoặc (với `credential_invalid`) Owner lưu key mới hợp lệ
 **Then** dịch vụ đã mở lại thì cờ chuyển `active` và enqueue Đối soát bù cho mọi Đơn còn mở của BTC (FR-20, AD-32)
-**And** lời gọi Tingee chạy ngoài transaction, có timeout
+**And** lời gọi Tingee chạy ngoài transaction, có timeout. Job dò và "Kiểm tra lại" giành lượt bằng `payment_service_checked_at`, nên chạy chồng nhau thì chỉ gọi Tingee một lần; "Kiểm tra lại" trong vòng 30 giây sau lần trước thì trả trạng thái hiện tại
+
+**Given** cờ `suspended` lý do `gateway_permission_missing` hoặc `payout_account_not_allowed` (`get-va-paging` không phát hiện được hai lỗi này)
+**When** Owner bấm "Kiểm tra lại", Quản trị Tingee tắt cờ, Owner lưu key mới hợp lệ, hoặc (với `payout_account_not_allowed`) Owner đổi hay hủy tài khoản nhận tiền mặc định
+**Then** cờ chuyển `active` mà không cần Tingee xác nhận, và enqueue Đối soát bù như trên. Job dò bỏ qua BTC có hai lý do này. Nếu quyền hoặc VA vẫn chưa được cho phép thì lần tạo link kế tiếp bật lại cờ; banner theo lý do, câu chữ ở spec 4.2-a và 4.2-d *(4.2-a, 4.2-d)*
 
 **Given** cờ `suspended` lý do Token
 **When** Owner/Admin mở dashboard
@@ -1410,6 +1421,8 @@ So that tôi xử lý trước khi khách nhắn hỏi.
 
 ### Story 4.4: Duyệt tay, từ chối và đánh dấu đã hoàn tay
 
+*(Story con: 4.4-a Duyệt tay, Từ chối, Đã hoàn tay, Bỏ qua; 4.4-b Ghép với Đơn.)*
+
 As a Owner hoặc Admin,
 I want quyết định từng mục Cần xử lý bằng một thao tác,
 So that khách được phát Vé hoặc được biết sẽ được hoàn tiền.
@@ -1425,12 +1438,12 @@ So that khách được phát Vé hoặc được biết sẽ được hoàn ti�
 **Given** mục `unmatched` đang `open` (tiền về không gắn được Đơn, ví dụ Người mua chuyển tiền với mã sai)
 **When** tôi bấm "Ghép với Đơn", chọn một Đơn `expired` hoặc `review` của cùng BTC có `total_amount` bằng số tiền nhận, và xác nhận (kèm `Idempotency-Key`)
 **Then** trong một transaction: gắn `payment_events.order_id` vào Đơn đó, gọi `markPaid(tx, orderId, 'manual', paidAmount)` với compare-and-set có `AND organization_id = :ctxOrg`, theo đúng quy tắc tồn kho và thứ tự kiểm của Story 3.6; thành công thì phát Vé, mục `resolved` (`approved`) (FR-21, AD-3)
-**And** danh sách Đơn để chọn chỉ lấy trong `orgScope`, lọc theo số tiền và Sự kiện; hết chỗ hoặc Sự kiện đã hủy/kết thúc thì không ghép được, mục vẫn `open` kèm lý do
-**And** audit ghi id giao dịch, Đơn được ghép, người ghép
+**And** danh sách Đơn để chọn chỉ lấy trong `orgScope`, lọc theo số tiền và Sự kiện. Hết chỗ hoặc Sự kiện đã hủy/kết thúc thì không ghép được: mục vẫn `open` kèm lý do, Đơn giữ nguyên trạng thái (Đơn `expired` không sang `review`, không gửi email)
+**And** audit ghi `review_item.match` (đối tượng: mục), `payment_event.match` (đối tượng: giao dịch, trường `order_id`) và `order.paid` kèm người ghép. Đơn được ghép đọc qua liên kết giao dịch → Đơn, không ghi trong audit (AD-18)
 
 **Given** mục đang `open`
 **When** tôi bấm "Từ chối" và xác nhận trong `Dialog` nêu hậu quả
-**Then** Đơn → `cancelled` với `cancel_reason` = `rejected`, mục `resolved` (`rejected`); Người mua thấy `order-card` "Đã hủy" + liên hệ BTC và nhận email (FR-21)
+**Then** Đơn → `cancelled` với `cancel_reason` = `rejected`. Mục vẫn `open` và ở lại hàng (badge vẫn đếm), chỉ còn thao tác "Đã hoàn tay", để khoản tiền khách đã trả luôn nằm trong danh sách hoàn tiền (AD-28). Người mua thấy `order-card` "Đã hủy" + liên hệ BTC và nhận email `order_rejected` (FR-21) *(4.4-a: không dùng `resolution` `rejected`)*
 
 **Given** Đơn `cancelled` mà khách đã trả tiền
 **When** tôi đánh dấu "Đã hoàn tay"
@@ -1440,10 +1453,12 @@ So that khách được phát Vé hoặc được biết sẽ được hoàn ti�
 **When** xử lý
 **Then** chỉ có thao tác "Đã hoàn tay" (`refunded`) hoặc "Bỏ qua" (`dismissed`, bắt buộc ghi lý do); không phát Vé (AD-7)
 **And** "Đã hoàn tay" trên mục `duplicate_payment` chỉ đóng mục đó; Đơn gốc giữ nguyên trạng thái (Đơn `paid` vẫn `paid`, Vé vẫn hợp lệ, doanh thu không đổi)
+**And** mục `amount_mismatch` hoặc `orphan` còn `open` khi Đơn đã `paid` (nhờ Ghép một khoản khác) cũng chỉ có "Đã hoàn tay" hoặc "Bỏ qua", và chỉ đóng mục *(4.4-b)*
 
 **Given** mọi thao tác ở story này
 **When** thực hiện
 **Then** audit ghi ai làm, lúc nào, quyết định gì; hàng rời hàng đợi và badge giảm realtime (NFR-11)
+**And** mọi `POST` bắt buộc header `Idempotency-Key` UUID (thiếu hoặc sai → `400`) nhưng không lưu khóa. Chống trùng dựa vào trạng thái mục: gửi lại đúng thao tác cho mục đã ở kết quả đó thì trả `200` kèm trạng thái hiện tại; thao tác không còn hợp lệ thì trả `409 REVIEW_ACTION_NOT_ALLOWED` (AD-31) *(4.4-a)*
 
 ### Story 4.5: Token và cảnh báo Token
 
@@ -1472,6 +1487,8 @@ So that tôi nạp thêm trước khi Sự kiện bị Tạm ngừng bán.
 
 ### Story 4.6: Giám sát và lưới an toàn vận hành
 
+*(Story con: 4.6-a nền quan sát, 4.6-b kênh cảnh báo vận hành, 4.6-c lưới an toàn định kỳ, 4.6-d dead-letter ở `/admin`, 4.6-e luật cảnh báo nghiệp vụ.)*
+
 As a đội vận hành Tickee,
 I want được cảnh báo khi luồng tiền hoặc hàng đợi có dấu hiệu bất thường,
 So that chúng tôi xử lý trước khi khách bị ảnh hưởng.
@@ -1485,6 +1502,8 @@ So that chúng tôi xử lý trước khi khách bị ảnh hưởng.
 **Given** các điều kiện: IPN lỗi chữ ký hoặc xử lý lỗi tăng, tỉ lệ phát Vé giảm bất thường, hàng đợi pg-boss ùn hoặc có dead-letter, Đơn `pending` quá hạn chưa xác nhận, p95 tạo link > 2 giây
 **When** một điều kiện xảy ra
 **Then** cảnh báo được gửi tới đội vận hành (NFR-10)
+**And** cảnh báo gửi email tới `OPS_ALERT_EMAILS`, bắt buộc ở production (E4-3). Mỗi loại chống lặp theo cooldown
+**And** "IPN lỗi tăng" là ngưỡng tuyệt đối: trong 5 phút có từ `OPS_ALERT_IPN_FAILURES` (mặc định 5) IPN kết thúc bằng 401, 400 vì chữ ký đúng mà body hỏng, hoặc 5xx; không đếm `ipnKey` lạ (404). p95 tạo link chỉ xét khi có từ 20 lần gọi trong 5 phút. "Tỉ lệ phát Vé giảm" so với cùng cửa sổ 7 ngày trước. Hai luật đầu đếm riêng ở từng instance api, không cộng giữa các instance *(4.6-e)*
 
 **Given** job đối chiếu tồn kho định kỳ
 **When** chạy
@@ -1510,16 +1529,21 @@ So that khi lên staging và production ở Story 9.1 chỉ còn việc hạ t�
 
 **Given** vai `api`, `worker` hoặc `migrate` khởi động
 **When** đọc env
-**Then** mọi biến kiểm bằng schema Zod của `config`; thiếu `NODE_ENV`, sai định dạng, ở production mà dùng giá trị mẫu của `.env.example` hoặc origin không phải `https`, hoặc `TICKET_QR_KEYS` dùng chung khóa với `TINGEE_CREDENTIAL_KEYS` thì tiến trình dừng và nêu tên biến, không nêu giá trị; `local` không nhận IPN thật (AD-36) *(4.7-b)*
+**Then** mọi biến kiểm bằng schema Zod của `config`; thiếu `NODE_ENV`, sai định dạng, ở production mà dùng giá trị mẫu của `.env.example` hoặc origin không phải `https`, hoặc `TICKET_QR_KEYS` dùng chung khóa với `TINGEE_CREDENTIAL_KEYS` thì tiến trình dừng và nêu tên biến, không nêu giá trị *(4.7-b)*
+**And** ở production, thiếu `OPS_ALERT_EMAILS` hoặc bật `TINGEE_ORDER_STATUS_QUERY` thì tiến trình dừng. `local` không nhận IPN thật: với `NODE_ENV=development`, api và worker từ chối `TINGEE_BASE_URL` có host không phải local, trừ khi đặt `TINGEE_ALLOW_REAL_IN_DEVELOPMENT=true` (AD-36) *(E4-3 phần A; 4.7-b chưa làm phần này)*
 
 **Given** `/v1/admin/*` trên staging và production
 **When** api khởi động và nhận request
 **Then** chỉ nhận request từ dải IP trong env `ADMIN_ALLOWED_CIDRS`, kiểm bằng schema Zod khi khởi động; thiếu hoặc sai định dạng ở production thì api không khởi động (FR-4, AD-26)
-**And** IP client lấy qua trusted proxy (`TRUST_PROXY_HOPS` đúng số proxy thật trước api); có test *(chuyển từ Story 2.5, E2-4; 4.7-a)*
+**And** IP client lấy qua trusted proxy theo `TRUST_PROXY_HOPS`; có test *(chuyển từ Story 2.5, E2-4; 4.7-a)*. Đặt đúng số proxy thật và kiểm sau deploy thuộc Story 9.1
 
 **Given** một PR
 **When** CI chạy
 **Then** CI gồm Playwright full-stack với api thật, worker, Tingee fake, Mailpit và bộ test cách ly; image chạy được vai `migrate`, và vai `worker` ở production từ chối cấu hình sai; hai tiến trình `migrate` chạy cùng lúc thì lượt sau chờ khóa, không chạy song song (AD-36) *(4.7-c, 4.7-e)*
+
+**Given** Owner hoặc Admin xin URL upload ảnh Sự kiện
+**When** vượt 50 lần mỗi BTC, hoặc 100 lần mỗi tài khoản (gộp mọi BTC), trong 24 giờ trượt
+**Then** trả `429 EVENT_IMAGE_RATE_LIMITED` kèm `retryAfterSeconds`; chỉ lần cấp thành công được đếm; mỗi lần cấp log `userId`, `organizationId`, `key`, không log IP hay URL ký *(4.7-d)*
 
 **Given** instance `api` hoặc `worker` nhận `SIGTERM`
 **When** tắt
@@ -1527,9 +1551,9 @@ So that khi lên staging và production ở Story 9.1 chỉ còn việc hạ t�
 
 **Given** web build hoặc chạy ở production
 **When** thiếu `WEB_ORIGIN`, `WEB_ORIGIN` hoặc `NEXT_PUBLIC_API_BASE_URL` không phải `https`, hoặc `REVALIDATE_SECRET` là giá trị mẫu hay quá ngắn
-**Then** build hoặc khởi động dừng và nêu tên biến; route revalidate không nhận giá trị mẫu; font OG có trong image *(4.7-f)*
+**Then** build hoặc khởi động dừng và nêu tên biến; route revalidate không nhận giá trị mẫu *(4.7-f; kiểm font OG trong image chuyển sang Story 9.1)*
 **And** api và worker cảnh báo khi `NODE_ENV` khác `production` mà `API_PUBLIC_URL` hoặc `WEB_ORIGIN` là `https` trên host không phải local *(4.7-f)*
-**And** lúc khởi động, mọi `qr_key_version` còn dùng ở bảng `tickets` phải có trong `TICKET_QR_KEYS`; thiếu thì báo kèm marker `ticket_qr_key_missing`, dừng hay chỉ cảnh báo chốt ở spec 4.7-g (AD-29) *(4.7-g)*
+**And** lúc khởi động, mọi `qr_key_version` của Vé `valid` thuộc Sự kiện còn mở (chưa kết thúc, chưa hủy) phải có trong `TICKET_QR_KEYS`. Thiếu thì log `error` kèm marker `ticket_qr_key_missing` và báo kênh cảnh báo vận hành; instance vẫn khởi động, chỉ cảnh báo (Mason chốt 20/11/2026) (AD-29) *(4.7-g)*
 
 ### Story 4.8: Ảnh Sự kiện trên object storage
 
@@ -2200,6 +2224,21 @@ So that Checkout, IPN và check-in luôn chạy, và một sự cố DB không l
 **Given** staging và production
 **When** gửi email OTP, email Vé và cảnh báo vận hành
 **Then** email đi qua nhà cung cấp SMTP đã chốt, qua `EmailTransport`; domain gửi có SPF, DKIM và DMARC; email OTP và email Vé thử gửi tới Gmail và Outlook không rơi vào spam (AD-22) *(mới, 19/11/2026)*
+
+**Given** staging và production sau load balancer
+**When** cấu hình api
+**Then** `TRUST_PROXY_HOPS` bằng đúng số proxy thật trước api. Sau lần deploy đầu và mỗi lần đổi topology, kiểm IP client mà api thấy (log đã che, hoặc endpoint chẩn đoán chỉ cho Quản trị Tingee) trước khi mở traffic (FR-4, AD-26) *(E4-7, retro Epic 4 E2)*
+**And** edge bỏ header `traceparent`/`tracestate` do client gửi trước khi tới api; chọn backend giám sát và nối endpoint OpenTelemetry. `OTEL_EXPORTER_OTLP_ENDPOINT` ra ngoài mạng nội bộ phải là `https` khi có `OTEL_EXPORTER_OTLP_HEADERS` (NFR-10) *(retro Epic 4 D6)*
+**And** `SHOW TimeZone` của Postgres là `UTC` hoặc múi giờ không có DST (luật `ticket_issuance_drop` của 4.6-e lùi cửa sổ 7 ngày bằng `make_interval(days => …)`)
+
+**Given** image `web`
+**When** pipeline build và deploy
+**Then** web có image gắn tag theo commit SHA, deploy cùng trình tự với `api`/`worker` (api trước web khi contract thêm trường bắt buộc). Image có font OG `apps/web/assets/fonts/*.ttf`. Nếu dùng `output: 'standalone'` thì chạy test tiến trình `apps/web/test/start.process.test.ts` trên image, để chắc server vẫn gọi `register()` của `instrumentation.ts` *(retro Epic 4 E3)*
+
+**Given** bucket ảnh Sự kiện trên nhà cung cấp đã chốt (staging, production)
+**When** dựng bucket
+**Then** bucket bật CORS `GET` cho origin web. Trước khi mở upload ảnh, lặp lại 8 bước kiểm tay presign của spec 4.8-a trên nhà cung cấp thật: PUT dư 1 byte hoặc khác `content-type` đã ký bị từ chối, liệt kê bucket ẩn danh bị từ chối, CORS đúng origin (AD-22) *(retro Epic 4 E3)*
+**And** khi đặt CDN trước web, revalidate Sự kiện purge cả `/e/{slug}` lẫn đường dẫn ảnh OG của Sự kiện
 
 **Given** Postgres production có PITR và failover tự động
 **When** cấu hình sao lưu
