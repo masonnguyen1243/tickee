@@ -3,9 +3,107 @@
 
 [workflow]
 
+# Retro Epic 4 (G1, G9; E4-8): mục hoãn ghi "Story X" bị rơi khi story X tách nhỏ hoặc đóng, vì không bước nào quét lại
+# `deferred-work.md`. Các luật dưới áp ở step-02 (nạp mục hoãn khi lập kế hoạch) và step-04/oneshot/step-01/step-02
+# (mục defer mới phải có đích), nên nằm ở `persistent_facts` chứ không ở bước kích hoạt. Luật mã và luật đóng mục dùng
+# chung cho step-02 và `on_complete`. Bước kết sổ nằm trong `on_complete`, chạy trước mục sprint-status.
+persistent_facts = [
+'''
+Mục defer mới trong `{project-root}/_bmad-output/implementation-artifacts/deferred-work.md` phải có đích (Retro Epic 4 G1,
+E4-8). Mọi mục defer mới (triage ở step-04, phần Classify của oneshot, tách phạm vi ở step-01 hoặc step-02) có thêm trường
+thứ tư `story:` ngay sau `evidence:`, theo mẫu:
+`- source_spec: ...` / `  summary: ...` / `  evidence: ...` / `  story: <đích>`.
+Đích là số story (vd. `6.1`, `4.2-b`), mã action item còn mở trong `sprint-status.yaml` (vd. `E4-11`; action item không có
+mã `EN-K` thì ghi `action item "<tên>"`, vd. `action item "Chốt với Tingee"`), hoặc `chấp nhận: <lý do>` (chỉ khi người
+dùng duyệt). Không dùng story hay action item đã `done`.
+- Lời bác ở triage kiểu "để story X xét" (hay "story X quyết", "làm ở story X") cũng phải thành một mục như vậy, với
+  `story: X`, không chỉ nằm trong Review Triage Log.
+- Đích rõ (spec, `epics.md`, `sprint-status.yaml` hoặc mục cũ cùng chủ đề nêu story/action item nhận) thì ghi ngay.
+- Không đích nào hợp: không ghi `story:` tự đoán. Vẫn ghi mục ở bước triage nhưng chưa có dòng `story:`; hỏi người dùng ở
+  bước trình bày (step-05, hoặc phần Present của oneshot), gộp vào câu hỏi của mục "Mục hoãn trong `deferred-work.md`"
+  ở On Complete, rồi mới thêm dòng `story:`. Tách phạm vi ở step-01/step-02 thì hỏi luôn trong lượt hỏi Split.
+''',
+'''
+Nạp mục hoãn khi lập kế hoạch (Retro Epic 4 G1, E4-8). Ở step-02, khi điều tra và trước khi viết spec: việc là một story
+(kể cả spec con) hoặc một action item (có hay không có mã `EN-K`) thì xác định `<mã>`, grep
+`{project-root}/_bmad-output/implementation-artifacts/deferred-work.md` và chọn mục giao cho `<mã>` còn mở, đúng theo
+luật "Mã và luật đóng mục hoãn".
+- Đọc thêm phần mở đầu của story trong `epics.md` và các phần bàn giao của `deferred-work.md` (vd. "Bàn giao sau khi
+  tách Story 4.7": mục ghi "Story 4.7" → 9.1, "5.8" → 9.2). Mục ghi nhãn cũ mà story này nhận cũng phải grep theo nhãn đó.
+- Mỗi mục (hoặc phần mục) còn mở giao cho `<mã>` phải có mặt trong spec, nêu được mục (heading và cụm đầu summary):
+  hoặc là việc làm (Tasks & Acceptance), hoặc là việc để lại kèm đích (Boundaries & Constraints › Never, ghi
+  story/action item nhận hoặc `chấp nhận`). Route oneshot (spec không có hai phần này) thì liệt kê trong `## Intent`.
+- Mục để lại mà chưa rõ đích thì thành một mục Open Questions, không tự đoán đích.
+''',
+'''
+Mã và luật đóng mục hoãn trong `{project-root}/_bmad-output/implementation-artifacts/deferred-work.md` (Retro Epic 4 G1,
+E4-8). Dùng chung cho luật nạp mục hoãn ở step-02 và mục "Mục hoãn trong `deferred-work.md`" ở On Complete.
+- `<mã>` của việc: story là `N.M`; spec con là mã đầy đủ `N.M-x` (vd. `4.2-a`), dùng cho nhãn và cho việc chọn mục;
+  action item có mã là `EN-K` (vd. `E4-1`); action item không có mã `EN-K` (vd. "Chốt với Tingee", "Hỏi Tingee", "Chốt
+  nhà cung cấp hạ tầng") là `action item "<tên>"`, đúng như `deferred-work.md` ghi.
+- Grep, không bao giờ khớp số kề: story và spec con grep theo `N.M` bằng `grep -nE '(^|[^0-9.])N\.M([^0-9]|$)'` (tìm
+  `5.3` không khớp `5.30`, `15.3`); action item có mã dùng `grep -nE 'EN-K([^0-9]|$)'` (tìm `E4-1` không khớp `E4-10`);
+  action item không mã dùng `grep -nF 'action item "<tên>"'`. Mỗi dòng khớp, đọc cả mục chứa nó: từ dòng
+  `- source_spec:` (hoặc gạch đầu dòng) tới hết các dòng theo sau. Tìm thêm trong cả file các dòng ở chỗ khác nêu tên
+  mục đó (vd. "Đã xử lý (…): mục Story 4.1 (B4) ở … phía trên").
+- Mục giao cho `<mã>`: có dòng chứa "Story nhận (…): <mã>" (kể cả khi chuỗi này đứng sau một từ đóng trên cùng dòng,
+  vd. "Chấp nhận (…): …. Story nhận (…): 9.1 …"), dòng `story: <mã>`, hoặc nội dung nói rõ `<mã>` nhận, làm hay quyết
+  mục đó. Mục chỉ nhắc `<mã>` làm ngữ cảnh thì không giao. Phần mục mà một dòng "Story nhận" đã nêu đích khác thuộc đích
+  đó và không hỏi lại (vd. "9.1 và action item E4-10" khi đang làm 9.1: phần của E4-10). Spec con: mục giao cho spec con
+  khác (vd. "Story nhận (…): 4.2-b" khi đang làm `4.2-a`) là đích khác.
+- Mục đã đóng với `<mã>` chỉ khi: một dòng "Đã xử lý" phủ hết mục (dòng "Đã xử lý … phần …" chỉ đóng phần đó); hoặc một
+  dòng "Trùng" hay "Chấp nhận" phủ hết mục; hoặc "Đã có AC <X>" với X khác `<mã>`; hoặc một dòng ở chỗ khác trong file
+  đóng mục bằng cách nêu tên nó. Dòng chứa "Story nhận (…): <mã>" giữ mục mở cho `<mã>`, kể cả khi dòng đó mở đầu bằng
+  "Chấp nhận", "Trùng" hay "Đã có AC …". Phần chưa đóng của mục vẫn mở.
+''',
+]
+
 # Retro Epic 3 (F1, E3-9): Build chỉ đặt story `review`, nên sprint-status lệch sau mỗi story và phải sửa tay trên
 # `main`. Override này đặt `done` ngay trong nhánh của story, bằng một commit riêng sau commit của Build.
 on_complete = '''
+### Mục hoãn trong `deferred-work.md`
+
+Retro Epic 4 (G1, G9; E4-8): mục hoãn ghi "Story X" bị rơi khi story X đóng mà không bước nào quét lại. Chạy mục này
+ngay, trước mục "Sprint-status `done` trong nhánh của story" và trước khi dừng chờ người dùng.
+
+File: `{project-root}/_bmad-output/implementation-artifacts/deferred-work.md`. Không có file này thì bỏ qua mục này.
+`<ngày>` là ngày hệ thống dạng `dd/mm/yyyy`. `<mã>`, cách grep, mục giao cho `<mã>` và mục đã đóng theo đúng luật
+"Mã và luật đóng mục hoãn" trong persistent facts.
+
+1. Kiểm nhánh như bước 1 của mục sprint-status. Nhánh là `main` (hoặc rỗng, tức detached HEAD) thì không sửa file này,
+   không commit, báo người dùng, rồi bỏ qua mục này. Không bao giờ commit lên `main`.
+2. Xác định `<mã>`, theo thứ tự:
+   - `{story_key}` có giá trị: `N.M` lấy từ hai đoạn đầu của key (vd. `5-3-…` → `5.3`). Tên file spec là spec con
+     (vd. `spec-4-2-a-….md`) thì `<mã>` là mã đầy đủ (`4.2-a`).
+   - `{story_key}` rỗng mà tên file spec là `spec-N-M-…` hoặc `spec-N-M-x-…`: lấy `N.M` (và hậu tố `-x`) từ tên file.
+   - Còn lại: action item mà spec xử lý, khớp như bước 3 của mục sprint-status. Mục có mã thì `<mã>` là `EN-K` (vd. spec
+     `spec-epic-4-e4-1-….md` → `E4-1`); mục không có mã `EN-K` thì `<mã>` là `action item "<tên>"`, với tên là cụm đầu
+     của `action` (trước dấu `:`) đúng như `deferred-work.md` ghi (vd. `action item "Chốt với Tingee"`).
+   - Không xác định được `<mã>` thì bỏ qua bước 3 và 4.
+3. Grep theo `<mã>` và chọn các mục (hoặc phần mục) giao cho `<mã>` còn mở, theo luật chung. Phần đã có đích khác trên
+   một dòng "Story nhận" không thuộc `<mã>` và không hỏi lại.
+4. Mỗi mục còn giữ lại:
+   - Spec này đã làm (đối chiếu Tasks của spec và diff của story): thêm một dòng theo mẫu
+     `- Đã xử lý (<ngày>, <mã>): mục ngay trên đã làm ở <spec>. Bằng chứng: <file:dòng>.`, với spec (đường dẫn từ gốc
+     repo) và bằng chứng đặt trong backtick. Chỉ làm một phần thì ghi "phần <…> của mục ngay trên đã làm …", phần còn
+     lại xử lý như mục chưa làm.
+   - Spec này không làm: đưa vào câu hỏi ở bước 5. Spec con (vd. xong `4.2-a`, mục để cho `4.2-b`) thì đề xuất spec con
+     kế tiếp làm đích.
+5. Gom mọi mục chưa làm ở bước 4, cùng mọi mục defer mới của lượt này chưa có dòng `story:` (`source_spec` là
+   `{spec_file}`, hoặc `source_spec: none` do lượt hỏi Split ở step-01/step-02 của lượt này ghi), vào đúng một câu hỏi
+   cho người dùng: mỗi mục chuyển sang story hay action item nào, hay chấp nhận không làm. Câu hỏi này không chặn mục
+   sprint-status: chạy hết mục đó trước (nó commit cả các dòng bước 4 đã ghi), rồi mới hỏi. Có trả lời thì ghi đúng một
+   dòng cho mỗi mục:
+   `- Story nhận (<ngày>, <mã>): <đích>. <lý do ngắn>.` hoặc `- Chấp nhận (<ngày>, <người dùng> duyệt ở <mã>): <lý do>.`
+   Mục defer mới thì thay vào đó thêm dòng `  story: <đích>` (hoặc `  story: chấp nhận: <lý do>`) ngay sau `evidence:`.
+   Rồi commit riêng `deferred-work.md` trên nhánh hiện tại:
+   `git commit --only {project-root}/_bmad-output/implementation-artifacts/deferred-work.md -m "chore: deferred-work <story_key hoặc id action item> kết sổ mục hoãn"`.
+   Không push; báo người dùng một dòng kèm hash commit. Chưa có trả lời thì chưa ghi các dòng đó.
+6. Dòng mới đặt ngay dưới mục, sau các dòng theo sau đã có, thụt như các dòng "Đã xử lý" hiện có. Không sửa hay xóa nội
+   dung cũ. Không có mục nào giữ lại và không có mục defer mới thiếu `story:`: không đổi file.
+7. Các dòng của bước 4 không commit ở mục này: mục sprint-status bên dưới commit chúng cùng `sprint-status.yaml` (bước 6
+   ở đó). Các dòng ghi sau câu trả lời ở bước 5 commit riêng như bước 5.
+
 ### Sprint-status `done` trong nhánh của story
 
 Chạy mục này ngay, trước khi dừng chờ người dùng (kể cả khi bước trên vừa nói "Stop and wait for the user").
@@ -28,9 +126,14 @@ File: `{project-root}/_bmad-output/implementation-artifacts/sprint-status.yaml`.
      `note` nêu phần đã xong qua spec này.
    Không khớp mục nào, hoặc khớp nhiều hơn một: không sửa `action_items`, báo người dùng.
 4. Không có gì để đổi (đã `done` và `note` đã trỏ spec) thì dừng, không commit.
+   Riêng khi mục "Mục hoãn trong `deferred-work.md`" đã đổi file đó: không dừng, bỏ qua bước 5 và làm bước 6 chỉ với
+   `deferred-work.md`.
 5. Cập nhật `last_updated` theo đúng định dạng đang dùng trong file (`MM-DD-YYYY HH:MM`). Giữ nguyên comment, thứ tự và
    cấu trúc YAML.
 6. Commit riêng trên nhánh hiện tại, chỉ file này (file khác đã stage không bị cuốn vào):
    `git commit --only {project-root}/_bmad-output/implementation-artifacts/sprint-status.yaml -m "chore: sprint-status <story_key hoặc id action item> done"`.
    Không push. Ngay sau khi commit, báo người dùng một dòng kèm hash commit.
+   Mục "Mục hoãn trong `deferred-work.md`" đã đổi file đó thì thêm
+   `{project-root}/_bmad-output/implementation-artifacts/deferred-work.md` vào sau `--only`, cùng commit. Commit chỉ có
+   `deferred-work.md` (bước 4) dùng message `chore: deferred-work <story_key hoặc id action item> kết sổ mục hoãn`.
 '''

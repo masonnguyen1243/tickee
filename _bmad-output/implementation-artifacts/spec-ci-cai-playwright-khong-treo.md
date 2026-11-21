@@ -2,7 +2,7 @@
 title: 'CI: bước cài Playwright không treo vì apt'
 type: 'bugfix'
 created: '2026-11-19'
-status: 'in-progress'
+status: 'done'
 route: 'oneshot'
 review_loop_iteration: 0
 context: []
