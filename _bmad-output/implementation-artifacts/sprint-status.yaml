@@ -29,7 +29,7 @@
 # - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-21-2026 08:38
+last_updated: 11-21-2026 09:37
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -521,8 +521,9 @@ action_items:
       hoặc bước đặt done kiểm base là main; cancel-in-progress của ci.yml không áp
       cho main (retro G2, E6)"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+    note: "Xong qua _bmad-output/implementation-artifacts/spec-epic-4-e4-9-quy-trinh-pr-ci.md"
   - id: "epic-4-retro-e4-10-no-ky-thuat"
     epic: 4
     action: "E4-10 (test cùng E4-3; tách file trước story đầu tiên chạm lại): test
