@@ -8,9 +8,13 @@ on:
 permissions:
   contents: read
 
+# Trên PR: push mới hủy run cũ của cùng PR. Trên `main`: mỗi commit một group riêng, không run nào bị hủy (retro Epic 4
+# E6: hai PR merge cách nhau dưới khoảng 30 phút thì run của commit `main` đầu bị hủy, lỗi do merge lệch base không bao
+# giờ ra kết quả đỏ). Không chỉ đặt `cancel-in-progress: false` với group chung: GitHub giữ tối đa một run chờ cho mỗi
+# group, nên tới merge thứ ba thì run đang chờ bị run mới thay. Đổi lại, các run trên `main` có thể chạy song song.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   ci:

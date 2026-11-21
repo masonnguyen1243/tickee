@@ -1,0 +1,32 @@
+name: PR base
+
+# Retro Epic 4 G2: PR #92 nhắm nhánh của #91 (đã merge vào `main` trước đó), PR #93 nhắm nhánh của #92. Cả hai báo
+# MERGED nhưng code không lên `main`, vì repo tắt `delete_branch_on_merge` nên GitHub không tự đổi base của PR con.
+# Check `base-main` đỏ khi base của PR khác `main`, để dấu X hiện ngay cạnh nút Merge. Không chặn tạo stacked PR.
+# `base-main` không phải required check nên không chặn nút Merge. Muốn chặn thì phải thêm ruleset bắt buộc check này
+# cho mọi nhánh, nhưng E4-9 chọn không đổi cài đặt repo.
+# `edited` để chạy lại khi đổi base (sửa tiêu đề hay mô tả cũng chạy lại, chỉ vài giây). `ci.yml` không có `edited`.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+
+permissions: {}
+
+jobs:
+  base-main:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    concurrency:
+      group: pr-base-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Base của PR phải là main
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ "$BASE_REF" != "main" ]; then
+            echo "::error::Base của PR này là '${BASE_REF}', không phải 'main': merge PR này thì code không lên 'main'. Merge PR cha trước, rồi đổi base của PR này sang 'main' (nút Edit cạnh tiêu đề PR). Đổi base không làm 'ci' chạy lại, nên sau đó phải đóng rồi mở lại PR (hoặc push một commit) để 'ci' chạy lại trên 'main', chờ 'ci' xanh rồi mới merge."
+            exit 1
+          fi
+          echo "Base của PR là main."
