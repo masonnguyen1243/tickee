@@ -20,6 +20,7 @@ import { PublicEventLink } from '../public-event-link';
 import { PurchaseFormEditor } from '../purchase-form-editor';
 import { TicketTypesEditor } from '../ticket-types-editor';
 
+import { CheckinTab } from './checkin-tab';
 import { EventOverviewLive } from './event-overview';
 import { EventSettings } from './event-settings';
 import { DEFAULT_EVENT_TAB, EVENT_TABS, isEventTab, type EventTab } from './event-tab-list';
@@ -129,6 +130,8 @@ export function EventTabs({ eventId, initialTab }: { eventId: string; initialTab
                   <TicketTypesEditor orgId={organization.id} event={event} />
                 ) : t.key === 'form-mua' ? (
                   <PurchaseFormEditor orgId={organization.id} eventId={event.id} />
+                ) : t.key === 'check-in' ? (
+                  <CheckinTab orgId={organization.id} event={event} />
                 ) : t.key === 'cai-dat' ? (
                   <EventSettings orgId={organization.id} event={event} />
                 ) : (

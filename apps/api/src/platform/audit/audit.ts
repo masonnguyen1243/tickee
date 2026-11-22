@@ -170,7 +170,17 @@ export type AuditAction =
    * Chủ Vé bấm "Tạo lại link" chia sẻ Vé (Story 3.8, AD-29; actor: chủ Vé; đối tượng: Vé): link cũ chết ngay, Mã QR vé
    * không đổi. Không ghi token hay hash.
    */
-  | 'ticket.share_link_regenerated';
+  | 'ticket.share_link_regenerated'
+  /**
+   * Owner/Admin "Tạo link mới" mời CTV của Sự kiện (Story 5.1, AD-30; đối tượng: `{ type: 'checker_invite', id }`).
+   * Không ghi token hay hash.
+   */
+  | 'checker_invite.created'
+  /**
+   * Link mời CTV bị thu hồi vì Owner/Admin tạo link mới cho cùng Sự kiện (Story 5.1; cùng transaction với
+   * `checker_invite.created`; đối tượng: link cũ). CTV đã nhận lời mời vẫn giữ quyền.
+   */
+  | 'checker_invite.revoked';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

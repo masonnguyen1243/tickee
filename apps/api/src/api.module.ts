@@ -2,6 +2,7 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { FlowsModule } from './flows/index.js';
 import { AdminModule } from './modules/admin/index.js';
+import { CheckinModule } from './modules/checkin/index.js';
 import { EventModule } from './modules/event/index.js';
 import { IdentityModule } from './modules/identity/index.js';
 import { OrderingModule } from './modules/ordering/index.js';
@@ -72,6 +73,8 @@ export class ApiModule {
         TicketingModule.forRoot(config),
         // Link chia sẻ Vé (Story 3.8): `GET /v1/shared-tickets/:token` (công khai), tạo lại link của chủ Vé.
         TicketingRoutesModule,
+        // Link mời CTV của Sự kiện (Story 5.1): route BTC dùng `PermissionGuard` toàn cục của OrganizerModule.
+        CheckinModule,
         // Trạng thái bán công khai (Story 2.11-a): `GET /v1/events/:slug/availability`; phễu mua (Story 3.1); Checkout
         // và tạo Đơn, giữ chỗ (Story 3.2); Đơn 0đ nhận Vé ngay (Story 3.3).
         OrderingModule.forRoot(config),

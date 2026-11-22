@@ -1,0 +1,35 @@
+import { sql } from 'drizzle-orm';
+import { check, index, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { createdAt, id, timestamptz } from '../../platform/db/index.js';
+import { events } from '../event/schema.js';
+
+/**
+ * Link mời CTV chung của một Sự kiện (Story 5.1, AD-30). Token 128 bit chỉ nằm trong response lúc tạo; DB lưu
+ * `token_hash` (SHA-256 hex, unique). `expires_at` = min(lúc tạo + 7 ngày, `effective_end_at` lúc tạo); đọc ra thì lấy
+ * min với `effective_end_at` hiện tại (Kết thúc sớm sau khi tạo). Mỗi Sự kiện tối đa một link chưa thu hồi (unique index
+ * một phần): "Tạo link mới" đặt `revoked_at` cho link cũ rồi INSERT, cùng transaction và sau khi khóa dòng `events`.
+ * Chỉ `revoked_at` được UPDATE (`UPDATE_PROTECTED_COLUMNS`).
+ *
+ * `organization_id` không có FK: `checkin` không phụ thuộc `organizer` (module-graph, AD-10). FK tới `events`
+ * (`checkin → event`).
+ */
+export const checkerInvites = pgTable(
+  'checker_invites',
+  {
+    id: id(),
+    organizationId: uuid('organization_id').notNull(),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => events.id),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: timestamptz('expires_at').notNull(),
+    revokedAt: timestamptz('revoked_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('checker_invites_token_hash_key').on(t.tokenHash),
+    uniqueIndex('checker_invites_one_active_per_event_key').on(t.eventId).where(sql`${t.revokedAt} IS NULL`),
+    index('checker_invites_event_id_idx').on(t.eventId),
+    check('checker_invites_token_hash_check', sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`),
+  ],
+);

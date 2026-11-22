@@ -6,9 +6,9 @@ import { useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/button';
 import { copyWithToast } from '@/lib/clipboard';
 
-/** `window.location.origin` sau khi hydrate (server render ra chuỗi rỗng). */
+/** `window.location.origin` sau khi hydrate (server render ra chuỗi rỗng). Dùng chung với link mời CTV (Story 5.1). */
 const subscribeNoop = () => () => {};
-function useOrigin(): string {
+export function useOrigin(): string {
   return useSyncExternalStore(
     subscribeNoop,
     () => window.location.origin,
