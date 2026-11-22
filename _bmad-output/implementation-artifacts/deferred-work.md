@@ -84,6 +84,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
   summary: `PermissionGuard` và cổng `AccessResolver` đang gắn với `:orgId`. Epic 5 (`/v1/checkin/events/:eventId`) cần mở rộng cổng, ví dụ resolver theo phạm vi route. Kiểm `@Public()` + `@RequirePermission` nên chuyển lên lúc khởi động hoặc vào bộ test route.
   evidence: Review B3/B4/V3. Hiện lỗi cấu hình chỉ lộ khi có request.
 - Story nhận (21/11/2026, E4-8): 5.1. `/v1/checkin/events/:eventId` là route đầu tiên cần cổng quyền theo Sự kiện.
+- Story nhận (22/11/2026, 5.1): 5.2. Mason chốt ở 5.1: route của 5.1 vẫn dưới `/v1/orgs/:orgId`; 5.2 là story đầu tiên có route `/v1/checkin/events/:eventId` và cài `AccessResolver` cho CTV, nhận cả phần kiểm `@Public()` + `@RequirePermission` lúc khởi động.
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-1-b-khung-dashboard-responsive.md`
   summary: Đổi BTC trong switcher làm khung dashboard unmount: sidebar/tab bar biến mất trong lúc tải, focus rơi về `<body>`, tab bar mobile nháy. Cân nhắc prefetch BTC đích khi mở menu, hoặc giữ khung với skeleton.
