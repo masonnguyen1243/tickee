@@ -4,7 +4,7 @@ export const EVENT_TABS = [
   { key: 'don', label: 'Đơn', soon: 'Đơn của Người mua sẽ hiện ở đây.' },
   { key: 'hang-ve', label: 'Hạng vé' },
   { key: 'form-mua', label: 'Form mua' },
-  { key: 'check-in', label: 'Check-in', soon: 'Theo dõi check-in của Sự kiện.' },
+  { key: 'check-in', label: 'Check-in' },
   { key: 'cai-dat', label: 'Cài đặt' },
 ] as const;
 export type EventTab = (typeof EVENT_TABS)[number]['key'];

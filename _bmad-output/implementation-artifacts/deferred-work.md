@@ -84,6 +84,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
   summary: `PermissionGuard` và cổng `AccessResolver` đang gắn với `:orgId`. Epic 5 (`/v1/checkin/events/:eventId`) cần mở rộng cổng, ví dụ resolver theo phạm vi route. Kiểm `@Public()` + `@RequirePermission` nên chuyển lên lúc khởi động hoặc vào bộ test route.
   evidence: Review B3/B4/V3. Hiện lỗi cấu hình chỉ lộ khi có request.
 - Story nhận (21/11/2026, E4-8): 5.1. `/v1/checkin/events/:eventId` là route đầu tiên cần cổng quyền theo Sự kiện.
+- Story nhận (22/11/2026, 5.1): 5.2. Mason chốt ở 5.1: route của 5.1 vẫn dưới `/v1/orgs/:orgId`; 5.2 là story đầu tiên có route `/v1/checkin/events/:eventId` và cài `AccessResolver` cho CTV, nhận cả phần kiểm `@Public()` + `@RequirePermission` lúc khởi động.
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-1-b-khung-dashboard-responsive.md`
   summary: Đổi BTC trong switcher làm khung dashboard unmount: sidebar/tab bar biến mất trong lúc tải, focus rơi về `<body>`, tab bar mobile nháy. Cân nhắc prefetch BTC đích khi mở menu, hoặc giữ khung với skeleton.
@@ -1169,3 +1170,18 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Các mục "Hoãn" của retro Epic 4 nằm ngoài action item chưa có trong file này: F2 (`new SecretBox(parseCredentialKeys(…))` lặp 6 chỗ; hai bộ giới hạn tốc độ cùng thuật toán với ba kiểu dọn; `isLocalHost`/`isLoopbackV4`/`isHttps` chép giữa `config/production-rules.ts` và `web/lib/production-env.ts` với hai định nghĩa "production"; fixture e2e không import `@tickee/contracts`), F3 (file trên 600 dòng ngoài danh sách E4-10: `review-actions.ts`, `purchase-form-editor.tsx` 903, `ticket-types-editor.tsx` 717, `payout-account.service.ts` 716), F5 (Code Map 4.7-d nói chỉ dọn dòng của tài khoản và BTC đang xin, code xóa tới 500 dòng của mọi tài khoản, `event-image-rate-limit.ts:50-59`).
   evidence: Review E4-8 (Blind Hunter, maybe-false; nếu đúng là medium). `epic-4-retro-2026-11-20.md:223-231, :250`: F2 ghi "Hoãn sang một story dọn nợ, trừ khi ghi khác", F3 ghi "Hoãn, tách trước khi mở rộng tiếp"; E4-10 chỉ nhận `payment-service.ts`, `review-queue.tsx`, `contracts/organizer.ts`, `defineCronQueue`. Grep `SecretBox`, `isLocalHost` trong file này ra 0. Chưa rõ retro cố ý chỉ đưa một phần vào E4-10 hay để rơi; Mason chốt đích.
   story: E4-10
+
+## Deferred from: code review of spec-5-1-link-moi-ctv-va-tab-check-in.md (2026-11-22)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-1-link-moi-ctv-va-tab-check-in.md`
+  summary: Sự kiện đã hủy thì tab Check-in hiện badge "Đã hết hạn" kèm "Hết hạn lúc <thời điểm còn ở tương lai>": `GET …/checker-invite` chỉ đặt `active:false`, `expiresAt` vẫn là `LEAST(expires_at, effective_end_at)`. Cần câu chữ riêng (vd. "Hết hiệu lực vì Sự kiện đã hủy") hoặc ẩn thời điểm.
+  evidence: Review 5.1 (Blind Hunter BH1, low). `apps/api/src/modules/checkin/checker-invite.service.ts` (`latest`), `apps/web/lib/checkin/invite-view.ts` (`checkerInviteView`). Hiện chưa route nào đặt `events.status='cancelled'`, nên người dùng chưa gặp; luồng hủy Sự kiện của 7.1 sẽ làm nó xảy ra (7.1 cũng chặn sửa link mời CTV sau khi hủy).
+  story: 7.1
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-1-link-moi-ctv-va-tab-check-in.md`
+  summary: Luật "link mời CTV còn hiệu lực" (chưa thu hồi, `now()` trước `LEAST(expires_at, effective_end_at)`, Sự kiện chưa hủy và chưa bấm "Kết thúc") đang nằm một phần trong SQL, một phần trong JS của `CheckerInviteService.latest`. `flows.acceptCheckerInvite` của 5.2 phải dùng đúng luật này: tách một hàm dùng chung để badge ở tab Check-in và việc nhận lời mời không lệch nhau.
+  evidence: Review 5.1 (Blind Hunter BH13, low). Hiện chỉ một nơi dùng nên chưa tách; 5.2 là nơi thứ hai.
+  story: 5.2
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-1-link-moi-ctv-va-tab-check-in.md`
+  summary: E2E `apps/web/e2e/event-image.spec.ts:346` › "presign bị giới hạn (429 EVENT_IMAGE_RATE_LIMITED)…" chập chờn: dòng 376 đọc `puts` ngay sau khi preview đổi `src` sang `blob:`, lúc PUT có thể chưa được mock ghi nhận. Sửa: `await expect.poll(() => puts.map((p) => p.key)).toEqual([...])` như dòng 224.
+  evidence: Kiểm chứng 5.1 (22/11/2026): cả bộ e2e 1133 pass, 1 fail ở ca này (android-chromium); chạy riêng ca này 16 lần (`--repeat-each=8`) fail 1. Story 5.1 không chạm file ảnh Sự kiện; test có từ 4.7-d (`4aec00a`).
+  story: E2-8

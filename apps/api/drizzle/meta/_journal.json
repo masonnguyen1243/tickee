@@ -232,6 +232,13 @@
       "when": 1795058239908,
       "tag": "0032_event_image_presigns",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795316605666,
+      "tag": "0033_checker_invites",
+      "breakpoints": true
     }
   ]
 }

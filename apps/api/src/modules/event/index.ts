@@ -1,4 +1,10 @@
 // Mô-đun `event`: API công khai cho mô-đun khác chỉ xuất từ file này (AD-10).
+export {
+  checkinEventOf,
+  lockEventForCheckerInvite,
+  type CheckinEventRef,
+  type LockedCheckinEventRef,
+} from './checkin-gate.js';
 export { EventModule } from './event.module.js';
 export {
   applyEventEdit,
