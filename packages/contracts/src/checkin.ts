@@ -62,6 +62,18 @@ export type CreatedCheckerInvite = z.infer<typeof CreatedCheckerInvite>;
 // Nhận lời mời CTV và Màn quét (FR-26, FR-29, AD-26, AD-30, Story 5.2)
 // ---------------------------------------------------------------------------------------------------------------
 
+/** Màn quét của một Sự kiện trên web (route group `(checkin)`): `/events/<eventId>`. */
+export const checkinScanPath = (eventId: string): string => `/events/${encodeURIComponent(eventId)}`;
+
+/** Đường API (sau `/v1`) xem trước link mời CTV: `POST`, token trong body. */
+export const CHECKER_INVITE_PREVIEW_API_PATH = '/checkin/invites/preview';
+
+/** Đường API (sau `/v1`) nhận lời mời CTV: `POST`, token trong body. */
+export const CHECKER_INVITE_ACCEPT_API_PATH = '/checkin/invites/accept';
+
+/** Đường API (sau `/v1`) của Sự kiện trên Màn quét: `GET` (`CheckinEvent`). */
+export const checkinEventApiPath = (eventId: string): string => `/checkin/events/${encodeURIComponent(eventId)}`;
+
 /*
  * Link mời còn hiệu lực khi: chưa thu hồi, đồng hồ DB còn trước min(`expires_at`, `effective_end_at`), Sự kiện chưa hủy
  * và chưa bấm "Kết thúc" (cùng luật với `CheckerInvite.active`). Mọi lỗi về link là `404 CHECKER_INVITE_INVALID`, không

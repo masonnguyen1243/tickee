@@ -1,11 +1,12 @@
 import type { Page } from '@playwright/test';
 
+import { checkinEvent, mockCheckinApi } from './checkin-mock';
 import { expect, test } from './fixtures';
 import { apiError, me, mockIdentityApi, type Call, type Handler } from './identity-mock';
 import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
 
 /*
- * Tab Check-in của Sự kiện (Story 5.1): khối "Link mời CTV". API giả có trạng thái, luật như server: `GET …/checker-invite`
+ * Tab Check-in của Sự kiện (Story 5.1): khối "Link mời CTV"; thẻ "Màn quét" với "Mở Màn quét" (Story 5.2). API giả có trạng thái, luật như server: `GET …/checker-invite`
  * trả link mới nhất (không token), `POST` thu hồi link cũ rồi tạo link mới kèm token (nháp → 409 EVENT_STATUS_CONFLICT,
  * đã hủy → 409 EVENT_CANCELLED, đã kết thúc → 409 EVENT_ALREADY_ENDED). Link đầy đủ chỉ có ngay sau khi tạo (token trong
  * bộ nhớ): chuyển tab vẫn sao chép được, tải lại thì "Sao chép link" tắt kèm lý do.
@@ -16,7 +17,9 @@ test.use({ timezoneId: 'America/New_York' });
 const CONSENTED = '2026-10-29T01:02:03.000Z';
 const ORG_NAME = 'CLB Cờ Vua Quận 3';
 const EVENT_ID = '019a3b2c-0712-7abc-8def-0123456789ab';
+const EVENT_NAME = 'Giải chạy Hà Nội 2026';
 const base = `/btc/${ORG_ID}/su-kien/${EVENT_ID}`;
+const SCAN_PATH = `/events/${EVENT_ID}`;
 const checkinTab = `${base}?tab=check-in`;
 const eventPath = `/orgs/${ORG_ID}/events/${EVENT_ID}`;
 const invitePath = `${eventPath}/checker-invite`;
@@ -52,7 +55,7 @@ const eventOf = (state: State) => ({
   id: EVENT_ID,
   organizationId: ORG_ID,
   slug: 'giai-chay-ha-noi-2026-c4d5',
-  name: 'Giải chạy Hà Nội 2026',
+  name: EVENT_NAME,
   status: state.status,
   startsAt: '2020-11-16T07:00:00+07:00',
   endsAt: '2099-11-16T17:00:00+07:00',
@@ -94,6 +97,8 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
 }
 
 const block = (page: Page) => page.locator('[data-slot="checker-invite"]');
+const scanCard = (page: Page) => page.locator('[data-slot="scan-screen-card"]');
+const scanLink = (page: Page) => scanCard(page).getByRole('link', { name: 'Mở Màn quét' });
 const copyButton = (page: Page) => block(page).getByRole('button', { name: 'Sao chép link' });
 const createButton = (page: Page) => block(page).getByRole('button', { name: 'Tạo link mới' });
 const posts = (calls: Call[]) => calls.filter((c) => c.method === 'POST' && c.path === invitePath);
@@ -283,4 +288,51 @@ test('Sự kiện vừa kết thúc ở server (409 EVENT_ALREADY_ENDED): toast,
   await expect(createButton(page)).toBeDisabled();
   await expect(block(page).getByText('Sự kiện đã kết thúc, không tạo được link mời mới.')).toBeVisible();
   await expect(block(page).locator('[data-slot="status-banner"]')).toHaveCount(0);
+});
+
+test('thẻ "Màn quét" đứng trước khối link mời; "Mở Màn quét" mở Màn quét của Sự kiện (Owner/Admin không cần lời mời)', async ({
+  page,
+}) => {
+  await openApi(page);
+  const calls = await mockCheckinApi(page, { [`GET /checkin/events/${EVENT_ID}`]: () => checkinEvent(EVENT_ID, EVENT_NAME) });
+  await page.goto(checkinTab);
+  await expect(scanCard(page).getByRole('heading', { name: 'Màn quét' })).toBeVisible();
+  const order = await page
+    .locator('[data-slot="checkin-tab"] > section')
+    .evaluateAll((sections) => sections.map((s) => s.getAttribute('data-slot')));
+  expect(order).toEqual(['scan-screen-card', 'checker-invite']);
+  await expect(scanLink(page)).toHaveAttribute('href', SCAN_PATH);
+
+  await scanLink(page).click();
+  await page.waitForURL((url) => url.pathname === SCAN_PATH);
+  await expect(page.getByRole('heading', { name: EVENT_NAME })).toBeVisible();
+  await expect(page.getByText('Màn quét đang được hoàn thiện.')).toBeVisible();
+  expect(calls.filter((c) => c.path === `/checkin/events/${EVENT_ID}`).length).toBeGreaterThan(0);
+});
+
+const ANY_STATE: [string, Partial<State>][] = [
+  ['nháp', { status: 'draft' }],
+  ['đang ẩn', { status: 'hidden' }],
+  ['đã kết thúc', { endedManuallyAt: '2026-11-20T08:30:00+07:00' }],
+  ['đã hủy', { status: 'cancelled' }],
+];
+for (const [label, initial] of ANY_STATE) {
+  test(`Sự kiện ${label}: vẫn có "Mở Màn quét" tới Màn quét của Sự kiện`, async ({ page }) => {
+    await openApi(page, initial);
+    await page.goto(checkinTab);
+    await expect(scanLink(page)).toHaveAttribute('href', SCAN_PATH);
+  });
+}
+
+test('320px: thẻ "Màn quét" không làm cuộn ngang, "Mở Màn quét" có vùng chạm ≥ 24px', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 667 });
+  await openApi(page);
+  await page.goto(checkinTab);
+  await expect(scanLink(page)).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+  ).toBeLessThanOrEqual(0);
+  const box = await scanLink(page).boundingBox();
+  expect(box?.width).toBeGreaterThanOrEqual(24);
+  expect(box?.height).toBeGreaterThanOrEqual(24);
 });

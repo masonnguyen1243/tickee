@@ -1,8 +1,9 @@
 'use client';
 
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { checkerInviteUrl, ErrorCode, type EventDetail } from '@tickee/contracts';
-import { Copy } from 'lucide-react';
+import { checkerInviteUrl, checkinScanPath, ErrorCode, type EventDetail } from '@tickee/contracts';
+import { Copy, ScanLine } from 'lucide-react';
+import Link from 'next/link';
 import { useId, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 
@@ -30,8 +31,9 @@ import { isEventEnded } from '../event-status';
 import { useOrigin } from '../public-event-link';
 
 /*
- * Tab Check-in của Sự kiện (Story 5.1, FR-26, UX-DR39): khối "Link mời CTV". Một link chung cho mỗi Sự kiện: trạng thái
- * "Còn hạn"/"Đã hết hạn" kèm thời điểm hết hạn (giờ Việt Nam), "Sao chép link" (toast "Đã sao chép") và "Tạo link mới".
+ * Tab Check-in của Sự kiện (Story 5.1, FR-26, UX-DR39): thẻ "Màn quét" (Story 5.2: lối vào Màn quét của Owner/Admin, không
+ * cần lời mời, FR-29) và khối "Link mời CTV". Một link chung cho mỗi Sự kiện: trạng thái "Còn hạn"/"Đã hết hạn" kèm thời
+ * điểm hết hạn (giờ Việt Nam), "Sao chép link" (toast "Đã sao chép") và "Tạo link mới".
  *
  * Link đầy đủ chỉ có ngay sau khi tạo: token nằm trong cache TanStack Query của tab trình duyệt (không `sessionStorage`),
  * gắn với id link. Chuyển tab trong app vẫn sao chép được; tải lại hoặc đóng trang thì "Sao chép link" tắt kèm lý do.
@@ -242,10 +244,40 @@ function CheckerInviteBlock({ orgId, event }: { orgId: string; event: EventDetai
   );
 }
 
-/** Tab "Check-in": khối link mời CTV (Story 5.1). */
+/**
+ * Thẻ "Màn quét" (Story 5.2): Owner/Admin mở Màn quét của Sự kiện đang xem mà không cần lời mời. Link luôn có ở mọi trạng
+ * thái Sự kiện; Màn quét tự báo khi Sự kiện không còn quét được (Story 5.3/5.6). Nút phụ: hành động chính của tab là link
+ * mời CTV.
+ */
+function ScanScreenCard({ eventId }: { eventId: string }) {
+  const titleId = useId();
+  return (
+    <section
+      aria-labelledby={titleId}
+      data-slot="scan-screen-card"
+      className="flex min-w-0 flex-col gap-stack rounded-lg bg-card p-card-padding shadow-card"
+    >
+      <h2 id={titleId} className="text-title">
+        Màn quét
+      </h2>
+      <p className="text-meta text-muted-foreground">
+        Quét Mã QR vé của khách tại cổng. Owner và Admin mở được Màn quét mà không cần link mời.
+      </p>
+      <Button asChild variant="secondary" className="self-start">
+        <Link href={checkinScanPath(eventId)}>
+          <ScanLine aria-hidden="true" />
+          Mở Màn quét
+        </Link>
+      </Button>
+    </section>
+  );
+}
+
+/** Tab "Check-in": thẻ "Màn quét" (Story 5.2) rồi khối link mời CTV (Story 5.1). */
 export function CheckinTab({ orgId, event }: { orgId: string; event: EventDetail }) {
   return (
     <div className="flex min-w-0 flex-col gap-section" data-slot="checkin-tab">
+      <ScanScreenCard eventId={event.id} />
       <CheckerInviteBlock orgId={orgId} event={event} />
     </div>
   );
