@@ -13,8 +13,8 @@ import {
 export const TICKEE_SCOPE = 'tickee';
 
 /**
- * Mốc histogram thời gian (giây) cho lời gọi ra ngoài: dày quanh 1–3 giây để đọc được p95 so với ngưỡng cảnh báo 2 giây
- * (4.6-b) và các timeout 3, 5, 15 giây của adapter Tingee.
+ * Mốc histogram thời gian (giây): dày quanh 1–3 giây để đọc được p95 so với ngưỡng cảnh báo 2 giây (4.6-b) và các timeout
+ * 3, 5, 15 giây của adapter Tingee; dưới 1 giây đủ mốc để đọc p95 < 1 giây của quét Vé (Story 5.3, NFR-2).
  */
 const DURATION_BUCKETS = [0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10, 15];
 
@@ -37,10 +37,15 @@ function histogramOf(name: string, description: string): Histogram {
   return histogram;
 }
 
-/** Kết quả của một lời gọi đã đo: `outcome` (giá trị ít, không id) và có phải lỗi không (span `ERROR`). */
+/**
+ * Kết quả của một lời gọi đã đo: `outcome` (giá trị ít, không id) và có phải lỗi không (span `ERROR`). `attributes`:
+ * thuộc tính thêm tùy kết quả (vd. `reason` của lần quét Vé không hợp lệ), ghi cùng `outcome` lên span và histogram;
+ * chỉ giá trị ít, không id, không PII.
+ */
 export interface MeasuredOutcome {
   outcome: string;
   error: boolean;
+  attributes?: Attributes;
 }
 
 export interface MeasuredCall<T> {
@@ -61,8 +66,9 @@ export interface MeasuredCall<T> {
 }
 
 /**
- * Chạy `fn` trong một span (con của span đang chạy) rồi ghi thời gian vào histogram kèm `outcome` (và đưa cùng số đo cho
- * `onRecorded`). Telemetry tắt thì span và histogram là no-op. `fn` ném lỗi: span `ERROR`, không ghi histogram, ném lại.
+ * Chạy `fn` trong một span (con của span đang chạy) rồi ghi thời gian vào histogram kèm `outcome` và thuộc tính theo kết
+ * quả (và đưa cùng số đo cho `onRecorded`). Telemetry tắt thì span và histogram là no-op. `fn` ném lỗi: span `ERROR`,
+ * không ghi histogram, ném lại.
  */
 export function measured<T>(call: MeasuredCall<T>, fn: () => Promise<T>): Promise<T> {
   const tracer = trace.getTracer(TICKEE_SCOPE);
@@ -70,11 +76,11 @@ export function measured<T>(call: MeasuredCall<T>, fn: () => Promise<T>): Promis
     const startedAt = performance.now();
     try {
       const result = await fn();
-      const { outcome, error } = call.outcome(result);
-      span.setAttribute('outcome', outcome);
+      const { outcome, error, attributes } = call.outcome(result);
+      span.setAttributes({ ...attributes, outcome });
       if (error) span.setStatus({ code: SpanStatusCode.ERROR });
       const seconds = (performance.now() - startedAt) / 1000;
-      histogramOf(call.metric, call.description).record(seconds, { ...call.attributes, outcome });
+      histogramOf(call.metric, call.description).record(seconds, { ...call.attributes, ...attributes, outcome });
       if (call.onRecorded) {
         try {
           call.onRecorded(seconds, outcome);

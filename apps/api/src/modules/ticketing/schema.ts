@@ -8,6 +8,13 @@ export const TICKET_STATUSES = ['valid', 'cancelled'] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
 
 /**
+ * Lý do hủy Vé (`cancel_reason`, chỉ khi `status = 'cancelled'`): Sự kiện bị hủy (Story 7.1) hoặc Vé bị vô hiệu (Story
+ * 7.5; quét ra `VOIDED`). Cột là text, DB không CHECK giá trị: nơi ghi và nơi đọc đều dùng hằng này.
+ */
+export const TICKET_CANCEL_REASON = { EVENT_CANCELLED: 'event_cancelled', VOIDED: 'voided' } as const;
+export type TicketCancelReason = (typeof TICKET_CANCEL_REASON)[keyof typeof TICKET_CANCEL_REASON];
+
+/**
  * Vé (Story 3.3, AD-1, AD-35): chỉ phát bên trong `ordering.markPaid`, cùng transaction với Đơn chuyển `paid`. Mỗi Vé
  * một dòng, bản chụp lúc phát không đổi được (`UPDATE_PROTECTED_COLUMNS`): `seq` 1..N trong Đơn (theo Hạng vé tăng
  * dần theo id), `order_ticket_count` (N), tên Người mua (`holder_name`, PII), tên Hạng vé, mã Đơn, giờ phát. Mã QR vé
@@ -17,6 +24,11 @@ export type TicketStatus = (typeof TICKET_STATUSES)[number];
  * Link chia sẻ Vé (AD-29, Story 3.8): `share_version` (bắt đầu 1) và `share_token_hash` (SHA-256 hex của token suy ra từ
  * id Vé, `share_version` và khóa `qr_key_version`; unique). Không lưu token dạng rõ. "Tạo lại link" tăng `share_version`
  * và ghi hash mới trong cùng một `UPDATE`. Vé phát trước Story 3.8 có hash `NULL` (link 404 tới khi chủ Vé tạo lại).
+ *
+ * Check-in (Story 5.3, AD-15): `checked_in_at` (đồng hồ DB lúc ghi), `checked_in_by` (tài khoản người quét) và
+ * `checkin_scan_id` (uuid client sinh cho lần quét, để phát lại cùng kết quả khi gửi lại). Chỉ `ticketing.checkIn` ghi,
+ * bằng một UPDATE có điều kiện (`status = 'valid' AND checked_in_at IS NULL`), nên mỗi Vé check-in đúng một lần. Hai cột
+ * sau phải `NULL` khi chưa check-in (CHECK); `checked_in_by` không có FK (`ticketing` không phụ thuộc `identity`).
  *
  * `order_id`, `organization_id`, `user_id` không có FK: `ticketing` không phụ thuộc `ordering`, `organizer` hay
  * `identity` (module-graph, AD-10). FK tới `events` và `ticket_types` (`ticketing → event`): Hạng vé đã phát Vé không
@@ -45,6 +57,8 @@ export const tickets = pgTable(
     status: text('status', { enum: TICKET_STATUSES }).notNull().default('valid'),
     cancelReason: text('cancel_reason'),
     checkedInAt: timestamptz('checked_in_at'),
+    checkedInBy: uuid('checked_in_by'),
+    checkinScanId: uuid('checkin_scan_id'),
     shareVersion: integer('share_version').notNull().default(1),
     shareTokenHash: text('share_token_hash'),
     updatedAt: timestamptz('updated_at')
@@ -65,5 +79,9 @@ export const tickets = pgTable(
     check('tickets_order_code_check', sql`${t.orderCode} ~ '^TK[0-9A-HJKMNP-TV-Z]{8}$'`),
     check('tickets_share_version_check', sql`${t.shareVersion} >= 1`),
     check('tickets_share_token_hash_check', sql`${t.shareTokenHash} ~ '^[0-9a-f]{64}$'`),
+    check(
+      'tickets_checkin_check',
+      sql`${t.checkedInAt} IS NOT NULL OR (${t.checkedInBy} IS NULL AND ${t.checkinScanId} IS NULL)`,
+    ),
   ],
 );

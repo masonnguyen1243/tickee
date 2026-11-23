@@ -107,6 +107,101 @@ export type CheckerInvitePreview = z.infer<typeof CheckerInvitePreview>;
 export const AcceptedCheckerInvite = z.object({ eventId: z.uuid() });
 export type AcceptedCheckerInvite = z.infer<typeof AcceptedCheckerInvite>;
 
-/** `GET /v1/checkin/events/:eventId` (`checkin.scan`): Sự kiện của Màn quét. */
-export const CheckinEvent = z.object({ eventId: z.uuid(), eventName: z.string() });
+/**
+ * `GET /v1/checkin/events/:eventId` (`checkin.scan`): Sự kiện của Màn quét, kèm số Vé đã check-in trên tổng số Vé hợp lệ
+ * (Story 5.3). Cả hai chỉ đếm Vé `valid` của Sự kiện (Vé đã hủy hay bị vô hiệu không tính, kể cả khi đã check-in);
+ * `checkedInCount` đếm thêm điều kiện đã check-in.
+ */
+export const CheckinEvent = z.object({
+  eventId: z.uuid(),
+  eventName: z.string(),
+  checkedInCount: z.number().int().min(0),
+  validTicketCount: z.number().int().min(0),
+});
 export type CheckinEvent = z.infer<typeof CheckinEvent>;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Quét Mã QR vé (FR-27, FR-28, AD-15, AD-16, Story 5.3)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Đường API (sau `/v1`) quét Mã QR vé của Màn quét: `POST` (`ScanRequest` → `ScanResult`). */
+export const checkinScanApiPath = (eventId: string): string =>
+  `/checkin/events/${encodeURIComponent(eventId)}/scans`;
+
+/** Độ dài tối đa của chuỗi đọc được từ mã QR (Mã QR vé thật ngắn hơn nhiều; dài hơn → `400`). */
+export const SCAN_CODE_MAX = 512;
+
+/**
+ * Body `POST /v1/checkin/events/:eventId/scans` (`checkin.scan`): `code` là chuỗi camera đọc được (1–`SCAN_CODE_MAX` ký
+ * tự; không kiểm dạng ở đây: sai dạng là `invalid BAD_SIGNATURE`), `scanId` là uuid client sinh cho mỗi lần đọc. Gửi lại
+ * cùng `scanId` (mất phản hồi) bằng cùng tài khoản nhận lại kết quả xanh của lần đầu. Sai schema → `400
+ * VALIDATION_FAILED`.
+ */
+export const ScanRequest = z.object({ code: z.string().min(1).max(SCAN_CODE_MAX), scanId: z.uuid() });
+export type ScanRequest = z.infer<typeof ScanRequest>;
+
+/** Kết quả một lần quét: xanh, trung tính (cùng người vừa quét Vé này), đỏ đã check-in, đỏ Vé không hợp lệ. */
+export const ScanOutcome = {
+  OK: 'ok',
+  RECENT: 'recent',
+  ALREADY: 'already',
+  INVALID: 'invalid',
+} as const;
+export type ScanOutcome = (typeof ScanOutcome)[keyof typeof ScanOutcome];
+
+/**
+ * Lý do "Vé không hợp lệ":
+ * - `BAD_SIGNATURE`: mã sai dạng, sai chữ ký, khóa `k` lạ, hoặc chữ ký đúng mà không có Vé;
+ * - `CANCELLED`: Vé đã hủy, hoặc Sự kiện đã hủy;
+ * - `VOIDED`: Vé bị vô hiệu (`cancel_reason = 'voided'`);
+ * - `OTHER_EVENT`: Vé của Sự kiện khác (cùng hoặc khác BTC; không lộ gì thêm);
+ * - `EVENT_ENDED`: Sự kiện đã kết thúc (đã bấm "Kết thúc", hoặc đồng hồ DB đã tới `effective_end_at`).
+ * `EXPIRED` và `CHECKER_REVOKED` của AD-15 không có ở đây: Vé hết hiệu lực đúng lúc Sự kiện kết thúc (trùng
+ * `EVENT_ENDED`), còn CTV bị thu hồi nhận `403 CHECKER_REVOKED` từ guard.
+ */
+export const ScanInvalidReason = {
+  BAD_SIGNATURE: 'BAD_SIGNATURE',
+  CANCELLED: 'CANCELLED',
+  VOIDED: 'VOIDED',
+  OTHER_EVENT: 'OTHER_EVENT',
+  EVENT_ENDED: 'EVENT_ENDED',
+} as const;
+export type ScanInvalidReason = (typeof ScanInvalidReason)[keyof typeof ScanInvalidReason];
+export const scanInvalidReasonSchema = z.enum(ScanInvalidReason);
+
+/** Vai của người quét trước khi không có tên: Owner, Admin của BTC, hoặc CTV (không phải thành viên BTC). */
+export const ScanCheckerRole = { OWNER: 'owner', ADMIN: 'admin', CHECKER: 'checker' } as const;
+export type ScanCheckerRole = (typeof ScanCheckerRole)[keyof typeof ScanCheckerRole];
+
+/**
+ * Người đã check-in Vé (kết quả `already`), không bao giờ là email: chính người đang quét → `self` ("bạn"); có tên (tài
+ * khoản Google, đã trim) → `name`; còn lại → vai trong BTC, hoặc `checker` khi không phải thành viên ("CTV khác").
+ */
+export const ScanCheckedBy = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('self') }),
+  z.object({ kind: z.literal('name'), name: z.string().min(1) }),
+  z.object({ kind: z.literal('role'), role: z.enum(ScanCheckerRole) }),
+]);
+export type ScanCheckedBy = z.infer<typeof ScanCheckedBy>;
+
+/**
+ * Response `POST /v1/checkin/events/:eventId/scans` (`200`, `no-store`), union theo `outcome`:
+ * - `ok`: tên Người mua · Vé k/N (`seq`/`count`) · Hạng vé, từ bản chụp trên Vé;
+ * - `recent`: cùng người quét đã check-in Vé này chưa tới 60 giây (trung tính, không đỏ);
+ * - `already`: đã check-in lúc `checkedInAt` bởi `checkedBy`;
+ * - `invalid`: Vé không hợp lệ kèm `reason`.
+ * Không bao giờ chứa Mã QR vé, SĐT hay email.
+ */
+export const ScanResult = z.discriminatedUnion('outcome', [
+  z.object({
+    outcome: z.literal(ScanOutcome.OK),
+    holderName: z.string(),
+    seq: z.number().int().min(1),
+    count: z.number().int().min(1),
+    ticketTypeName: z.string(),
+  }),
+  z.object({ outcome: z.literal(ScanOutcome.RECENT) }),
+  z.object({ outcome: z.literal(ScanOutcome.ALREADY), checkedInAt: EventDateTime, checkedBy: ScanCheckedBy }),
+  z.object({ outcome: z.literal(ScanOutcome.INVALID), reason: scanInvalidReasonSchema }),
+]);
+export type ScanResult = z.infer<typeof ScanResult>;

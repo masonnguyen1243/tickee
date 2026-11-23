@@ -51,6 +51,9 @@ const draft = {
   refundPolicy: 'Không hoàn vé.',
 };
 
+/** Sự kiện chưa phát Vé nào (số đếm của Story 5.3; ca có Vé ở `scan.test.ts`). */
+const NO_TICKETS = { checkedInCount: 0, validTicketCount: 0 };
+
 type User = Awaited<ReturnType<typeof signUp>>;
 
 let h: Harness;
@@ -122,10 +125,10 @@ afterAll(async () => {
 });
 
 describe('GET /v1/checkin/events/:eventId', () => {
-  it('CTV active của Sự kiện → 200 {eventId, eventName}; no-store', async () => {
+  it('CTV active của Sự kiện → 200 {eventId, eventName, số đếm}; no-store', async () => {
     const res = await get(checkinPath(eventA1.id), ctv.cookie).expect(200);
     expect(res.headers['cache-control']).toBe('no-store');
-    expect(CheckinEvent.parse(res.body)).toEqual({ eventId: eventA1.id, eventName: draft.name });
+    expect(CheckinEvent.parse(res.body)).toEqual({ eventId: eventA1.id, eventName: draft.name, ...NO_TICKETS });
   });
 
   it('Owner/Admin của BTC sở hữu → 200 không cần lời mời (kể cả Sự kiện nháp)', async () => {
@@ -133,14 +136,14 @@ describe('GET /v1/checkin/events/:eventId', () => {
     for (const event of [eventA1, eventA2, draftEvent]) {
       for (const cookie of [owner.cookie, admin.cookie]) {
         const res = await get(checkinPath(event.id), cookie).expect(200);
-        expect(res.body).toEqual({ eventId: event.id, eventName: draft.name });
+        expect(res.body).toEqual({ eventId: event.id, eventName: draft.name, ...NO_TICKETS });
       }
     }
   });
 
   it('id chữ hoa vẫn là cùng Sự kiện', async () => {
     const res = await get(checkinPath(eventA1.id.toUpperCase()), ctv.cookie).expect(200);
-    expect(res.body).toEqual({ eventId: eventA1.id, eventName: draft.name });
+    expect(res.body).toEqual({ eventId: eventA1.id, eventName: draft.name, ...NO_TICKETS });
   });
 
   it('chưa đăng nhập → 401 UNAUTHENTICATED', async () => {

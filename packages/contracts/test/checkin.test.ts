@@ -12,8 +12,14 @@ import {
   checkerInviteUrl,
   CheckinEvent,
   checkinEventApiPath,
+  checkinScanApiPath,
   checkinScanPath,
   CreatedCheckerInvite,
+  SCAN_CODE_MAX,
+  ScanCheckedBy,
+  ScanInvalidReason,
+  ScanRequest,
+  ScanResult,
 } from '../src/checkin.js';
 import { ErrorCode } from '../src/errors.js';
 import { CHECKER_PERMISSIONS, checkerHasPermission, Permission } from '../src/organizer.js';
@@ -76,7 +82,8 @@ describe('nhận lời mời CTV và quyền CTV (Story 5.2)', () => {
   it('accept và Sự kiện của Màn quét', () => {
     expect(AcceptedCheckerInvite.parse({ eventId: EVENT })).toEqual({ eventId: EVENT });
     expect(AcceptedCheckerInvite.safeParse({ eventId: 'abc' }).success).toBe(false);
-    expect(CheckinEvent.parse({ eventId: EVENT, eventName: 'Giải chạy' })).toEqual({ eventId: EVENT, eventName: 'Giải chạy' });
+    const event = { eventId: EVENT, eventName: 'Giải chạy', checkedInCount: 0, validTicketCount: 0 };
+    expect(CheckinEvent.parse(event)).toEqual(event);
   });
 
   it('đường Màn quét trên web: /events/<id>, mã hóa id', () => {
@@ -100,5 +107,103 @@ describe('nhận lời mời CTV và quyền CTV (Story 5.2)', () => {
     expect([...CHECKER_PERMISSIONS].sort()).toEqual(['checkin.lookup', 'checkin.scan']);
     const allowed = Object.values(Permission).filter(checkerHasPermission);
     expect(allowed.sort()).toEqual(['checkin.lookup', 'checkin.scan']);
+  });
+});
+
+describe('quét Mã QR vé (Story 5.3-a)', () => {
+  const SCAN_ID = '019a3b2c-0c00-7abc-8def-000000000001';
+
+  it('Sự kiện của Màn quét: số đã check-in và tổng số Vé hợp lệ là số nguyên không âm, bắt buộc', () => {
+    const base = { eventId: EVENT, eventName: 'Giải chạy' };
+    expect(CheckinEvent.parse({ ...base, checkedInCount: 3, validTicketCount: 120 })).toEqual({
+      ...base,
+      checkedInCount: 3,
+      validTicketCount: 120,
+    });
+    for (const bad of [
+      base,
+      { ...base, checkedInCount: 0 },
+      { ...base, validTicketCount: 0 },
+      { ...base, checkedInCount: -1, validTicketCount: 0 },
+      { ...base, checkedInCount: 1.5, validTicketCount: 2 },
+      { ...base, checkedInCount: '1', validTicketCount: 2 },
+    ]) {
+      expect(CheckinEvent.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('đường API quét tương đối với /v1, mã hóa id Sự kiện; mã QR không bao giờ trong đường dẫn', () => {
+    expect(checkinScanApiPath(EVENT)).toBe(`/checkin/events/${EVENT}/scans`);
+    expect(checkinScanApiPath('a/b?c')).toBe('/checkin/events/a%2Fb%3Fc/scans');
+  });
+
+  it('body quét: code là chuỗi 1–512 ký tự (không kiểm dạng QR), scanId là uuid', () => {
+    expect(SCAN_CODE_MAX).toBe(512);
+    for (const code of ['x', 'khong-phai-ma-qr', 'x'.repeat(SCAN_CODE_MAX)]) {
+      expect(ScanRequest.safeParse({ code, scanId: SCAN_ID }).success, code).toBe(true);
+    }
+    for (const body of [
+      {},
+      { scanId: SCAN_ID },
+      { code: 'x' },
+      { code: '', scanId: SCAN_ID },
+      { code: 'x'.repeat(SCAN_CODE_MAX + 1), scanId: SCAN_ID },
+      { code: 42, scanId: SCAN_ID },
+      { code: 'x', scanId: 'khong-phai-uuid' },
+      { code: 'x', scanId: '' },
+      null,
+    ]) {
+      expect(ScanRequest.safeParse(body).success, JSON.stringify(body)).toBe(false);
+    }
+  });
+
+  it('ScanResult: union theo outcome', () => {
+    const ok = { outcome: 'ok', holderName: 'Nguyễn Văn An', seq: 1, count: 2, ticketTypeName: 'Vé thường' };
+    expect(ScanResult.parse(ok)).toEqual(ok);
+    expect(ScanResult.parse({ outcome: 'recent' })).toEqual({ outcome: 'recent' });
+    const already = { outcome: 'already', checkedInAt: '2026-11-23T19:05:00+07:00', checkedBy: { kind: 'self' } };
+    expect(ScanResult.parse(already)).toEqual(already);
+    for (const reason of Object.values(ScanInvalidReason)) {
+      expect(ScanResult.parse({ outcome: 'invalid', reason })).toEqual({ outcome: 'invalid', reason });
+    }
+    expect(Object.values(ScanInvalidReason).sort()).toEqual([
+      'BAD_SIGNATURE',
+      'CANCELLED',
+      'EVENT_ENDED',
+      'OTHER_EVENT',
+      'VOIDED',
+    ]);
+    for (const bad of [
+      { outcome: 'ok', holderName: 'A', seq: 0, count: 2, ticketTypeName: 'B' },
+      { outcome: 'ok', holderName: 'A', seq: 1, ticketTypeName: 'B' },
+      { outcome: 'already', checkedInAt: '2026-11-23T19:05:00', checkedBy: { kind: 'self' } },
+      { outcome: 'already', checkedInAt: '2026-11-23T19:05:00+07:00' },
+      { outcome: 'invalid', reason: 'EXPIRED' },
+      { outcome: 'invalid', reason: 'CHECKER_REVOKED' },
+      { outcome: 'invalid' },
+      { outcome: 'green' },
+    ]) {
+      expect(ScanResult.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('checkedBy: self, tên (không rỗng), hoặc vai owner/admin/checker', () => {
+    for (const by of [
+      { kind: 'self' },
+      { kind: 'name', name: 'Trần Thị Bình' },
+      { kind: 'role', role: 'owner' },
+      { kind: 'role', role: 'admin' },
+      { kind: 'role', role: 'checker' },
+    ]) {
+      expect(ScanCheckedBy.parse(by)).toEqual(by);
+    }
+    for (const bad of [
+      { kind: 'name', name: '' },
+      { kind: 'name' },
+      { kind: 'role', role: 'buyer' },
+      { kind: 'email', email: 'a@vidu.vn' },
+    ]) {
+      expect(ScanCheckedBy.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
   });
 });

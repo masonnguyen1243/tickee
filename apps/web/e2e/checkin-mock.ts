@@ -32,8 +32,12 @@ export const invitePreview = (eventName: string, organizationName: string, scanE
   body: { eventName, organizationName, scanEventId },
 });
 
-/** `CheckinEvent`. */
-export const checkinEvent = (eventId: string, eventName: string): Reply => ({ status: 200, body: { eventId, eventName } });
+/** `CheckinEvent`: mặc định chưa có Vé nào (số đã check-in / tổng Vé hợp lệ của Story 5.3). */
+export const checkinEvent = (
+  eventId: string,
+  eventName: string,
+  counts: { checkedInCount: number; validTicketCount: number } = { checkedInCount: 0, validTicketCount: 0 },
+): Reply => ({ status: 200, body: { eventId, eventName, ...counts } });
 
 export async function mockCheckinApi(page: Page, handlers: Record<string, Handler> = {}): Promise<Call[]> {
   const calls: Call[] = [];

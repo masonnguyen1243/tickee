@@ -1,9 +1,11 @@
 // Mô-đun `event`: API công khai cho mô-đun khác chỉ xuất từ file này (AD-10).
 export {
+  assertCheckinOpen,
   checkinEventById,
   checkinEventOf,
   lockCheckinEventByIdForShare,
   lockEventForCheckerInvite,
+  type CheckinClosedReason,
   type CheckinEventDetail,
   type CheckinEventRef,
   type LockedCheckinEventRef,
