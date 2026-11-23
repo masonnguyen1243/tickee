@@ -143,6 +143,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
   summary: Đăng nhập tài khoản khác trong cùng tab (không đăng xuất) chỉ invalidate `me`, nên cache memberships của tài khoản trước còn tới 30 giây; `AccountMenu` và CTA landing trỏ "Dashboard BTC"/"Vào dashboard" tới BTC của người khác.
   evidence: `apps/web/app/(public)/dang-nhap/login-form.tsx:164` chỉ gọi `invalidateQueries({ queryKey: ME_QUERY_KEY })`, `staleTime` 30 giây ở `providers.tsx:42`; có từ trước Story 2.3. Server vẫn trả lỗi quyền khi mở BTC không phải của mình. Sửa: xóa cache (như đăng xuất) hoặc invalidate cả `MEMBERSHIPS_QUERY_KEY` khi đăng nhập thành công.
 - Story nhận (21/11/2026, E4-8): 5.2. CTV nhận lời mời là luồng đăng nhập kế tiếp chạm cache memberships.
+- Story nhận (23/11/2026, 5.2-a): 5.2-b. Story 5.2 tách đôi; phần web (đăng nhập OTP để nhận lời mời) nằm ở 5.2-b, Mason duyệt.
 
 ## Deferred from: code review of spec-2-4-moi-va-xoa-admin.md (2026-11-02)
 
