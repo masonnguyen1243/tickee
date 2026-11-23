@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test';
 
 import { expect, test } from './fixtures';
 import { apiError, EMAIL, me, mockIdentityApi, unauthenticated, WEB_ORIGIN, type Call, type Reply } from './identity-mock';
+import { mockOrganizerApi, ORG_ID } from './organizer-mock';
 
 /* Màn đăng nhập OTP và đồng ý NĐ 13 với API giả bằng `page.route` (xem `identity-mock.ts`). */
 
@@ -338,4 +339,52 @@ test('320px không cuộn ngang: đăng nhập (cả bước mã) và đồng ý
   await page.goto('/dong-y');
   await expect(page.getByRole('button', { name: 'Không đồng ý' })).toBeVisible();
   expect(await overflow()).toBeLessThanOrEqual(0);
+});
+
+test('đăng nhập OTP bằng tài khoản khác trong cùng tab (không đăng xuất): bỏ cache của tài khoản trước, menu không còn "Dashboard BTC" của người đó', async ({
+  page,
+}) => {
+  const OTHER_EMAIL = 'binh.tran@vidu.vn';
+  let user: 'a' | 'b' = 'a';
+  await mockIdentityApi(page, {
+    'GET /identity/me': () =>
+      user === 'a'
+        ? me('2026-10-29T01:02:03.000Z')
+        : {
+            status: 200,
+            body: {
+              id: '019a3b2c-4321-7abc-8def-0123456789ab',
+              email: OTHER_EMAIL,
+              consentedAt: '2026-10-29T01:02:03.000Z',
+              twoFactorEnabled: false,
+            },
+          },
+    'POST /identity/otp': otpSent,
+    'POST /identity/otp/verify': () => {
+      user = 'b';
+      return { status: 200, body: { consentRequired: false } };
+    },
+  });
+  await mockOrganizerApi(page, {
+    'GET /me/memberships': () => ({
+      status: 200,
+      body: user === 'a' ? [{ organizationId: ORG_ID, name: 'CLB Cờ Vua Quận 3', role: 'owner' }] : [],
+    }),
+  });
+
+  // Tài khoản A đang đăng nhập mở màn đăng nhập: cache có danh sách BTC của A.
+  await page.goto(`/dang-nhap?returnTo=${encodeURIComponent('/chinh-sach-du-lieu')}`);
+  await page.getByRole('button', { name: `Tài khoản: ${EMAIL}` }).click();
+  await expect(page.getByRole('menuitem', { name: 'Dashboard BTC' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+
+  await page.getByLabel('Email').fill(OTHER_EMAIL);
+  await page.getByRole('button', { name: 'Gửi mã' }).click();
+  await pasteCode(page, '123456');
+  await page.waitForURL('**/chinh-sach-du-lieu');
+
+  await page.getByRole('button', { name: `Tài khoản: ${OTHER_EMAIL}` }).click();
+  await expect(page.getByRole('menuitem', { name: 'Tạo BTC' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Dashboard BTC' })).toHaveCount(0);
 });

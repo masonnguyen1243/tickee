@@ -1,6 +1,17 @@
 import type { ReactNode } from 'react';
 
-/** Màn quét của CTV (Epic 5). Layout thật thêm ở story của bề mặt này. */
+import { SiteHeader } from '@/components/tickee/site-header';
+
+/**
+ * Màn quét của CTV và Owner/Admin (Epic 5), `/events/{eventId}`. Tạm thời là khung một cột có header như bề mặt Người
+ * mua, cho trang tạm của Story 5.2; Màn quét thật (Story 5.3) đổi thành toàn màn, dọc, mobile-first. Phiên nằm ở origin
+ * API nên server web không biết ai đang xem: trang tự chặn chưa đăng nhập ở trình duyệt.
+ */
 export default function CheckinLayout({ children }: { children: ReactNode }) {
-  return <>{children}</>;
+  return (
+    <div className="mx-auto w-full max-w-content-max-buyer px-gutter-mobile">
+      <SiteHeader />
+      <main className="pb-section">{children}</main>
+    </div>
+  );
 }

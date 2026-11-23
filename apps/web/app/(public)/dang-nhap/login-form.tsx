@@ -16,7 +16,6 @@ import { ApiError } from '@/lib/api/errors';
 import { messageOf } from '@/lib/api/message-of';
 import {
   hasErrorCode,
-  ME_QUERY_KEY,
   remainingAttempts,
   retryAfterHours,
   retryAfterMinutes,
@@ -146,7 +145,10 @@ export function LoginForm({ returnTo, alternativeSignIn, googleError }: LoginFor
   const verify = useMutation({
     mutationFn: (code: string) => verifyOtp({ email: step.kind === 'code' ? step.email : email, otp: code }),
     onSuccess: async ({ consentRequired }) => {
-      await queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY });
+      // Có thể vừa đổi tài khoản trong cùng tab (không đăng xuất): bỏ mọi dữ liệu của phiên trước (BTC của tài khoản cũ,
+      // xem trước lời mời…), tải lại các query đang hiện (`me`, danh sách BTC ở header) rồi mới điều hướng. Không dùng
+      // `clear()` như đăng xuất: header không unmount khi `returnTo` cùng layout nên sẽ không tải lại `me`.
+      await queryClient.resetQueries();
       router.replace(consentRequired ? withReturnTo(CONSENT_PATH, returnTo) : returnTo);
     },
     onError: (error) => {

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   AcceptedCheckerInvite,
+  CHECKER_INVITE_ACCEPT_API_PATH,
   CHECKER_INVITE_PATH,
+  CHECKER_INVITE_PREVIEW_API_PATH,
   CHECKER_INVITE_TOKEN_PATTERN,
   CHECKER_INVITE_TTL_DAYS,
   checkerInviteApiPath,
@@ -9,6 +11,8 @@ import {
   CheckerInviteTokenRequest,
   checkerInviteUrl,
   CheckinEvent,
+  checkinEventApiPath,
+  checkinScanPath,
   CreatedCheckerInvite,
 } from '../src/checkin.js';
 import { ErrorCode } from '../src/errors.js';
@@ -73,6 +77,18 @@ describe('nhận lời mời CTV và quyền CTV (Story 5.2)', () => {
     expect(AcceptedCheckerInvite.parse({ eventId: EVENT })).toEqual({ eventId: EVENT });
     expect(AcceptedCheckerInvite.safeParse({ eventId: 'abc' }).success).toBe(false);
     expect(CheckinEvent.parse({ eventId: EVENT, eventName: 'Giải chạy' })).toEqual({ eventId: EVENT, eventName: 'Giải chạy' });
+  });
+
+  it('đường Màn quét trên web: /events/<id>, mã hóa id', () => {
+    expect(checkinScanPath(EVENT)).toBe(`/events/${EVENT}`);
+    expect(checkinScanPath('a/b?c#d')).toBe('/events/a%2Fb%3Fc%23d');
+  });
+
+  it('đường API tương đối với /v1: token không bao giờ trong đường dẫn; id Sự kiện được mã hóa', () => {
+    expect(CHECKER_INVITE_PREVIEW_API_PATH).toBe('/checkin/invites/preview');
+    expect(CHECKER_INVITE_ACCEPT_API_PATH).toBe('/checkin/invites/accept');
+    expect(checkinEventApiPath(EVENT)).toBe(`/checkin/events/${EVENT}`);
+    expect(checkinEventApiPath('a/b?c')).toBe('/checkin/events/a%2Fb%3Fc');
   });
 
   it('mã lỗi mới', () => {
