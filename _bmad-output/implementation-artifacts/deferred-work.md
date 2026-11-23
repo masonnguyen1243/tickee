@@ -144,6 +144,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
   evidence: `apps/web/app/(public)/dang-nhap/login-form.tsx:164` chỉ gọi `invalidateQueries({ queryKey: ME_QUERY_KEY })`, `staleTime` 30 giây ở `providers.tsx:42`; có từ trước Story 2.3. Server vẫn trả lỗi quyền khi mở BTC không phải của mình. Sửa: xóa cache (như đăng xuất) hoặc invalidate cả `MEMBERSHIPS_QUERY_KEY` khi đăng nhập thành công.
 - Story nhận (21/11/2026, E4-8): 5.2. CTV nhận lời mời là luồng đăng nhập kế tiếp chạm cache memberships.
 - Story nhận (23/11/2026, 5.2-a): 5.2-b. Story 5.2 tách đôi; phần web (đăng nhập OTP để nhận lời mời) nằm ở 5.2-b, Mason duyệt.
+- Đã xử lý (23/11/2026, 5.2-b): mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-5-2-b-web-nhan-loi-moi-ctv.md` (`resetQueries()` thay cho invalidate `me`). Bằng chứng: `apps/web/app/(public)/dang-nhap/login-form.tsx:151`; `apps/web/e2e/login.spec.ts:344`.
 
 ## Deferred from: code review of spec-2-4-moi-va-xoa-admin.md (2026-11-02)
 
@@ -1195,6 +1196,7 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Story 5.2 phần web (5.2-b). Trang `/loi-moi-ctv` theo mẫu `/loi-moi-btc`: token từ hash giữ trong sessionStorage, `returnTo=/loi-moi-ctv` không kèm hash; các nhánh xem trước (tên Sự kiện, tên BTC, "Nhận soát vé"), link hỏng ("Link mời đã hết hạn. Liên hệ BTC để nhận link mới."), `scanEventId` → chuyển thẳng, `CHECKER_REVOKED` ("Bạn không còn quyền soát vé cho Sự kiện này."). Trang tạm `/events/[eventId]` (route group `(checkin)`, `GET /v1/checkin/events/:eventId`): tên Sự kiện + "Màn quét đang được hoàn thiện."; 401 → đăng nhập, 403 → câu lỗi. Nút "Mở Màn quét" ở tab Check-in của Sự kiện (Mason chọn 23/11/2026; "Quét vé" ở tab bar để 5.3). Mục hoãn "Đăng nhập tài khoản khác trong cùng tab…" (`queryClient.clear()` khi đăng nhập OTP). Helper đường dẫn web trong contracts. e2e vòng OTP.
   evidence: Tách khỏi Story 5.2 khi chạy bmad-build (23/11/2026, Mason chọn Split): spec gộp API và web ước 4.500–5.500 token. 5.2-a (API) merge được riêng; tới khi 5.2-b xong, mở link mời vẫn ra 404.
   story: 5.2-b
+- Đã xử lý (23/11/2026, 5.2-b): mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-5-2-b-web-nhan-loi-moi-ctv.md`. Bằng chứng: `apps/web/app/(public)/loi-moi-ctv/checker-invite-acceptance.tsx:95`; `apps/web/app/(checkin)/events/[eventId]/checkin-event-screen.tsx:59`; `apps/web/app/(dashboard)/btc/[orgId]/su-kien/[eventId]/checkin-tab.tsx:252`; `packages/contracts/src/checkin.ts:66`; `apps/web/e2e/checker-invite-accept.spec.ts:66`.
 
 ## Deferred from: code review of spec-5-2-a-api-nhan-loi-moi-va-quyen-ctv.md (2026-11-23)
 
