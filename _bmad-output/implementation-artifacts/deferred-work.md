@@ -95,6 +95,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
   summary: Padding `env(safe-area-inset-bottom)` của tab bar, vùng nội dung và Sheet đang bằng 0 vì viewport gốc không có `viewportFit: 'cover'`. Cần quyết định bật `cover` (và kiểm tra trang công khai ở landscape) trước Closed Beta.
   evidence: `app/layout.tsx` không đặt `viewportFit`; spec 2.1B cấm đổi (review B15, medium).
 - Story nhận (21/11/2026, E4-8): 5.3. Màn quét Mã QR vé trên điện thoại là nơi đầu tiên cần safe-area.
+- Story nhận (23/11/2026, 5.3-a): 5.3-b. Story 5.3 tách đôi; Màn quét (nơi đầu tiên cần safe-area) nằm ở 5.3-b, Mason duyệt.
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-1-b-khung-dashboard-responsive.md`
   summary: Repo chưa có cấu hình Prettier và bước kiểm định dạng, nên code mới có thể lệch kiểu (nháy kép, 80 cột) mà CI không bắt.
   evidence: Không có `.prettierrc`; pipeline `build typecheck lint:deps test` không kiểm định dạng (review B1).
@@ -679,6 +680,7 @@ Mỗi mục dưới đây có đúng một story nhận. Story nhận đọc m�
 - source_spec: `_bmad-output/implementation-artifacts/epic-3-retro-2026-11-12.md`
   summary: Story 5.3 (D5). `/xem-ve` (người nhận link chia sẻ) không giữ màn hình sáng, khác Chi tiết Vé. Người đi cùng thường là người đưa QR ở cổng. Khi làm màn quét, thêm Screen Wake Lock cho `/xem-ve` bằng hook của 3.9. Chấp nhận thiếu ở MVP nếu 5.3 không kịp.
   evidence: Hook Wake Lock ở `apps/web/lib/tickets/wake-lock.ts` (spec 3.9). Đúng phạm vi spec 3.8. Retro Epic 3 D5 (LOW).
+- Story nhận (23/11/2026, 5.3-a): 5.3-b. Story 5.3 tách đôi; Wake Lock cho `/xem-ve` là phần web, nằm ở 5.3-b, Mason duyệt.
 
 ## Deferred from: code review of spec-epic-3-e3-5-link-chia-se-thieu-khoa-qr.md (2026-11-13)
 
