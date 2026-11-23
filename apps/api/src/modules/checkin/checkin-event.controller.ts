@@ -4,6 +4,7 @@ import { EventAccess, RequirePermission, type EventAccessContext } from '../../p
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { checkinEventById } from '../event/index.js';
+import { checkinCountsOf } from '../ticketing/index.js';
 
 /**
  * Route CTV (`/v1/checkin/events/:eventId/…`, Story 5.2, AD-26): Owner/Admin của BTC sở hữu Sự kiện, hoặc CTV `active`
@@ -14,7 +15,7 @@ import { checkinEventById } from '../event/index.js';
 export class CheckinEventController {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
 
-  /** Sự kiện của Màn quét: id và tên. */
+  /** Sự kiện của Màn quét: id, tên, số Vé đã check-in trên tổng số Vé hợp lệ (chỉ Vé `valid` của Sự kiện). */
   @Get()
   @RequirePermission(Permission.CHECKIN_SCAN)
   @Header('cache-control', 'no-store')
@@ -24,6 +25,7 @@ export class CheckinEventController {
     if (!event || event.organizationId !== ctx.organizationId) {
       throw new AppError(ErrorCode.NOT_A_MEMBER, 'Bạn không có quyền soát vé cho Sự kiện này.');
     }
-    return { eventId: event.id, eventName: event.name };
+    const counts = await checkinCountsOf(this.db.orm, event, event.id);
+    return { eventId: event.id, eventName: event.name, ...counts };
   }
 }

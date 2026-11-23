@@ -1208,3 +1208,17 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Route CTV (`PermissionGuard` nhánh Sự kiện, `GET /v1/checkin/events/:eventId`) vẫn cho CTV `active` vào khi Sự kiện đã hủy, và `CheckinEvent` không có trạng thái để Màn quét biết. Khi làm hủy Sự kiện, quyết route CTV trả gì (vd. màn hết quyền hay đỏ `CANCELLED` ở lượt quét) và thêm trạng thái vào response nếu cần.
   evidence: Review 5.2-a (Blind Hunter BH12, low). Hiện chưa route nào đặt `events.status='cancelled'`; 5.6 chỉ nhận ca quá `effective_end_at` (`EVENT_ENDED`).
   story: 7.1
+
+## Deferred from: tách phạm vi Story 5.3 khi build (2026-11-23)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-3-a-api-quet-ma-qr-ve.md`
+  summary: Story 5.3 phần web (5.3-b). Màn quét thật ở `/events/[eventId]` (route group `(checkin)`, toàn màn, dọc, theo theme), dùng API của 5.3-a (`POST /v1/checkin/events/:eventId/scans`, `ScanResult`, `checkedInCount`/`validTicketCount` trong `CheckinEvent`). Gồm: màn "Bật camera" trước khi trình duyệt hỏi quyền, hướng dẫn bật lại cho Safari iOS/Chrome Android kèm "Tra tay" (UX-DR28); `scanner-viewport` (camera liên tục, khung vuông, đỉnh: tên Sự kiện + "Đã check-in k/N", đáy: "Tra tay", khóa quét tới khi kết quả đóng, mỗi lần đọc một `scanId` mới) (UX-DR29); `scan-result-overlay` xanh/trung tính (`recent`)/đỏ, âm thanh, `aria-live="assertive"`, reduced motion (UX-DR30); đỏ "Đã check-in" ghi "bởi {tên | bạn | Owner | Admin | CTV khác}" theo `checkedBy` (Mason chốt 23/11/2026); lỗi mạng/5xx khi quét không hiện đỏ; giữ màn hình sáng khi camera chạy. Hai mục hoãn giao cho 5.3: "Padding `env(safe-area-inset-bottom)`… đang bằng 0" (`viewportFit: 'cover'`) và "Story 5.3 (D5). `/xem-ve`… không giữ màn hình sáng". Lối vào "Quét vé" ở `bottom-tab-bar` (hiện là trang `ComingSoon` `/btc/[orgId]/quet-ve`; 5.2-b để lại cho 5.3). Khi lập spec phải chốt: thư viện giải mã QR (repo chỉ có `qrcode` để sinh mã; BRD gợi ý ZXing/html5-qrcode), hành vi tab "Quét vé" khi không ở trang Sự kiện hoặc có nhiều Sự kiện đang diễn ra, bật `viewportFit: 'cover'` toàn app hay chỉ cho `(checkin)`. e2e stub `getUserMedia` (Playwright chưa có fake camera).
+  evidence: Tách khỏi Story 5.3 khi chạy bmad-build (23/11/2026, Mason chọn Split): spec gộp API và web ước khoảng 4.500 token. 5.3-a (API) merge được riêng; tới khi 5.3-b xong, `/events/[eventId]` vẫn là trang tạm "Màn quét đang được hoàn thiện."
+  story: 5.3-b
+
+## Deferred from: code review of spec-5-3-a-api-quet-ma-qr-ve.md (2026-11-23)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-3-a-api-quet-ma-qr-ve.md`
+  summary: Gửi lại cùng `scanId` (mất phản hồi) sau khi Sự kiện vừa đóng ("Kết thúc", quá `effective_end_at`, hủy) hoặc Vé vừa bị hủy thì nhận đỏ `EVENT_ENDED`/`CANCELLED` thay vì `ok` của lần đầu, vì `assertCheckinOpen` và nhánh Vé hủy chạy trước nhánh phát lại. Khi làm thử lại cùng `scanId` ở client, quyết có cần đọc lần quét (`checked_in_by = user AND checkin_scan_id = scanId`) trước cổng hay chấp nhận ca này.
+  evidence: Review 5.3-a (Blind Hunter BH1, Edge Case Hunter EC1, low). `apps/api/src/modules/ticketing/check-in.ts` (`checkIn`): bước 1 `assertCheckinOpen`, bước 3 mới phát lại. Chỉ gặp khi lần đầu đã commit, phản hồi mất và Sự kiện đóng ngay trong vài giây thử lại.
+  story: 5.4

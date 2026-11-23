@@ -187,6 +187,9 @@ describe('cách ly BTC', () => {
     // Story 5.2: route CTV của `checkin` (Owner, Admin và CTV `active`, `checkin.scan`).
     expect(guarded).toContain('GET /v1/checkin/events/:eventId');
     expect(permissionOf('/v1/checkin/events/:eventId')).toBe(Permission.CHECKIN_SCAN);
+    // Story 5.3: quét Mã QR vé (flows; Owner, Admin và CTV `active`, `checkin.scan`).
+    expect(guarded).toContain('POST /v1/checkin/events/:eventId/scans');
+    expect(permissionOf('/v1/checkin/events/:eventId/scans', 'POST')).toBe(Permission.CHECKIN_SCAN);
   });
 
   it('kho route: không route nào vừa @Public() vừa @RequirePermission; route có quyền chỉ dưới /v1/orgs/:orgId hoặc /v1/checkin/events/:eventId', () => {
