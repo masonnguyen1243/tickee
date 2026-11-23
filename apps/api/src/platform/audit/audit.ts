@@ -180,7 +180,13 @@ export type AuditAction =
    * Link mời CTV bị thu hồi vì Owner/Admin tạo link mới cho cùng Sự kiện (Story 5.1; cùng transaction với
    * `checker_invite.created`; đối tượng: link cũ). CTV đã nhận lời mời vẫn giữ quyền.
    */
-  | 'checker_invite.revoked';
+  | 'checker_invite.revoked'
+  /**
+   * Tài khoản nhận lời mời CTV lần đầu (Story 5.2, `flows.acceptCheckerInvite`; actor: chính tài khoản đó; đối tượng:
+   * `{ type: 'checker', id }`; `organizationId`: BTC sở hữu Sự kiện). Nhận lại khi đã là CTV `active` không ghi. Không
+   * ghi token hay hash.
+   */
+  | 'checker.joined';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

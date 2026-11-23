@@ -78,6 +78,8 @@ export interface HarnessOptions {
   imports?: Type[];
   /** Thay provider của gốc DI (vd. `TINGEE_CLIENT` trỏ vào Tingee fake với timeout ngắn). */
   overrides?: { provide: symbol | string | Type; useValue: unknown }[];
+  /** Thay cả module của `ApiModule` (vd. bỏ `CheckinModule` để kiểm guard quyền khi không có cổng CTV). */
+  moduleOverrides?: { module: Type; useModule: Type }[];
 }
 
 export async function createHarness(overrides: Partial<ApiConfig> = {}, options: HarnessOptions = {}): Promise<Harness> {
@@ -90,6 +92,7 @@ export async function createHarness(overrides: Partial<ApiConfig> = {}, options:
     .overrideProvider(EMAIL_TRANSPORT)
     .useValue(email);
   for (const { provide, useValue } of options.overrides ?? []) builder = builder.overrideProvider(provide).useValue(useValue);
+  for (const { module, useModule } of options.moduleOverrides ?? []) builder = builder.overrideModule(module).useModule(useModule);
   const moduleRef = await builder.compile();
   const app = configureApiApp(moduleRef.createNestApplication(API_APP_OPTIONS), { shutdownHooks: false });
   await app.init();

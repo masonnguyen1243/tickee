@@ -5,14 +5,22 @@ import { Test } from '@nestjs/testing';
 import { ErrorResponse, IDEMPOTENCY_KEY_HEADER, Permission, REAUTH_HEADER, REVIEW_ACTIONS } from '@tickee/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RequirePermission } from '../../src/platform/access/index.js';
+import { Public } from '../../src/platform/http/index.js';
 import { createHarness, reauthToken, signUp, type Harness } from '../identity/harness.js';
 import { listen, openSse } from '../platform/sse-client.js';
-import { discoverRoutes, ORG_ROUTE, type DiscoveredRoute } from './routes.js';
+import {
+  CHECKIN_EVENT_ROUTE,
+  discoverRoutes,
+  ORG_ROUTE,
+  PERMISSION_ROUTE_PREFIXES,
+  type DiscoveredRoute,
+} from './routes.js';
 import { EventsTestController, OwnerOnlyTestController } from './test-controllers.js';
 
 /*
  * Bộ test cách ly (AD-27): tự tìm mọi route có `@RequirePermission` rồi gọi chéo BTC bằng cookie Owner BTC A trên
- * id BTC B. Route của story sau tự rơi vào đây mà không phải sửa test.
+ * id BTC B. Route BTC (`/v1/orgs/:orgId/…`) thay `:orgId`; route CTV (`/v1/checkin/events/:eventId/…`, Story 5.2) thay
+ * `:eventId` bằng Sự kiện của BTC B. Route của story sau tự rơi vào đây mà không phải sửa test.
  */
 
 /**
@@ -27,6 +35,15 @@ let routes: DiscoveredRoute[];
 let ownerA: Awaited<ReturnType<typeof signUp>>;
 let orgA: string;
 let orgB: string;
+let eventA: string;
+let eventB: string;
+
+const draft = {
+  name: 'Sự kiện kiểm cách ly',
+  startsAt: '2099-11-16T07:00:00+07:00',
+  endsAt: '2099-11-16T17:00:00+07:00',
+  refundPolicy: 'Không hoàn vé.',
+};
 
 beforeAll(async () => {
   h = await createHarness({}, { imports: [DiscoveryModule], controllers: [OwnerOnlyTestController, EventsTestController] });
@@ -35,6 +52,8 @@ beforeAll(async () => {
   const ownerB = await signUp(h);
   orgA = (await h.http.post('/v1/orgs').set('cookie', ownerA.cookie).send({ name: 'BTC A' }).expect(201)).body.id;
   orgB = (await h.http.post('/v1/orgs').set('cookie', ownerB.cookie).send({ name: 'BTC B' }).expect(201)).body.id;
+  eventA = (await h.http.post(`/v1/orgs/${orgA}/events`).set('cookie', ownerA.cookie).send(draft).expect(201)).body.id;
+  eventB = (await h.http.post(`/v1/orgs/${orgB}/events`).set('cookie', ownerB.cookie).send(draft).expect(201)).body.id;
 });
 afterAll(async () => {
   await h.close();
@@ -43,11 +62,20 @@ afterAll(async () => {
 const fill = (path: string, orgId: string) =>
   path.replace(/:orgId\b/g, orgId).replace(/:[A-Za-z0-9_]+/g, () => randomUUID());
 
-function call(route: DiscoveredRoute, orgId: string, cookie: string) {
+/** Route CTV: `:eventId` là Sự kiện cho trước, tham số khác ngẫu nhiên. */
+const fillEvent = (path: string, eventId: string) =>
+  path.replace(/:eventId\b/g, eventId).replace(/:[A-Za-z0-9_]+/g, () => randomUUID());
+
+function request(route: DiscoveredRoute, path: string, cookie: string) {
   const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'patch' | 'delete';
-  const req = h.http[method](fill(route.path, orgId)).set('cookie', cookie);
+  const req = h.http[method](path).set('cookie', cookie);
   return method === 'get' || method === 'delete' ? req : req.send({});
 }
+
+const call = (route: DiscoveredRoute, orgId: string, cookie: string) => request(route, fill(route.path, orgId), cookie);
+
+/** Route BTC có `@RequirePermission` (phần thay `:orgId`). */
+const orgRoutes = () => routes.filter((r) => r.permission && ORG_ROUTE.test(r.path));
 
 const label = (r: DiscoveredRoute) => `${r.method} ${r.path} (${r.handler})`;
 
@@ -156,15 +184,29 @@ describe('cách ly BTC', () => {
     );
     expect(guarded).toContain('GET /v1/orgs/:orgId/test-owner-only');
     expect(guarded).toContain('POST /v1/orgs/:orgId/test-owner-only/items/:itemId');
+    // Story 5.2: route CTV của `checkin` (Owner, Admin và CTV `active`, `checkin.scan`).
+    expect(guarded).toContain('GET /v1/checkin/events/:eventId');
+    expect(permissionOf('/v1/checkin/events/:eventId')).toBe(Permission.CHECKIN_SCAN);
   });
 
-  it('mọi route dưới /v1/orgs/:orgId đều mang @RequirePermission', () => {
-    const missing = routes.filter((r) => ORG_ROUTE.test(r.path) && !r.permission).map(label);
+  it('kho route: không route nào vừa @Public() vừa @RequirePermission; route có quyền chỉ dưới /v1/orgs/:orgId hoặc /v1/checkin/events/:eventId', () => {
+    const publicAndGuarded = routes.filter((r) => r.isPublic && r.permission).map(label);
+    expect(publicAndGuarded).toEqual([]);
+    const outside = routes
+      .filter((r) => r.permission && !PERMISSION_ROUTE_PREFIXES.some((prefix) => prefix.test(r.path)))
+      .map(label);
+    expect(outside).toEqual([]);
+  });
+
+  it('mọi route dưới /v1/orgs/:orgId và /v1/checkin/events/:eventId đều mang @RequirePermission', () => {
+    const missing = routes
+      .filter((r) => (ORG_ROUTE.test(r.path) || CHECKIN_EVENT_ROUTE.test(r.path)) && !r.permission)
+      .map(label);
     expect(missing).toEqual([]);
   });
 
-  it('Owner BTC A gọi mọi route @RequirePermission trên BTC B → 403 NOT_A_MEMBER', async () => {
-    const guarded = routes.filter((r) => r.permission);
+  it('Owner BTC A gọi mọi route BTC @RequirePermission trên BTC B → 403 NOT_A_MEMBER', async () => {
+    const guarded = orgRoutes();
     expect(guarded.length).toBeGreaterThan(0);
     for (const route of guarded) {
       const res = await call(route, orgB, ownerA.cookie);
@@ -174,7 +216,7 @@ describe('cách ly BTC', () => {
   });
 
   it('đối chứng: cùng route trên BTC A không trả NOT_A_MEMBER', async () => {
-    for (const route of routes.filter((r) => r.permission && !isStreamRoute(r))) {
+    for (const route of orgRoutes().filter((r) => !isStreamRoute(r))) {
       const res = await call(route, orgA, ownerA.cookie);
       // Body `{}` và id ngẫu nhiên ra 4xx (400/404…), không bao giờ 500.
       expect(res.status, label(route)).toBeLessThan(500);
@@ -184,7 +226,7 @@ describe('cách ly BTC', () => {
   });
 
   it('đối chứng route SSE (`…/live`): trên BTC A mở được stream hoặc trả 4xx JSON, không NOT_A_MEMBER; trên BTC B → 403 NOT_A_MEMBER', async () => {
-    const streams = routes.filter((r) => r.permission && isStreamRoute(r));
+    const streams = orgRoutes().filter(isStreamRoute);
     expect(streams.map((r) => `${r.method} ${r.path}`)).toEqual(
       expect.arrayContaining(['GET /v1/orgs/:orgId/live', 'GET /v1/orgs/:orgId/events/:eventId/overview/live']),
     );
@@ -275,6 +317,43 @@ describe('cách ly BTC', () => {
     }
   });
 
+  it('route CTV (Story 5.2): Owner BTC A trên Sự kiện của BTC B hoặc Sự kiện không có, CTV của Sự kiện khác cùng BTC → 403 NOT_A_MEMBER; CTV bị thu hồi → 403 CHECKER_REVOKED; đối chứng Sự kiện của A không NOT_A_MEMBER', async () => {
+    const checkinRoutes = routes.filter((r) => r.permission && CHECKIN_EVENT_ROUTE.test(r.path));
+    expect(checkinRoutes.map((r) => `${r.method} ${r.path}`)).toContain('GET /v1/checkin/events/:eventId');
+    // CTV `active` của một Sự kiện khác cùng BTC A, và CTV đã bị thu hồi ở `eventA` (dòng `checkers` chèn bằng SQL).
+    const otherEventA = (await h.http.post(`/v1/orgs/${orgA}/events`).set('cookie', ownerA.cookie).send(draft).expect(201))
+      .body.id as string;
+    const ctvOther = await signUp(h);
+    const ctvRevoked = await signUp(h);
+    await h.db.pool.query(
+      `INSERT INTO checkers (organization_id, event_id, user_id, status, revoked_at, revoked_by)
+       VALUES ($1, $2, $3, 'active', NULL, NULL), ($1, $4, $5, 'revoked', now(), $6)`,
+      [orgA, otherEventA, ctvOther.userId, eventA, ctvRevoked.userId, ownerA.userId],
+    );
+    for (const route of checkinRoutes) {
+      for (const eventId of [eventB, randomUUID(), 'khong-phai-uuid']) {
+        const res = await request(route, fillEvent(route.path, eventId), ownerA.cookie);
+        expect(res.status, `${label(route)} ${eventId}`).toBe(403);
+        expect(ErrorResponse.parse(res.body).error.code, `${label(route)} ${eventId}`).toBe('NOT_A_MEMBER');
+        expect(res.text).not.toContain(draft.name);
+      }
+      for (const [caller, expected] of [
+        [ctvOther, 'NOT_A_MEMBER'],
+        [ctvRevoked, 'CHECKER_REVOKED'],
+      ] as const) {
+        const res = await request(route, fillEvent(route.path, eventA), caller.cookie);
+        expect(res.status, `${label(route)} ${expected}`).toBe(403);
+        expect(ErrorResponse.parse(res.body).error.code, `${label(route)} ${expected}`).toBe(expected);
+        expect(res.text).not.toContain(draft.name);
+      }
+      if (isStreamRoute(route)) continue;
+      const own = await request(route, fillEvent(route.path, eventA), ownerA.cookie);
+      expect(own.status, label(route)).toBeLessThan(500);
+      const code = own.status === 403 ? ErrorResponse.parse(own.body).error.code : null;
+      expect(code, label(route)).not.toBe('NOT_A_MEMBER');
+    }
+  });
+
   it('route Sự kiện trên BTC A: body {} → 400, id ngẫu nhiên → 404 EVENT_NOT_FOUND', async () => {
     const eventRoutes = routes.filter((r) => r.permission && r.path.startsWith('/v1/orgs/:orgId/events'));
     // Story 5.1: thêm `GET`/`POST …/checker-invite` (25).
@@ -307,6 +386,26 @@ class MissingDecoratorController {
   }
 }
 
+/** Cấu hình sai mà bộ kiểm kho route phải bắt: công khai mà đòi quyền; đòi quyền ngoài hai tiền tố. */
+@Controller('checkin/events/:eventId/cau-hinh-sai')
+class MisconfiguredController {
+  @Get('cong-khai')
+  @Public()
+  @RequirePermission(Permission.CHECKIN_SCAN)
+  open(): string {
+    return 'sai';
+  }
+}
+
+@Controller('checkin/khong-co-su-kien/:eventId')
+class OutsidePrefixController {
+  @Get()
+  @RequirePermission(Permission.CHECKIN_SCAN)
+  get(): string {
+    return 'sai';
+  }
+}
+
 describe('bộ kiểm route tự phát hiện route BTC thiếu decorator', () => {
   it('route dưới /v1/orgs/:orgId thiếu @RequirePermission bị báo', async () => {
     const moduleRef = await Test.createTestingModule({
@@ -316,6 +415,23 @@ describe('bộ kiểm route tự phát hiện route BTC thiếu decorator', () =
     try {
       const missing = discoverRoutes(moduleRef).filter((r) => ORG_ROUTE.test(r.path) && !r.permission);
       expect(missing.map((r) => r.path)).toEqual(['/v1/orgs/:orgId/quen-decorator']);
+    } finally {
+      await moduleRef.close();
+    }
+  });
+
+  it('route vừa @Public() vừa @RequirePermission, hoặc đòi quyền ngoài hai tiền tố, bị báo', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [DiscoveryModule],
+      controllers: [MisconfiguredController, OutsidePrefixController],
+    }).compile();
+    try {
+      const found = discoverRoutes(moduleRef);
+      expect(found.filter((r) => r.isPublic && r.permission).map((r) => r.path)).toEqual([
+        '/v1/checkin/events/:eventId/cau-hinh-sai/cong-khai',
+      ]);
+      const outside = found.filter((r) => r.permission && !PERMISSION_ROUTE_PREFIXES.some((p) => p.test(r.path)));
+      expect(outside.map((r) => r.path)).toEqual(['/v1/checkin/khong-co-su-kien/:eventId']);
     } finally {
       await moduleRef.close();
     }

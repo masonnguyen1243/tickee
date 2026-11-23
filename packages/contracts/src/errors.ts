@@ -21,10 +21,14 @@ export const ErrorCode = {
   OTP_LOCKED: 'OTP_LOCKED',
   /**
    * Người gọi không là thành viên BTC trong đường dẫn. Trả cả khi BTC không tồn tại hoặc `orgId` sai dạng,
-   * để không lộ BTC nào có thật.
+   * để không lộ BTC nào có thật. Route CTV (`/v1/checkin/events/:eventId/…`, Story 5.2): người gọi không phải Owner/Admin
+   * của BTC sở hữu Sự kiện, cũng không là CTV của Sự kiện (kể cả Sự kiện không tồn tại hoặc `eventId` sai dạng).
    */
   NOT_A_MEMBER: 'NOT_A_MEMBER',
-  /** Là thành viên nhưng vai trò không có quyền này (vd. Admin gọi thao tác chỉ Owner). */
+  /**
+   * Là thành viên nhưng vai trò không có quyền này (vd. Admin gọi thao tác chỉ Owner); hoặc CTV gọi route cần quyền
+   * ngoài `CHECKER_PERMISSIONS`.
+   */
   FORBIDDEN_ROLE: 'FORBIDDEN_ROLE',
   /**
    * Tài khoản đã bật 2FA mà session chưa qua lớp hai (chưa nhập TOTP hay mã khôi phục), gọi route ngoài
@@ -240,6 +244,17 @@ export const ErrorCode = {
    * cấp URL, không đếm. `details`: `EventImageRateLimitedDetails` (`retryAfterSeconds` theo giới hạn chặn lâu nhất).
    */
   EVENT_IMAGE_RATE_LIMITED: 'EVENT_IMAGE_RATE_LIMITED',
+  /**
+   * Link mời CTV không dùng được (Story 5.2): token sai hoặc sai dạng, link đã hết hạn hoặc bị thu hồi ("Tạo link mới"),
+   * Sự kiện đã hủy hoặc đã kết thúc. Một mã và một câu cho mọi trường hợp; không lộ tên Sự kiện, tên BTC hay id. Không
+   * ghi gì.
+   */
+  CHECKER_INVITE_INVALID: 'CHECKER_INVITE_INVALID',
+  /**
+   * CTV đã bị thu hồi quyền ở Sự kiện này: gọi route `/v1/checkin/events/:eventId/…`, hoặc nhận lại lời mời (kể cả bằng
+   * link mới). Không tự kích hoạt lại; chỉ Owner/Admin "Khôi phục" được (Story 5.6).
+   */
+  CHECKER_REVOKED: 'CHECKER_REVOKED',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

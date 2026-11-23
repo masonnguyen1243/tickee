@@ -54,6 +54,16 @@ export function roleHasPermission(role: Role, permission: Permission): boolean {
   return ROLE_PERMISSIONS[role].includes(permission);
 }
 
+/**
+ * Quyền của CTV `active` trên đúng Sự kiện được giao (FR-29, AD-26): chỉ quét và tra tay, qua route
+ * `/v1/checkin/events/:eventId/…`. CTV không có vai trong BTC: quyền ngoài danh sách này → `403 FORBIDDEN_ROLE`.
+ */
+export const CHECKER_PERMISSIONS: readonly Permission[] = [Permission.CHECKIN_SCAN, Permission.CHECKIN_LOOKUP];
+
+export function checkerHasPermission(permission: Permission): boolean {
+  return CHECKER_PERMISSIONS.includes(permission);
+}
+
 /** Tên BTC: bỏ khoảng trắng hai đầu, 1–100 ký tự. */
 export const ORGANIZATION_NAME_MAX = 100;
 export const OrganizationName = z.string().trim().min(1).max(ORGANIZATION_NAME_MAX);

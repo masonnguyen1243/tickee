@@ -15,6 +15,7 @@ import { audit } from '../../platform/audit/index.js';
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { checkinEventOf, lockEventForCheckerInvite, type LockedCheckinEventRef } from '../event/index.js';
+import { effectiveExpiresAt, inviteActiveSql, timestamptzParam } from './invite-rule.js';
 import { generateCheckerInviteToken, hashCheckerInviteToken } from './invite-token.js';
 import { checkerInvites } from './schema.js';
 
@@ -34,13 +35,6 @@ const toInvite = (row: InviteRow): CheckerInvite => ({
   expiresAt: toEventIso(row.expiresAt),
   active: row.active,
 });
-
-/** Mốc `effective_end_at` đọc từ `event`, gửi lại Postgres làm tham số `timestamptz`. */
-const timestamptzParam = (value: Date) => sql`${value.toISOString()}::timestamptz`;
-
-/** Hạn hiệu lực: min(hạn lưu lúc tạo, `effective_end_at` hiện tại của Sự kiện). */
-const effectiveExpiresAt = (effectiveEndAt: Date) =>
-  sql<Date>`LEAST(${ci.expiresAt}, ${timestamptzParam(effectiveEndAt)})`;
 
 /** Trạng thái chặn "Tạo link mới": đã hủy, chưa đăng (nháp), đã kết thúc (kể cả "Kết thúc" sớm). */
 function assertCanInvite(event: LockedCheckinEventRef): void {
@@ -63,7 +57,7 @@ export class CheckerInviteService {
   /**
    * Link mới nhất của Sự kiện, chưa có thì `null`. Link chưa thu hồi (tối đa một) đứng trước; còn lại theo id (UUIDv7,
    * theo thứ tự INSERT, kể cả khi hai lần tạo song song có `created_at` = lúc bắt đầu transaction đảo nhau).
-   * `active`: chưa thu hồi, `now()` của DB còn trước hạn hiệu lực, Sự kiện chưa hủy và chưa bị bấm "Kết thúc".
+   * `active`: luật "link còn hiệu lực" dùng chung với nhận lời mời (`inviteActiveSql`).
    */
   async latest(ctx: AccessContext, eventId: string): Promise<CheckerInviteResponse> {
     const event = await checkinEventOf(this.db.orm, ctx, eventId);
@@ -72,15 +66,13 @@ export class CheckerInviteService {
         id: ci.id,
         createdAt: ci.createdAt,
         expiresAt: effectiveExpiresAt(event.effectiveEndAt).mapWith(ci.expiresAt),
-        active: sql<boolean>`${ci.revokedAt} IS NULL AND now() < ${effectiveExpiresAt(event.effectiveEndAt)}`,
+        active: inviteActiveSql(event),
       })
       .from(ci)
       .where(and(orgScope(ctx)(ci), eq(ci.eventId, event.id)))
       .orderBy(desc(sql`${ci.revokedAt} IS NULL`), desc(ci.id))
       .limit(1);
-    if (!row) return { invite: null };
-    const eventOpen = event.status !== EventStatus.CANCELLED && !event.endedManually;
-    return { invite: toInvite({ ...row, active: row.active && eventOpen }) };
+    return { invite: row ? toInvite(row) : null };
   }
 
   /**
@@ -120,7 +112,7 @@ export class CheckerInviteService {
           id: ci.id,
           createdAt: ci.createdAt,
           expiresAt: ci.expiresAt,
-          active: sql<boolean>`${ci.revokedAt} IS NULL AND now() < ${ci.expiresAt}`,
+          active: inviteActiveSql(event),
         });
       if (!created) throw new Error('INSERT checker_invites không trả về dòng nào');
       await audit.record(tx, {

@@ -1185,3 +1185,21 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: E2E `apps/web/e2e/event-image.spec.ts:346` › "presign bị giới hạn (429 EVENT_IMAGE_RATE_LIMITED)…" chập chờn: dòng 376 đọc `puts` ngay sau khi preview đổi `src` sang `blob:`, lúc PUT có thể chưa được mock ghi nhận. Sửa: `await expect.poll(() => puts.map((p) => p.key)).toEqual([...])` như dòng 224.
   evidence: Kiểm chứng 5.1 (22/11/2026): cả bộ e2e 1133 pass, 1 fail ở ca này (android-chromium); chạy riêng ca này 16 lần (`--repeat-each=8`) fail 1. Story 5.1 không chạm file ảnh Sự kiện; test có từ 4.7-d (`4aec00a`).
   story: E2-8
+
+## Deferred from: tách phạm vi Story 5.2 khi build (2026-11-23)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-2-a-api-nhan-loi-moi-va-quyen-ctv.md`
+  summary: Story 5.2 phần web (5.2-b). Trang `/loi-moi-ctv` theo mẫu `/loi-moi-btc`: token từ hash giữ trong sessionStorage, `returnTo=/loi-moi-ctv` không kèm hash; các nhánh xem trước (tên Sự kiện, tên BTC, "Nhận soát vé"), link hỏng ("Link mời đã hết hạn. Liên hệ BTC để nhận link mới."), `scanEventId` → chuyển thẳng, `CHECKER_REVOKED` ("Bạn không còn quyền soát vé cho Sự kiện này."). Trang tạm `/events/[eventId]` (route group `(checkin)`, `GET /v1/checkin/events/:eventId`): tên Sự kiện + "Màn quét đang được hoàn thiện."; 401 → đăng nhập, 403 → câu lỗi. Nút "Mở Màn quét" ở tab Check-in của Sự kiện (Mason chọn 23/11/2026; "Quét vé" ở tab bar để 5.3). Mục hoãn "Đăng nhập tài khoản khác trong cùng tab…" (`queryClient.clear()` khi đăng nhập OTP). Helper đường dẫn web trong contracts. e2e vòng OTP.
+  evidence: Tách khỏi Story 5.2 khi chạy bmad-build (23/11/2026, Mason chọn Split): spec gộp API và web ước 4.500–5.500 token. 5.2-a (API) merge được riêng; tới khi 5.2-b xong, mở link mời vẫn ra 404.
+  story: 5.2-b
+
+## Deferred from: code review of spec-5-2-a-api-nhan-loi-moi-va-quyen-ctv.md (2026-11-23)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-2-a-api-nhan-loi-moi-va-quyen-ctv.md`
+  summary: Bảng `checkers` không có CHECK ràng `status` với `revoked_at`/`revoked_by`: DB nhận cả dòng `revoked` không có người/lúc thu hồi lẫn dòng `active` còn `revoked_at`. Khi làm "Thu hồi"/"Khôi phục", chốt nghĩa của khôi phục (giữ hay xóa `revoked_*`) rồi thêm CHECK tương ứng bằng migration mới.
+  evidence: Review 5.2-a (Blind Hunter BH4, Edge Case Hunter EC2, low). `apps/api/drizzle/0034_checkers.sql` chỉ có `checkers_status_check`. Chưa code nào ghi `revoked_*`; tiền lệ ràng cặp cột: `organizations_payment_service_status_check`.
+  story: 5.6
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-2-a-api-nhan-loi-moi-va-quyen-ctv.md`
+  summary: Route CTV (`PermissionGuard` nhánh Sự kiện, `GET /v1/checkin/events/:eventId`) vẫn cho CTV `active` vào khi Sự kiện đã hủy, và `CheckinEvent` không có trạng thái để Màn quét biết. Khi làm hủy Sự kiện, quyết route CTV trả gì (vd. màn hết quyền hay đỏ `CANCELLED` ở lượt quét) và thêm trạng thái vào response nếu cần.
+  evidence: Review 5.2-a (Blind Hunter BH12, low). Hiện chưa route nào đặt `events.status='cancelled'`; 5.6 chỉ nhận ca quá `effective_end_at` (`EVENT_ENDED`).
+  story: 7.1
