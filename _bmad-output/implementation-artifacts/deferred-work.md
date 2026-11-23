@@ -85,6 +85,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
   evidence: Review B3/B4/V3. Hiện lỗi cấu hình chỉ lộ khi có request.
 - Story nhận (21/11/2026, E4-8): 5.1. `/v1/checkin/events/:eventId` là route đầu tiên cần cổng quyền theo Sự kiện.
 - Story nhận (22/11/2026, 5.1): 5.2. Mason chốt ở 5.1: route của 5.1 vẫn dưới `/v1/orgs/:orgId`; 5.2 là story đầu tiên có route `/v1/checkin/events/:eventId` và cài `AccessResolver` cho CTV, nhận cả phần kiểm `@Public()` + `@RequirePermission` lúc khởi động.
+- Đã xử lý (23/11/2026, 5.2-a): mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-5-2-a-api-nhan-loi-moi-va-quyen-ctv.md`. Bằng chứng: `apps/api/src/platform/access/permission.guard.ts:105`; `apps/api/test/organizer/isolation.test.ts:192`.
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-1-b-khung-dashboard-responsive.md`
   summary: Đổi BTC trong switcher làm khung dashboard unmount: sidebar/tab bar biến mất trong lúc tải, focus rơi về `<body>`, tab bar mobile nháy. Cân nhắc prefetch BTC đích khi mở menu, hoặc giữ khung với skeleton.
@@ -1181,6 +1182,7 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Luật "link mời CTV còn hiệu lực" (chưa thu hồi, `now()` trước `LEAST(expires_at, effective_end_at)`, Sự kiện chưa hủy và chưa bấm "Kết thúc") đang nằm một phần trong SQL, một phần trong JS của `CheckerInviteService.latest`. `flows.acceptCheckerInvite` của 5.2 phải dùng đúng luật này: tách một hàm dùng chung để badge ở tab Check-in và việc nhận lời mời không lệch nhau.
   evidence: Review 5.1 (Blind Hunter BH13, low). Hiện chỉ một nơi dùng nên chưa tách; 5.2 là nơi thứ hai.
   story: 5.2
+- Đã xử lý (23/11/2026, 5.2-a): mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-5-2-a-api-nhan-loi-moi-va-quyen-ctv.md`. Bằng chứng: `apps/api/src/modules/checkin/invite-rule.ts:32`; `apps/api/src/modules/checkin/checker-invite.service.ts:69`.
 - source_spec: `_bmad-output/implementation-artifacts/spec-5-1-link-moi-ctv-va-tab-check-in.md`
   summary: E2E `apps/web/e2e/event-image.spec.ts:346` › "presign bị giới hạn (429 EVENT_IMAGE_RATE_LIMITED)…" chập chờn: dòng 376 đọc `puts` ngay sau khi preview đổi `src` sang `blob:`, lúc PUT có thể chưa được mock ghi nhận. Sửa: `await expect.poll(() => puts.map((p) => p.key)).toEqual([...])` như dòng 224.
   evidence: Kiểm chứng 5.1 (22/11/2026): cả bộ e2e 1133 pass, 1 fail ở ca này (android-chromium); chạy riêng ca này 16 lần (`--repeat-each=8`) fail 1. Story 5.1 không chạm file ảnh Sự kiện; test có từ 4.7-d (`4aec00a`).
