@@ -5,9 +5,10 @@ import { notFound, UUID } from './event.service.js';
 import { events } from './schema.js';
 
 /*
- * Phần Sự kiện mà `checkin` cần cho link mời CTV (Story 5.1, AD-30). `checkin` không đọc bảng `events` (chỉ `schema.ts`
- * của nó được import `event/schema.ts` để khai FK), nên đọc và khóa Sự kiện đi qua đây. Mọi truy vấn qua `orgScope(ctx)`:
- * id lạ, sai dạng hoặc của BTC khác → `404 EVENT_NOT_FOUND`, kiểm trước mọi thứ khác.
+ * Phần Sự kiện mà `checkin` cần cho link mời CTV (Story 5.1, AD-30) và CTV (Story 5.2). `checkin` không đọc bảng `events`
+ * (chỉ `schema.ts` của nó được import `event/schema.ts` để khai FK), nên đọc và khóa Sự kiện đi qua đây. Route BTC đi qua
+ * `orgScope(ctx)`: id lạ, sai dạng hoặc của BTC khác → `404 EVENT_NOT_FOUND`, kiểm trước mọi thứ khác. Luồng CTV và nhận
+ * lời mời không có `AccessContext` (người gọi không thuộc BTC): đọc theo id, không có thì `null` để bên gọi chọn lỗi.
  */
 
 /**
@@ -62,4 +63,30 @@ export async function checkinEventOf(db: DbExecutor, ctx: AccessContext, eventId
     .where(and(orgScope(ctx)(events), eq(events.id, eventId)));
   if (!row) throw notFound();
   return row;
+}
+
+/**
+ * `CheckinEventRef` kèm BTC sở hữu và tên Sự kiện: cho cổng quyền CTV (`PermissionGuard`), Màn quét và nhận lời mời CTV
+ * (Story 5.2), nơi chỉ có id Sự kiện.
+ */
+export type CheckinEventDetail = CheckinEventRef & { organizationId: string; name: string };
+
+const detailColumns = { ...columns, organizationId: events.organizationId, name: events.name };
+
+/** Đọc (không khóa) Sự kiện theo id, không cần ctx. Id sai dạng hoặc không tồn tại → `null`. */
+export async function checkinEventById(db: DbExecutor, eventId: string): Promise<CheckinEventDetail | null> {
+  if (!UUID.test(eventId)) return null;
+  const [row] = await db.select(detailColumns).from(events).where(eq(events.id, eventId));
+  return row ?? null;
+}
+
+/**
+ * Khóa dòng Sự kiện theo id `FOR SHARE` trong `tx` của nhận lời mời CTV (`flows.acceptCheckerInvite`), không cần ctx: các
+ * lần nhận song song không chờ nhau, còn mọi lệnh ghi của BTC lên Sự kiện (Hủy, Kết thúc, sửa giờ; khóa `FOR UPDATE`) chờ
+ * lần nhận đang chạy xong, nên luật hiệu lực của link đọc trên trạng thái đã commit. Id sai dạng hoặc không tồn tại → `null`.
+ */
+export async function lockCheckinEventByIdForShare(tx: Tx, eventId: string): Promise<CheckinEventDetail | null> {
+  if (!UUID.test(eventId)) return null;
+  const [row] = await tx.select(detailColumns).from(events).where(eq(events.id, eventId)).for('share');
+  return row ?? null;
 }

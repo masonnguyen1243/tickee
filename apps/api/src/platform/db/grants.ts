@@ -88,6 +88,9 @@ export const UPDATE_PROTECTED_COLUMNS: Readonly<Record<string, readonly string[]
   // Link mời CTV (Story 5.1): chỉ `revoked_at` ghi được ("Tạo link mới" thu hồi link cũ); token hash, Sự kiện và hạn cố
   // định từ lúc tạo.
   'public.checker_invites': ['id', 'organization_id', 'event_id', 'token_hash', 'expires_at', 'created_at'],
+  // CTV của Sự kiện (Story 5.2): chỉ `status`, `revoked_by`, `revoked_at` ghi được (thu hồi/khôi phục, Story 5.6); BTC,
+  // Sự kiện, tài khoản và lúc nhận cố định từ lúc nhận lời mời.
+  'public.checkers': ['id', 'organization_id', 'event_id', 'user_id', 'created_at'],
 };
 
 const quoteIdent = (name: string) => `"${name.replaceAll('"', '""')}"`;

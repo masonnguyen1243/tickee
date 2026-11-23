@@ -67,6 +67,8 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   EVENT_LOCKED: 409,
   MATCH_ORDER_NOT_ELIGIBLE: 409,
   EVENT_IMAGE_RATE_LIMITED: 429,
+  CHECKER_INVITE_INVALID: 404,
+  CHECKER_REVOKED: 403,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

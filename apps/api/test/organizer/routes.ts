@@ -20,6 +20,15 @@ export interface DiscoveredRoute {
 /** Route dưới `/v1/orgs/:<tham số>` — bắt buộc mang `@RequirePermission`. */
 export const ORG_ROUTE = /^\/v1\/orgs\/:[^/]+(\/|$)/;
 
+/**
+ * Route CTV dưới `/v1/checkin/events/:<tham số>` (Story 5.2, AD-26) — bắt buộc mang `@RequirePermission`; guard đi nhánh
+ * Sự kiện (không có `:orgId`).
+ */
+export const CHECKIN_EVENT_ROUTE = /^\/v1\/checkin\/events\/:[^/]+(\/|$)/;
+
+/** Hai tiền tố duy nhất mà route `@RequirePermission` được nằm dưới (tham số đúng tên guard đọc). */
+export const PERMISSION_ROUTE_PREFIXES = [/^\/v1\/orgs\/:orgId(\/|$)/, /^\/v1\/checkin\/events\/:eventId(\/|$)/] as const;
+
 /** Route dưới `/v1/admin` — bắt buộc mang `@RequirePlatformAdmin()`. */
 export const ADMIN_ROUTE = /^\/v1\/admin(\/|$)/;
 

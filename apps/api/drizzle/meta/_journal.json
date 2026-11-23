@@ -239,6 +239,13 @@
       "when": 1795316605666,
       "tag": "0033_checker_invites",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795423304296,
+      "tag": "0034_checkers",
+      "breakpoints": true
     }
   ]
 }

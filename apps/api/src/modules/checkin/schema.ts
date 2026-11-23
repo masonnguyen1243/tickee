@@ -33,3 +33,32 @@ export const checkerInvites = pgTable(
     check('checker_invites_token_hash_check', sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`),
   ],
 );
+
+/**
+ * CTV của một Sự kiện (Story 5.2, AD-30): một dòng mỗi `(event_id, user_id)`, ghi khi tài khoản nhận lời mời lần đầu
+ * (`created_at` = lúc nhận). `status`: `active` quét và tra tay được ở đúng Sự kiện này; `revoked` bị Owner/Admin thu hồi
+ * (`revoked_by`, `revoked_at`, Story 5.6), nhận lại lời mời không kích hoạt lại. Chỉ `status`, `revoked_by`, `revoked_at`
+ * được UPDATE (`UPDATE_PROTECTED_COLUMNS`).
+ *
+ * `organization_id` (BTC sở hữu Sự kiện lúc nhận) và `user_id`, `revoked_by` không có FK: `checkin` không phụ thuộc
+ * `organizer` hay `identity` (module-graph, AD-10). FK tới `events` (`checkin → event`).
+ */
+export const checkers = pgTable(
+  'checkers',
+  {
+    id: id(),
+    organizationId: uuid('organization_id').notNull(),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => events.id),
+    userId: uuid('user_id').notNull(),
+    status: text('status', { enum: ['active', 'revoked'] }).notNull(),
+    revokedBy: uuid('revoked_by'),
+    revokedAt: timestamptz('revoked_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('checkers_event_id_user_id_key').on(t.eventId, t.userId),
+    check('checkers_status_check', sql`${t.status} IN ('active', 'revoked')`),
+  ],
+);

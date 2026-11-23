@@ -9,7 +9,7 @@ export {
   type ClosedBetaState,
 } from './closed-beta.js';
 export { payoutAccountStatusOf, type PayoutAccountState } from './payout-account.service.js';
-export { memberNamesOf, organizationNameOf, organizerContactOf } from './organizer.service.js';
+export { memberNamesOf, memberRoleOf, organizationNameOf, organizerContactOf } from './organizer.service.js';
 export {
   listSuspendedPaymentServices,
   PAYMENT_SERVICE_RESUMED_QUEUE,

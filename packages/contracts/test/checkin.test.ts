@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AcceptedCheckerInvite,
   CHECKER_INVITE_PATH,
   CHECKER_INVITE_TOKEN_PATTERN,
   CHECKER_INVITE_TTL_DAYS,
   checkerInviteApiPath,
+  CheckerInvitePreview,
+  CheckerInviteTokenRequest,
   checkerInviteUrl,
+  CheckinEvent,
   CreatedCheckerInvite,
 } from '../src/checkin.js';
+import { ErrorCode } from '../src/errors.js';
+import { CHECKER_PERMISSIONS, checkerHasPermission, Permission } from '../src/organizer.js';
 
 const ORG = '019a3b2c-5678-7abc-8def-0123456789ab';
 const EVENT = '019a3b2c-0712-7abc-8def-0123456789ab';
@@ -42,5 +48,41 @@ describe('link mời CTV (Story 5.1, AD-30)', () => {
       expect(CHECKER_INVITE_TOKEN_PATTERN.test(bad), bad).toBe(false);
       expect(CreatedCheckerInvite.safeParse({ invite, token: bad }).success, bad).toBe(false);
     }
+  });
+});
+
+describe('nhận lời mời CTV và quyền CTV (Story 5.2)', () => {
+  it('body token: chuỗi 1–256 ký tự; không kiểm dạng token (sai dạng xử lý như token sai ở api)', () => {
+    for (const token of [TOKEN, 'a', 'khong-phai-token', 'x'.repeat(256)]) {
+      expect(CheckerInviteTokenRequest.safeParse({ token }).success, token).toBe(true);
+    }
+    for (const body of [{}, { token: '' }, { token: 'x'.repeat(257) }, { token: 42 }, null]) {
+      expect(CheckerInviteTokenRequest.safeParse(body).success, JSON.stringify(body)).toBe(false);
+    }
+  });
+
+  it('preview: scanEventId là uuid hoặc null', () => {
+    const base = { eventName: 'Giải chạy', organizationName: 'CLB Chạy Bộ' };
+    expect(CheckerInvitePreview.parse({ ...base, scanEventId: null })).toEqual({ ...base, scanEventId: null });
+    expect(CheckerInvitePreview.parse({ ...base, scanEventId: EVENT }).scanEventId).toBe(EVENT);
+    expect(CheckerInvitePreview.safeParse({ ...base, scanEventId: 'abc' }).success).toBe(false);
+    expect(CheckerInvitePreview.safeParse(base).success).toBe(false);
+  });
+
+  it('accept và Sự kiện của Màn quét', () => {
+    expect(AcceptedCheckerInvite.parse({ eventId: EVENT })).toEqual({ eventId: EVENT });
+    expect(AcceptedCheckerInvite.safeParse({ eventId: 'abc' }).success).toBe(false);
+    expect(CheckinEvent.parse({ eventId: EVENT, eventName: 'Giải chạy' })).toEqual({ eventId: EVENT, eventName: 'Giải chạy' });
+  });
+
+  it('mã lỗi mới', () => {
+    expect(ErrorCode.CHECKER_INVITE_INVALID).toBe('CHECKER_INVITE_INVALID');
+    expect(ErrorCode.CHECKER_REVOKED).toBe('CHECKER_REVOKED');
+  });
+
+  it('CTV chỉ có checkin.scan và checkin.lookup', () => {
+    expect([...CHECKER_PERMISSIONS].sort()).toEqual(['checkin.lookup', 'checkin.scan']);
+    const allowed = Object.values(Permission).filter(checkerHasPermission);
+    expect(allowed.sort()).toEqual(['checkin.lookup', 'checkin.scan']);
   });
 });

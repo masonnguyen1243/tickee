@@ -68,6 +68,19 @@ export async function memberNamesOf(
   return new Map(rows.map((r) => [r.userId, contacts.get(r.userId)?.name ?? '']));
 }
 
+/**
+ * Read model vai của `userId` ở BTC `organizationId`; `null` khi không là thành viên (kể cả BTC không tồn tại). Cổng
+ * `AccessResolver` (`PermissionGuard`) và luồng không qua guard (nhận lời mời CTV, Story 5.2: Owner/Admin quét không
+ * cần lời mời) cùng đọc ở đây; nhận `tx` để đọc trong transaction của bên gọi.
+ */
+export async function memberRoleOf(db: DbExecutor, userId: string, organizationId: string): Promise<Role | null> {
+  const [row] = await db
+    .select({ role: members.role })
+    .from(members)
+    .where(and(orgScope({ organizationId })(members), eq(members.userId, userId)));
+  return row?.role ?? null;
+}
+
 /** Body `POST /v1/orgs` sau khi qua schema (tên đã trim, liên hệ trống → `null`). */
 export type CreateOrganizationInput = z.output<typeof CreateOrganizationRequest>;
 
@@ -126,10 +139,7 @@ export class OrganizerService {
 
   /** Vai của `userId` ở BTC; `null` khi không là thành viên (kể cả BTC không tồn tại). */
   async roleOf(userId: string, organizationId: string): Promise<{ role: Role } | null> {
-    const [row] = await this.db.orm
-      .select({ role: members.role })
-      .from(members)
-      .where(and(orgScope({ organizationId })(members), eq(members.userId, userId)));
-    return row ?? null;
+    const role = await memberRoleOf(this.db.orm, userId, organizationId);
+    return role ? { role } : null;
   }
 }

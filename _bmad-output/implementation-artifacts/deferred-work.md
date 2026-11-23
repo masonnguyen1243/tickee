@@ -85,6 +85,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
   evidence: Review B3/B4/V3. Hiện lỗi cấu hình chỉ lộ khi có request.
 - Story nhận (21/11/2026, E4-8): 5.1. `/v1/checkin/events/:eventId` là route đầu tiên cần cổng quyền theo Sự kiện.
 - Story nhận (22/11/2026, 5.1): 5.2. Mason chốt ở 5.1: route của 5.1 vẫn dưới `/v1/orgs/:orgId`; 5.2 là story đầu tiên có route `/v1/checkin/events/:eventId` và cài `AccessResolver` cho CTV, nhận cả phần kiểm `@Public()` + `@RequirePermission` lúc khởi động.
+- Đã xử lý (23/11/2026, 5.2-a): mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-5-2-a-api-nhan-loi-moi-va-quyen-ctv.md`. Bằng chứng: `apps/api/src/platform/access/permission.guard.ts:105`; `apps/api/test/organizer/isolation.test.ts:192`.
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-1-b-khung-dashboard-responsive.md`
   summary: Đổi BTC trong switcher làm khung dashboard unmount: sidebar/tab bar biến mất trong lúc tải, focus rơi về `<body>`, tab bar mobile nháy. Cân nhắc prefetch BTC đích khi mở menu, hoặc giữ khung với skeleton.
@@ -142,6 +143,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
   summary: Đăng nhập tài khoản khác trong cùng tab (không đăng xuất) chỉ invalidate `me`, nên cache memberships của tài khoản trước còn tới 30 giây; `AccountMenu` và CTA landing trỏ "Dashboard BTC"/"Vào dashboard" tới BTC của người khác.
   evidence: `apps/web/app/(public)/dang-nhap/login-form.tsx:164` chỉ gọi `invalidateQueries({ queryKey: ME_QUERY_KEY })`, `staleTime` 30 giây ở `providers.tsx:42`; có từ trước Story 2.3. Server vẫn trả lỗi quyền khi mở BTC không phải của mình. Sửa: xóa cache (như đăng xuất) hoặc invalidate cả `MEMBERSHIPS_QUERY_KEY` khi đăng nhập thành công.
 - Story nhận (21/11/2026, E4-8): 5.2. CTV nhận lời mời là luồng đăng nhập kế tiếp chạm cache memberships.
+- Story nhận (23/11/2026, 5.2-a): 5.2-b. Story 5.2 tách đôi; phần web (đăng nhập OTP để nhận lời mời) nằm ở 5.2-b, Mason duyệt.
 
 ## Deferred from: code review of spec-2-4-moi-va-xoa-admin.md (2026-11-02)
 
@@ -1181,7 +1183,26 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Luật "link mời CTV còn hiệu lực" (chưa thu hồi, `now()` trước `LEAST(expires_at, effective_end_at)`, Sự kiện chưa hủy và chưa bấm "Kết thúc") đang nằm một phần trong SQL, một phần trong JS của `CheckerInviteService.latest`. `flows.acceptCheckerInvite` của 5.2 phải dùng đúng luật này: tách một hàm dùng chung để badge ở tab Check-in và việc nhận lời mời không lệch nhau.
   evidence: Review 5.1 (Blind Hunter BH13, low). Hiện chỉ một nơi dùng nên chưa tách; 5.2 là nơi thứ hai.
   story: 5.2
+- Đã xử lý (23/11/2026, 5.2-a): mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-5-2-a-api-nhan-loi-moi-va-quyen-ctv.md`. Bằng chứng: `apps/api/src/modules/checkin/invite-rule.ts:32`; `apps/api/src/modules/checkin/checker-invite.service.ts:69`.
 - source_spec: `_bmad-output/implementation-artifacts/spec-5-1-link-moi-ctv-va-tab-check-in.md`
   summary: E2E `apps/web/e2e/event-image.spec.ts:346` › "presign bị giới hạn (429 EVENT_IMAGE_RATE_LIMITED)…" chập chờn: dòng 376 đọc `puts` ngay sau khi preview đổi `src` sang `blob:`, lúc PUT có thể chưa được mock ghi nhận. Sửa: `await expect.poll(() => puts.map((p) => p.key)).toEqual([...])` như dòng 224.
   evidence: Kiểm chứng 5.1 (22/11/2026): cả bộ e2e 1133 pass, 1 fail ở ca này (android-chromium); chạy riêng ca này 16 lần (`--repeat-each=8`) fail 1. Story 5.1 không chạm file ảnh Sự kiện; test có từ 4.7-d (`4aec00a`).
   story: E2-8
+
+## Deferred from: tách phạm vi Story 5.2 khi build (2026-11-23)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-2-a-api-nhan-loi-moi-va-quyen-ctv.md`
+  summary: Story 5.2 phần web (5.2-b). Trang `/loi-moi-ctv` theo mẫu `/loi-moi-btc`: token từ hash giữ trong sessionStorage, `returnTo=/loi-moi-ctv` không kèm hash; các nhánh xem trước (tên Sự kiện, tên BTC, "Nhận soát vé"), link hỏng ("Link mời đã hết hạn. Liên hệ BTC để nhận link mới."), `scanEventId` → chuyển thẳng, `CHECKER_REVOKED` ("Bạn không còn quyền soát vé cho Sự kiện này."). Trang tạm `/events/[eventId]` (route group `(checkin)`, `GET /v1/checkin/events/:eventId`): tên Sự kiện + "Màn quét đang được hoàn thiện."; 401 → đăng nhập, 403 → câu lỗi. Nút "Mở Màn quét" ở tab Check-in của Sự kiện (Mason chọn 23/11/2026; "Quét vé" ở tab bar để 5.3). Mục hoãn "Đăng nhập tài khoản khác trong cùng tab…" (`queryClient.clear()` khi đăng nhập OTP). Helper đường dẫn web trong contracts. e2e vòng OTP.
+  evidence: Tách khỏi Story 5.2 khi chạy bmad-build (23/11/2026, Mason chọn Split): spec gộp API và web ước 4.500–5.500 token. 5.2-a (API) merge được riêng; tới khi 5.2-b xong, mở link mời vẫn ra 404.
+  story: 5.2-b
+
+## Deferred from: code review of spec-5-2-a-api-nhan-loi-moi-va-quyen-ctv.md (2026-11-23)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-2-a-api-nhan-loi-moi-va-quyen-ctv.md`
+  summary: Bảng `checkers` không có CHECK ràng `status` với `revoked_at`/`revoked_by`: DB nhận cả dòng `revoked` không có người/lúc thu hồi lẫn dòng `active` còn `revoked_at`. Khi làm "Thu hồi"/"Khôi phục", chốt nghĩa của khôi phục (giữ hay xóa `revoked_*`) rồi thêm CHECK tương ứng bằng migration mới.
+  evidence: Review 5.2-a (Blind Hunter BH4, Edge Case Hunter EC2, low). `apps/api/drizzle/0034_checkers.sql` chỉ có `checkers_status_check`. Chưa code nào ghi `revoked_*`; tiền lệ ràng cặp cột: `organizations_payment_service_status_check`.
+  story: 5.6
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-2-a-api-nhan-loi-moi-va-quyen-ctv.md`
+  summary: Route CTV (`PermissionGuard` nhánh Sự kiện, `GET /v1/checkin/events/:eventId`) vẫn cho CTV `active` vào khi Sự kiện đã hủy, và `CheckinEvent` không có trạng thái để Màn quét biết. Khi làm hủy Sự kiện, quyết route CTV trả gì (vd. màn hết quyền hay đỏ `CANCELLED` ở lượt quét) và thêm trạng thái vào response nếu cần.
+  evidence: Review 5.2-a (Blind Hunter BH12, low). Hiện chưa route nào đặt `events.status='cancelled'`; 5.6 chỉ nhận ca quá `effective_end_at` (`EVENT_ENDED`).
+  story: 7.1

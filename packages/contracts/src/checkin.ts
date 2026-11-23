@@ -57,3 +57,44 @@ export const CreatedCheckerInvite = z.object({
   token: z.string().regex(CHECKER_INVITE_TOKEN_PATTERN),
 });
 export type CreatedCheckerInvite = z.infer<typeof CreatedCheckerInvite>;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Nhận lời mời CTV và Màn quét (FR-26, FR-29, AD-26, AD-30, Story 5.2)
+// ---------------------------------------------------------------------------------------------------------------
+
+/*
+ * Link mời còn hiệu lực khi: chưa thu hồi, đồng hồ DB còn trước min(`expires_at`, `effective_end_at`), Sự kiện chưa hủy
+ * và chưa bấm "Kết thúc" (cùng luật với `CheckerInvite.active`). Mọi lỗi về link là `404 CHECKER_INVITE_INVALID`, không
+ * lộ tên Sự kiện. Cả hai route trả `cache-control: no-store`.
+ */
+
+/**
+ * Body `POST /v1/checkin/invites/preview` và `POST /v1/checkin/invites/accept`. Token chỉ đi trong body, không bao giờ
+ * trong đường dẫn hay query. Chuỗi 1–256 ký tự; token đúng độ dài mà sai dạng (không khớp `CHECKER_INVITE_TOKEN_PATTERN`)
+ * xử lý như token sai (`404 CHECKER_INVITE_INVALID`).
+ */
+export const CheckerInviteTokenRequest = z.object({ token: z.string().min(1).max(256) });
+export type CheckerInviteTokenRequest = z.input<typeof CheckerInviteTokenRequest>;
+
+/**
+ * `POST /v1/checkin/invites/preview` (không bắt buộc đăng nhập): tên Sự kiện và tên BTC của link. `scanEventId`: id Sự
+ * kiện khi người xem đã đăng nhập và đã có quyền quét (CTV `active`, hoặc Owner/Admin của BTC sở hữu), kể cả khi link đã
+ * hết hiệu lực (mở lại link để quay lại Màn quét); còn lại `null`.
+ */
+export const CheckerInvitePreview = z.object({
+  eventName: z.string(),
+  organizationName: z.string(),
+  scanEventId: z.uuid().nullable(),
+});
+export type CheckerInvitePreview = z.infer<typeof CheckerInvitePreview>;
+
+/**
+ * `POST /v1/checkin/invites/accept` (cần đăng nhập): tài khoản đang đăng nhập quét được Sự kiện `eventId`. Nhận lại khi
+ * đã là CTV `active`, hoặc là Owner/Admin, trả cùng kết quả mà không ghi gì. Đã bị thu hồi → `403 CHECKER_REVOKED`.
+ */
+export const AcceptedCheckerInvite = z.object({ eventId: z.uuid() });
+export type AcceptedCheckerInvite = z.infer<typeof AcceptedCheckerInvite>;
+
+/** `GET /v1/checkin/events/:eventId` (`checkin.scan`): Sự kiện của Màn quét. */
+export const CheckinEvent = z.object({ eventId: z.uuid(), eventName: z.string() });
+export type CheckinEvent = z.infer<typeof CheckinEvent>;

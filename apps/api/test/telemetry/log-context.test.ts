@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Logger } from '@nestjs/common';
+import { sql } from 'drizzle-orm';
 import type { Job, JobResult, PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -43,6 +44,42 @@ describe('log của request BTC', () => {
     await h.http.get(`/v1/orgs/${orgId}/notices`).set('cookie', other.cookie).set('x-request-id', requestId).expect(403);
     const lines = h.logs.lines.filter((l) => l.requestId === requestId);
     expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(line).not.toHaveProperty('organizationId');
+  });
+
+  it('route CTV (Story 5.2): CTV active → dòng kết thúc request mang organizationId của BTC sở hữu; người khác (403 NOT_A_MEMBER) → không', async () => {
+    const owner = await signUp(h);
+    const ctv = await signUp(h);
+    const other = await signUp(h);
+    const orgId = (await h.http.post('/v1/orgs').set('cookie', owner.cookie).send({ name: 'CLB Soát vé' }).expect(201))
+      .body.id as string;
+    const eventId = (
+      await h.http
+        .post(`/v1/orgs/${orgId}/events`)
+        .set('cookie', owner.cookie)
+        .send({
+          name: 'Sự kiện log',
+          startsAt: '2099-11-16T07:00:00+07:00',
+          endsAt: '2099-11-16T17:00:00+07:00',
+          refundPolicy: 'Không hoàn vé.',
+        })
+        .expect(201)
+    ).body.id as string;
+    await h.db.orm.execute(
+      sql`INSERT INTO checkers (organization_id, event_id, user_id, status) VALUES (${orgId}, ${eventId}, ${ctv.userId}, 'active')`,
+    );
+
+    const allowed = `req-ctv-${randomUUID()}`;
+    await h.http.get(`/v1/checkin/events/${eventId}`).set('cookie', ctv.cookie).set('x-request-id', allowed).expect(200);
+    const completed = h.logs.lines.filter((l) => l.requestId === allowed).find((l) => 'res' in l);
+    expect(completed).toMatchObject({ requestId: allowed, organizationId: orgId });
+
+    const denied = `req-ctv-${randomUUID()}`;
+    const res = await h.http.get(`/v1/checkin/events/${eventId}`).set('cookie', other.cookie).set('x-request-id', denied);
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('NOT_A_MEMBER');
+    const lines = h.logs.lines.filter((l) => l.requestId === denied);
+    expect(lines.find((l) => 'res' in l)).toBeDefined();
     for (const line of lines) expect(line).not.toHaveProperty('organizationId');
   });
 });
