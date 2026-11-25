@@ -40,8 +40,9 @@ const columns = {
 };
 
 /**
- * Khóa dòng Sự kiện của BTC (`FOR UPDATE`) trong `tx` của "Tạo link mới": hai lần tạo đồng thời xếp hàng trên dòng này,
- * và chạy tuần tự với mọi lệnh ghi khác của BTC lên Sự kiện (Ẩn, Kết thúc, sửa giờ…).
+ * Khóa dòng Sự kiện của BTC (`FOR UPDATE`) trong `tx` của "Tạo link mới" (Story 5.1) và "Thu hồi"/"Khôi phục" CTV (Story
+ * 5.6): hai lần ghi đồng thời xếp hàng trên dòng này, và chạy tuần tự với mọi lệnh ghi khác của BTC lên Sự kiện (Ẩn, Kết
+ * thúc, sửa giờ…).
  */
 export async function lockEventForCheckerInvite(
   tx: Tx,
@@ -58,7 +59,7 @@ export async function lockEventForCheckerInvite(
   return row;
 }
 
-/** Đọc (không khóa) Sự kiện của BTC cho `GET` link mời CTV. */
+/** Đọc (không khóa) Sự kiện của BTC cho `GET` link mời CTV (Story 5.1) và danh sách CTV (Story 5.6). */
 export async function checkinEventOf(db: DbExecutor, ctx: AccessContext, eventId: string): Promise<CheckinEventRef> {
   if (!UUID.test(eventId)) throw notFound();
   const [row] = await db
@@ -70,12 +71,13 @@ export async function checkinEventOf(db: DbExecutor, ctx: AccessContext, eventId
 }
 
 /**
- * `CheckinEventRef` kèm BTC sở hữu và tên Sự kiện: cho cổng quyền CTV (`PermissionGuard`), Màn quét và nhận lời mời CTV
- * (Story 5.2), nơi chỉ có id Sự kiện.
+ * `CheckinEventRef` kèm BTC sở hữu, tên Sự kiện và `ended` (cùng luật `checkinEnded`, tính lúc đọc): cho cổng quyền CTV
+ * (`PermissionGuard`; CTV hết quyền khi Sự kiện đã kết thúc, Story 5.6, AD-14), Màn quét và nhận lời mời CTV (Story 5.2),
+ * nơi chỉ có id Sự kiện.
  */
-export type CheckinEventDetail = CheckinEventRef & { organizationId: string; name: string };
+export type CheckinEventDetail = LockedCheckinEventRef & { organizationId: string; name: string };
 
-const detailColumns = { ...columns, organizationId: events.organizationId, name: events.name };
+const detailColumns = { ...columns, ended: checkinEnded, organizationId: events.organizationId, name: events.name };
 
 /** Đọc (không khóa) Sự kiện theo id, không cần ctx. Id sai dạng hoặc không tồn tại → `null`. */
 export async function checkinEventById(db: DbExecutor, eventId: string): Promise<CheckinEventDetail | null> {

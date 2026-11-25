@@ -186,7 +186,17 @@ export type AuditAction =
    * `{ type: 'checker', id }`; `organizationId`: BTC sở hữu Sự kiện). Nhận lại khi đã là CTV `active` không ghi. Không
    * ghi token hay hash.
    */
-  | 'checker.joined';
+  | 'checker.joined'
+  /**
+   * Owner/Admin "Thu hồi" một CTV `active` của Sự kiện (Story 5.6, FR-26; đối tượng: `{ type: 'checker', id }`;
+   * `changedFields: ['status']`). Thu hồi lặp (dòng đã `revoked`) không ghi.
+   */
+  | 'checker.revoked'
+  /**
+   * Owner/Admin "Khôi phục" một CTV đã bị thu hồi khi Sự kiện chưa kết thúc (Story 5.6; đối tượng: `{ type: 'checker',
+   * id }`; `changedFields: ['status']`). Người và lúc thu hồi trước đó chỉ còn ở dòng `checker.revoked`.
+   */
+  | 'checker.restored';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

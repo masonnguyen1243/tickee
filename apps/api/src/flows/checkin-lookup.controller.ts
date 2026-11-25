@@ -42,8 +42,9 @@ function ticketIdOf(raw: string): string {
 /**
  * Tra tay và check-in tay ở Màn quét (Story 5.5, FR-29): Owner/Admin của BTC sở hữu Sự kiện, hoặc CTV `active` của đúng
  * Sự kiện (`PermissionGuard`, nhánh Sự kiện, `checkin.lookup`). Người khác, CTV của Sự kiện khác, Sự kiện lạ → `403
- * NOT_A_MEMBER`; CTV bị thu hồi → `403 CHECKER_REVOKED`. `cache-control: no-store` đặt ở đầu handler nên có ở mọi
- * response handler hoặc flow tạo ra, kể cả lỗi chúng ném.
+ * NOT_A_MEMBER`; CTV bị thu hồi → `403 CHECKER_REVOKED`; CTV `active` khi Sự kiện đã kết thúc → `403 EVENT_ENDED`
+ * (Story 5.6). `cache-control: no-store` đặt ở đầu handler nên có ở mọi response handler hoặc flow tạo ra, kể cả lỗi
+ * chúng ném.
  */
 @Controller('checkin/events/:eventId')
 export class CheckinLookupController {

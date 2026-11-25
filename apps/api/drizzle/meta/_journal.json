@@ -260,6 +260,13 @@
       "when": 1795583478282,
       "tag": "0036_checkin_lookup_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1795592538521,
+      "tag": "0037_checkers_revoked_check",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,9 @@ import {
   CHECKER_REVOKED_MESSAGE,
   checkerRevoked,
   checkinEvent,
+  EVENT_ENDED_MESSAGE,
+  EVENT_ENDED_NOTE,
+  eventEnded,
   inviteInvalid,
   invitePreview,
   mockCheckinApi,
@@ -392,16 +395,19 @@ test.describe('Màn quét /events/:eventId: tải Sự kiện', () => {
     expect(new URL(page.url()).search).toBe(`?returnTo=${encodeURIComponent(SCAN_PATH)}`);
   });
 
-  const FORBIDDEN: [string, () => Reply, string][] = [
-    ['NOT_A_MEMBER', notAMember, NOT_A_MEMBER_MESSAGE],
-    ['CHECKER_REVOKED', checkerRevoked, CHECKER_REVOKED_MESSAGE],
+  // Story 5.6: CTV khi Sự kiện đã kết thúc (`EVENT_ENDED`) cũng vào màn hết quyền, thêm dòng "Sự kiện đã kết thúc.".
+  const FORBIDDEN: [string, () => Reply, string, string | null][] = [
+    ['NOT_A_MEMBER', notAMember, NOT_A_MEMBER_MESSAGE, null],
+    ['CHECKER_REVOKED', checkerRevoked, CHECKER_REVOKED_MESSAGE, null],
+    ['EVENT_ENDED', eventEnded, EVENT_ENDED_MESSAGE, EVENT_ENDED_NOTE],
   ];
-  for (const [code, reply, message] of FORBIDDEN) {
-    test(`403 ${code}: câu của api, không tên Sự kiện`, async ({ page }) => {
+  for (const [code, reply, message, note] of FORBIDDEN) {
+    test(`403 ${code}: màn hết quyền${note ? ' kèm "Sự kiện đã kết thúc."' : ''}, không tên Sự kiện`, async ({ page }) => {
       await signedIn(page);
       await mockCheckinApi(page, { [`GET /checkin/events/${EVENT_ID}`]: reply });
       await page.goto(SCAN_PATH);
       await expect(page.getByRole('heading', { name: message })).toBeVisible();
+      await expect(page.getByText(EVENT_ENDED_NOTE, { exact: true })).toHaveCount(note ? 1 : 0);
       await expect(page.getByText(EVENT_NAME)).toHaveCount(0);
       await expect(enableCamera(page)).toHaveCount(0);
     });

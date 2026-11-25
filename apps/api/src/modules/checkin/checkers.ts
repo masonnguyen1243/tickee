@@ -1,17 +1,20 @@
-import { ErrorCode } from '@tickee/contracts';
-import { and, eq } from 'drizzle-orm';
+import { CheckerAction, ErrorCode } from '@tickee/contracts';
+import { and, asc, eq, ne, sql } from 'drizzle-orm';
 import { orgScope, type AccessContext, type CheckerStatus } from '../../platform/access/index.js';
-import type { DbExecutor, Tx } from '../../platform/db/index.js';
+import { audit, type AuditAction } from '../../platform/audit/index.js';
+import type { Database, DbExecutor, Tx } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
+import { lockEventForCheckerInvite } from '../event/index.js';
 import { inviteActiveSql, type InviteEventState } from './invite-rule.js';
 import { hashCheckerInviteToken } from './invite-token.js';
 import { checkerInvites, checkers } from './schema.js';
 
 /*
- * Phần `checkin` mà luồng nhận lời mời CTV (`flows.acceptCheckerInvite`, `flows.previewCheckerInvite`, Story 5.2) và cổng
- * quyền CTV cần. Token chỉ vào đây và chỉ được băm: không trả ra, không log. Đọc theo BTC qua `orgScope`, trừ một ngoại
- * lệ có chủ ý: `checkerInviteByToken` tìm link theo hash token trên mọi BTC (người mở link chưa thuộc BTC nào; token 128
- * bit là khóa tra), rồi các bước sau dùng BTC của chính link đó.
+ * Phần `checkin` mà luồng nhận lời mời CTV (`flows.acceptCheckerInvite`, `flows.previewCheckerInvite`, Story 5.2), cổng
+ * quyền CTV, danh sách CTV (`flows`, Story 5.6) và "Thu hồi"/"Khôi phục" (Story 5.6) cần. Token chỉ vào đây và chỉ được
+ * băm: không trả ra, không log. Đọc theo BTC qua `orgScope`, trừ một ngoại lệ có chủ ý: `checkerInviteByToken` tìm link
+ * theo hash token trên mọi BTC (người mở link chưa thuộc BTC nào; token 128 bit là khóa tra), rồi các bước sau dùng BTC
+ * của chính link đó.
  */
 
 const ci = checkerInvites;
@@ -97,4 +100,99 @@ export async function joinChecker(
     .where(and(orgScope(scope)(checkers), eq(checkers.eventId, eventId), eq(checkers.userId, userId)));
   if (!existing) throw new Error('INSERT checkers trùng khóa nhưng không đọc lại được dòng');
   return { id: existing.id, joined: false, status: existing.status };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Danh sách, thu hồi, khôi phục CTV (Story 5.6, FR-26, AD-30)
+// ---------------------------------------------------------------------------------------------------------------
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** `checkerId` sai dạng, lạ hoặc của Sự kiện khác: một mã, một câu. */
+const checkerNotFound = () => new AppError(ErrorCode.NOT_FOUND, 'CTV này không còn trong Sự kiện.');
+
+/** Một dòng `checkers` cho danh sách CTV của BTC (tên, email đọc ở `flows` qua `identity`). */
+export interface CheckerRow {
+  id: string;
+  userId: string;
+  status: CheckerStatus;
+  /** Lúc nhận lời mời lần đầu (`created_at`). */
+  acceptedAt: Date;
+  revokedAt: Date | null;
+}
+
+/**
+ * Mọi CTV của Sự kiện `eventId` (BTC `scope`), kể cả đã bị thu hồi, theo lúc nhận lời mời tăng dần (rồi id, UUIDv7):
+ * thứ tự không đổi khi đổi trạng thái. Bên gọi đã kiểm Sự kiện thuộc BTC.
+ */
+export async function checkersOf(db: DbExecutor, scope: Scope, eventId: string): Promise<CheckerRow[]> {
+  return db
+    .select({
+      id: checkers.id,
+      userId: checkers.userId,
+      status: checkers.status,
+      acceptedAt: checkers.createdAt,
+      revokedAt: checkers.revokedAt,
+    })
+    .from(checkers)
+    .where(and(orgScope(scope)(checkers), eq(checkers.eventId, eventId)))
+    .orderBy(asc(checkers.createdAt), asc(checkers.id));
+}
+
+/** Trạng thái đích và audit của mỗi thao tác. */
+const ACTION_RULES = {
+  [CheckerAction.REVOKE]: { status: 'revoked', audit: 'checker.revoked' },
+  [CheckerAction.RESTORE]: { status: 'active', audit: 'checker.restored' },
+} as const satisfies Record<CheckerAction, { status: CheckerStatus; audit: AuditAction }>;
+
+/**
+ * "Thu hồi" (`revoke`) hoặc "Khôi phục" (`restore`) CTV `checkerId` của Sự kiện `eventId`, một transaction:
+ * 1. khóa Sự kiện của BTC `FOR UPDATE` (`lockEventForCheckerInvite`; lạ, sai dạng, của BTC khác → `404 EVENT_NOT_FOUND`):
+ *    hai lần bấm đồng thời xếp hàng, và chạy tuần tự với "Kết thúc";
+ * 2. khôi phục khi Sự kiện đã kết thúc → `409 EVENT_ALREADY_ENDED`; thu hồi không bị chặn theo thời gian;
+ * 3. `UPDATE` có điều kiện trên `status` trong `orgScope` và `event_id`: thu hồi ghi `revoked` + người bấm + `now()`;
+ *    khôi phục ghi `active` và xóa `revoked_*` (lịch sử ở audit);
+ * 4. không dòng nào đổi: dòng đã ở trạng thái đích → xong, không ghi gì, không audit (lần bấm trước giữ người/lúc thu
+ *    hồi); không có dòng (`checkerId` sai dạng, lạ, của Sự kiện khác) → `404 NOT_FOUND`;
+ * 5. audit `checker.revoked` / `checker.restored` (`changedFields: ['status']`).
+ * Không đẩy realtime: Màn quét đang mở của CTV đổi ở request kế tiếp (quyền đọc lại ở mỗi request).
+ */
+export async function setCheckerStatus(
+  db: Database,
+  ctx: AccessContext,
+  eventId: string,
+  checkerId: string,
+  action: CheckerAction,
+): Promise<void> {
+  const rule = ACTION_RULES[action];
+  await db.transaction(async (tx) => {
+    const event = await lockEventForCheckerInvite(tx, ctx, eventId);
+    if (action === CheckerAction.RESTORE && event.ended) {
+      throw new AppError(ErrorCode.EVENT_ALREADY_ENDED, 'Sự kiện đã kết thúc, không khôi phục được CTV.');
+    }
+    if (!UUID.test(checkerId)) throw checkerNotFound();
+
+    const target = and(orgScope(ctx)(checkers), eq(checkers.eventId, event.id), eq(checkers.id, checkerId));
+    const [changed] = await tx
+      .update(checkers)
+      .set(
+        rule.status === 'revoked'
+          ? { status: 'revoked', revokedBy: ctx.userId, revokedAt: sql`now()` }
+          : { status: 'active', revokedBy: null, revokedAt: null },
+      )
+      .where(and(target, ne(checkers.status, rule.status)))
+      .returning({ id: checkers.id });
+    if (!changed) {
+      const [existing] = await tx.select({ id: checkers.id }).from(checkers).where(target);
+      if (!existing) throw checkerNotFound();
+      return;
+    }
+    await audit.record(tx, {
+      actorUserId: ctx.userId,
+      organizationId: ctx.organizationId,
+      action: rule.audit,
+      target: { type: 'checker', id: changed.id },
+      changedFields: ['status'],
+    });
+  });
 }

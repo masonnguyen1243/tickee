@@ -34,9 +34,11 @@ const toDate = (value: Date | string | null | undefined): Date | null => {
  * - Có `:orgId` (route BTC): không là thành viên (kể cả BTC không tồn tại hay `orgId` sai dạng) → 403 `NOT_A_MEMBER`;
  *   vai thiếu quyền → 403 `FORBIDDEN_ROLE`. Qua thì gắn `req.accessContext`.
  * - Không có `:orgId` mà có `:eventId` (route CTV, AD-26): ghép cổng `ACCESS_RESOLVER` (vai trong BTC sở hữu Sự kiện) và
- *   `CHECKER_ACCESS_RESOLVER` (BTC sở hữu, trạng thái CTV). Owner/Admin kiểm theo `ROLE_PERMISSIONS`; CTV `active` chỉ
- *   có `CHECKER_PERMISSIONS` (quyền khác → 403 `FORBIDDEN_ROLE`); CTV `revoked` → 403 `CHECKER_REVOKED`; còn lại (kể cả
- *   Sự kiện không tồn tại, `eventId` sai dạng) → 403 `NOT_A_MEMBER`. Qua thì gắn `req.eventAccessContext`.
+ *   `CHECKER_ACCESS_RESOLVER` (BTC sở hữu, trạng thái CTV, Sự kiện đã kết thúc). Owner/Admin kiểm theo
+ *   `ROLE_PERMISSIONS`, kể cả khi Sự kiện đã kết thúc; CTV `revoked` → 403 `CHECKER_REVOKED`; CTV `active` khi Sự kiện
+ *   đã kết thúc → 403 `EVENT_ENDED` (Story 5.6, AD-14); CTV `active` còn lại chỉ có `CHECKER_PERMISSIONS` (quyền khác →
+ *   403 `FORBIDDEN_ROLE`); còn lại (kể cả Sự kiện không tồn tại, `eventId` sai dạng) → 403 `NOT_A_MEMBER`. Qua thì gắn
+ *   `req.eventAccessContext`.
  * - Không có tham số nào: lỗi cấu hình (500).
  * Quyền đọc lại ở mỗi request, không cache. Ctx mang `stepUpAt` của session để story sau dùng; `organizationId` gắn vào
  * mọi log còn lại của request. Luật 2FA không nằm ở đây mà ở `TotpGuard` của `identity` (AD-26).
@@ -100,7 +102,8 @@ export class PermissionGuard implements CanActivate {
 
   /**
    * Route CTV (`/v1/checkin/events/:eventId/…`): Owner/Admin của BTC sở hữu Sự kiện thắng mọi trạng thái CTV (quét
-   * không cần lời mời); không thì theo dòng `checkers` của người gọi ở đúng Sự kiện này.
+   * không cần lời mời, kể cả khi Sự kiện đã kết thúc); không thì theo dòng `checkers` của người gọi ở đúng Sự kiện này,
+   * theo thứ tự: `revoked` → `CHECKER_REVOKED`; `active` mà Sự kiện đã kết thúc → `EVENT_ENDED`; `active` → quyền CTV.
    */
   private async eventRoute(
     req: GuardRequest,
@@ -122,11 +125,12 @@ export class PermissionGuard implements CanActivate {
     if (member) {
       if (!roleHasPermission(member.role, permission)) throw forbiddenRole(permission);
       req.eventAccessContext = { userId, organizationId, eventId, role: member.role, assignedEventIds: [], stepUpAt };
-    } else if (event.checker === 'active') {
-      if (!checkerHasPermission(permission)) throw forbiddenRole(permission);
-      req.eventAccessContext = { userId, organizationId, eventId, role: null, assignedEventIds: [eventId], stepUpAt };
     } else if (event.checker === 'revoked') {
       throw new AppError(ErrorCode.CHECKER_REVOKED, 'Bạn không còn quyền soát vé cho Sự kiện này.');
+    } else if (event.checker === 'active') {
+      if (event.ended) throw new AppError(ErrorCode.EVENT_ENDED, 'Bạn không còn quyền soát vé cho Sự kiện này.');
+      if (!checkerHasPermission(permission)) throw forbiddenRole(permission);
+      req.eventAccessContext = { userId, organizationId, eventId, role: null, assignedEventIds: [eventId], stepUpAt };
     } else {
       throw notAChecker();
     }

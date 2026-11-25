@@ -10,9 +10,10 @@ import { scanTicket } from './checkin-scan.flow.js';
 /**
  * Quét Mã QR vé ở Màn quét (`POST /v1/checkin/events/:eventId/scans`, Story 5.3): Owner/Admin của BTC sở hữu Sự kiện,
  * hoặc CTV `active` của đúng Sự kiện (`PermissionGuard`, nhánh Sự kiện, `checkin.scan`). Người khác, Sự kiện lạ → `403
- * NOT_A_MEMBER`; CTV bị thu hồi → `403 CHECKER_REVOKED`. Body sai schema → `400 VALIDATION_FAILED`. Mọi kết quả quét
- * (kể cả đỏ) là `200 ScanResult`. `cache-control: no-store` đặt ở đầu handler nên có ở mọi response handler hoặc flow
- * tạo ra, kể cả lỗi chúng ném. Mã QR chỉ đi trong body (không log).
+ * NOT_A_MEMBER`; CTV bị thu hồi → `403 CHECKER_REVOKED`; CTV `active` khi Sự kiện đã kết thúc → `403 EVENT_ENDED` (Story
+ * 5.6). Body sai schema → `400 VALIDATION_FAILED`. Mọi kết quả quét (kể cả đỏ) là `200 ScanResult`. `cache-control:
+ * no-store` đặt ở đầu handler nên có ở mọi response handler hoặc flow tạo ra, kể cả lỗi chúng ném. Mã QR chỉ đi trong
+ * body (không log).
  */
 @Controller('checkin/events/:eventId/scans')
 export class CheckinScanController {

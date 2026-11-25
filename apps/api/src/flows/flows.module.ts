@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { EventModule } from '../modules/event/index.js';
 import { EventChangeEmailQueues } from '../modules/ordering/index.js';
 import { CheckerInviteAcceptanceController } from './checker-invite.controller.js';
+import { CheckersListController } from './checkers.controller.js';
 import { CheckinLookupController } from './checkin-lookup.controller.js';
 import { CheckinScanController } from './checkin-scan.controller.js';
 import { EventEditController } from './event-edit.controller.js';
@@ -15,7 +16,8 @@ import { TicketTypesController } from './ticket-types.controller.js';
  * CTV (Story 5.2) ghép `checkin`, `event` và `organizer`. Quét Mã QR vé (Story 5.3) ghép `ticketing` (check-in, khóa QR
  * toàn cục `TICKET_QR_KEYS`), `identity` và `organizer` (tên, vai người quét trước). Tra tay và check-in tay (Story 5.5)
  * ghép `ordering` (Đơn khớp SĐT/email), `ticketing` và bộ đếm tra tay của `checkin` (`CheckinLookupRateLimiter`, toàn
- * cục từ `CheckinLookupLimitModule`).
+ * cục từ `CheckinLookupLimitModule`). Danh sách CTV của Sự kiện (Story 5.6) ghép `checkin`, `event` và `identity` (tên,
+ * email).
  */
 @Module({
   imports: [EventModule],
@@ -23,6 +25,7 @@ import { TicketTypesController } from './ticket-types.controller.js';
     TicketTypesController,
     EventEditController,
     CheckerInviteAcceptanceController,
+    CheckersListController,
     CheckinScanController,
     CheckinLookupController,
   ],

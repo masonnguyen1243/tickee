@@ -15,7 +15,13 @@ import {
   CHECKER_INVITE_PREVIEW_API_PATH,
   CHECKER_INVITE_TOKEN_PATTERN,
   CHECKER_INVITE_TTL_DAYS,
+  CheckerAction,
+  checkerActionApiPath,
   checkerInviteApiPath,
+  CheckerList,
+  CheckerListItem,
+  checkersApiPath,
+  CheckerStatus,
   CheckerInvitePreview,
   CheckerInviteTokenRequest,
   checkerInviteUrl,
@@ -303,5 +309,56 @@ describe('tra tay và check-in tay (Story 5.5, FR-29, AD-31, AD-35)', () => {
     for (const bad of [{}, { retryAfterSeconds: 0 }, { retryAfterSeconds: 1.5 }]) {
       expect(CheckinLookupRateLimitedDetails.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
     }
+  });
+});
+
+describe('CTV của Sự kiện: danh sách, thu hồi, khôi phục (Story 5.6)', () => {
+  const CHECKER = '019a3b2c-0d00-7abc-8def-000000000001';
+  const row = {
+    id: CHECKER,
+    name: 'Trần Thị Bình',
+    email: 'binh@vidu.vn',
+    acceptedAt: '2026-11-22T10:04:00+07:00',
+    status: 'active',
+    revokedAt: null,
+  };
+
+  it('đường API tương đối với /v1, mã hóa từng đoạn id', () => {
+    expect(checkersApiPath(ORG, EVENT)).toBe(`/orgs/${ORG}/events/${EVENT}/checkers`);
+    expect(checkersApiPath('a/b', 'c?d')).toBe('/orgs/a%2Fb/events/c%3Fd/checkers');
+    expect(checkerActionApiPath(ORG, EVENT, CHECKER, CheckerAction.REVOKE)).toBe(
+      `/orgs/${ORG}/events/${EVENT}/checkers/${CHECKER}/revoke`,
+    );
+    expect(checkerActionApiPath(ORG, EVENT, 'x/y', CheckerAction.RESTORE)).toBe(
+      `/orgs/${ORG}/events/${EVENT}/checkers/x%2Fy/restore`,
+    );
+  });
+
+  it('trạng thái CTV: active, revoked', () => {
+    expect(Object.values(CheckerStatus).sort()).toEqual(['active', 'revoked']);
+    expect(Object.values(CheckerAction).sort()).toEqual(['restore', 'revoke']);
+  });
+
+  it('một hàng: tên/email null được (tài khoản OTP, tài khoản không còn); tên rỗng không hợp lệ; revokedAt có offset', () => {
+    expect(CheckerListItem.parse(row)).toEqual(row);
+    const revoked = { ...row, status: 'revoked', revokedAt: '2026-11-23T08:00:00+07:00' };
+    expect(CheckerListItem.parse(revoked)).toEqual(revoked);
+    expect(CheckerListItem.parse({ ...row, name: null }).name).toBeNull();
+    expect(CheckerListItem.parse({ ...row, name: null, email: null })).toMatchObject({ name: null, email: null });
+    for (const bad of [
+      { ...row, id: 'abc' },
+      { ...row, name: '' },
+      { ...row, status: 'pending' },
+      { ...row, acceptedAt: '2026-11-22T10:04:00' },
+      { ...row, revokedAt: undefined },
+    ]) {
+      expect(CheckerListItem.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+    expect(CheckerList.parse({ checkers: [row] })).toEqual({ checkers: [row] });
+    expect(CheckerList.parse({ checkers: [] })).toEqual({ checkers: [] });
+  });
+
+  it('mã lỗi mới: EVENT_ENDED', () => {
+    expect(ErrorCode.EVENT_ENDED).toBe('EVENT_ENDED');
   });
 });

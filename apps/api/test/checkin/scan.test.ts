@@ -600,23 +600,24 @@ describe('POST /v1/checkin/events/:eventId/scans', () => {
     },
   );
 
+  // Admin: từ Story 5.6, CTV gửi lại cùng scanId sau khi Sự kiện đóng nhận `403 EVENT_ENDED` từ guard (cái giá đã chấp
+  // nhận ở Design Notes của spec 5.6); `checkers.test.ts` phủ CTV bị `403 EVENT_ENDED` ở cả 4 route CTV.
   it('Sự kiện đóng khi lần đầu còn chạy (UPDATE chưa commit): lần gửi lại cùng scanId chờ lần đầu commit → ok bản chụp của Vé', async () => {
     const sale = await freeEvent();
-    const saleChecker = await checkerOf(sale);
     const [ticket] = await issue(sale);
     const scanId = randomUUID();
     // Lần đầu đã qua cổng (Sự kiện còn mở) và ghi Vé nhưng chưa commit (kết nối riêng); đồng hồ qua `effective_end_at`.
     const [res] = await whileLocked(
       [
         'UPDATE tickets SET checked_in_at = now(), checked_in_by = $2, checkin_scan_id = $3 WHERE id = $1',
-        [ticket!.id, saleChecker.userId, scanId],
+        [ticket!.id, admin.userId, scanId],
       ],
       TICKET_REPLAY_READ,
-      () => [CLOSE.time_ended(sale.event.id).then(() => scan(sale.event.id, saleChecker, ticket!.qr, scanId))],
+      () => [CLOSE.time_ended(sale.event.id).then(() => scan(sale.event.id, admin, ticket!.qr, scanId))],
     );
     expect(res!.status, res!.text).toBe(200);
     expect(ScanResult.parse(res!.body)).toEqual(okOf(ticket!));
-    expect(await ticketRow(ticket!.id)).toMatchObject({ checked_in_by: saleChecker.userId, checkin_scan_id: scanId });
+    expect(await ticketRow(ticket!.id)).toMatchObject({ checked_in_by: admin.userId, checkin_scan_id: scanId });
   });
 
   it('Sự kiện bị khóa hoặc đã Ẩn vẫn check-in được: khóa chỉ chặn bán', async () => {

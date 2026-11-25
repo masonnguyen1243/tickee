@@ -4,7 +4,7 @@ import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/reac
 import { checkerInviteUrl, checkinScanPath, ErrorCode, type EventDetail } from '@tickee/contracts';
 import { Copy, ScanLine } from 'lucide-react';
 import Link from 'next/link';
-import { useId, useState, type ReactNode } from 'react';
+import { useId, useState } from 'react';
 import { toast } from 'sonner';
 
 import { ConfirmDialog } from '@/components/tickee/confirm-dialog';
@@ -29,11 +29,14 @@ import { eventQueryKey, eventsQueryKey } from '@/lib/event/api';
 
 import { isEventEnded } from '../event-status';
 import { useOrigin } from '../public-event-link';
+import { ActionWithReason } from './action-with-reason';
+import { CheckerList } from './checker-list';
 
 /*
  * Tab Check-in của Sự kiện (Story 5.1, FR-26, UX-DR39): thẻ "Màn quét" (Story 5.2: lối vào Màn quét của Owner/Admin, không
- * cần lời mời, FR-29) và khối "Link mời CTV". Một link chung cho mỗi Sự kiện: trạng thái "Còn hạn"/"Đã hết hạn" kèm thời
- * điểm hết hạn (giờ Việt Nam), "Sao chép link" (toast "Đã sao chép") và "Tạo link mới".
+ * cần lời mời, FR-29), khối "Link mời CTV" và khối "CTV soát vé" (Story 5.6, `checker-list.tsx`). Một link chung cho
+ * mỗi Sự kiện: trạng thái "Còn hạn"/"Đã hết hạn" kèm thời điểm hết hạn (giờ Việt Nam), "Sao chép link" (toast "Đã sao
+ * chép") và "Tạo link mới".
  *
  * Link đầy đủ chỉ có ngay sau khi tạo: token nằm trong cache TanStack Query của tab trình duyệt (không `sessionStorage`),
  * gắn với id link. Chuyển tab trong app vẫn sao chép được; tải lại hoặc đóng trang thì "Sao chép link" tắt kèm lý do.
@@ -53,21 +56,6 @@ function InviteSkeleton() {
       <span className="sr-only">Đang tải link mời CTV</span>
       <Skeleton className="h-6 w-48" />
       <Skeleton className="h-control-height w-40" />
-    </div>
-  );
-}
-
-/** Nút kèm lý do tắt hiện ngay dưới nút (luôn đọc được, không chỉ tooltip). */
-function ActionWithReason({ reason, children }: { reason: string | null; children: (reasonId?: string) => ReactNode }) {
-  const reasonId = useId();
-  return (
-    <div className="flex min-w-0 flex-col items-start gap-1">
-      {children(reason ? reasonId : undefined)}
-      {reason ? (
-        <p id={reasonId} className="text-meta text-muted-foreground">
-          {reason}
-        </p>
-      ) : null}
     </div>
   );
 }
@@ -273,12 +261,13 @@ function ScanScreenCard({ eventId }: { eventId: string }) {
   );
 }
 
-/** Tab "Check-in": thẻ "Màn quét" (Story 5.2) rồi khối link mời CTV (Story 5.1). */
+/** Tab "Check-in": thẻ "Màn quét" (Story 5.2), khối link mời CTV (Story 5.1), rồi danh sách CTV (Story 5.6). */
 export function CheckinTab({ orgId, event }: { orgId: string; event: EventDetail }) {
   return (
     <div className="flex min-w-0 flex-col gap-section" data-slot="checkin-tab">
       <ScanScreenCard eventId={event.id} />
       <CheckerInviteBlock orgId={orgId} event={event} />
+      <CheckerList orgId={orgId} event={event} />
     </div>
   );
 }

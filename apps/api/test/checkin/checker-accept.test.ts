@@ -386,8 +386,11 @@ describe('POST /v1/checkin/invites/accept', () => {
       const [res] = await whileHolding(
         [
           [
-            `INSERT INTO checkers (organization_id, event_id, user_id, status) VALUES ($1, $2, $3, $4)`,
-            [orgId, event.id, checker.userId, status],
+            // `checkers_revoked_check` (Story 5.6): dòng `revoked` có người và lúc thu hồi.
+            `INSERT INTO checkers (organization_id, event_id, user_id, status, revoked_at, revoked_by)
+             VALUES ($1, $2, $3, $4::text, CASE WHEN $4::text = 'revoked' THEN now() END,
+                     CASE WHEN $4::text = 'revoked' THEN $5::uuid END)`,
+            [orgId, event.id, checker.userId, status, owner.userId],
           ],
         ],
         1,
@@ -521,6 +524,15 @@ describe('ràng buộc DB của checkers', () => {
       code: '23505',
       constraint: 'checkers_event_id_user_id_key',
     });
-    await expect(insert(owner.userId, 'paused')).rejects.toMatchObject({ code: '23514', constraint: 'checkers_status_check' });
+    // `paused` vi phạm cả `checkers_status_check` lẫn `checkers_revoked_check` (Story 5.6); Postgres báo ràng buộc đầu
+    // theo tên, nên kiểm thêm cả hai ràng buộc đều có.
+    await expect(insert(owner.userId, 'paused')).rejects.toMatchObject({
+      code: '23514',
+      constraint: expect.stringMatching(/^checkers_(status|revoked)_check$/),
+    });
+    const { rows } = await h.db.pool.query<{ conname: string }>(
+      `SELECT conname FROM pg_constraint WHERE conrelid = 'checkers'::regclass AND contype = 'c' ORDER BY conname`,
+    );
+    expect(rows.map((r) => r.conname)).toEqual(['checkers_revoked_check', 'checkers_status_check']);
   });
 });

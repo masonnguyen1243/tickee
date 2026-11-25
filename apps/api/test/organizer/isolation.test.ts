@@ -158,6 +158,10 @@ describe('cách ly BTC', () => {
     // Story 5.1: link mời CTV của `checkin` (Owner và Admin, `checkers.manage`).
     expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/checker-invite');
     expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/checker-invite');
+    // Story 5.6: danh sách CTV (flows), thu hồi và khôi phục CTV (`checkin`; Owner và Admin, `checkers.manage`).
+    expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/checkers');
+    expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/checkers/:checkerId/revoke');
+    expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/checkers/:checkerId/restore');
     const permissionOf = (path: string, method = 'GET') =>
       routes.find((r) => r.method === method && r.path === path)?.permission;
     for (const path of ['', '/summary', '/:itemId', '/:itemId/match-candidates']) {
@@ -179,6 +183,12 @@ describe('cách ly BTC', () => {
     expect(permissionOf('/v1/orgs/:orgId/token/alert-threshold', 'PUT')).toBe(Permission.TOKEN_ALERT_MANAGE);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/checker-invite')).toBe(Permission.CHECKERS_MANAGE);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/checker-invite', 'POST')).toBe(Permission.CHECKERS_MANAGE);
+    expect(permissionOf('/v1/orgs/:orgId/events/:eventId/checkers')).toBe(Permission.CHECKERS_MANAGE);
+    for (const action of ['revoke', 'restore']) {
+      expect(permissionOf(`/v1/orgs/:orgId/events/:eventId/checkers/:checkerId/${action}`, 'POST'), action).toBe(
+        Permission.CHECKERS_MANAGE,
+      );
+    }
     expect(routes.find((r) => r.method === 'POST' && r.path === '/v1/orgs/:orgId/payment-service/check')?.permission).toBe(
       Permission.PAYOUT_ACCOUNT_MANAGE,
     );
@@ -386,15 +396,17 @@ describe('cách ly BTC', () => {
 
   it('route Sự kiện trên BTC A: body {} → 400, id ngẫu nhiên → 404 EVENT_NOT_FOUND', async () => {
     const eventRoutes = routes.filter((r) => r.permission && r.path.startsWith('/v1/orgs/:orgId/events'));
-    // Story 5.1: thêm `GET`/`POST …/checker-invite` (25).
-    expect(eventRoutes).toHaveLength(25);
+    // Story 5.1: thêm `GET`/`POST …/checker-invite` (25). Story 5.6: danh sách, thu hồi, khôi phục CTV (28).
+    expect(eventRoutes).toHaveLength(28);
     for (const route of eventRoutes) {
       const res = await call(route, orgA, ownerA.cookie);
       // Body được kiểm trước khi chạm DB; danh sách Sự kiện của BTC trả 200; còn lại Sự kiện ngẫu nhiên → 404.
-      // Mở bán, Ẩn, Hiện lại, Kết thúc, Tạo link mời CTV không có body nên cũng ra 404.
+      // Mở bán, Ẩn, Hiện lại, Kết thúc, Tạo link mời CTV, thu hồi/khôi phục CTV không có body nên cũng ra 404.
       const hasBody =
         (route.method === 'POST' || route.method === 'PATCH' || route.method === 'PUT') &&
-        !/\/events\/:eventId\/(publish|hide|unhide|end|checker-invite)$/.test(route.path);
+        !/\/events\/:eventId\/(publish|hide|unhide|end|checker-invite|checkers\/:checkerId\/(revoke|restore))$/.test(
+          route.path,
+        );
       const expected = hasBody ? 400 : route.path === '/v1/orgs/:orgId/events' ? 200 : 404;
       expect(res.status, label(route)).toBe(expected);
       if (expected === 404) expect(ErrorResponse.parse(res.body).error.code, label(route)).toBe('EVENT_NOT_FOUND');
