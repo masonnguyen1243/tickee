@@ -1228,6 +1228,7 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Gửi lại cùng `scanId` (mất phản hồi) sau khi Sự kiện vừa đóng ("Kết thúc", quá `effective_end_at`, hủy) hoặc Vé vừa bị hủy thì nhận đỏ `EVENT_ENDED`/`CANCELLED` thay vì `ok` của lần đầu, vì `assertCheckinOpen` và nhánh Vé hủy chạy trước nhánh phát lại. Khi làm thử lại cùng `scanId` ở client, quyết có cần đọc lần quét (`checked_in_by = user AND checkin_scan_id = scanId`) trước cổng hay chấp nhận ca này.
   evidence: Review 5.3-a (Blind Hunter BH1, Edge Case Hunter EC1, low). `apps/api/src/modules/ticketing/check-in.ts` (`checkIn`): bước 1 `assertCheckinOpen`, bước 3 mới phát lại. Chỉ gặp khi lần đầu đã commit, phản hồi mất và Sự kiện đóng ngay trong vài giây thử lại.
   story: 5.4
+- Đã xử lý (25/11/2026, 5.4): mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-5-4-quet-song-song-va-mat-mang.md`. Bằng chứng: `apps/api/src/modules/ticketing/check-in.ts:77`; `apps/api/src/modules/ticketing/check-in.ts:115`; `apps/api/src/modules/ticketing/check-in.ts:147`.
 
 ## Deferred from: code review of spec-5-3-b-man-quet-web.md (2026-11-25)
 
@@ -1235,6 +1236,7 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Màn quét không có dấu hiệu nào khi request quét đang chờ: gate đã khóa nhưng không có chữ hay `aria-live` báo "Đang gửi…", nên trên mạng chậm CTV tưởng camera bỏ qua Vé. Khi làm timeout 3 giây và `offline-banner`, quyết có thêm chỉ báo đang gửi trước mốc 3 giây không.
   evidence: Review 5.3-b (Blind Hunter BH6, low). `apps/web/app/(checkin)/events/[eventId]/checkin-event-screen.tsx` không dùng `submit.isPending`. Request treo vô hạn (EC8) đã thuộc AC 5.4 "client timeout 3 giây".
   story: 5.4
+- Đã xử lý (25/11/2026, 5.4): mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-5-4-quet-song-song-va-mat-mang.md`. Bằng chứng: `apps/web/app/(checkin)/events/[eventId]/checkin-event-screen.tsx:316`; `apps/web/components/tickee/scanner-viewport.tsx:116`.
 
 ## Deferred from: code review of spec-5-4-quet-song-song-va-mat-mang.md (2026-11-25)
 
