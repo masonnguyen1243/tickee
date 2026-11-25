@@ -4,6 +4,7 @@ import { expect, test } from './fixtures';
 import { apiError, corsHeaders, EMAIL, me, mockIdentityApi, WEB_ORIGIN, type Reply } from './identity-mock';
 import { fakeEventSource, setVisibility } from './live-mock';
 import { expectQrImageEncodes } from './qr-image';
+import { recordWakeLock } from './wake-lock-mock';
 
 /*
  * Story 3.9: "Vé của tôi" (`/tickets`) và Chi tiết Vé (`/tickets/:ticketId`). API (`/v1/me/tickets`, `/:ticketId`,
@@ -161,36 +162,6 @@ async function mockMyTickets(page: Page) {
     },
   );
   return state;
-}
-
-/** Ghi lại `navigator.wakeLock.request` (thay API thật): số lần xin, số lần nhả. `deny`: luôn từ chối. */
-async function recordWakeLock(page: Page, mode: 'grant' | 'deny' = 'grant') {
-  await page.addInitScript((m) => {
-    const calls = { requests: 0, released: 0 };
-    (window as unknown as { __wakeLock: typeof calls }).__wakeLock = calls;
-    Object.defineProperty(navigator, 'wakeLock', {
-      configurable: true,
-      value: {
-        request: (type: string) => {
-          calls.requests += 1;
-          if (m === 'deny') return Promise.reject(new DOMException('Không cho phép', 'NotAllowedError'));
-          const sentinel = Object.assign(new EventTarget(), {
-            type,
-            released: false,
-            release() {
-              if (sentinel.released) return Promise.resolve();
-              sentinel.released = true;
-              calls.released += 1;
-              sentinel.dispatchEvent(new Event('release'));
-              return Promise.resolve();
-            },
-          });
-          return Promise.resolve(sentinel);
-        },
-      },
-    });
-  }, mode);
-  return () => page.evaluate(() => (window as unknown as { __wakeLock: { requests: number; released: number } }).__wakeLock);
 }
 
 /** Thay `navigator.share` để ghi lại nội dung chia sẻ. */

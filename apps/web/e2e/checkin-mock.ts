@@ -1,11 +1,15 @@
-import type { Page } from '@playwright/test';
+import type { Page, Request } from '@playwright/test';
 
-import { apiError, corsHeaders, WEB_ORIGIN, type Call, type Handler, type Reply } from './identity-mock';
+import { apiError, corsHeaders, WEB_ORIGIN, type Call, type Reply } from './identity-mock';
 
 /*
  * API CTV giả bằng `page.route`: `/v1/checkin/**` (nhận lời mời `POST /checkin/invites/{preview,accept}` và Sự kiện của
- * Màn quét `GET /checkin/events/:eventId`, Story 5.2). Lời gọi không có handler → 500. Trả về danh sách lời gọi để kiểm.
+ * Màn quét `GET /checkin/events/:eventId`, Story 5.2; quét `POST /checkin/events/:eventId/scans`, Story 5.3). Lời gọi
+ * không có handler → 500; handler trả `'abort'` → lỗi mạng (không có phản hồi). Trả về danh sách lời gọi để kiểm.
  */
+
+/** Handler của API CTV giả: một phản hồi, hoặc `'abort'` để giả lỗi mạng. */
+export type CheckinHandler = (request: Request) => Reply | 'abort' | Promise<Reply | 'abort'>;
 
 const CHECKIN_PATH = /\/v1\/checkin\//;
 
@@ -39,7 +43,10 @@ export const checkinEvent = (
   counts: { checkedInCount: number; validTicketCount: number } = { checkedInCount: 0, validTicketCount: 0 },
 ): Reply => ({ status: 200, body: { eventId, eventName, ...counts } });
 
-export async function mockCheckinApi(page: Page, handlers: Record<string, Handler> = {}): Promise<Call[]> {
+/** `ScanResult` `200` của `POST /checkin/events/:eventId/scans`. */
+export const scanResult = (body: Record<string, unknown>): Reply => ({ status: 200, body });
+
+export async function mockCheckinApi(page: Page, handlers: Record<string, CheckinHandler> = {}): Promise<Call[]> {
   const calls: Call[] = [];
   const cors = corsHeaders(WEB_ORIGIN);
   await page.route(
@@ -52,6 +59,7 @@ export async function mockCheckinApi(page: Page, handlers: Record<string, Handle
       calls.push({ method: request.method(), path, body: request.postDataJSON() as unknown });
       const handler = handlers[key];
       const reply = handler ? await handler(request) : apiError(500, 'INTERNAL_ERROR');
+      if (reply === 'abort') return route.abort('failed');
       return route.fulfill({
         status: reply.status,
         headers: { ...cors, 'content-type': 'application/json' },

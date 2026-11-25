@@ -306,7 +306,8 @@ test('thẻ "Màn quét" đứng trước khối link mời; "Mở Màn quét" m
   await scanLink(page).click();
   await page.waitForURL((url) => url.pathname === SCAN_PATH);
   await expect(page.getByRole('heading', { name: EVENT_NAME })).toBeVisible();
-  await expect(page.getByText('Màn quét đang được hoàn thiện.')).toBeVisible();
+  // Màn quét (Story 5.3) mở bằng màn "Bật camera".
+  await expect(page.getByRole('button', { name: 'Bật camera' })).toBeVisible();
   expect(calls.filter((c) => c.path === `/checkin/events/${EVENT_ID}`).length).toBeGreaterThan(0);
 });
 

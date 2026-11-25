@@ -15,9 +15,10 @@ import { apiError, EMAIL, me, mockIdentityApi, unauthenticated, type Call, type 
 import { mockOrganizerApi } from './organizer-mock';
 
 /*
- * Màn nhận lời mời CTV `/loi-moi-ctv#token` và Màn quét tạm `/events/:eventId` (Story 5.2) với API giả: xem trước công
- * khai, đăng nhập OTP rồi quay lại nhận, đã có quyền thì vào thẳng, link hỏng, CTV đã bị thu hồi, phiên hết giữa chừng.
- * Token chỉ đi trong body `POST`: không bao giờ trong URL request hay `returnTo`.
+ * Màn nhận lời mời CTV `/loi-moi-ctv#token` (Story 5.2) và phần tải Sự kiện của Màn quét `/events/:eventId` với API giả:
+ * xem trước công khai, đăng nhập OTP rồi quay lại nhận, đã có quyền thì vào thẳng, link hỏng, CTV đã bị thu hồi, phiên hết
+ * giữa chừng. Token chỉ đi trong body `POST`: không bao giờ trong URL request hay `returnTo`. Camera và kết quả quét ở
+ * `checkin-scan.spec.ts`.
  */
 
 const CONSENTED = '2026-10-29T01:02:03.000Z';
@@ -32,7 +33,8 @@ const INVITED_TITLE = `Bạn được mời soát vé cho ${EVENT_NAME}.`;
 const LOGIN_RETURN = `?returnTo=${encodeURIComponent(INVITE_PATH)}`;
 const INVALID_TITLE = 'Link mời đã hết hạn.';
 const INVALID_DESCRIPTION = 'Liên hệ BTC để nhận link mới.';
-const SCAN_PENDING = 'Màn quét đang được hoàn thiện.';
+/** Màn "Bật camera" của Màn quét (Story 5.3): hiện ở mọi lần vào, sau khi tải xong Sự kiện. */
+const enableCamera = (page: Page) => page.getByRole('button', { name: 'Bật camera' });
 
 const accepted = (): Reply => ({ status: 200, body: { eventId: EVENT_ID } });
 const preview = (scanEventId: string | null = null) => invitePreview(EVENT_NAME, ORG_NAME, scanEventId);
@@ -115,7 +117,7 @@ test('chưa đăng nhập: tên Sự kiện + tên BTC + "Nhận soát vé" → 
   await inviteButton(page).click();
   await page.waitForURL((url) => url.pathname === SCAN_PATH);
   await expect(page.getByRole('heading', { name: EVENT_NAME })).toBeVisible();
-  await expect(page.getByText(SCAN_PENDING)).toBeVisible();
+  await expect(enableCamera(page)).toBeVisible();
 
   expect(callsTo(calls, '/checkin/invites/accept').map((c) => c.body)).toEqual([{ token: TOKEN }]);
   expect(callsTo(calls, '/checkin/invites/preview').every((c) => (c.body as { token: string }).token === TOKEN)).toBe(
@@ -373,13 +375,13 @@ test('đã đăng nhập nhưng chưa đồng ý NĐ 13 → màn đồng ý (ret
   expect(callsTo(calls, '/checkin/invites/accept').map((c) => c.body)).toEqual([{ token: TOKEN }]);
 });
 
-test.describe('Màn quét tạm /events/:eventId', () => {
-  test('200: tên Sự kiện + "Màn quét đang được hoàn thiện."', async ({ page }) => {
+test.describe('Màn quét /events/:eventId: tải Sự kiện', () => {
+  test('200: tên Sự kiện + "Bật camera"', async ({ page }) => {
     await signedIn(page);
     await mockCheckinApi(page, { [`GET /checkin/events/${EVENT_ID}`]: () => checkinEvent(EVENT_ID, EVENT_NAME) });
     await page.goto(SCAN_PATH);
     await expect(page.getByRole('heading', { name: EVENT_NAME })).toBeVisible();
-    await expect(page.getByText(SCAN_PENDING)).toBeVisible();
+    await expect(enableCamera(page)).toBeVisible();
   });
 
   test('401: sang đăng nhập với returnTo là chính trang này', async ({ page }) => {
@@ -401,7 +403,7 @@ test.describe('Màn quét tạm /events/:eventId', () => {
       await page.goto(SCAN_PATH);
       await expect(page.getByRole('heading', { name: message })).toBeVisible();
       await expect(page.getByText(EVENT_NAME)).toHaveCount(0);
-      await expect(page.getByText(SCAN_PENDING)).toHaveCount(0);
+      await expect(enableCamera(page)).toHaveCount(0);
     });
   }
 
@@ -426,7 +428,7 @@ test.describe('Màn quét tạm /events/:eventId', () => {
 
     await expect(page.getByRole('heading', { name: CHECKER_REVOKED_MESSAGE })).toBeVisible();
     await expect(page.getByText(EVENT_NAME)).toHaveCount(0);
-    await expect(page.getByText(SCAN_PENDING)).toHaveCount(0);
+    await expect(enableCamera(page)).toHaveCount(0);
   });
 
   test('lỗi tải (5xx): banner "Chưa tải được Màn quét", không tên Sự kiện; "Thử lại" → tên Sự kiện', async ({ page }) => {
@@ -445,7 +447,7 @@ test.describe('Màn quét tạm /events/:eventId', () => {
     failing = false;
     await banner.getByRole('button', { name: 'Thử lại' }).click();
     await expect(page.getByRole('heading', { name: EVENT_NAME })).toBeVisible();
-    await expect(page.getByText(SCAN_PENDING)).toBeVisible();
+    await expect(enableCamera(page)).toBeVisible();
   });
 });
 
@@ -464,7 +466,7 @@ async function smallTargets(page: Page): Promise<string[]> {
 const overflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
-test('320px: không cuộn ngang, vùng chạm ≥ 24px ở màn xem trước (chưa đăng nhập, đã đăng nhập), link hỏng và Màn quét tạm', async ({
+test('320px: không cuộn ngang, vùng chạm ≥ 24px ở màn xem trước (chưa đăng nhập, đã đăng nhập), link hỏng và Màn quét (Bật camera)', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 667 });
