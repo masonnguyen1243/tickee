@@ -38,6 +38,12 @@ export type LiveResourceOptions<T> = {
    * quan Tài khoản nhận tiền, Story 4.2-b). Không gọi ở các lần polling. Đọc bản mới nhất mỗi lần (không cần ổn định).
    */
   onSignal?: () => void;
+  /**
+   * Tự cập nhật (Story 5.7), mặc định `true`. `false` → đóng SSE (không mở lại), không polling, bỏ qua mọi lời nhắc tải
+   * lại (tab visible, có mạng lại, tín hiệu đang gom dở); vd. Màn quét đã hiện màn hết quyền. Không tắt chính truy vấn:
+   * `refetch()` gọi tay và lần tải khi mount (TanStack) vẫn chạy. Bật lại → mở lại SSE và polling như lúc đầu.
+   */
+  enabled?: boolean;
 };
 
 export type LiveResource<T> = {
@@ -56,6 +62,7 @@ export type LiveResource<T> = {
  * - SSE chỉ mở khi đã có dữ liệu (tài nguyên tồn tại, đúng quyền). Chưa kết nối (đang nối, lỗi, bị đóng) → polling theo
  *   `pollInterval`; kết nối rồi → không polling. Stream bị đóng hẳn (lỗi HTTP, máy chủ tắt) → tự mở lại sau 1, 2, 4…
  *   giây (tối đa 30); tab visible lại hoặc có mạng lại → mở lại ngay. Mất kết nối tạm thời thì trình duyệt tự nối lại.
+ * - `enabled` `false` (Story 5.7) → không SSE, không polling, không tải lại theo lời nhắc.
  * - Không đọc `returnUrl` hay search params nào để suy ra trạng thái.
  */
 export function useLiveResource<T>({
@@ -64,13 +71,14 @@ export function useLiveResource<T>({
   livePath,
   pollInterval,
   onSignal,
+  enabled = true,
 }: LiveResourceOptions<T>): LiveResource<T> {
   const [connected, setConnected] = useState(false);
   const [browserOnline, setBrowserOnline] = useState(true);
   const query = useQuery({
     queryKey,
     queryFn: ({ signal }) => queryFn(signal),
-    refetchInterval: (q) => effectivePollInterval(connected, pollInterval(q.state.data)),
+    refetchInterval: (q) => effectivePollInterval(connected, pollInterval(q.state.data), enabled),
     // Hook tự tải lại khi visible và khi có mạng lại (qua bộ gom), không để TanStack tải thêm lần nữa.
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
@@ -80,6 +88,8 @@ export function useLiveResource<T>({
   refetch.current = query.refetch;
   const onSignalRef = useRef(onSignal);
   onSignalRef.current = onSignal;
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
   const coalescer = useRef<SignalCoalescer | null>(null);
   /** Mở lại SSE ngay nếu đang đóng hẳn (đặt bởi effect SSE). */
   const reopenNow = useRef<() => void>(() => undefined);
@@ -89,6 +99,7 @@ export function useLiveResource<T>({
       signalReload(
         () => void refetch.current(),
         () => onSignalRef.current?.(),
+        () => enabledRef.current,
       ),
     );
     coalescer.current = c;
@@ -124,7 +135,7 @@ export function useLiveResource<T>({
   const hasData = query.data !== undefined;
   const path = typeof livePath === 'function' ? livePath(query.data) : livePath;
   useEffect(() => {
-    if (!hasData || typeof EventSource === 'undefined') return;
+    if (!enabled || !hasData || typeof EventSource === 'undefined') return;
     const url = `${apiBaseUrl()}${path}`;
     let source: EventSource | null = null;
     let attempt = 0;
@@ -166,7 +177,7 @@ export function useLiveResource<T>({
       reopenNow.current = () => undefined;
       setConnected(false);
     };
-  }, [hasData, path]);
+  }, [enabled, hasData, path]);
 
   const offline = !browserOnline || isNetworkError(query.failureReason);
   return { query, connected, offline };

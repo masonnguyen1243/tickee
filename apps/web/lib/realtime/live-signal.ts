@@ -63,18 +63,23 @@ export function createSignalCoalescer(
 /**
  * Việc của một lần tải lại do lời nhắc (Story 4.2-b): tải lại tài nguyên chính (`refetch`), rồi `onSignal` nếu có — vd.
  * tài nguyên khác cùng dùng tín hiệu của stream này. Cả hai đi cùng nhịp gom của `createSignalCoalescer`; polling chỉ tải
- * lại tài nguyên chính.
+ * lại tài nguyên chính. `enabled` (Story 5.7, đọc lúc chạy) trả `false` → bỏ qua lời nhắc: không tải gì (vd. Màn quét
+ * đã hiện màn hết quyền).
  */
-export function signalReload(refetch: () => void, onSignal?: () => void): () => void {
+export function signalReload(refetch: () => void, onSignal?: () => void, enabled?: () => boolean): () => void {
   return () => {
+    if (enabled && !enabled()) return;
     refetch();
     onSignal?.();
   };
 }
 
-/** Chu kỳ polling hiệu lực: SSE đang kết nối → không polling; chưa (hoặc mất) → chu kỳ trang chọn. */
-export function effectivePollInterval(connected: boolean, chosen: number | false): number | false {
-  return connected ? false : chosen;
+/**
+ * Chu kỳ polling hiệu lực: tài nguyên tắt tự cập nhật (`enabled` `false`, Story 5.7) hoặc SSE đang kết nối → không
+ * polling; chưa (hoặc mất) kết nối → chu kỳ trang chọn.
+ */
+export function effectivePollInterval(connected: boolean, chosen: number | false, enabled = true): number | false {
+  return !enabled || connected ? false : chosen;
 }
 
 /** Chờ trước lần mở lại SSE thứ `attempt` (0, 1, 2…) sau khi stream bị đóng hẳn: 1, 2, 4… giây, tối đa 30 giây. */

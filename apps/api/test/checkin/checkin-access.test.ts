@@ -51,8 +51,17 @@ const draft = {
   refundPolicy: 'Không hoàn vé.',
 };
 
-/** Sự kiện chưa phát Vé nào (số đếm của Story 5.3; ca có Vé ở `scan.test.ts`). */
-const NO_TICKETS = { checkedInCount: 0, validTicketCount: 0 };
+/**
+ * Sự kiện chưa phát Vé nào (số đếm của Story 5.3, theo Hạng vé của Story 5.7; ca có Vé ở `scan.test.ts` và
+ * `checkin-live.test.ts`): Sự kiện đã đăng có một Hạng vé "Miễn phí" `0/0`, Sự kiện nháp chưa có Hạng vé nào.
+ */
+const noTickets = (published = true) => ({
+  checkedInCount: 0,
+  validTicketCount: 0,
+  ticketTypes: published
+    ? [{ ticketTypeId: expect.any(String), name: 'Miễn phí', checkedInCount: 0, validTicketCount: 0 }]
+    : [],
+});
 
 type User = Awaited<ReturnType<typeof signUp>>;
 
@@ -128,22 +137,26 @@ describe('GET /v1/checkin/events/:eventId', () => {
   it('CTV active của Sự kiện → 200 {eventId, eventName, số đếm}; no-store', async () => {
     const res = await get(checkinPath(eventA1.id), ctv.cookie).expect(200);
     expect(res.headers['cache-control']).toBe('no-store');
-    expect(CheckinEvent.parse(res.body)).toEqual({ eventId: eventA1.id, eventName: draft.name, ...NO_TICKETS });
+    expect(CheckinEvent.parse(res.body)).toEqual({ eventId: eventA1.id, eventName: draft.name, ...noTickets() });
   });
 
   it('Owner/Admin của BTC sở hữu → 200 không cần lời mời (kể cả Sự kiện nháp)', async () => {
     const draftEvent = await createEvent(orgA, owner.cookie, false);
-    for (const event of [eventA1, eventA2, draftEvent]) {
+    for (const [event, published] of [
+      [eventA1, true],
+      [eventA2, true],
+      [draftEvent, false],
+    ] as const) {
       for (const cookie of [owner.cookie, admin.cookie]) {
         const res = await get(checkinPath(event.id), cookie).expect(200);
-        expect(res.body).toEqual({ eventId: event.id, eventName: draft.name, ...NO_TICKETS });
+        expect(res.body).toEqual({ eventId: event.id, eventName: draft.name, ...noTickets(published) });
       }
     }
   });
 
   it('id chữ hoa vẫn là cùng Sự kiện', async () => {
     const res = await get(checkinPath(eventA1.id.toUpperCase()), ctv.cookie).expect(200);
-    expect(res.body).toEqual({ eventId: eventA1.id, eventName: draft.name, ...NO_TICKETS });
+    expect(res.body).toEqual({ eventId: eventA1.id, eventName: draft.name, ...noTickets() });
   });
 
   it('chưa đăng nhập → 401 UNAUTHENTICATED', async () => {

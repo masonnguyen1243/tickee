@@ -9,8 +9,9 @@ import { CHECKIN_CONFIG, CheckinLookupRateLimiter, type CheckinConfig } from './
 
 /**
  * Check-in (Epic 5): link mời CTV của Sự kiện (Story 5.1), quyền CTV và Sự kiện của Màn quét (Story 5.2), thu hồi và
- * khôi phục CTV (Story 5.6). Cần `DbModule` ở gốc DI. Không đăng ký `PermissionGuard` (guard toàn cục của
- * `OrganizerModule`), nhưng cài cổng `CHECKER_ACCESS_RESOLVER` mà guard đó dùng ở route `/v1/checkin/events/:eventId/…`.
+ * khôi phục CTV (Story 5.6), số check-in theo Hạng vé và stream của nó (Story 5.7). Cần `DbModule` và `RealtimeModule`
+ * ở gốc DI. Không đăng ký `PermissionGuard` (guard toàn cục của `OrganizerModule`), nhưng cài cổng
+ * `CHECKER_ACCESS_RESOLVER` mà guard đó dùng ở route `/v1/checkin/events/:eventId/…`.
  * Toàn cục vì guard lấy DI trong scope của `OrganizerModule`; guard inject cổng bằng `@Optional()`, nên app không nạp
  * module này vẫn chạy route BTC.
  */

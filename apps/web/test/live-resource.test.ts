@@ -118,6 +118,31 @@ describe('signalReload (onSignal, Story 4.2-b)', () => {
     signalReload(refetch)();
     expect(refetch).toHaveBeenCalledTimes(1);
   });
+
+  it('enabled (Story 5.7) đọc lúc chạy: false → bỏ qua lời nhắc (không tải, không onSignal), kể cả lần tải gộp đang chờ', () => {
+    const calls: string[] = [];
+    let enabled = true;
+    const c = createSignalCoalescer(
+      signalReload(
+        () => calls.push('refetch'),
+        () => calls.push('onSignal'),
+        () => enabled,
+      ),
+    );
+    c.signal();
+    c.signal();
+    expect(calls).toEqual(['refetch', 'onSignal']);
+    // Tắt khi lần tải gộp đang chờ (vd. màn hết quyền vừa hiện): lần đó không chạy.
+    enabled = false;
+    vi.advanceTimersByTime(1_000);
+    c.signal();
+    vi.advanceTimersByTime(5_000);
+    expect(calls).toEqual(['refetch', 'onSignal']);
+    // Bật lại: lời nhắc sau tải như thường.
+    enabled = true;
+    c.signal();
+    expect(calls).toEqual(['refetch', 'onSignal', 'refetch', 'onSignal']);
+  });
 });
 
 describe('effectivePollInterval / reopenDelay', () => {
@@ -126,6 +151,13 @@ describe('effectivePollInterval / reopenDelay', () => {
     expect(effectivePollInterval(false, 2_000)).toBe(2_000);
     expect(effectivePollInterval(false, false)).toBe(false);
     expect(effectivePollInterval(true, false)).toBe(false);
+  });
+
+  it('enabled false (Story 5.7) → không polling dù chưa kết nối; mặc định true', () => {
+    expect(effectivePollInterval(false, 10_000, false)).toBe(false);
+    expect(effectivePollInterval(true, 10_000, false)).toBe(false);
+    expect(effectivePollInterval(false, 10_000, true)).toBe(10_000);
+    expect(effectivePollInterval(false, 10_000)).toBe(10_000);
   });
 
   it('mở lại SSE sau 1, 2, 4… giây, tối đa 30 giây', () => {

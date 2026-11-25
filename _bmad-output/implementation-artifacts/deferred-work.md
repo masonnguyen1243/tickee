@@ -1256,3 +1256,22 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Unit test web `apps/web/test/dependency-rules.test.ts` › "mã nguồn thật không vi phạm" chập chờn: chạy dependency-cruiser bằng process con trong hạn mặc định 5 giây của Vitest, nên quá hạn khi máy đang bận (vd. build web và e2e chạy cùng lúc). Sửa: đặt `testTimeout` riêng cho ca này (vd. 30 giây) như các test gọi process con khác.
   evidence: Kiểm chứng 5.6 (25/11/2026): chạy `pnpm --filter @tickee/web test` 3 lần trong lúc build web và e2e chạy nền, fail 1 lần với "Test timed out in 5000ms" ở `dependency-rules.test.ts:16`; hai lần còn lại 469/469. `pnpm lint:deps` (cùng luật) pass. Story 5.6 không chạm file này; test có từ 4.7-f (`60e42df`).
   story: E2-8
+
+## Deferred from: code review of spec-5-7-theo-doi-check-in-realtime.md (2026-11-25)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-7-theo-doi-check-in-realtime.md`
+  summary: Hủy Sự kiện chuyển Vé `valid` (kể cả đã check-in) sang `cancelled` thì phải phát `event_checkins_changed` cho Sự kiện trong cùng tx, vì tab Check-in và đỉnh Màn quét đang nối SSE không polling, nên giữ số k/N cũ tới lần check-in kế tiếp (mà Sự kiện đã hủy thì không còn check-in).
+  evidence: Review 5.7 (Blind Hunter BH1, Edge Case Hunter EC1, low). Chỉ `apps/api/src/modules/ticketing/check-in.ts` (`checkIn`) phát `event_checkins_changed`; stream `GET /v1/checkin/events/:eventId/live` (`checkin/checkin-event.controller.ts`) chỉ lọc topic này; `effectivePollInterval` (`apps/web/lib/realtime/live-signal.ts`) tắt polling khi đã nối.
+  story: 7.1
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-7-theo-doi-check-in-realtime.md`
+  summary: Vô hiệu Vé đã phát (`voided`) phải phát `event_checkins_changed` cho Sự kiện trong cùng tx, để tab Check-in và đỉnh Màn quét đang nối SSE trừ Vé đó khỏi k/N ngay, không chờ lần check-in kế tiếp.
+  evidence: Review 5.7 (Blind Hunter BH1, Edge Case Hunter EC1, low). Cùng bằng chứng với mục 7.1 ngay trên; `CheckinEvent` chỉ đếm Vé `valid`.
+  story: 7.5
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-7-theo-doi-check-in-realtime.md`
+  summary: Vé mới phát (Đơn `paid`, Đơn 0đ) chỉ phát `event_orders_changed`, nên khi SSE check-in đang nối thì mẫu số N (tổng và theo Hạng vé) ở tab Check-in và đỉnh Màn quét chỉ đúng lại ở lần check-in, lần hiện tab hay lần nối lại kế tiếp. Hướng sửa: stream `…/checkin/events/:eventId/live` lọc thêm `event_orders_changed` của cùng Sự kiện cho Owner/Admin (CTV không nhận topic Đơn theo AD-17), hoặc polling chậm cả khi đã nối.
+  evidence: Review 5.7 (Blind Hunter BH1, Edge Case Hunter EC1, low). `ordering/order-changed.ts` (`notifyEventOrdersChanged`); test `apps/api/test/checkin/checkin-live.test.ts` khẳng định tạo Đơn không lọt vào stream check-in. Spec 5.7 (phần đóng băng) chốt bộ lọc chỉ `event_checkins_changed`.
+  story: 6.2
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-7-theo-doi-check-in-realtime.md`
+  summary: Chưa đo (maybe-false, nếu đúng thì medium): mỗi check-in làm mọi client đang mở (mọi điện thoại CTV + tab Owner/Admin) tải lại `GET /v1/checkin/events/:eventId` (3 câu: Sự kiện, `ticket_types`, `GROUP BY ticket_type_id` trên mọi Vé của Sự kiện qua `tickets_event_id_idx`), gom 1 giây mỗi client; Màn quét trả phí số theo Hạng vé mà không hiện. Đo p95 của GET này và tải DB lúc cổng đông; nếu nặng thì thêm index một phần `(event_id, ticket_type_id) WHERE status = 'valid'` kèm `checked_in_at`, hoặc đường chỉ tổng cho Màn quét.
+  evidence: Review 5.7 (Blind Hunter BH12). `checkin/checkin-event.controller.ts` (`get`), `ticketing/check-in.ts` (`checkinCountsByTicketType`). Design Notes của spec 5.7 đã ghi đo ở 9.2.
+  story: 9.2

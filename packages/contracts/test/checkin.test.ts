@@ -27,6 +27,8 @@ import {
   checkerInviteUrl,
   CheckinEvent,
   checkinEventApiPath,
+  checkinEventLiveApiPath,
+  CheckinTicketTypeProgress,
   checkinScanApiPath,
   checkinScanPath,
   CreatedCheckerInvite,
@@ -97,7 +99,7 @@ describe('nhận lời mời CTV và quyền CTV (Story 5.2)', () => {
   it('accept và Sự kiện của Màn quét', () => {
     expect(AcceptedCheckerInvite.parse({ eventId: EVENT })).toEqual({ eventId: EVENT });
     expect(AcceptedCheckerInvite.safeParse({ eventId: 'abc' }).success).toBe(false);
-    const event = { eventId: EVENT, eventName: 'Giải chạy', checkedInCount: 0, validTicketCount: 0 };
+    const event = { eventId: EVENT, eventName: 'Giải chạy', checkedInCount: 0, validTicketCount: 0, ticketTypes: [] };
     expect(CheckinEvent.parse(event)).toEqual(event);
   });
 
@@ -129,7 +131,7 @@ describe('quét Mã QR vé (Story 5.3-a)', () => {
   const SCAN_ID = '019a3b2c-0c00-7abc-8def-000000000001';
 
   it('Sự kiện của Màn quét: số đã check-in và tổng số Vé hợp lệ là số nguyên không âm, bắt buộc', () => {
-    const base = { eventId: EVENT, eventName: 'Giải chạy' };
+    const base = { eventId: EVENT, eventName: 'Giải chạy', ticketTypes: [] };
     expect(CheckinEvent.parse({ ...base, checkedInCount: 3, validTicketCount: 120 })).toEqual({
       ...base,
       checkedInCount: 3,
@@ -360,5 +362,43 @@ describe('CTV của Sự kiện: danh sách, thu hồi, khôi phục (Story 5.6)
 
   it('mã lỗi mới: EVENT_ENDED', () => {
     expect(ErrorCode.EVENT_ENDED).toBe('EVENT_ENDED');
+  });
+});
+
+describe('theo dõi check-in realtime (Story 5.7)', () => {
+  const TYPE = '019a3b2c-0e00-7abc-8def-000000000001';
+  const progress = { ticketTypeId: TYPE, name: 'Vé thường', checkedInCount: 2, validTicketCount: 5 };
+
+  it('một Hạng vé: id uuid, tên, hai số nguyên không âm (0/0 hợp lệ), bắt buộc đủ', () => {
+    expect(CheckinTicketTypeProgress.parse(progress)).toEqual(progress);
+    const empty = { ...progress, checkedInCount: 0, validTicketCount: 0 };
+    expect(CheckinTicketTypeProgress.parse(empty)).toEqual(empty);
+    for (const bad of [
+      { ...progress, ticketTypeId: 'abc' },
+      { ...progress, name: undefined },
+      { ...progress, checkedInCount: -1 },
+      { ...progress, validTicketCount: 1.5 },
+      { ...progress, checkedInCount: '2' },
+    ]) {
+      expect(CheckinTicketTypeProgress.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('CheckinEvent: ticketTypes bắt buộc, giữ thứ tự api trả', () => {
+    const base = { eventId: EVENT, eventName: 'Giải chạy', checkedInCount: 2, validTicketCount: 5 };
+    const second = {
+      ticketTypeId: '019a3b2c-0e00-7abc-8def-000000000002',
+      name: 'Vé mời',
+      checkedInCount: 0,
+      validTicketCount: 0,
+    };
+    expect(CheckinEvent.parse({ ...base, ticketTypes: [progress, second] }).ticketTypes).toEqual([progress, second]);
+    expect(CheckinEvent.safeParse(base).success).toBe(false);
+    expect(CheckinEvent.safeParse({ ...base, ticketTypes: [{ ...progress, ticketTypeId: 'abc' }] }).success).toBe(false);
+  });
+
+  it('đường SSE: …/checkin/events/<id>/live, mã hóa id', () => {
+    expect(checkinEventLiveApiPath(EVENT)).toBe(`/checkin/events/${EVENT}/live`);
+    expect(checkinEventLiveApiPath('a/b?c#d')).toBe('/checkin/events/a%2Fb%3Fc%23d/live');
   });
 });

@@ -1,5 +1,5 @@
 import type { Page, Request } from '@playwright/test';
-import type { CheckinLookupTicket } from '@tickee/contracts';
+import type { CheckinLookupTicket, CheckinTicketTypeProgress } from '@tickee/contracts';
 
 import { apiError, corsHeaders, WEB_ORIGIN, type Call, type Reply } from './identity-mock';
 
@@ -8,7 +8,8 @@ import { apiError, corsHeaders, WEB_ORIGIN, type Call, type Reply } from './iden
  * Màn quét `GET /checkin/events/:eventId`, Story 5.2; quét `POST /checkin/events/:eventId/scans`, Story 5.3; tra tay
  * `POST /checkin/events/:eventId/lookups` và check-in tay `POST /checkin/events/:eventId/tickets/:ticketId/check-in`,
  * Story 5.5 — handler đọc header `Idempotency-Key` bằng `request.headers()`; hết quyền `403 CHECKER_REVOKED` / `403
- * EVENT_ENDED`, Story 5.6). Lời gọi
+ * EVENT_ENDED`, Story 5.6). Mặc định SSE số liệu check-in `GET /checkin/events/:eventId/live` (Story 5.7) → 503 (không
+ * realtime: polling 10 giây; spec cần realtime dùng `fakeEventSource`). Lời gọi khác
  * không có handler → 500; handler trả `'abort'` → lỗi mạng (không có phản hồi). Handler treo quá hạn 3 giây của client
  * (Story 5.4): client đã hủy request nên trả lời sau đó có thể ném; bỏ qua lỗi đó. Trả về danh sách lời gọi để kiểm.
  */
@@ -17,6 +18,19 @@ import { apiError, corsHeaders, WEB_ORIGIN, type Call, type Reply } from './iden
 export type CheckinHandler = (request: Request) => Reply | 'abort' | Promise<Reply | 'abort'>;
 
 const CHECKIN_PATH = /\/v1\/checkin\//;
+const CHECKIN_EVENT_LIVE_KEY = /^GET \/checkin\/events\/[^/]+\/live$/;
+
+/** Đường SSE số liệu check-in (Story 5.7), để `fakeEventSource` chọn đúng stream. */
+export const CHECKIN_LIVE_URL = /\/v1\/checkin\/events\/[^/]+\/live$/;
+
+/** Trang đã cài API CTV giả. */
+const mockedPages = new WeakSet<Page>();
+
+/**
+ * Trang đã cài `mockCheckinApi`: `mockOrganizerApi` nhường mọi `/v1/checkin/**` cho API CTV giả, bất kể cài trước hay
+ * sau (mặc định số liệu check-in của tab Check-in, Story 5.7, không đè handler của spec).
+ */
+export const hasCheckinMock = (page: Page): boolean => mockedPages.has(page);
 
 /** Lỗi kèm câu của api thật (màn hiện nguyên câu này). */
 export const checkinError = (status: number, code: string, message: string): Reply => ({
@@ -47,12 +61,19 @@ export const invitePreview = (eventName: string, organizationName: string, scanE
   body: { eventName, organizationName, scanEventId },
 });
 
-/** `CheckinEvent`: mặc định chưa có Vé nào (số đã check-in / tổng Vé hợp lệ của Story 5.3). */
+/** Số check-in của một Hạng vé (`CheckinTicketTypeProgress`, Story 5.7). */
+export type TicketTypeProgress = CheckinTicketTypeProgress;
+
+/**
+ * `CheckinEvent`: mặc định chưa có Vé nào (số đã check-in / tổng Vé hợp lệ của Story 5.3) và chưa có Hạng vé nào (Story
+ * 5.7; Màn quét không hiện số theo Hạng vé).
+ */
 export const checkinEvent = (
   eventId: string,
   eventName: string,
   counts: { checkedInCount: number; validTicketCount: number } = { checkedInCount: 0, validTicketCount: 0 },
-): Reply => ({ status: 200, body: { eventId, eventName, ...counts } });
+  ticketTypes: TicketTypeProgress[] = [],
+): Reply => ({ status: 200, body: { eventId, eventName, ...counts, ticketTypes } });
 
 /** `ScanResult` `200` của `POST /checkin/events/:eventId/scans` (và của check-in tay). */
 export const scanResult = (body: Record<string, unknown>): Reply => ({ status: 200, body });
@@ -78,6 +99,7 @@ export const lookupRateLimited = (retryAfterSeconds: number): Reply => ({
 export async function mockCheckinApi(page: Page, handlers: Record<string, CheckinHandler> = {}): Promise<Call[]> {
   const calls: Call[] = [];
   const cors = corsHeaders(WEB_ORIGIN);
+  mockedPages.add(page);
   await page.route(
     (url) => CHECKIN_PATH.test(url.pathname),
     async (route) => {
@@ -86,7 +108,8 @@ export async function mockCheckinApi(page: Page, handlers: Record<string, Checki
       const path = new URL(request.url()).pathname.replace(/^.*\/v1/, '');
       const key = `${request.method()} ${path}`;
       calls.push({ method: request.method(), path, body: request.postDataJSON() as unknown });
-      const handler = handlers[key];
+      const fallback = CHECKIN_EVENT_LIVE_KEY.test(key) ? () => apiError(503, 'SERVICE_UNAVAILABLE') : undefined;
+      const handler = handlers[key] ?? fallback;
       const reply = handler ? await handler(request) : apiError(500, 'INTERNAL_ERROR');
       try {
         if (reply === 'abort') return await route.abort('failed');

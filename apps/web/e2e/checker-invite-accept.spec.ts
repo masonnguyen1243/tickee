@@ -15,6 +15,7 @@ import {
 } from './checkin-mock';
 import { expect, test } from './fixtures';
 import { apiError, EMAIL, me, mockIdentityApi, unauthenticated, type Call, type Reply } from './identity-mock';
+import { setVisibility } from './live-mock';
 import { mockOrganizerApi } from './organizer-mock';
 
 /*
@@ -413,7 +414,7 @@ test.describe('Màn quét /events/:eventId: tải Sự kiện', () => {
     });
   }
 
-  test('tải lại sau khi đã hiện (quay lại tab quá staleTime) trả 403 CHECKER_REVOKED: câu của api thay tên Sự kiện', async ({
+  test('tải lại sau khi đã hiện (quay lại tab) trả 403 CHECKER_REVOKED: câu của api thay tên Sự kiện', async ({
     page,
   }) => {
     let revoked = false;
@@ -427,9 +428,9 @@ test.describe('Màn quét /events/:eventId: tải Sự kiện', () => {
     revoked = true;
     const gets = () => callsTo(calls, `/checkin/events/${EVENT_ID}`).length;
     const before = gets();
-    // Quá `staleTime` (30s) rồi quay lại tab → TanStack Query tải lại.
-    await page.clock.setFixedTime(Date.now() + 60_000);
-    await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+    // Quay lại tab → `useLiveResource` tải lại ngay (Story 5.7; không chờ `staleTime`).
+    await setVisibility(page, 'hidden');
+    await setVisibility(page, 'visible');
     await expect.poll(gets).toBeGreaterThan(before);
 
     await expect(page.getByRole('heading', { name: CHECKER_REVOKED_MESSAGE })).toBeVisible();
