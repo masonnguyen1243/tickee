@@ -1209,6 +1209,7 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Bảng `checkers` không có CHECK ràng `status` với `revoked_at`/`revoked_by`: DB nhận cả dòng `revoked` không có người/lúc thu hồi lẫn dòng `active` còn `revoked_at`. Khi làm "Thu hồi"/"Khôi phục", chốt nghĩa của khôi phục (giữ hay xóa `revoked_*`) rồi thêm CHECK tương ứng bằng migration mới.
   evidence: Review 5.2-a (Blind Hunter BH4, Edge Case Hunter EC2, low). `apps/api/drizzle/0034_checkers.sql` chỉ có `checkers_status_check`. Chưa code nào ghi `revoked_*`; tiền lệ ràng cặp cột: `organizations_payment_service_status_check`.
   story: 5.6
+- Đã xử lý (25/11/2026, 5.6): mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-5-6-thu-hoi-khoi-phuc-ctv-va-het-quyen.md`. Bằng chứng: `apps/api/src/modules/checkin/schema.ts:66`; `apps/api/drizzle/0037_checkers_revoked_check.sql:1`; `apps/api/src/modules/checkin/checkers.ts:181`.
 - source_spec: `_bmad-output/implementation-artifacts/spec-5-2-a-api-nhan-loi-moi-va-quyen-ctv.md`
   summary: Route CTV (`PermissionGuard` nhánh Sự kiện, `GET /v1/checkin/events/:eventId`) vẫn cho CTV `active` vào khi Sự kiện đã hủy, và `CheckinEvent` không có trạng thái để Màn quét biết. Khi làm hủy Sự kiện, quyết route CTV trả gì (vd. màn hết quyền hay đỏ `CANCELLED` ở lượt quét) và thêm trạng thái vào response nếu cần.
   evidence: Review 5.2-a (Blind Hunter BH12, low). Hiện chưa route nào đặt `events.status='cancelled'`; 5.6 chỉ nhận ca quá `effective_end_at` (`EVENT_ENDED`).
