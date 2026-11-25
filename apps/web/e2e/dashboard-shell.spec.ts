@@ -1,5 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
+import { checkinEvent, mockCheckinApi } from './checkin-mock';
 import { expect, test } from './fixtures';
 import { apiError, EMAIL, me, mockIdentityApi, unauthenticated, USER_ID, type Handler } from './identity-mock';
 import { mockOrganizerApi, organization, ORG_ID, OTHER_ORG_ID } from './organizer-mock';
@@ -427,12 +428,115 @@ test('mục chưa có trang: trang tạm "Sắp có" trong khung, mục đang ch
   await expect(page.getByText('Sắp có', { exact: true })).toHaveCount(0);
   await expect(sidebar(page).getByRole('link', { name: 'Cần xử lý', exact: true })).toHaveAttribute('aria-current', 'page');
 
+  // Story 5.3: "Quét vé" là trang chọn Sự kiện thật (API giả mặc định: chưa có Sự kiện nào), không còn "Sắp có".
   await page.setViewportSize({ width: 375, height: 667 });
   await tabBar(page).getByRole('link', { name: 'Quét vé' }).click();
   await page.waitForURL(`**${base}/quet-ve`);
-  await expect(page.getByRole('heading', { name: 'Quét vé' })).toBeVisible();
-  await expect(page.getByText('Sắp có', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Quét vé', level: 1 })).toBeVisible();
+  await expect(page.getByText('Chưa có Sự kiện nào để quét.')).toBeVisible();
+  await expect(page.getByText('Sắp có', { exact: true })).toHaveCount(0);
   await expect(tabBar(page).getByRole('link', { name: 'Quét vé' })).toHaveAttribute('aria-current', 'page');
+});
+
+test.describe('tab "Quét vé": chọn Sự kiện để mở Màn quét', () => {
+  const FUTURE_END = '2099-11-16T23:59:59+07:00';
+  const PAST_END = '2026-01-01T23:59:59+07:00';
+  const scanEventId = (n: number) => `019a3b2c-0e00-7abc-8def-${String(n).padStart(12, '0')}`;
+  /** `EventSummary` của `GET /orgs/:id/events`. */
+  const summary = (
+    n: number,
+    name: string,
+    { status = 'published', startsAt = '2099-11-16T07:00:00+07:00', effectiveEndAt = FUTURE_END } = {},
+  ) => ({
+    id: scanEventId(n),
+    slug: `su-kien-${n}`,
+    name,
+    status,
+    startsAt,
+    endsAt: startsAt,
+    effectiveEndAt,
+    imageUrl: null,
+  });
+  /** Sự kiện không quét được: nháp, đã hủy, đã kết thúc. */
+  const NOT_SCANNABLE = [
+    summary(90, 'Giải còn nháp', { status: 'draft' }),
+    summary(91, 'Giải đã hủy', { status: 'cancelled' }),
+    summary(92, 'Giải đã kết thúc', { effectiveEndAt: PAST_END }),
+  ];
+
+  async function openScanTab(page: Page, events: unknown[] | (() => { status: number; body?: unknown })) {
+    await mockIdentityApi(page, { 'GET /identity/me': () => me(CONSENTED) });
+    await mockOrganizerApi(page, {
+      [`GET /orgs/${ORG_ID}`]: () => organization({ role: 'admin' }),
+      [`GET /orgs/${ORG_ID}/events`]: typeof events === 'function' ? events : () => ({ status: 200, body: events }),
+    });
+    await page.goto(base);
+    await tabBar(page).getByRole('link', { name: 'Quét vé' }).click();
+  }
+
+  test('0 Sự kiện còn quét được (chỉ nháp, đã hủy, đã kết thúc): empty-state có link về "Sự kiện"', async ({ page }) => {
+    await openScanTab(page, NOT_SCANNABLE);
+    await page.waitForURL(`**${base}/quet-ve`);
+    const empty = page.locator('[data-slot="empty-state"]');
+    await expect(empty).toContainText('Chưa có Sự kiện nào để quét.');
+    for (const event of NOT_SCANNABLE) await expect(page.getByText(event.name)).toHaveCount(0);
+    await empty.getByRole('link', { name: 'Về danh sách Sự kiện' }).click();
+    await page.waitForURL((url) => url.pathname === base);
+    await expect(tabBar(page).getByRole('link', { name: 'Sự kiện' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  test('đúng 1 Sự kiện (published hoặc hidden, chưa kết thúc): chuyển thẳng tới Màn quét, Back không quay lại trang chọn', async ({
+    page,
+  }) => {
+    await mockCheckinApi(page, {
+      [`GET /checkin/events/${scanEventId(1)}`]: () => checkinEvent(scanEventId(1), 'Giải đang ẩn'),
+    });
+    await openScanTab(page, [...NOT_SCANNABLE, summary(1, 'Giải đang ẩn', { status: 'hidden' })]);
+    await page.waitForURL((url) => url.pathname === `/events/${scanEventId(1)}`);
+    await expect(page.getByRole('heading', { name: 'Giải đang ẩn' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Bật camera' })).toBeVisible();
+    await page.goBack();
+    await page.waitForURL((url) => url.pathname === base);
+  });
+
+  test('từ 2 Sự kiện: danh sách theo giờ bắt đầu gần nhất, chạm một Sự kiện mở Màn quét của nó', async ({ page }) => {
+    const now = Date.now();
+    const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString();
+    const HOUR = 3_600_000;
+    await mockCheckinApi(page, {
+      [`GET /checkin/events/${scanEventId(2)}`]: () => checkinEvent(scanEventId(2), 'Giải đang diễn ra'),
+    });
+    await openScanTab(page, [
+      summary(3, 'Giải tuần sau', { startsAt: iso(7 * 24 * HOUR) }),
+      ...NOT_SCANNABLE,
+      summary(2, 'Giải đang diễn ra', { startsAt: iso(-1 * HOUR), status: 'hidden' }),
+      summary(4, 'Giải chiều nay', { startsAt: iso(3 * HOUR) }),
+    ]);
+    await page.waitForURL(`**${base}/quet-ve`);
+    await expect(page.getByRole('heading', { name: 'Chọn Sự kiện để quét' })).toBeVisible();
+    const cards = page.locator('[data-slot="scan-event-card"]');
+    await expect(cards).toHaveCount(3);
+    await expect(cards.locator('[data-slot="scan-event-name"]')).toHaveText(['Giải đang diễn ra', 'Giải chiều nay', 'Giải tuần sau']);
+    await expect(cards.first()).toHaveAttribute('href', `/events/${scanEventId(2)}`);
+
+    await cards.first().click();
+    await page.waitForURL((url) => url.pathname === `/events/${scanEventId(2)}`);
+    await expect(page.getByRole('heading', { name: 'Giải đang diễn ra' })).toBeVisible();
+  });
+
+  test('lỗi tải danh sách: banner "Thử lại" → tải lại được', async ({ page }) => {
+    let failing = true;
+    await openScanTab(page, () =>
+      failing ? apiError(500, 'INTERNAL_ERROR') : { status: 200, body: [summary(1, 'Giải A'), summary(2, 'Giải B')] },
+    );
+    await page.waitForURL(`**${base}/quet-ve`);
+    const banner = page.locator('main [data-slot="status-banner"]').filter({ hasText: 'Chưa tải được danh sách Sự kiện' });
+    // Lỗi 5xx được thử lại 2 lần trước khi báo.
+    await expect(banner).toBeVisible({ timeout: 15_000 });
+    failing = false;
+    await banner.getByRole('button', { name: 'Thử lại' }).click();
+    await expect(page.locator('[data-slot="scan-event-card"]')).toHaveCount(2);
+  });
 });
 
 const OWNER_ONLY_PAGES: [string, string][] = [

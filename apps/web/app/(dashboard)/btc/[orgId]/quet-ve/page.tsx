@@ -1,13 +1,14 @@
 import type { Metadata } from 'next';
 
-import { ComingSoon } from '@/components/tickee/coming-soon';
 import { navSection } from '@/lib/organizer/nav';
+
+import { ScanEventPicker } from './scan-event-picker';
 
 const { label } = navSection('scan');
 
 export const metadata: Metadata = { title: `${label} · Tickee`, robots: { index: false, follow: false } };
 
-/** Trang tạm "Sắp có": Epic 5 thay bằng Màn quét. */
+/** Tab "Quét vé" (Story 5.3): chọn Sự kiện còn quét được rồi mở Màn quét `/events/{eventId}`. */
 export default function ScanPage() {
-  return <ComingSoon title={label} description="Quét Mã QR vé để check-in Người mua tại cửa." />;
+  return <ScanEventPicker title={label} />;
 }

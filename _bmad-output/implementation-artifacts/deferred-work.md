@@ -96,6 +96,8 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
   evidence: `app/layout.tsx` không đặt `viewportFit`; spec 2.1B cấm đổi (review B15, medium).
 - Story nhận (21/11/2026, E4-8): 5.3. Màn quét Mã QR vé trên điện thoại là nơi đầu tiên cần safe-area.
 - Story nhận (23/11/2026, 5.3-a): 5.3-b. Story 5.3 tách đôi; Màn quét (nơi đầu tiên cần safe-area) nằm ở 5.3-b, Mason duyệt.
+- Đã xử lý (25/11/2026, 5.3-b): phần Màn quét (`viewportFit: 'cover'` chỉ cho route group `(checkin)`, padding safe-area bốn phía) của mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-5-3-b-man-quet-web.md`. Bằng chứng: `apps/web/app/(checkin)/layout.tsx:8`.
+- Story nhận (25/11/2026, 5.3-b): 9.1. Phần còn lại (tab bar, Sheet, `purchase-bar`, kiểm tra trang công khai ở landscape): Mason chọn chỉ bật `cover` cho `(checkin)` ở 5.3-b, kiểm trên thiết bị thật ở staging trước Closed Beta.
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-1-b-khung-dashboard-responsive.md`
   summary: Repo chưa có cấu hình Prettier và bước kiểm định dạng, nên code mới có thể lệch kiểu (nháy kép, 80 cột) mà CI không bắt.
   evidence: Không có `.prettierrc`; pipeline `build typecheck lint:deps test` không kiểm định dạng (review B1).
@@ -681,6 +683,7 @@ Mỗi mục dưới đây có đúng một story nhận. Story nhận đọc m�
   summary: Story 5.3 (D5). `/xem-ve` (người nhận link chia sẻ) không giữ màn hình sáng, khác Chi tiết Vé. Người đi cùng thường là người đưa QR ở cổng. Khi làm màn quét, thêm Screen Wake Lock cho `/xem-ve` bằng hook của 3.9. Chấp nhận thiếu ở MVP nếu 5.3 không kịp.
   evidence: Hook Wake Lock ở `apps/web/lib/tickets/wake-lock.ts` (spec 3.9). Đúng phạm vi spec 3.8. Retro Epic 3 D5 (LOW).
 - Story nhận (23/11/2026, 5.3-a): 5.3-b. Story 5.3 tách đôi; Wake Lock cho `/xem-ve` là phần web, nằm ở 5.3-b, Mason duyệt.
+- Đã xử lý (25/11/2026, 5.3-b): mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-5-3-b-man-quet-web.md`. Bằng chứng: `apps/web/app/(public)/xem-ve/shared-ticket.tsx:48`.
 
 ## Deferred from: code review of spec-epic-3-e3-5-link-chia-se-thieu-khoa-qr.md (2026-11-13)
 
@@ -1217,10 +1220,18 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Story 5.3 phần web (5.3-b). Màn quét thật ở `/events/[eventId]` (route group `(checkin)`, toàn màn, dọc, theo theme), dùng API của 5.3-a (`POST /v1/checkin/events/:eventId/scans`, `ScanResult`, `checkedInCount`/`validTicketCount` trong `CheckinEvent`). Gồm: màn "Bật camera" trước khi trình duyệt hỏi quyền, hướng dẫn bật lại cho Safari iOS/Chrome Android kèm "Tra tay" (UX-DR28); `scanner-viewport` (camera liên tục, khung vuông, đỉnh: tên Sự kiện + "Đã check-in k/N", đáy: "Tra tay", khóa quét tới khi kết quả đóng, mỗi lần đọc một `scanId` mới) (UX-DR29); `scan-result-overlay` xanh/trung tính (`recent`)/đỏ, âm thanh, `aria-live="assertive"`, reduced motion (UX-DR30); đỏ "Đã check-in" ghi "bởi {tên | bạn | Owner | Admin | CTV khác}" theo `checkedBy` (Mason chốt 23/11/2026); lỗi mạng/5xx khi quét không hiện đỏ; giữ màn hình sáng khi camera chạy. Hai mục hoãn giao cho 5.3: "Padding `env(safe-area-inset-bottom)`… đang bằng 0" (`viewportFit: 'cover'`) và "Story 5.3 (D5). `/xem-ve`… không giữ màn hình sáng". Lối vào "Quét vé" ở `bottom-tab-bar` (hiện là trang `ComingSoon` `/btc/[orgId]/quet-ve`; 5.2-b để lại cho 5.3). Khi lập spec phải chốt: thư viện giải mã QR (repo chỉ có `qrcode` để sinh mã; BRD gợi ý ZXing/html5-qrcode), hành vi tab "Quét vé" khi không ở trang Sự kiện hoặc có nhiều Sự kiện đang diễn ra, bật `viewportFit: 'cover'` toàn app hay chỉ cho `(checkin)`. e2e stub `getUserMedia` (Playwright chưa có fake camera).
   evidence: Tách khỏi Story 5.3 khi chạy bmad-build (23/11/2026, Mason chọn Split): spec gộp API và web ước khoảng 4.500 token. 5.3-a (API) merge được riêng; tới khi 5.3-b xong, `/events/[eventId]` vẫn là trang tạm "Màn quét đang được hoàn thiện."
   story: 5.3-b
+- Đã xử lý (25/11/2026, 5.3-b): mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-5-3-b-man-quet-web.md`. Bằng chứng: `apps/web/app/(checkin)/events/[eventId]/checkin-event-screen.tsx:228`; `apps/web/app/(dashboard)/btc/[orgId]/quet-ve/scan-event-picker.tsx:37`.
 
 ## Deferred from: code review of spec-5-3-a-api-quet-ma-qr-ve.md (2026-11-23)
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-5-3-a-api-quet-ma-qr-ve.md`
   summary: Gửi lại cùng `scanId` (mất phản hồi) sau khi Sự kiện vừa đóng ("Kết thúc", quá `effective_end_at`, hủy) hoặc Vé vừa bị hủy thì nhận đỏ `EVENT_ENDED`/`CANCELLED` thay vì `ok` của lần đầu, vì `assertCheckinOpen` và nhánh Vé hủy chạy trước nhánh phát lại. Khi làm thử lại cùng `scanId` ở client, quyết có cần đọc lần quét (`checked_in_by = user AND checkin_scan_id = scanId`) trước cổng hay chấp nhận ca này.
   evidence: Review 5.3-a (Blind Hunter BH1, Edge Case Hunter EC1, low). `apps/api/src/modules/ticketing/check-in.ts` (`checkIn`): bước 1 `assertCheckinOpen`, bước 3 mới phát lại. Chỉ gặp khi lần đầu đã commit, phản hồi mất và Sự kiện đóng ngay trong vài giây thử lại.
+  story: 5.4
+
+## Deferred from: code review of spec-5-3-b-man-quet-web.md (2026-11-25)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-3-b-man-quet-web.md`
+  summary: Màn quét không có dấu hiệu nào khi request quét đang chờ: gate đã khóa nhưng không có chữ hay `aria-live` báo "Đang gửi…", nên trên mạng chậm CTV tưởng camera bỏ qua Vé. Khi làm timeout 3 giây và `offline-banner`, quyết có thêm chỉ báo đang gửi trước mốc 3 giây không.
+  evidence: Review 5.3-b (Blind Hunter BH6, low). `apps/web/app/(checkin)/events/[eventId]/checkin-event-screen.tsx` không dùng `submit.isPending`. Request treo vô hạn (EC8) đã thuộc AC 5.4 "client timeout 3 giây".
   story: 5.4

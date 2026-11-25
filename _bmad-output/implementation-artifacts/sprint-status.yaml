@@ -29,7 +29,7 @@
 # - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-23-2026 19:58
+last_updated: 11-25-2026 09:35
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -87,7 +87,7 @@ development_status:
   epic-5: in-progress
   5-1-link-mời-ctv-và-tab-check-in: done
   5-2-ctv-nhận-lời-mời: done
-  5-3-quét-mã-qr-vé-xanh-đỏ: in-progress
+  5-3-quét-mã-qr-vé-xanh-đỏ: done
   5-4-quét-song-song-và-mất-mạng: backlog
   5-5-tra-tay-và-check-in-tay: backlog
   5-6-thu-hồi-khôi-phục-ctv-và-hết-quyền: backlog

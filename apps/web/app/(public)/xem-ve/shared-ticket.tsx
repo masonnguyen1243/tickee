@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/tickee/empty-state';
 import { TicketCard } from '@/components/tickee/ticket-card';
 import { fetchSharedTicket, sharedTicketQueryKey } from '@/lib/order/api';
 import { sharedTicketTokenFromHash } from '@/lib/order/shared-ticket';
+import { useScreenWakeLock } from '@/lib/tickets/wake-lock';
 
 /** Token trong `#` của URL, đọc sau khi hydrate và theo dõi `hashchange`. `undefined`: chưa đọc; `null`: thiếu/sai dạng. */
 function useHashToken(): string | null | undefined {
@@ -34,7 +35,8 @@ function Loading() {
 /**
  * Vé được chia sẻ (Story 3.8): đọc `#token`, gọi `GET /v1/shared-tickets/:token` không kèm cookie, hiện `ticket-card`
  * không có dòng Người mua (QR, Sự kiện, Hạng vé, "Vé k/N", địa điểm, trạng thái; đã check-in → QR mờ + "Đã check-in").
- * Thiếu token, token sai dạng, `404` hay lỗi bất kỳ → cùng một `empty-state`, không nút (không lộ lý do).
+ * Thiếu token, token sai dạng, `404` hay lỗi bất kỳ → cùng một `empty-state`, không nút (không lộ lý do). Đang hiện Vé
+ * thì giữ màn hình không tối (Story 5.3: người nhận link thường là người đưa QR ở cổng), như Chi tiết Vé.
  */
 export function SharedTicket() {
   const token = useHashToken();
@@ -43,6 +45,7 @@ export function SharedTicket() {
     queryFn: ({ signal }) => fetchSharedTicket(token!, signal),
     enabled: Boolean(token),
   });
+  useScreenWakeLock(Boolean(ticket.data));
 
   if (token === undefined || (token !== null && ticket.isPending)) return <Loading />;
   if (token === null || !ticket.data) {

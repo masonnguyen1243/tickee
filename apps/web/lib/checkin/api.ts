@@ -7,8 +7,11 @@ import {
   CheckerInviteResponse,
   CheckinEvent,
   checkinEventApiPath,
+  checkinScanApiPath,
   CreatedCheckerInvite,
+  ScanResult,
   type CheckerInviteTokenRequest,
+  type ScanRequest,
 } from '@tickee/contracts';
 
 import { apiRequest } from '@/lib/api/client';
@@ -76,3 +79,14 @@ export const acceptCheckerInvite = (token: string) =>
  */
 export const fetchCheckinEvent = (eventId: string, signal?: AbortSignal) =>
   apiRequest(checkinEventApiPath(eventId), { schema: CheckinEvent, init: { signal } });
+
+/**
+ * `POST /v1/checkin/events/:eventId/scans` (`checkin.scan`, Story 5.3): chuỗi camera vừa đọc (`code`) và `scanId` mới
+ * cho lần đọc này → `ScanResult` (xanh / trung tính / đỏ). Không có quyền → `403 NOT_A_MEMBER`; CTV bị thu hồi → `403
+ * CHECKER_REVOKED`. `code` chỉ đi trong body, không bao giờ trong đường dẫn, query hay log.
+ */
+export const submitScan = (eventId: string, body: ScanRequest) =>
+  apiRequest(checkinScanApiPath(eventId), {
+    schema: ScanResult,
+    init: { method: 'POST', body: JSON.stringify(body) },
+  });

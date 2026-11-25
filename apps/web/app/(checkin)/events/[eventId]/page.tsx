@@ -7,8 +7,8 @@ export const metadata: Metadata = { title: 'Màn quét · Tickee', robots: { ind
 type CheckinEventPageProps = { params: Promise<{ eventId: string }> };
 
 /**
- * Màn quét của một Sự kiện `/events/{eventId}` (route group `(checkin)`). Story 5.2 chỉ dựng trang tạm (tên Sự kiện),
- * để nhận lời mời CTV và nút "Mở Màn quét" ở tab Check-in có đích; camera, kết quả quét và số check-in thuộc Story 5.3.
+ * Màn quét của một Sự kiện `/events/{eventId}` (route group `(checkin)`, Story 5.3): camera, kết quả quét xanh/đỏ và số
+ * đã check-in. Đích của nhận lời mời CTV, nút "Mở Màn quét" ở tab Check-in và tab "Quét vé" của dashboard.
  */
 export default async function CheckinEventPage({ params }: CheckinEventPageProps) {
   const { eventId } = await params;

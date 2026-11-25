@@ -2,7 +2,9 @@ import type { Page, Route } from '@playwright/test';
 
 import { expect, test } from './fixtures';
 import { apiError, corsHeaders, EMAIL, me, mockIdentityApi, WEB_ORIGIN, type Reply } from './identity-mock';
+import { setVisibility } from './live-mock';
 import { expectQrImageEncodes } from './qr-image';
+import { recordWakeLock } from './wake-lock-mock';
 
 /*
  * Story 3.8 (AD-29): link chia sẻ Vé. Trang công khai `/xem-ve#<token>` gọi `GET /v1/shared-tickets/:token` không kèm
@@ -123,6 +125,26 @@ test.describe('trang Vé được chia sẻ /xem-ve', () => {
     expect(new URL(page.url()).search).toBe('');
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex, nofollow');
     await expect(page.locator('meta[name="referrer"]')).toHaveAttribute('content', 'no-referrer');
+  });
+
+  test('Vé hợp lệ đang hiện: giữ màn hình sáng (Wake Lock), nhả khi tab ẩn, xin lại khi hiện lại', async ({ page }) => {
+    const wakeLock = await recordWakeLock(page);
+    await mockShared(page, () => ({ status: 200, body: VIEW }));
+    await page.goto(`/xem-ve#${shareToken(1)}`);
+    await expect(card(page)).toHaveCount(1);
+    await expect.poll(async () => (await wakeLock()).requests).toBe(1);
+    await setVisibility(page, 'hidden');
+    await expect.poll(async () => (await wakeLock()).released).toBe(1);
+    await setVisibility(page, 'visible');
+    await expect.poll(async () => (await wakeLock()).requests).toBe(2);
+  });
+
+  test('không hiện Vé (404): không xin Wake Lock', async ({ page }) => {
+    const wakeLock = await recordWakeLock(page);
+    await mockShared(page, () => apiError(404, 'SHARED_TICKET_NOT_FOUND'));
+    await page.goto(`/xem-ve#${shareToken(9)}`);
+    await expectNotFound(page);
+    expect((await wakeLock()).requests).toBe(0);
   });
 
   test('Vé đã check-in → QR mờ .25 + badge "Đã check-in"', async ({ page }) => {
