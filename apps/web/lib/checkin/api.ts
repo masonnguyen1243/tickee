@@ -15,6 +15,7 @@ import {
 } from '@tickee/contracts';
 
 import { apiRequest } from '@/lib/api/client';
+import { serviceUnavailableError } from '@/lib/api/errors';
 
 /** Khóa TanStack Query: link mời CTV mới nhất của một Sự kiện (không có token). */
 export const checkerInviteQueryKey = (orgId: string, eventId: string) =>
@@ -80,13 +81,39 @@ export const acceptCheckerInvite = (token: string) =>
 export const fetchCheckinEvent = (eventId: string, signal?: AbortSignal) =>
   apiRequest(checkinEventApiPath(eventId), { schema: CheckinEvent, init: { signal } });
 
+/** Hạn chờ của mỗi lần gửi quét (kể cả gửi lại): quá hạn thì hủy request và coi như lỗi mạng (Story 5.4, UX-DR31). */
+export const SCAN_TIMEOUT_MS = 3000;
+
 /**
- * `POST /v1/checkin/events/:eventId/scans` (`checkin.scan`, Story 5.3): chuỗi camera vừa đọc (`code`) và `scanId` mới
- * cho lần đọc này → `ScanResult` (xanh / trung tính / đỏ). Không có quyền → `403 NOT_A_MEMBER`; CTV bị thu hồi → `403
+ * `POST /v1/checkin/events/:eventId/scans` (`checkin.scan`, Story 5.3): chuỗi camera vừa đọc (`code`) và `scanId` của
+ * lần đọc này → `ScanResult` (xanh / trung tính / đỏ). Không có quyền → `403 NOT_A_MEMBER`; CTV bị thu hồi → `403
  * CHECKER_REVOKED`. `code` chỉ đi trong body, không bao giờ trong đường dẫn, query hay log.
+ *
+ * Mỗi lần gọi có hạn `SCAN_TIMEOUT_MS` (Story 5.4): chưa xong (kể cả lúc đang đọc body) thì hủy request và ném
+ * `serviceUnavailableError` (`isNetworkError`), để nơi gọi gửi lại cùng `scanId`. `AbortController` + `setTimeout`, không
+ * `AbortSignal.timeout` (thiếu ở iOS 15); timer luôn được xóa. `signal` của nơi gọi (vd. rời Màn quét) hủy theo kiểu
+ * thường: ném lại nguyên trạng, không phải lỗi mạng.
  */
-export const submitScan = (eventId: string, body: ScanRequest) =>
-  apiRequest(checkinScanApiPath(eventId), {
-    schema: ScanResult,
-    init: { method: 'POST', body: JSON.stringify(body) },
-  });
+export async function submitScan(eventId: string, body: ScanRequest, signal?: AbortSignal) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, SCAN_TIMEOUT_MS);
+  const abort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) abort();
+  else signal?.addEventListener('abort', abort, { once: true });
+  try {
+    return await apiRequest(checkinScanApiPath(eventId), {
+      schema: ScanResult,
+      init: { method: 'POST', body: JSON.stringify(body), signal: controller.signal },
+    });
+  } catch (error) {
+    if (timedOut) throw serviceUnavailableError(error);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  }
+}

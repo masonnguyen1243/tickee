@@ -7,10 +7,13 @@ import { assertCheckinOpen } from '../event/index.js';
 import { TICKET_CANCEL_REASON, tickets } from './schema.js';
 
 /*
- * Check-in đúng một lần (FR-28, AD-15, Story 5.3). Mọi check-in (quét, sau này tra tay) đi qua `checkIn`, trong `tx` của
- * bên gọi (READ COMMITTED): an toàn đồng thời dựa vào UPDATE có điều kiện, không dựa SERIALIZABLE. Hai lần quét song song
- * cùng một Vé: lần sau chờ khóa dòng của lần đầu, rồi đánh giá lại điều kiện `checked_in_at IS NULL` trên bản đã commit
- * nên không ghi gì. Kết quả chỉ đọc bản chụp trên Vé (AD-35), không bao giờ có Mã QR vé, SĐT hay email.
+ * Check-in đúng một lần (FR-28, AD-15, Story 5.3, 5.4). Mọi check-in (quét, sau này tra tay) đi qua `checkIn`, trong `tx`
+ * của bên gọi (READ COMMITTED): an toàn đồng thời dựa vào UPDATE có điều kiện, không dựa SERIALIZABLE. Hai lần quét song
+ * song cùng một Vé: lần sau chờ khóa dòng của lần đầu, rồi đánh giá lại điều kiện `checked_in_at IS NULL` trên bản đã
+ * commit nên không ghi gì. Gửi lại cùng `scanId` (client hủy lần gửi sau 3 giây rồi gửi lại, lần đầu có thể vẫn đang chạy
+ * ở server) cũng chờ khóa đó rồi rơi vào nhánh phát lại: ở đường thường là UPDATE chờ khóa dòng; khi Sự kiện vừa đóng
+ * trong lúc lần đầu còn chạy, `replayOf` đọc Vé `FOR SHARE` nên cũng chờ lần đầu commit rồi mới so. Kết quả chỉ đọc bản
+ * chụp trên Vé (AD-35), không bao giờ có Mã QR vé, SĐT hay email.
  */
 
 /** Đầu vào check-in: Vé (id từ Mã QR vé đã kiểm chữ ký), Sự kiện và BTC của route, người quét, uuid của lần quét. */
@@ -53,19 +56,27 @@ const snapshot = {
 /**
  * Check-in Vé `ticketId` ở Sự kiện `eventId` trong `tx`:
  * 1. `event.assertCheckinOpen` (khóa Sự kiện `FOR SHARE`): Sự kiện đã hủy → `invalid CANCELLED`; đã kết thúc → `invalid
- *    EVENT_ENDED`; không ghi gì.
+ *    EVENT_ENDED`; không ghi gì. Riêng lần gửi lại cùng `scanId` của chính người quét đã check-in Vé này thì phát lại
+ *    `ok` của lần đầu (`replayOf`, chỉ đọc ở nhánh đóng này, khóa dòng Vé `FOR SHARE` để chờ lần đầu còn đang chạy).
  * 2. UPDATE có điều kiện (`id`, `event_id`, `organization_id`, `status = 'valid'`, `checked_in_at IS NULL`) ghi
  *    `checked_in_at = now()`, người quét và `scanId`, `RETURNING` bản chụp. Được 1 dòng → `ok` và tín hiệu
  *    `event_checkins_changed` trong cùng `tx`.
  * 3. Được 0 dòng → đọc lại Vé theo id chỉ để phân loại (bản chụp chỉ trả khi Vé thuộc Sự kiện này): không có Vé →
- *    `BAD_SIGNATURE`; Vé của Sự kiện khác → `OTHER_EVENT`; Vé đã hủy → `VOIDED` (`TICKET_CANCEL_REASON.VOIDED`) hoặc
- *    `CANCELLED`; cùng `scanId` và cùng người quét → phát lại `ok`; cùng người quét, chưa tới 60 giây (đồng hồ DB) →
- *    `recent`; còn lại → `already` kèm lúc và người check-in.
+ *    `BAD_SIGNATURE`; Vé của Sự kiện khác → `OTHER_EVENT`; cùng `scanId` và cùng người quét → phát lại `ok` (kể cả khi
+ *    Vé đã bị hủy sau lần đầu); Vé đã hủy → `VOIDED` (`TICKET_CANCEL_REASON.VOIDED`) hoặc `CANCELLED`; cùng người quét,
+ *    chưa tới 60 giây (đồng hồ DB) → `recent`; còn lại → `already` kèm lúc và người check-in.
+ *
+ * Phát lại theo `scanId` thắng mọi lý do đóng xảy ra sau lần đầu (AD-15): client gửi lại cùng `scanId` tới khi có phản
+ * hồi, nên lần đầu đã ghi mà mất phản hồi vẫn nhận lại đúng kết quả xanh. `scanId` mới, hay người khác dùng `scanId` đó,
+ * vẫn nhận lý do đóng.
  */
 export async function checkIn(tx: Tx, input: CheckInInput): Promise<CheckInResult> {
   const { ticketId, eventId, organizationId, userId, scanId } = input;
   const closed = await assertCheckinOpen(tx, eventId);
-  if (closed) return { outcome: 'invalid', reason: closed };
+  if (closed) {
+    const replay = await replayOf(tx, input);
+    return replay ? { outcome: 'ok', ...replay } : { outcome: 'invalid', reason: closed };
+  }
 
   const [updated] = await tx
     .update(tickets)
@@ -101,6 +112,16 @@ export async function checkIn(tx: Tx, input: CheckInInput): Promise<CheckInResul
     .where(eq(tickets.id, ticketId));
   if (!row) return { outcome: 'invalid', reason: ScanInvalidReason.BAD_SIGNATURE };
   if (row.eventId !== eventId) return { outcome: 'invalid', reason: ScanInvalidReason.OTHER_EVENT };
+  // Phát lại đứng trước nhánh Vé hủy: Vé bị hủy hay vô hiệu sau lần đầu không đổi kết quả của lần quét đó.
+  if (row.checkedInAt !== null && row.checkedInBy === userId && row.checkinScanId === scanId) {
+    return {
+      outcome: 'ok',
+      holderName: row.holderName,
+      seq: row.seq,
+      count: row.count,
+      ticketTypeName: row.ticketTypeName,
+    };
+  }
   if (row.status === 'cancelled') {
     return {
       outcome: 'invalid',
@@ -111,19 +132,39 @@ export async function checkIn(tx: Tx, input: CheckInInput): Promise<CheckInResul
     // Vé `valid` của Sự kiện này, chưa check-in, mà UPDATE không khớp: chỉ có thể khi BTC của Vé khác BTC của Sự kiện.
     throw new Error('checkIn: UPDATE không ghi được Vé hợp lệ chưa check-in của Sự kiện (lệch BTC)');
   }
-  if (row.checkedInBy === userId) {
-    if (row.checkinScanId === scanId) {
-      return {
-        outcome: 'ok',
-        holderName: row.holderName,
-        seq: row.seq,
-        count: row.count,
-        ticketTypeName: row.ticketTypeName,
-      };
-    }
-    if (row.recent) return { outcome: 'recent' };
-  }
+  if (row.checkedInBy === userId && row.recent) return { outcome: 'recent' };
   return { outcome: 'already', checkedInAt: row.checkedInAt, checkedInBy: row.checkedInBy };
+}
+
+/**
+ * Bản chụp của lần check-in `scanId` khi Sự kiện đã đóng (bước 1 của `checkIn`): Vé thuộc Sự kiện và BTC này, đã
+ * check-in bởi chính `userId` với đúng `scanId` (Vé đã hủy sau đó vẫn tính). Không có → `null`.
+ *
+ * Chỉ lọc theo `id`, `event_id`, BTC rồi khóa `FOR SHARE`, so người quét và `scanId` trong JS: lần đầu còn giữ dòng Vé
+ * (UPDATE chưa commit) thì câu này chờ nó commit rồi đọc bản mới. Lọc thêm `checked_in_by`/`checkin_scan_id` trong
+ * WHERE thì dòng bị loại theo bản cũ mà không chờ, và lần gửi lại nhận lý do đóng dù lần đầu ngay sau đó commit.
+ */
+async function replayOf(tx: Tx, input: CheckInInput): Promise<CheckedInTicket | null> {
+  const [row] = await tx
+    .select({
+      ...snapshot,
+      checkedInAt: tickets.checkedInAt,
+      checkedInBy: tickets.checkedInBy,
+      checkinScanId: tickets.checkinScanId,
+    })
+    .from(tickets)
+    .where(
+      and(
+        eq(tickets.id, input.ticketId),
+        eq(tickets.eventId, input.eventId),
+        orgScope({ organizationId: input.organizationId })(tickets),
+      ),
+    )
+    .for('share');
+  if (!row || row.checkedInAt === null || row.checkedInBy !== input.userId || row.checkinScanId !== input.scanId) {
+    return null;
+  }
+  return { holderName: row.holderName, seq: row.seq, count: row.count, ticketTypeName: row.ticketTypeName };
 }
 
 /** Số Vé check-in của một Sự kiện: đã check-in trên tổng số Vé hợp lệ. */

@@ -5,7 +5,8 @@ import { apiError, corsHeaders, WEB_ORIGIN, type Call, type Reply } from './iden
 /*
  * API CTV giả bằng `page.route`: `/v1/checkin/**` (nhận lời mời `POST /checkin/invites/{preview,accept}` và Sự kiện của
  * Màn quét `GET /checkin/events/:eventId`, Story 5.2; quét `POST /checkin/events/:eventId/scans`, Story 5.3). Lời gọi
- * không có handler → 500; handler trả `'abort'` → lỗi mạng (không có phản hồi). Trả về danh sách lời gọi để kiểm.
+ * không có handler → 500; handler trả `'abort'` → lỗi mạng (không có phản hồi). Handler treo quá hạn 3 giây của client
+ * (Story 5.4): client đã hủy request nên trả lời sau đó có thể ném; bỏ qua lỗi đó. Trả về danh sách lời gọi để kiểm.
  */
 
 /** Handler của API CTV giả: một phản hồi, hoặc `'abort'` để giả lỗi mạng. */
@@ -59,12 +60,16 @@ export async function mockCheckinApi(page: Page, handlers: Record<string, Checki
       calls.push({ method: request.method(), path, body: request.postDataJSON() as unknown });
       const handler = handlers[key];
       const reply = handler ? await handler(request) : apiError(500, 'INTERNAL_ERROR');
-      if (reply === 'abort') return route.abort('failed');
-      return route.fulfill({
-        status: reply.status,
-        headers: { ...cors, 'content-type': 'application/json' },
-        body: reply.body === undefined ? '' : JSON.stringify(reply.body),
-      });
+      try {
+        if (reply === 'abort') return await route.abort('failed');
+        return await route.fulfill({
+          status: reply.status,
+          headers: { ...cors, 'content-type': 'application/json' },
+          body: reply.body === undefined ? '' : JSON.stringify(reply.body),
+        });
+      } catch {
+        // Client đã hủy request (hết hạn 3 giây, rời trang) trong lúc handler còn chờ: không còn ai nhận phản hồi.
+      }
     },
   );
   return calls;

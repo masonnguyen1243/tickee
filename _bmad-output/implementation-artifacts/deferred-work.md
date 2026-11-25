@@ -1235,3 +1235,10 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Màn quét không có dấu hiệu nào khi request quét đang chờ: gate đã khóa nhưng không có chữ hay `aria-live` báo "Đang gửi…", nên trên mạng chậm CTV tưởng camera bỏ qua Vé. Khi làm timeout 3 giây và `offline-banner`, quyết có thêm chỉ báo đang gửi trước mốc 3 giây không.
   evidence: Review 5.3-b (Blind Hunter BH6, low). `apps/web/app/(checkin)/events/[eventId]/checkin-event-screen.tsx` không dùng `submit.isPending`. Request treo vô hạn (EC8) đã thuộc AC 5.4 "client timeout 3 giây".
   story: 5.4
+
+## Deferred from: code review of spec-5-4-quet-song-song-va-mat-mang.md (2026-11-25)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-4-quet-song-song-va-mat-mang.md`
+  summary: Lần gửi quét bị client hủy ở mốc 3 giây vẫn chạy tiếp ở server (transaction quét không có `statement_timeout`/`lock_timeout`), trong khi Màn quét gửi lại cùng `scanId` mỗi ~1 giây không giới hạn; khi DB chậm hoặc có khóa dài trên Sự kiện/Vé, các lần gửi lại có thể chồng lên nhau, chiếm pool (`max: 10`) và làm hỏng request khác, màn kẹt ở `offline-banner`. Chưa kiểm chứng (maybe-false, nếu đúng thì medium).
+  evidence: Review 5.4 (Edge Case Hunter EC3, Blind Hunter BH1). `apps/api/src/flows/checkin-scan.flow.ts` `scanTicket` mở `db.transaction` không đặt timeout; `apps/web/app/(checkin)/events/[eventId]/checkin-event-screen.tsx` `retry` + `retryDelay: SCAN_RETRY_DELAY_MS`. Pool có `connectionTimeoutMillis: 3000` (`platform/db/database.ts:29`) nên request chờ kết nối tự lỗi sau 3 giây, chưa rõ có cạn pool thật không. Muốn chốt: trong kiểm thử tải check-in ở staging, giữ một khóa dài (vd. `SELECT … FOR UPDATE` trên dòng Sự kiện) hoặc làm DB chậm, cho 20 CTV quét, xem số kết nối đang dùng và lỗi của route khác; nếu cạn thì thêm `set_config('statement_timeout'/'lock_timeout', …, true)` trong transaction quét (mẫu ở `ticketing.module.ts:86`).
+  story: 9.2
