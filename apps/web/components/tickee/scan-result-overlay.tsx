@@ -2,6 +2,7 @@
 
 import { CircleCheck, Info, OctagonX, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 import type { ScanTone, ScanView } from '@/lib/checkin/scan-view';
 import { cn } from '@/lib/utils';
@@ -26,6 +27,11 @@ type ScanResultOverlayProps = {
  * `scan-result-overlay` (UX-DR30, DESIGN.md › scan-result-success/danger): phủ toàn màn hình, che camera, đọc bằng
  * `aria-live="assertive"`. Chữ `text-scan-result` / `text-scan-detail`. Xanh và trung tính tự đóng; đỏ giữ tới khi chạm
  * bất kỳ đâu, có nút "Chạm để quét tiếp" chữ trắng viền trắng ở vùng ngón cái. Reduced motion: hiện ngay, không animation.
+ *
+ * Gắn thẳng vào `body` (portal, sau mọi phần tử khác): kết quả check-in tay (Story 5.5) hiện đúng lúc `manual-lookup`
+ * đang đóng, mà `Sheet` (Radix) che và ẩn với trình đọc màn hình (`aria-hidden`) mọi thứ có sẵn trong trang tới khi
+ * đóng xong. `pointer-events-auto`: trong lúc đó Radix đặt `pointer-events: none` cho `body`, mà chạm vào overlay đỏ vẫn
+ * phải đóng được. Chỉ render ở client (khi đã có kết quả).
  */
 export function ScanResultOverlay({ view, onClose }: ScanResultOverlayProps) {
   const Icon = TONE_ICON[view.tone];
@@ -41,7 +47,7 @@ export function ScanResultOverlay({ view, onClose }: ScanResultOverlayProps) {
     return () => clearTimeout(timer);
   }, [view]);
 
-  return (
+  return createPortal(
     <div
       role="alert"
       aria-live="assertive"
@@ -50,7 +56,7 @@ export function ScanResultOverlay({ view, onClose }: ScanResultOverlayProps) {
       data-tone={view.tone}
       onClick={dismissable ? onClose : undefined}
       className={cn(
-        'fixed inset-0 z-50 flex flex-col pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]',
+        'pointer-events-auto fixed inset-0 z-50 flex flex-col pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]',
         'animate-in fade-in-0 duration-150 motion-reduce:animate-none',
         dismissable && 'cursor-pointer',
         TONE_CLASS[view.tone],
@@ -79,6 +85,7 @@ export function ScanResultOverlay({ view, onClose }: ScanResultOverlayProps) {
           </button>
         </div>
       ) : null}
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -7,10 +7,17 @@ import {
   CheckerInviteResponse,
   CheckinEvent,
   checkinEventApiPath,
+  CheckinLookupResult,
+  checkinLookupApiPath,
+  checkinManualCheckinApiPath,
   checkinScanApiPath,
   CreatedCheckerInvite,
+  IDEMPOTENCY_KEY_HEADER,
+  lookupQueryKey,
   ScanResult,
   type CheckerInviteTokenRequest,
+  type CheckinLookupRequest,
+  type LookupQuery,
   type ScanRequest,
 } from '@tickee/contracts';
 
@@ -85,16 +92,15 @@ export const fetchCheckinEvent = (eventId: string, signal?: AbortSignal) =>
 export const SCAN_TIMEOUT_MS = 3000;
 
 /**
- * `POST /v1/checkin/events/:eventId/scans` (`checkin.scan`, Story 5.3): chuỗi camera vừa đọc (`code`) và `scanId` của
- * lần đọc này → `ScanResult` (xanh / trung tính / đỏ). Không có quyền → `403 NOT_A_MEMBER`; CTV bị thu hồi → `403
- * CHECKER_REVOKED`. `code` chỉ đi trong body, không bao giờ trong đường dẫn, query hay log.
- *
- * Mỗi lần gọi có hạn `SCAN_TIMEOUT_MS` (Story 5.4): chưa xong (kể cả lúc đang đọc body) thì hủy request và ném
- * `serviceUnavailableError` (`isNetworkError`), để nơi gọi gửi lại cùng `scanId`. `AbortController` + `setTimeout`, không
- * `AbortSignal.timeout` (thiếu ở iOS 15); timer luôn được xóa. `signal` của nơi gọi (vd. rời Màn quét) hủy theo kiểu
- * thường: ném lại nguyên trạng, không phải lỗi mạng.
+ * Gọi `request` với một `signal` có hạn `SCAN_TIMEOUT_MS`: chưa xong (kể cả lúc đang đọc body) thì hủy request và ném
+ * `serviceUnavailableError` (`isNetworkError`), để nơi gọi gửi lại (cùng `scanId` / `Idempotency-Key`). `AbortController`
+ * + `setTimeout`, không `AbortSignal.timeout` (thiếu ở iOS 15); timer luôn được xóa. `signal` của nơi gọi (vd. rời Màn
+ * quét, TanStack Query hủy) hủy theo kiểu thường: ném lại nguyên trạng, không phải lỗi mạng.
  */
-export async function submitScan(eventId: string, body: ScanRequest, signal?: AbortSignal) {
+async function withScanTimeout<T>(
+  signal: AbortSignal | undefined,
+  request: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -105,10 +111,7 @@ export async function submitScan(eventId: string, body: ScanRequest, signal?: Ab
   if (signal?.aborted) abort();
   else signal?.addEventListener('abort', abort, { once: true });
   try {
-    return await apiRequest(checkinScanApiPath(eventId), {
-      schema: ScanResult,
-      init: { method: 'POST', body: JSON.stringify(body), signal: controller.signal },
-    });
+    return await request(controller.signal);
   } catch (error) {
     if (timedOut) throw serviceUnavailableError(error);
     throw error;
@@ -117,3 +120,65 @@ export async function submitScan(eventId: string, body: ScanRequest, signal?: Ab
     signal?.removeEventListener('abort', abort);
   }
 }
+
+/**
+ * `POST /v1/checkin/events/:eventId/scans` (`checkin.scan`, Story 5.3): chuỗi camera vừa đọc (`code`) và `scanId` của
+ * lần đọc này → `ScanResult` (xanh / trung tính / đỏ). Không có quyền → `403 NOT_A_MEMBER`; CTV bị thu hồi → `403
+ * CHECKER_REVOKED`. `code` chỉ đi trong body, không bao giờ trong đường dẫn, query hay log. Mỗi lần gọi có hạn
+ * `SCAN_TIMEOUT_MS` (Story 5.4, `withScanTimeout`), để nơi gọi gửi lại cùng `scanId`.
+ */
+export const submitScan = (eventId: string, body: ScanRequest, signal?: AbortSignal) =>
+  withScanTimeout(signal, (timed) =>
+    apiRequest(checkinScanApiPath(eventId), {
+      schema: ScanResult,
+      init: { method: 'POST', body: JSON.stringify(body), signal: timed },
+    }),
+  );
+
+// ---------------------------------------------------------------------------------------------------------------
+// Tra tay và check-in tay (Story 5.5)
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Khóa TanStack Query: kết quả tra tay của một giá trị đã chuẩn hóa (`lookupQueryKey`: `phone:+84…` / `email:…`), nên mọi
+ * cách gõ cùng một SĐT/email dùng chung một kết quả trong bộ nhớ của tab.
+ */
+export const checkinLookupQueryKey = (eventId: string, query: LookupQuery) =>
+  [...checkinLookupQueryPrefix(eventId), lookupQueryKey(query)] as const;
+
+/** Tiền tố khóa của mọi kết quả tra tay của một Sự kiện ("Tra tay" mở mới thì xóa hết). */
+export const checkinLookupQueryPrefix = (eventId: string) => ['checkin', 'lookup', eventId] as const;
+
+/** Giá trị gửi lên api: dạng đã chuẩn hóa (email chữ thường, SĐT E.164); api kiểm lại bằng cùng `parseLookupQuery`. */
+const lookupValue = (query: LookupQuery): string => (query.kind === 'email' ? query.email : query.phone);
+
+/**
+ * `POST /v1/checkin/events/:eventId/lookups` (`checkin.lookup`): Vé hợp lệ của Sự kiện có SĐT/email Người mua khớp đầy
+ * đủ. Giá trị tra chỉ đi trong body, không bao giờ trên URL. Vượt giới hạn → `429 CHECKIN_LOOKUP_RATE_LIMITED`
+ * (`details.retryAfterSeconds`); không có quyền → `403 NOT_A_MEMBER` / `CHECKER_REVOKED`. Hạn `SCAN_TIMEOUT_MS` như khi
+ * quét: quá hạn là lỗi mạng (dải lỗi kèm "Thử lại").
+ */
+export const lookupCheckinTickets = (eventId: string, query: LookupQuery, signal?: AbortSignal) =>
+  withScanTimeout(signal, (timed) =>
+    apiRequest(checkinLookupApiPath(eventId), {
+      schema: CheckinLookupResult,
+      init: {
+        method: 'POST',
+        body: JSON.stringify({ query: lookupValue(query) } satisfies CheckinLookupRequest),
+        signal: timed,
+      },
+    }),
+  );
+
+/**
+ * `POST /v1/checkin/events/:eventId/tickets/:ticketId/check-in` (`checkin.lookup`) với header `Idempotency-Key`: nơi gọi
+ * sinh một khóa mỗi lượt bấm và giữ nguyên khi bấm lại sau lỗi mạng hay 5xx (api phát lại kết quả lần đầu) → `ScanResult`
+ * như khi quét. Hạn `SCAN_TIMEOUT_MS` như khi quét: quá hạn là lỗi mạng, bấm lại dùng cùng khóa.
+ */
+export const checkInManually = (eventId: string, ticketId: string, idempotencyKey: string, signal?: AbortSignal) =>
+  withScanTimeout(signal, (timed) =>
+    apiRequest(checkinManualCheckinApiPath(eventId, ticketId), {
+      schema: ScanResult,
+      init: { method: 'POST', headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey }, signal: timed },
+    }),
+  );

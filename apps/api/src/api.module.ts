@@ -2,7 +2,7 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { FlowsModule } from './flows/index.js';
 import { AdminModule } from './modules/admin/index.js';
-import { CheckinModule } from './modules/checkin/index.js';
+import { CheckinLookupLimitModule, CheckinModule } from './modules/checkin/index.js';
 import { EventModule } from './modules/event/index.js';
 import { IdentityModule } from './modules/identity/index.js';
 import { OrderingModule } from './modules/ordering/index.js';
@@ -75,6 +75,8 @@ export class ApiModule {
         TicketingRoutesModule,
         // Link mời CTV của Sự kiện (Story 5.1): route BTC dùng `PermissionGuard` toàn cục của OrganizerModule.
         CheckinModule,
+        // Bộ đếm tra tay (Story 5.5, toàn cục): khóa HMAC IP từ `BETTER_AUTH_SECRET`; route tra tay ở flows dùng.
+        CheckinLookupLimitModule.forRoot(config),
         // Trạng thái bán công khai (Story 2.11-a): `GET /v1/events/:slug/availability`; phễu mua (Story 3.1); Checkout
         // và tạo Đơn, giữ chỗ (Story 3.2); Đơn 0đ nhận Vé ngay (Story 3.3).
         OrderingModule.forRoot(config),

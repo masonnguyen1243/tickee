@@ -190,6 +190,11 @@ describe('cách ly BTC', () => {
     // Story 5.3: quét Mã QR vé (flows; Owner, Admin và CTV `active`, `checkin.scan`).
     expect(guarded).toContain('POST /v1/checkin/events/:eventId/scans');
     expect(permissionOf('/v1/checkin/events/:eventId/scans', 'POST')).toBe(Permission.CHECKIN_SCAN);
+    // Story 5.5: tra tay và check-in tay (flows; Owner, Admin và CTV `active`, `checkin.lookup`).
+    expect(guarded).toContain('POST /v1/checkin/events/:eventId/lookups');
+    expect(permissionOf('/v1/checkin/events/:eventId/lookups', 'POST')).toBe(Permission.CHECKIN_LOOKUP);
+    expect(guarded).toContain('POST /v1/checkin/events/:eventId/tickets/:ticketId/check-in');
+    expect(permissionOf('/v1/checkin/events/:eventId/tickets/:ticketId/check-in', 'POST')).toBe(Permission.CHECKIN_LOOKUP);
   });
 
   it('kho route: không route nào vừa @Public() vừa @RequirePermission; route có quyền chỉ dưới /v1/orgs/:orgId hoặc /v1/checkin/events/:eventId', () => {
@@ -355,6 +360,28 @@ describe('cách ly BTC', () => {
       const code = own.status === 403 ? ErrorResponse.parse(own.body).error.code : null;
       expect(code, label(route)).not.toBe('NOT_A_MEMBER');
     }
+  });
+
+  it('check-in tay (Story 5.5): Sự kiện của A thiếu Idempotency-Key → 400; có khóa → 200 invalid (Vé ngẫu nhiên); có khóa vẫn không mở được Sự kiện của B → 403 NOT_A_MEMBER', async () => {
+    const path = '/v1/checkin/events/:eventId/tickets/:ticketId/check-in';
+    const route = routes.find((r) => r.method === 'POST' && r.path === path);
+    expect(route?.permission).toBe(Permission.CHECKIN_LOOKUP);
+    const own = await request(route!, fillEvent(path, eventA), ownerA.cookie);
+    expect(own.status).toBe(400);
+    expect(ErrorResponse.parse(own.body).error.code).toBe('VALIDATION_FAILED');
+    const keyed = await h.http
+      .post(fillEvent(path, eventA))
+      .set('cookie', ownerA.cookie)
+      .set(IDEMPOTENCY_KEY_HEADER, randomUUID());
+    expect(keyed.status, keyed.text).toBe(200);
+    expect(keyed.body).toEqual({ outcome: 'invalid', reason: 'BAD_SIGNATURE' });
+    const cross = await h.http
+      .post(fillEvent(path, eventB))
+      .set('cookie', ownerA.cookie)
+      .set(IDEMPOTENCY_KEY_HEADER, randomUUID());
+    expect(cross.status).toBe(403);
+    expect(ErrorResponse.parse(cross.body).error.code).toBe('NOT_A_MEMBER');
+    expect(cross.text).not.toContain(draft.name);
   });
 
   it('route Sự kiện trên BTC A: body {} → 400, id ngẫu nhiên → 404 EVENT_NOT_FOUND', async () => {

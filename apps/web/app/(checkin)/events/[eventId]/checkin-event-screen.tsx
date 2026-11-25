@@ -1,11 +1,12 @@
 'use client';
 
 import { onlineManager, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ErrorCode, ScanOutcome, type CheckinEvent, type ScanRequest } from '@tickee/contracts';
+import { ErrorCode, ScanOutcome, type CheckinEvent, type ScanRequest, type ScanResult } from '@tickee/contracts';
 import { Camera, CameraOff, ShieldX, type LucideIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 
+import { ManualLookup } from '@/components/tickee/manual-lookup';
 import { ScanResultOverlay } from '@/components/tickee/scan-result-overlay';
 import { ManualLookupButton, ScannerViewport } from '@/components/tickee/scanner-viewport';
 import { StatusBanner } from '@/components/tickee/status-banner';
@@ -15,7 +16,7 @@ import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
 import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
 import { isTotpRequired } from '@/lib/auth/totp';
-import { checkinEventQueryKey, fetchCheckinEvent, submitScan } from '@/lib/checkin/api';
+import { checkinEventQueryKey, checkinLookupQueryPrefix, fetchCheckinEvent, submitScan } from '@/lib/checkin/api';
 import { createScanSound, type ScanSound } from '@/lib/checkin/scan-sound';
 import { scanView, type ScanView } from '@/lib/checkin/scan-view';
 import { useQrScanner, type QrScanner } from '@/lib/checkin/use-qr-scanner';
@@ -49,6 +50,9 @@ const handledByGateOrProviders = (error: unknown): boolean =>
   hasErrorCode(error, ErrorCode.UNAUTHENTICATED) ||
   isTotpRequired(error) ||
   hasErrorCode(error, ErrorCode.CONSENT_REQUIRED);
+
+/** Lỗi khi tra hay check-in tay mà `manual-lookup` không tự báo: Màn quét (401, 403) hoặc `Providers` (2FA, NĐ 13). */
+const isScreenHandledError = (error: unknown): boolean => noAccess(error) || handledByGateOrProviders(error);
 
 /** Trang hiện tại làm `returnTo` của màn đăng nhập. */
 const loginHere = () => withReturnTo(LOGIN_PATH, `${window.location.pathname}${window.location.search}`);
@@ -97,7 +101,15 @@ function StepIcon({ icon: Icon }: { icon: LucideIcon }) {
  * Màn "Bật camera", hiện ở mọi lần vào: chạm nút này vừa xin camera vừa mở khóa âm thanh (Safari iOS chỉ cho phát âm
  * thanh sau một cử chỉ của người dùng).
  */
-function EnableCamera({ eventName, onEnable }: { eventName: string; onEnable: () => void }) {
+function EnableCamera({
+  eventName,
+  onEnable,
+  onManualLookup,
+}: {
+  eventName: string;
+  onEnable: () => void;
+  onManualLookup: () => void;
+}) {
   return (
     <CameraStep
       eventName={eventName}
@@ -107,7 +119,7 @@ function EnableCamera({ eventName, onEnable }: { eventName: string; onEnable: ()
             <Camera aria-hidden="true" />
             Bật camera
           </Button>
-          <ManualLookupButton />
+          <ManualLookupButton onClick={onManualLookup} />
         </>
       }
     >
@@ -121,7 +133,15 @@ function EnableCamera({ eventName, onEnable }: { eventName: string; onEnable: ()
 }
 
 /** Bị từ chối quyền camera: hướng dẫn bật lại cho Safari iOS và Chrome Android, "Thử lại", "Tra tay". */
-function CameraDenied({ eventName, onRetry }: { eventName: string; onRetry: () => void }) {
+function CameraDenied({
+  eventName,
+  onRetry,
+  onManualLookup,
+}: {
+  eventName: string;
+  onRetry: () => void;
+  onManualLookup: () => void;
+}) {
   return (
     <CameraStep
       eventName={eventName}
@@ -130,7 +150,7 @@ function CameraDenied({ eventName, onRetry }: { eventName: string; onRetry: () =
           <Button type="button" variant="primary-on-light" className="w-full" onClick={onRetry}>
             Thử lại
           </Button>
-          <ManualLookupButton />
+          <ManualLookupButton onClick={onManualLookup} />
         </>
       }
     >
@@ -160,7 +180,15 @@ function CameraDenied({ eventName, onRetry }: { eventName: string; onRetry: () =
  * Không mở được camera: không có camera hay `mediaDevices`, camera đang bị ứng dụng khác dùng, hoặc lỗi khác ngoài từ chối
  * quyền. "Thử lại" xin camera lại mà không phải tải lại trang.
  */
-function CameraUnavailable({ eventName, onRetry }: { eventName: string; onRetry: () => void }) {
+function CameraUnavailable({
+  eventName,
+  onRetry,
+  onManualLookup,
+}: {
+  eventName: string;
+  onRetry: () => void;
+  onManualLookup: () => void;
+}) {
   return (
     <CameraStep
       eventName={eventName}
@@ -169,7 +197,7 @@ function CameraUnavailable({ eventName, onRetry }: { eventName: string; onRetry:
           <Button type="button" variant="primary-on-light" className="w-full" onClick={onRetry}>
             Thử lại
           </Button>
-          <ManualLookupButton />
+          <ManualLookupButton onClick={onManualLookup} />
         </>
       }
     >
@@ -187,54 +215,47 @@ type ScanFlowProps = {
   event: CheckinEvent;
   scanner: QrScanner;
   sound: ScanSound;
-  result: ScanView | null;
   sendFailed: boolean;
   /** `offline-banner` hiện: khung camera tạm dừng; dải "Chưa gửi được…" ẩn (banner thắng). */
   offline: boolean;
   /** Lần gửi quét chưa xong sau 1 giây. */
   sending: boolean;
-  onCloseResult: () => void;
+  /** Chạm "Tra tay" (mọi màn có nút này): mở `manual-lookup`. */
+  onManualLookup: () => void;
 };
 
-/** Phần của Màn quét sau khi tải xong Sự kiện: Bật camera → bị từ chối / lỗi camera → đang quét → overlay. */
-function ScanFlow({ event, scanner, sound, result, sendFailed, offline, sending, onCloseResult }: ScanFlowProps) {
+/**
+ * Phần của Màn quét sau khi tải xong Sự kiện: Bật camera → bị từ chối / lỗi camera → đang quét. Overlay kết quả và
+ * `manual-lookup` nằm ngoài (hiện được ở mọi màn).
+ */
+function ScanFlow({ event, scanner, sound, sendFailed, offline, sending, onManualLookup }: ScanFlowProps) {
   const enable = () => {
     // Trong chính lần chạm: mở khóa âm thanh trước, rồi mới xin camera.
     sound.unlock();
     scanner.start();
   };
-  // Kết quả đỏ chỉ đóng bằng chạm: mở khóa âm thanh lại trong cử chỉ đó (Safari iOS có thể treo `AudioContext` sau cuộc
-  // gọi hay khóa màn hình, và từ chối `resume()` ngoài cử chỉ).
-  const closeByTap = () => {
-    sound.unlock();
-    onCloseResult();
-  };
 
   switch (scanner.status) {
     case 'idle':
     case 'stopped':
-      return <EnableCamera eventName={event.eventName} onEnable={enable} />;
+      return <EnableCamera eventName={event.eventName} onEnable={enable} onManualLookup={onManualLookup} />;
     case 'denied':
-      return <CameraDenied eventName={event.eventName} onRetry={enable} />;
+      return <CameraDenied eventName={event.eventName} onRetry={enable} onManualLookup={onManualLookup} />;
     case 'unavailable':
-      return <CameraUnavailable eventName={event.eventName} onRetry={enable} />;
+      return <CameraUnavailable eventName={event.eventName} onRetry={enable} onManualLookup={onManualLookup} />;
     case 'starting':
     case 'running':
       return (
-        <>
-          <ScannerViewport
-            eventName={event.eventName}
-            checkedInCount={event.checkedInCount}
-            validTicketCount={event.validTicketCount}
-            videoRef={scanner.videoRef}
-            notice={sendFailed && !offline ? <StatusBanner tone="warning" title={SCAN_SEND_FAILED} /> : null}
-            offline={offline}
-            sending={sending}
-          />
-          {result ? (
-            <ScanResultOverlay view={result} onClose={result.autoCloseMs === null ? closeByTap : onCloseResult} />
-          ) : null}
-        </>
+        <ScannerViewport
+          eventName={event.eventName}
+          checkedInCount={event.checkedInCount}
+          validTicketCount={event.validTicketCount}
+          videoRef={scanner.videoRef}
+          notice={sendFailed && !offline ? <StatusBanner tone="warning" title={SCAN_SEND_FAILED} /> : null}
+          offline={offline}
+          sending={sending}
+          onManualLookup={onManualLookup}
+        />
       );
   }
 }
@@ -250,6 +271,11 @@ function ScanFlow({ event, scanner, sound, result, sendFailed, offline, sending,
  * Query gửi lại đúng biến cũ (cùng `code`, cùng `scanId`) mỗi 1 giây tới khi có phản hồi, tạm dừng khi trình duyệt báo
  * offline và gửi ngay khi có mạng lại. Trong lúc đó, hoặc khi trình duyệt báo offline, `offline-banner` hiện và không
  * giải mã mã mới (camera vẫn chạy). Không có hàng đợi quét offline. Rời Màn quét thì hủy lần gửi đang chạy và thôi gửi lại.
+ *
+ * Tra tay (Story 5.5, UX-DR32): "Tra tay" ở mọi màn sau khi tải Sự kiện mở `manual-lookup`; camera không giải mã khi
+ * Sheet mở. Check-in tay không khóa cổng quét; kết quả hiện bằng cùng overlay (Sheet đóng khi overlay hiện). Đóng overlay:
+ * kết quả tra còn Vé chưa check-in (khách đi nhóm) thì mở lại Sheet với ô tìm và kết quả cũ, hết thì về camera. `401` và
+ * `403` khi tra hay check-in tay xử lý như khi quét.
  */
 export function CheckinEventScreen({ eventId }: { eventId: string }) {
   const router = useRouter();
@@ -264,9 +290,26 @@ export function CheckinEventScreen({ eventId }: { eventId: string }) {
 
   /** `403` khi gửi quét: màn hết quyền thay Màn quét. */
   const [scanNoAccessError, setScanNoAccessError] = useState<unknown>(null);
-  /** Kết quả quét đang phủ màn; `ok` thì tải lại số đã check-in khi đóng. */
-  const [result, setResult] = useState<{ view: ScanView; ok: boolean } | null>(null);
+  /**
+   * Kết quả quét hay check-in tay đang phủ màn; `ok` thì tải lại số đã check-in khi đóng; `reopenLookup` thì mở lại
+   * `manual-lookup` khi đóng.
+   */
+  const [result, setResult] = useState<{ view: ScanView; ok: boolean; reopenLookup: boolean } | null>(null);
   const [sendFailed, setSendFailed] = useState(false);
+  /** `manual-lookup` đang mở; chữ trong ô tìm (giữ khi Sheet đóng vì overlay để mở lại nguyên trạng). */
+  const [lookupOpen, setLookupOpen] = useState(false);
+  const [lookupText, setLookupText] = useState('');
+
+  /** Hiện overlay kết quả (quét hay check-in tay): Sheet đóng để overlay chạy đúng như lúc quét. */
+  const showResult = useCallback(
+    (scanned: ScanResult, reopenLookup: boolean) => {
+      const view = scanView(scanned);
+      setLookupOpen(false);
+      setResult({ view, ok: scanned.outcome === ScanOutcome.OK, reopenLookup });
+      if (view.sound) sound.play(view.sound);
+    },
+    [sound],
+  );
 
   /** Hủy khi rời Màn quét: lần gửi đang chạy dừng, không gửi lại nữa (tạo trong effect để chịu được StrictMode). */
   const screenAbort = useRef<AbortController | null>(null);
@@ -284,23 +327,13 @@ export function CheckinEventScreen({ eventId }: { eventId: string }) {
     retry: (_failureCount, error) => !hasLeft() && isNetworkError(error),
     retryDelay: SCAN_RETRY_DELAY_MS,
     onSuccess: (scanned) => {
-      const view = scanView(scanned);
       setSendFailed(false);
-      setResult({ view, ok: scanned.outcome === ScanOutcome.OK });
-      if (view.sound) sound.play(view.sound);
+      // Kết quả quét tới khi Sheet đang mở (mã đọc ngay trước khi bấm "Tra tay"): mở lại Sheet sau khi đóng overlay.
+      showResult(scanned, lookupOpen);
     },
     onError: (error) => {
       if (hasLeft()) return;
-      if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) {
-        scanner.stop();
-        router.replace(loginHere());
-        return;
-      }
-      if (noAccess(error)) {
-        scanner.stop();
-        setScanNoAccessError(error);
-        return;
-      }
+      if (handleAccessError(error)) return;
       // 2FA và đồng ý NĐ 13 do `Providers` xử lý; 5xx và lỗi khác có phản hồi: không đỏ, báo rồi quét tiếp.
       if (!isTotpRequired(error) && !hasErrorCode(error, ErrorCode.CONSENT_REQUIRED)) setSendFailed(true);
       scanner.release();
@@ -329,13 +362,58 @@ export function CheckinEventScreen({ eventId }: { eventId: string }) {
   // Mỗi lần đọc một `scanId` mới; lần gửi lại (TanStack) giữ nguyên `scanId` đó. `mutate` ổn định giữa các lần render.
   const { mutate } = submit;
   const onCode = useCallback((code: string) => mutate({ code, scanId: crypto.randomUUID() }), [mutate]);
-  const scanner = useQrScanner({ onCode, paused: offline });
+  // Không giải mã khi offline, khi `manual-lookup` mở, hay khi overlay đang phủ (check-in tay không khóa cổng quét).
+  const scanner = useQrScanner({ onCode, paused: offline || lookupOpen || result !== null });
+
+  /**
+   * `401` → màn đăng nhập rồi quay lại đây; `403` (`NOT_A_MEMBER`, `CHECKER_REVOKED`) → màn hết quyền. Cả hai tắt camera.
+   * Trả `true` khi đã xử lý (quét, tra tay, check-in tay dùng chung).
+   */
+  const stopScanner = scanner.stop;
+  const handleAccessError = useCallback(
+    (error: unknown): boolean => {
+      if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) {
+        stopScanner();
+        router.replace(loginHere());
+        return true;
+      }
+      if (noAccess(error)) {
+        stopScanner();
+        setScanNoAccessError(error);
+        return true;
+      }
+      return false;
+    },
+    [stopScanner, router],
+  );
+  const onLookupAccessError = useCallback((error: unknown) => void handleAccessError(error), [handleAccessError]);
 
   const closeResult = useCallback(() => {
     const wasOk = result?.ok ?? false;
+    const reopen = result?.reopenLookup ?? false;
     setResult(null);
+    if (reopen) setLookupOpen(true);
     if (wasOk) void queryClient.invalidateQueries({ queryKey: checkinEventQueryKey(eventId) });
   }, [result, queryClient, eventId]);
+  // Kết quả đỏ chỉ đóng bằng chạm: mở khóa âm thanh lại trong cử chỉ đó (Safari iOS có thể treo `AudioContext` sau cuộc
+  // gọi hay khóa màn hình, và từ chối `resume()` ngoài cử chỉ).
+  const closeResultByTap = useCallback(() => {
+    sound.unlock();
+    closeResult();
+  }, [sound, closeResult]);
+
+  /**
+   * "Tra tay": mở Sheet với ô tìm trống (không để lộ lần tra của khách trước) và bỏ mọi kết quả tra đã lưu của Sự kiện
+   * (Người mua vừa trả tiền, Vé vừa được check-in nơi khác), nên gõ lại cùng số thì tra lại. Mở lại sau overlay không đi
+   * qua đây: giữ kết quả. Chạm cũng mở khóa âm thanh.
+   */
+  const openLookup = useCallback(() => {
+    sound.unlock();
+    queryClient.removeQueries({ queryKey: checkinLookupQueryPrefix(eventId) });
+    setLookupText('');
+    setLookupOpen(true);
+  }, [sound, queryClient, eventId]);
+  const unlockSound = useCallback(() => sound.unlock(), [sound]);
 
   // Mở khóa quét khi overlay đã thật sự rời màn (sau commit), để "cùng mã trong 2 giây sau khi overlay đóng" tính từ lúc
   // đóng thật. Lúc chưa có kết quả nào thì gate chưa khóa: `release()` không làm gì.
@@ -352,7 +430,6 @@ export function CheckinEventScreen({ eventId }: { eventId: string }) {
 
   // Lần tải lại Sự kiện trả 403 (vd. bị thu hồi khi đang quét): tắt camera cùng lúc thay bằng màn hết quyền.
   const eventNoAccess = noAccess(event.error);
-  const stopScanner = scanner.stop;
   useEffect(() => {
     if (eventNoAccess) stopScanner();
   }, [eventNoAccess, stopScanner]);
@@ -364,16 +441,36 @@ export function CheckinEventScreen({ eventId }: { eventId: string }) {
 
   if (event.data) {
     return (
-      <ScanFlow
-        event={event.data}
-        scanner={scanner}
-        sound={sound}
-        result={result?.view ?? null}
-        sendFailed={sendFailed}
-        offline={offline}
-        sending={sending}
-        onCloseResult={closeResult}
-      />
+      <>
+        <ScanFlow
+          event={event.data}
+          scanner={scanner}
+          sound={sound}
+          sendFailed={sendFailed}
+          offline={offline}
+          sending={sending}
+          onManualLookup={openLookup}
+        />
+        <ManualLookup
+          eventId={eventId}
+          open={lookupOpen}
+          onOpenChange={setLookupOpen}
+          text={lookupText}
+          onTextChange={setLookupText}
+          online={online}
+          onResult={showResult}
+          isHandledByScreen={isScreenHandledError}
+          onHandledError={onLookupAccessError}
+          onCheckInTap={unlockSound}
+          returnFocus={result === null}
+        />
+        {result ? (
+          <ScanResultOverlay
+            view={result.view}
+            onClose={result.view.autoCloseMs === null ? closeResultByTap : closeResult}
+          />
+        ) : null}
+      </>
     );
   }
 

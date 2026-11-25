@@ -10,6 +10,8 @@ export {
   type CheckInResult,
 } from './check-in.js';
 export { issuedTicketCountsByType } from './issued-counts.js';
+// Tra tay (Story 5.5): Vé `valid` của các Đơn khớp SĐT/email (`flows`).
+export { validTicketsOfOrders, type LookupTicketRow } from './lookup-read.js';
 export { type OwnTicket, type OwnTicketDetail } from './my-tickets.js';
 export { signTicketQr, TICKET_QR_KEYS, TicketQrKeys, verifyTicketQr, type VerifiedTicketQr } from './qr.js';
 export { hashShareToken, shareTokenOf } from './share-token.js';
