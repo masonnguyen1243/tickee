@@ -20,11 +20,24 @@ export const CHECKER_ACCESS_RESOLVER = Symbol('CHECKER_ACCESS_RESOLVER');
 /** Trạng thái CTV của một tài khoản ở một Sự kiện (bảng `checkers` của `checkin`). */
 export type CheckerStatus = 'active' | 'revoked';
 
+/** Kết quả tra Sự kiện của cổng `CheckerAccessResolver`. */
+export interface CheckerEventAccess {
+  /** BTC sở hữu Sự kiện. */
+  organizationId: string;
+  /** Trạng thái CTV của người gọi ở Sự kiện; `null` khi chưa từng nhận lời mời. */
+  checker: CheckerStatus | null;
+  /**
+   * Sự kiện đã kết thúc (Story 5.6, AD-14): đã bấm "Kết thúc", hoặc đồng hồ DB đã tới `effective_end_at` (cùng luật
+   * `ended` của cổng check-in). CTV `active` hết quyền từ mốc này.
+   */
+  ended: boolean;
+}
+
 /**
- * Cổng tra Sự kiện cho route CTV (`/v1/checkin/events/:eventId/…`, AD-26): BTC sở hữu Sự kiện và trạng thái CTV của
- * `userId` ở Sự kiện đó (`null` khi chưa từng nhận lời mời). `eventId` luôn là UUID hợp lệ (chữ thường) khi được gọi.
- * Trả `null` khi Sự kiện không tồn tại. Đọc lại ở mỗi request, không cache (thu hồi có hiệu lực ngay request kế tiếp).
+ * Cổng tra Sự kiện cho route CTV (`/v1/checkin/events/:eventId/…`, AD-26): BTC sở hữu Sự kiện, trạng thái CTV của
+ * `userId` ở Sự kiện đó và Sự kiện đã kết thúc chưa. `eventId` luôn là UUID hợp lệ (chữ thường) khi được gọi. Trả `null`
+ * khi Sự kiện không tồn tại. Đọc lại ở mỗi request, không cache (thu hồi và hết quyền có hiệu lực ngay request kế tiếp).
  */
 export interface CheckerAccessResolver {
-  resolveEvent(userId: string, eventId: string): Promise<{ organizationId: string; checker: CheckerStatus | null } | null>;
+  resolveEvent(userId: string, eventId: string): Promise<CheckerEventAccess | null>;
 }

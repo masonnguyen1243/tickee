@@ -1,7 +1,17 @@
 import type { Locator, Page } from '@playwright/test';
 
 import { fakeCamera, recordScanSound, type CameraMode, type CameraSize } from './checkin-camera';
-import { checkerRevoked, CHECKER_REVOKED_MESSAGE, checkinEvent, mockCheckinApi, scanResult, type CheckinHandler } from './checkin-mock';
+import {
+  checkerRevoked,
+  CHECKER_REVOKED_MESSAGE,
+  checkinEvent,
+  EVENT_ENDED_MESSAGE,
+  EVENT_ENDED_NOTE,
+  eventEnded,
+  mockCheckinApi,
+  scanResult,
+  type CheckinHandler,
+} from './checkin-mock';
 import { expect, test } from './fixtures';
 import { apiError, me, mockIdentityApi, unauthenticated, type Call } from './identity-mock';
 import { setVisibility } from './live-mock';
@@ -600,6 +610,8 @@ test('mất quyền giữa chừng: POST scans → 403 CHECKER_REVOKED → màn 
   await expect.poll(async () => (await wakeLock()).requests).toBe(1);
   await camera.show(ticketCode(1));
   await expect(page.getByRole('heading', { name: CHECKER_REVOKED_MESSAGE })).toBeVisible();
+  // Thu hồi (Story 5.6): không có dòng "Sự kiện đã kết thúc.".
+  await expect(page.getByText(EVENT_ENDED_NOTE, { exact: true })).toHaveCount(0);
   await expect(page.getByText(EVENT_NAME)).toHaveCount(0);
   await expect(viewport(page)).toHaveCount(0);
   await expect(overlay(page)).toHaveCount(0);
@@ -608,6 +620,23 @@ test('mất quyền giữa chừng: POST scans → 403 CHECKER_REVOKED → màn 
   // Không tự bật lại camera.
   await page.waitForTimeout(500);
   expect((await camera.state()).calls).toHaveLength(1);
+});
+
+test('Sự kiện vừa kết thúc khi đang quét (Story 5.6): POST scans → 403 EVENT_ENDED → màn hết quyền kèm "Sự kiện đã kết thúc.", camera tắt, không gửi lại', async ({
+  page,
+}) => {
+  const { camera, wakeLock, calls } = await openScanScreen(page, { scan: eventEnded });
+  await startCamera(page, camera);
+  await camera.show(ticketCode(1));
+  await expect(page.getByRole('heading', { name: EVENT_ENDED_MESSAGE })).toBeVisible();
+  await expect(page.getByText(EVENT_ENDED_NOTE, { exact: true })).toBeVisible();
+  await expect(page.getByText(EVENT_NAME)).toHaveCount(0);
+  await expect(viewport(page)).toHaveCount(0);
+  await expect(overlay(page)).toHaveCount(0);
+  await expect.poll(async () => (await camera.state()).live).toBe(0);
+  await expect.poll(async () => (await wakeLock()).released).toBe(1);
+  await page.waitForTimeout(500);
+  expect(scans(calls)).toHaveLength(1);
 });
 
 test('Sự kiện tải lại trả 403 khi đang quét (sau lần xanh): màn hết quyền, camera tắt, nhả Wake Lock', async ({ page }) => {

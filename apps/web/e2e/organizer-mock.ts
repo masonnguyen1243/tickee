@@ -15,8 +15,8 @@ import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
  * BTC `GET /orgs/:id/live` (khung dashboard luôn mở, Story 4.2-b) → 503 (dải banner polling 10 giây),
  * `GET /orgs/:id/review-items/summary` (badge "Cần xử lý" của khung, Story 4.3) → `{ openCount: 0 }`,
  * `GET /orgs/:id/review-items` (trang Cần xử lý) → hàng trống không lọc, `GET /orgs/:id/token` (trang Token, Story 4.5-a)
- * → BTC chưa có tài khoản nhận tiền mặc định, không có link portal, chưa đặt ngưỡng cảnh báo (Story 4.5-b); lời gọi
- * không có handler → 500.
+ * → BTC chưa có tài khoản nhận tiền mặc định, không có link portal, chưa đặt ngưỡng cảnh báo (Story 4.5-b),
+ * `GET /orgs/:id/events/:eventId/checkers` (tab Check-in, Story 5.6) → chưa có CTV; lời gọi không có handler → 500.
  *
  * Ảnh Sự kiện (Story 4.8-b): `presignReply` cho handler `POST /orgs/:id/event-images`, `mockImageStorage` giả object
  * storage (host riêng, không qua api) cho PUT của trình duyệt và ảnh công khai.
@@ -38,6 +38,7 @@ const SALE_STATUS_KEY = /^GET \/orgs\/[^/]+\/event-sale-status$/;
 const REVIEW_SUMMARY_KEY = /^GET \/orgs\/[^/]+\/review-items\/summary$/;
 const REVIEW_ITEMS_KEY = /^GET \/orgs\/[^/]+\/review-items$/;
 const TOKEN_KEY = /^GET \/orgs\/[^/]+\/token$/;
+const CHECKERS_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/checkers$/;
 
 /** Đường SSE cấp BTC (Story 4.2-b), để `fakeEventSource` chọn đúng stream giữa stream của khung và stream của trang. */
 export const ORG_LIVE_URL = /\/v1\/orgs\/[^/]+\/live$/;
@@ -106,6 +107,8 @@ function defaultHandler(key: string): Handler | undefined {
   if (REVIEW_ITEMS_KEY.test(key)) return () => ({ status: 200, body: { event: null, items: [] } });
   // Trang Token (Story 4.5-a): mặc định chưa có tài khoản nhận tiền mặc định (api không gọi Tingee), không link portal.
   if (TOKEN_KEY.test(key)) return () => ({ status: 200, body: tokenOverview() });
+  // Tab Check-in luôn tải danh sách CTV (Story 5.6): mặc định chưa CTV nào nhận lời mời.
+  if (CHECKERS_KEY.test(key)) return () => ({ status: 200, body: { checkers: [] } });
   return undefined;
 }
 

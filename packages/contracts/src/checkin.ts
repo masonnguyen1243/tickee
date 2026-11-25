@@ -61,6 +61,67 @@ export const CreatedCheckerInvite = z.object({
 export type CreatedCheckerInvite = z.infer<typeof CreatedCheckerInvite>;
 
 // ---------------------------------------------------------------------------------------------------------------
+// CTV của Sự kiện: danh sách, thu hồi, khôi phục (FR-26, AD-14, AD-30, Story 5.6)
+// ---------------------------------------------------------------------------------------------------------------
+
+/*
+ * Owner và Admin (`checkers.manage`) xem CTV đã nhận lời mời của Sự kiện, "Thu hồi" và "Khôi phục". Thu hồi có hiệu lực
+ * ở request kế tiếp của CTV (quyền đọc lại ở mỗi request, không cache); CTV bị thu hồi không tự nhận lại bằng link mời.
+ * Khôi phục xóa người/lúc thu hồi (lịch sử nằm ở audit) và chỉ được khi Sự kiện chưa kết thúc. Sự kiện lạ, sai dạng hoặc
+ * của BTC khác → `404 EVENT_NOT_FOUND`, kiểm trước mọi thứ khác. Mọi response `cache-control: no-store`.
+ */
+
+/** Trạng thái của một CTV ở Sự kiện: `active` quét và tra tay được; `revoked` bị Owner/Admin thu hồi. */
+export const CheckerStatus = { ACTIVE: 'active', REVOKED: 'revoked' } as const;
+export type CheckerStatus = (typeof CheckerStatus)[keyof typeof CheckerStatus];
+
+/** Đường API (sau `/v1`) danh sách CTV của Sự kiện: `GET` (`CheckerList`). */
+export const checkersApiPath = (organizationId: string, eventId: string): string =>
+  `/orgs/${encodeURIComponent(organizationId)}/events/${encodeURIComponent(eventId)}/checkers`;
+
+/** Thao tác trên một CTV: "Thu hồi" hoặc "Khôi phục". */
+export const CheckerAction = { REVOKE: 'revoke', RESTORE: 'restore' } as const;
+export type CheckerAction = (typeof CheckerAction)[keyof typeof CheckerAction];
+
+/** Đường API (sau `/v1`) thu hồi / khôi phục một CTV: `POST`, không body, `204`. */
+export const checkerActionApiPath = (
+  organizationId: string,
+  eventId: string,
+  checkerId: string,
+  action: CheckerAction,
+): string => `${checkersApiPath(organizationId, eventId)}/${encodeURIComponent(checkerId)}/${action}`;
+
+/**
+ * Một CTV của Sự kiện. `name`: tên hiển thị của tài khoản (đã trim), không có (tài khoản OTP, hoặc tài khoản không còn)
+ * → `null`; `email`: `null` khi tài khoản không còn. `acceptedAt`: lúc nhận lời mời lần đầu. `revokedAt`: lúc bị thu hồi,
+ * `null` khi `active` (khôi phục xóa mốc này).
+ */
+export const CheckerListItem = z.object({
+  id: z.uuid(),
+  name: z.string().min(1).nullable(),
+  email: z.string().nullable(),
+  acceptedAt: EventDateTime,
+  status: z.enum(CheckerStatus),
+  revokedAt: EventDateTime.nullable(),
+});
+export type CheckerListItem = z.infer<typeof CheckerListItem>;
+
+/**
+ * `GET /v1/orgs/:orgId/events/:eventId/checkers` (`checkers.manage`): mọi CTV đã nhận lời mời của Sự kiện, kể cả đã bị
+ * thu hồi, sắp theo `acceptedAt` tăng dần (hàng không đổi chỗ khi đổi trạng thái).
+ */
+export const CheckerList = z.object({ checkers: z.array(CheckerListItem) });
+export type CheckerList = z.infer<typeof CheckerList>;
+
+/*
+ * `POST /v1/orgs/:orgId/events/:eventId/checkers/:checkerId/{revoke,restore}` (`checkers.manage`, không body, `204`):
+ * - CTV đã ở trạng thái đích (kể cả hai người bấm cùng lúc) → `204`, không ghi gì;
+ * - `checkerId` sai dạng, lạ hoặc của Sự kiện khác → `404 NOT_FOUND`;
+ * - "Khôi phục" khi Sự kiện đã kết thúc (kể cả "Kết thúc" sớm) → `409 EVENT_ALREADY_ENDED`; "Thu hồi" luôn được.
+ * Không nhận `Idempotency-Key`: gửi lại luôn ra cùng trạng thái đích.
+ */
+
+// ---------------------------------------------------------------------------------------------------------------
 // Nhận lời mời CTV và Màn quét (FR-26, FR-29, AD-26, AD-30, Story 5.2)
 // ---------------------------------------------------------------------------------------------------------------
 
@@ -157,7 +218,8 @@ export type ScanOutcome = (typeof ScanOutcome)[keyof typeof ScanOutcome];
  * - `CANCELLED`: Vé đã hủy, hoặc Sự kiện đã hủy;
  * - `VOIDED`: Vé bị vô hiệu (`cancel_reason = 'voided'`);
  * - `OTHER_EVENT`: Vé của Sự kiện khác (cùng hoặc khác BTC; không lộ gì thêm);
- * - `EVENT_ENDED`: Sự kiện đã kết thúc (đã bấm "Kết thúc", hoặc đồng hồ DB đã tới `effective_end_at`).
+ * - `EVENT_ENDED`: Sự kiện đã kết thúc (đã bấm "Kết thúc", hoặc đồng hồ DB đã tới `effective_end_at`). Từ Story 5.6 chỉ
+ *   Owner/Admin còn nhận `invalid EVENT_ENDED`: CTV bị guard chặn trước bằng `403 EVENT_ENDED`.
  * `EXPIRED` và `CHECKER_REVOKED` của AD-15 không có ở đây: Vé hết hiệu lực đúng lúc Sự kiện kết thúc (trùng
  * `EVENT_ENDED`), còn CTV bị thu hồi nhận `403 CHECKER_REVOKED` từ guard.
  */

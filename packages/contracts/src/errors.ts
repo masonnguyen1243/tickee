@@ -256,6 +256,12 @@ export const ErrorCode = {
    */
   CHECKER_REVOKED: 'CHECKER_REVOKED',
   /**
+   * CTV `active` gọi route `/v1/checkin/events/:eventId/…` khi Sự kiện đã kết thúc (Story 5.6, AD-14): đã bấm "Kết thúc",
+   * hoặc đồng hồ DB đã tới `effective_end_at`. Quyền CTV tự hết ở mốc này; tính lại ở mỗi request. Owner/Admin không nhận
+   * mã này (quét vẫn ra `invalid EVENT_ENDED`).
+   */
+  EVENT_ENDED: 'EVENT_ENDED',
+  /**
    * Tra tay quá nhanh (Story 5.5): vượt `CHECKIN_LOOKUP_RATE_LIMITS` theo tài khoản hoặc theo IP. Không tra, không đếm.
    * `details`: `CheckinLookupRateLimitedDetails` (`retryAfterSeconds` theo giới hạn chặn lâu nhất).
    */

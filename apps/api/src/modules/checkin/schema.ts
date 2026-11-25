@@ -60,6 +60,12 @@ export const checkers = pgTable(
   (t) => [
     uniqueIndex('checkers_event_id_user_id_key').on(t.eventId, t.userId),
     check('checkers_status_check', sql`${t.status} IN ('active', 'revoked')`),
+    // Story 5.6: dòng `active` không mang dấu thu hồi (khôi phục xóa `revoked_*`, lịch sử ở audit); dòng `revoked` luôn
+    // có người và lúc thu hồi.
+    check(
+      'checkers_revoked_check',
+      sql`(${t.status} = 'active' AND ${t.revokedAt} IS NULL AND ${t.revokedBy} IS NULL) OR (${t.status} = 'revoked' AND ${t.revokedAt} IS NOT NULL AND ${t.revokedBy} IS NOT NULL)`,
+    ),
   ],
 );
 

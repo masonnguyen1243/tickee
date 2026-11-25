@@ -14,3 +14,5 @@ export {
   joinChecker,
   type CheckerInviteRef,
 } from './checkers.js';
+// Danh sách CTV của Sự kiện (Story 5.6): `flows.listCheckers` ghép tên, email của `identity`.
+export { checkersOf, type CheckerRow } from './checkers.js';

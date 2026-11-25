@@ -5,6 +5,9 @@ import {
   checkerRevoked,
   CHECKER_REVOKED_MESSAGE,
   checkinEvent,
+  EVENT_ENDED_MESSAGE,
+  EVENT_ENDED_NOTE,
+  eventEnded,
   lookupRateLimited,
   lookupResult,
   mockCheckinApi,
@@ -611,6 +614,33 @@ test('403 khi check-in tay (NOT_A_MEMBER): màn hết quyền với câu của a
   await input(page).fill('0912345678');
   await checkInButton(rows(page).first()).click();
   await expect(page.getByRole('heading', { name: NOT_A_MEMBER_MESSAGE })).toBeVisible();
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(overlay(page)).toHaveCount(0);
+});
+
+test('Sự kiện vừa kết thúc (Story 5.6): tra → 403 EVENT_ENDED → màn hết quyền kèm "Sự kiện đã kết thúc.", camera tắt', async ({
+  page,
+}) => {
+  const { camera } = await openScanScreen(page, { lookup: eventEnded });
+  await startCamera(page, camera);
+  await openLookup(page);
+  await input(page).fill('0912345678');
+  await expect(page.getByRole('heading', { name: EVENT_ENDED_MESSAGE })).toBeVisible();
+  await expect(page.getByText(EVENT_ENDED_NOTE, { exact: true })).toBeVisible();
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(page.getByText(EVENT_NAME)).toHaveCount(0);
+  await expect.poll(async () => (await camera.state()).live).toBe(0);
+});
+
+test('Sự kiện vừa kết thúc (Story 5.6): check-in tay → 403 EVENT_ENDED → màn hết quyền kèm "Sự kiện đã kết thúc.", không overlay', async ({
+  page,
+}) => {
+  await openScanScreen(page, { lookup: () => lookupResult([ticket(1)]), checkIn: { 1: eventEnded } });
+  await openLookup(page);
+  await input(page).fill('0912345678');
+  await checkInButton(rows(page).first()).click();
+  await expect(page.getByRole('heading', { name: EVENT_ENDED_MESSAGE })).toBeVisible();
+  await expect(page.getByText(EVENT_ENDED_NOTE, { exact: true })).toBeVisible();
   await expect(sheet(page)).toHaveCount(0);
   await expect(overlay(page)).toHaveCount(0);
 });

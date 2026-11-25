@@ -18,6 +18,7 @@ import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
 import { isTotpRequired } from '@/lib/auth/totp';
 import { checkinEventQueryKey, checkinLookupQueryPrefix, fetchCheckinEvent, submitScan } from '@/lib/checkin/api';
 import { createScanSound, type ScanSound } from '@/lib/checkin/scan-sound';
+import { isNoAccessError, noAccessView } from '@/lib/checkin/checker-view';
 import { scanView, type ScanView } from '@/lib/checkin/scan-view';
 import { useQrScanner, type QrScanner } from '@/lib/checkin/use-qr-scanner';
 
@@ -38,12 +39,12 @@ const browserOnline = () => onlineManager.isOnline();
 const onlineOnServer = () => true;
 
 /**
- * `403` của route CTV: người xem không quét được Sự kiện này (`NOT_A_MEMBER`, cả Sự kiện lạ hay id sai dạng), hoặc CTV
- * đã bị thu hồi (`CHECKER_REVOKED`). Hiện câu của api, không lộ tên Sự kiện. Không dùng `handledElsewhere`: ở đây
- * `NOT_A_MEMBER` không có dashboard nào xử lý thay.
+ * `403` của route CTV (`isNoAccessError`): người xem không quét được Sự kiện này (`NOT_A_MEMBER`, cả Sự kiện lạ hay id
+ * sai dạng), CTV đã bị thu hồi (`CHECKER_REVOKED`), hoặc Sự kiện đã kết thúc với CTV (`EVENT_ENDED`, Story 5.6). Màn hết
+ * quyền không lộ tên Sự kiện (`noAccessView`). Không dùng `handledElsewhere`: ở đây `NOT_A_MEMBER` không có dashboard
+ * nào xử lý thay.
  */
-const NO_ACCESS_CODES = [ErrorCode.NOT_A_MEMBER, ErrorCode.CHECKER_REVOKED];
-const noAccess = (error: unknown): boolean => NO_ACCESS_CODES.some((code) => hasErrorCode(error, code));
+const noAccess = isNoAccessError;
 
 /** Lỗi do nơi khác xử lý: 401 (sang đăng nhập ngay dưới), 2FA và đồng ý NĐ 13 (`Providers`). */
 const handledByGateOrProviders = (error: unknown): boolean =>
@@ -57,15 +58,32 @@ const isScreenHandledError = (error: unknown): boolean => noAccess(error) || han
 /** Trang hiện tại làm `returnTo` của màn đăng nhập. */
 const loginHere = () => withReturnTo(LOGIN_PATH, `${window.location.pathname}${window.location.search}`);
 
-/** Khung một cột cho các màn không phải camera (tải, lỗi, hết quyền). */
-function Screen({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children?: ReactNode }) {
+/** Khung một cột cho các màn không phải camera (tải, lỗi, hết quyền): tiêu đề, dòng mô tả nếu có. */
+function Screen({
+  icon: Icon,
+  title,
+  description,
+  children,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description?: string | null;
+  children?: ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-2 px-gutter-mobile pt-4">
       <Icon aria-hidden="true" strokeWidth={1.5} className="size-icon-button text-muted-foreground" />
       <h1 className="text-headline wrap-break-word">{title}</h1>
+      {description ? <p className="text-body text-muted-foreground">{description}</p> : null}
       {children}
     </div>
   );
+}
+
+/** Màn hết quyền (UX-DR33): câu theo mã lỗi, thêm "Sự kiện đã kết thúc." khi `EVENT_ENDED`. */
+function NoAccessScreen({ error }: { error: unknown }) {
+  const view = noAccessView(error);
+  return <Screen icon={ShieldX} title={view.title} description={view.description} />;
 }
 
 function Loading() {
@@ -264,8 +282,9 @@ function ScanFlow({ event, scanner, sound, sendFailed, offline, sending, onManua
  * Màn quét (Story 5.3, `/events/:eventId`): tải `GET /v1/checkin/events/:eventId` (Owner/Admin của BTC hoặc CTV `active`
  * của Sự kiện) → "Bật camera" → camera chạy liên tục, mỗi mã đọc được gửi `POST …/scans` với một `scanId` mới → overlay
  * xanh / trung tính / đỏ có âm thanh. `401` → màn đăng nhập rồi quay lại đúng trang này; `403` (lúc tải hay lúc quét) →
- * câu của api, tắt camera. Gửi quét lỗi có phản hồi (5xx, lỗi khác) → dải cảnh báo, quét lại bằng `scanId` mới. Quyền
- * kiểm lại ở mỗi request phía api.
+ * màn hết quyền, tắt camera (CTV bị thu hồi hay Sự kiện đã kết thúc với CTV, Story 5.6: "Bạn không còn quyền soát vé cho
+ * Sự kiện này.", thêm "Sự kiện đã kết thúc." khi `EVENT_ENDED`). Gửi quét lỗi có phản hồi (5xx, lỗi khác) → dải cảnh
+ * báo, quét lại bằng `scanId` mới. Quyền kiểm lại ở mỗi request phía api; không có tín hiệu đẩy khi bị thu hồi.
  *
  * Mất mạng (Story 5.4, UX-DR31, AD-15): mỗi lần gửi có hạn 3 giây (`submitScan`); hết hạn hoặc lỗi mạng thì TanStack
  * Query gửi lại đúng biến cũ (cùng `code`, cùng `scanId`) mỗi 1 giây tới khi có phản hồi, tạm dừng khi trình duyệt báo
@@ -366,7 +385,8 @@ export function CheckinEventScreen({ eventId }: { eventId: string }) {
   const scanner = useQrScanner({ onCode, paused: offline || lookupOpen || result !== null });
 
   /**
-   * `401` → màn đăng nhập rồi quay lại đây; `403` (`NOT_A_MEMBER`, `CHECKER_REVOKED`) → màn hết quyền. Cả hai tắt camera.
+   * `401` → màn đăng nhập rồi quay lại đây; `403` (`NOT_A_MEMBER`, `CHECKER_REVOKED`, `EVENT_ENDED`) → màn hết quyền.
+   * Cả hai tắt camera.
    * Trả `true` khi đã xử lý (quét, tra tay, check-in tay dùng chung).
    */
   const stopScanner = scanner.stop;
@@ -434,10 +454,10 @@ export function CheckinEventScreen({ eventId }: { eventId: string }) {
     if (eventNoAccess) stopScanner();
   }, [eventNoAccess, stopScanner]);
 
-  if (scanNoAccessError) return <Screen icon={ShieldX} title={messageOf(scanNoAccessError)} />;
+  if (scanNoAccessError) return <NoAccessScreen error={scanNoAccessError} />;
 
   // Trước `data`: lần tải lại (vd. quay lại tab sau `staleTime`) trả 403 thì bỏ tên Sự kiện đã tải.
-  if (eventNoAccess) return <Screen icon={ShieldX} title={messageOf(event.error)} />;
+  if (eventNoAccess) return <NoAccessScreen error={event.error} />;
 
   if (event.data) {
     return (

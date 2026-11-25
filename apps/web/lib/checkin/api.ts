@@ -2,7 +2,11 @@ import {
   AcceptedCheckerInvite,
   CHECKER_INVITE_ACCEPT_API_PATH,
   CHECKER_INVITE_PREVIEW_API_PATH,
+  CheckerAction,
+  checkerActionApiPath,
   checkerInviteApiPath,
+  CheckerList,
+  checkersApiPath,
   CheckerInvitePreview,
   CheckerInviteResponse,
   CheckinEvent,
@@ -20,6 +24,7 @@ import {
   type LookupQuery,
   type ScanRequest,
 } from '@tickee/contracts';
+import { z } from 'zod';
 
 import { apiRequest } from '@/lib/api/client';
 import { serviceUnavailableError } from '@/lib/api/errors';
@@ -46,6 +51,37 @@ export const fetchCheckerInvite = (orgId: string, eventId: string, signal?: Abor
 /** `POST …/checker-invite` ("Tạo link mới", không body): link mới kèm token; link cũ hết hiệu lực ngay. */
 export const createCheckerInvite = (orgId: string, eventId: string) =>
   apiRequest(checkerInviteApiPath(orgId, eventId), { schema: CreatedCheckerInvite, init: { method: 'POST' } });
+
+// ---------------------------------------------------------------------------------------------------------------
+// CTV của Sự kiện: danh sách, thu hồi, khôi phục (Story 5.6)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Khóa TanStack Query: danh sách CTV của một Sự kiện. */
+export const checkersQueryKey = (orgId: string, eventId: string) => ['checkin', 'checkers', orgId, eventId] as const;
+
+/** `GET /v1/orgs/:orgId/events/:eventId/checkers`: mọi CTV đã nhận lời mời (kể cả đã thu hồi), theo lúc nhận. */
+export const fetchCheckers = (orgId: string, eventId: string, signal?: AbortSignal) =>
+  apiRequest(checkersApiPath(orgId, eventId), { schema: CheckerList, init: { signal } });
+
+/**
+ * `POST …/checkers/:checkerId/revoke` (không body, `204`): CTV không quét hay tra tay được nữa từ request kế tiếp. Đã
+ * thu hồi → `204` như thường; CTV không còn trong Sự kiện → `404 NOT_FOUND`.
+ */
+export const revokeChecker = (orgId: string, eventId: string, checkerId: string) =>
+  apiRequest(checkerActionApiPath(orgId, eventId, checkerId, CheckerAction.REVOKE), {
+    schema: z.undefined(),
+    init: { method: 'POST' },
+  });
+
+/**
+ * `POST …/checkers/:checkerId/restore` (không body, `204`): CTV quét và tra tay lại được. Sự kiện đã kết thúc → `409
+ * EVENT_ALREADY_ENDED`; CTV không còn trong Sự kiện → `404 NOT_FOUND`.
+ */
+export const restoreChecker = (orgId: string, eventId: string, checkerId: string) =>
+  apiRequest(checkerActionApiPath(orgId, eventId, checkerId, CheckerAction.RESTORE), {
+    schema: z.undefined(),
+    init: { method: 'POST' },
+  });
 
 // ---------------------------------------------------------------------------------------------------------------
 // Nhận lời mời CTV và Màn quét (Story 5.2)
@@ -83,7 +119,7 @@ export const acceptCheckerInvite = (token: string) =>
 
 /**
  * `GET /v1/checkin/events/:eventId` (`checkin.scan`): Sự kiện của Màn quét. Không có quyền → `403 NOT_A_MEMBER`; CTV bị
- * thu hồi → `403 CHECKER_REVOKED`.
+ * thu hồi → `403 CHECKER_REVOKED`; CTV khi Sự kiện đã kết thúc → `403 EVENT_ENDED` (Story 5.6).
  */
 export const fetchCheckinEvent = (eventId: string, signal?: AbortSignal) =>
   apiRequest(checkinEventApiPath(eventId), { schema: CheckinEvent, init: { signal } });
@@ -124,8 +160,9 @@ async function withScanTimeout<T>(
 /**
  * `POST /v1/checkin/events/:eventId/scans` (`checkin.scan`, Story 5.3): chuỗi camera vừa đọc (`code`) và `scanId` của
  * lần đọc này → `ScanResult` (xanh / trung tính / đỏ). Không có quyền → `403 NOT_A_MEMBER`; CTV bị thu hồi → `403
- * CHECKER_REVOKED`. `code` chỉ đi trong body, không bao giờ trong đường dẫn, query hay log. Mỗi lần gọi có hạn
- * `SCAN_TIMEOUT_MS` (Story 5.4, `withScanTimeout`), để nơi gọi gửi lại cùng `scanId`.
+ * CHECKER_REVOKED`; CTV `active` khi Sự kiện đã kết thúc → `403 EVENT_ENDED` (Story 5.6). `code` chỉ đi trong body,
+ * không bao giờ trong đường dẫn, query hay log. Mỗi lần gọi có hạn `SCAN_TIMEOUT_MS` (Story 5.4, `withScanTimeout`), để
+ * nơi gọi gửi lại cùng `scanId`.
  */
 export const submitScan = (eventId: string, body: ScanRequest, signal?: AbortSignal) =>
   withScanTimeout(signal, (timed) =>
@@ -155,8 +192,9 @@ const lookupValue = (query: LookupQuery): string => (query.kind === 'email' ? qu
 /**
  * `POST /v1/checkin/events/:eventId/lookups` (`checkin.lookup`): Vé hợp lệ của Sự kiện có SĐT/email Người mua khớp đầy
  * đủ. Giá trị tra chỉ đi trong body, không bao giờ trên URL. Vượt giới hạn → `429 CHECKIN_LOOKUP_RATE_LIMITED`
- * (`details.retryAfterSeconds`); không có quyền → `403 NOT_A_MEMBER` / `CHECKER_REVOKED`. Hạn `SCAN_TIMEOUT_MS` như khi
- * quét: quá hạn là lỗi mạng (dải lỗi kèm "Thử lại").
+ * (`details.retryAfterSeconds`); không có quyền → `403 NOT_A_MEMBER` / `CHECKER_REVOKED`; CTV `active` khi Sự kiện đã
+ * kết thúc → `403 EVENT_ENDED` (Story 5.6). Hạn `SCAN_TIMEOUT_MS` như khi quét: quá hạn là lỗi mạng (dải lỗi kèm "Thử
+ * lại").
  */
 export const lookupCheckinTickets = (eventId: string, query: LookupQuery, signal?: AbortSignal) =>
   withScanTimeout(signal, (timed) =>
@@ -173,7 +211,8 @@ export const lookupCheckinTickets = (eventId: string, query: LookupQuery, signal
 /**
  * `POST /v1/checkin/events/:eventId/tickets/:ticketId/check-in` (`checkin.lookup`) với header `Idempotency-Key`: nơi gọi
  * sinh một khóa mỗi lượt bấm và giữ nguyên khi bấm lại sau lỗi mạng hay 5xx (api phát lại kết quả lần đầu) → `ScanResult`
- * như khi quét. Hạn `SCAN_TIMEOUT_MS` như khi quét: quá hạn là lỗi mạng, bấm lại dùng cùng khóa.
+ * như khi quét. Không có quyền → `403 NOT_A_MEMBER` / `CHECKER_REVOKED`; CTV `active` khi Sự kiện đã kết thúc → `403
+ * EVENT_ENDED` (Story 5.6). Hạn `SCAN_TIMEOUT_MS` như khi quét: quá hạn là lỗi mạng, bấm lại dùng cùng khóa.
  */
 export const checkInManually = (eventId: string, ticketId: string, idempotencyKey: string, signal?: AbortSignal) =>
   withScanTimeout(signal, (timed) =>

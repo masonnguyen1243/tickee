@@ -1,0 +1,1 @@
+ALTER TABLE "checkers" ADD CONSTRAINT "checkers_revoked_check" CHECK (("checkers"."status" = 'active' AND "checkers"."revoked_at" IS NULL AND "checkers"."revoked_by" IS NULL) OR ("checkers"."status" = 'revoked' AND "checkers"."revoked_at" IS NOT NULL AND "checkers"."revoked_by" IS NOT NULL));

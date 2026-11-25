@@ -9,7 +9,8 @@ import { checkinCountsOf } from '../ticketing/index.js';
 /**
  * Route CTV (`/v1/checkin/events/:eventId/…`, Story 5.2, AD-26): Owner/Admin của BTC sở hữu Sự kiện, hoặc CTV `active`
  * của đúng Sự kiện đó (`PermissionGuard`, nhánh Sự kiện). Người khác, Sự kiện lạ hoặc id sai dạng → `403 NOT_A_MEMBER`;
- * CTV bị thu hồi → `403 CHECKER_REVOKED`. `no-store`: response phụ thuộc quyền đọc lại ở mỗi request.
+ * CTV bị thu hồi → `403 CHECKER_REVOKED`; CTV `active` khi Sự kiện đã kết thúc → `403 EVENT_ENDED` (Story 5.6).
+ * `no-store`: response phụ thuộc quyền đọc lại ở mỗi request.
  */
 @Controller('checkin/events/:eventId')
 export class CheckinEventController {
