@@ -255,6 +255,11 @@ export const ErrorCode = {
    * link mới). Không tự kích hoạt lại; chỉ Owner/Admin "Khôi phục" được (Story 5.6).
    */
   CHECKER_REVOKED: 'CHECKER_REVOKED',
+  /**
+   * Tra tay quá nhanh (Story 5.5): vượt `CHECKIN_LOOKUP_RATE_LIMITS` theo tài khoản hoặc theo IP. Không tra, không đếm.
+   * `details`: `CheckinLookupRateLimitedDetails` (`retryAfterSeconds` theo giới hạn chặn lâu nhất).
+   */
+  CHECKIN_LOOKUP_RATE_LIMITED: 'CHECKIN_LOOKUP_RATE_LIMITED',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

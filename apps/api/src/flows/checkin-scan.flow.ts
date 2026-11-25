@@ -49,7 +49,11 @@ async function checkedByOf(
   return { kind: 'role', role: role ?? ScanCheckerRole.CHECKER };
 }
 
-async function toScanResult(db: DbExecutor, ctx: EventAccessContext, result: CheckInResult): Promise<ScanResult> {
+/**
+ * `ScanResult` của một lần check-in (quét, hay check-in tay ở `checkin-lookup.flow.ts`): `already` thì dựng `checkedBy`
+ * (đọc `identity`, `organizer`), gọi sau khi transaction check-in đã xong (đọc ngoài khóa).
+ */
+export async function toScanResult(db: DbExecutor, ctx: EventAccessContext, result: CheckInResult): Promise<ScanResult> {
   switch (result.outcome) {
     case 'ok':
       return {

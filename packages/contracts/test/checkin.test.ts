@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   AcceptedCheckerInvite,
   CHECKER_INVITE_ACCEPT_API_PATH,
+  CHECKIN_LOOKUP_QUERY_MAX,
+  CHECKIN_LOOKUP_RATE_LIMITS,
+  CheckinLookupRateLimitedDetails,
+  CheckinLookupRequest,
+  CheckinLookupResult,
+  checkinLookupApiPath,
+  checkinManualCheckinApiPath,
+  lookupQueryKey,
+  parseLookupQuery,
   CHECKER_INVITE_PATH,
   CHECKER_INVITE_PREVIEW_API_PATH,
   CHECKER_INVITE_TOKEN_PATTERN,
@@ -204,6 +213,95 @@ describe('quét Mã QR vé (Story 5.3-a)', () => {
       { kind: 'email', email: 'a@vidu.vn' },
     ]) {
       expect(ScanCheckedBy.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+});
+
+describe('tra tay và check-in tay (Story 5.5, FR-29, AD-31, AD-35)', () => {
+  const TICKET = '019a3b2c-0b00-7abc-8def-000000000001';
+
+  it('đường API tương đối với /v1, mã hóa từng đoạn id; giá trị tra không bao giờ trong đường dẫn', () => {
+    expect(checkinLookupApiPath(EVENT)).toBe(`/checkin/events/${EVENT}/lookups`);
+    expect(checkinLookupApiPath('a/b?c')).toBe('/checkin/events/a%2Fb%3Fc/lookups');
+    expect(checkinManualCheckinApiPath(EVENT, TICKET)).toBe(`/checkin/events/${EVENT}/tickets/${TICKET}/check-in`);
+    expect(checkinManualCheckinApiPath('a/b', 'c?d')).toBe('/checkin/events/a%2Fb/tickets/c%3Fd/check-in');
+  });
+
+  it('parseLookupQuery: có @ → email trim + chữ thường; còn lại → SĐT E.164 cùng luật form mua', () => {
+    expect(parseLookupQuery('  Minh@Gmail.com ')).toEqual({ kind: 'email', email: 'minh@gmail.com' });
+    for (const phone of ['0912 345 678', '0912345678', '0912.345.678', '0912-345-678', '+84 912 345 678', '(0912) 345678']) {
+      expect(parseLookupQuery(phone), phone).toEqual({ kind: 'phone', phone: '+84912345678' });
+    }
+  });
+
+  it('parseLookupQuery: không đủ dạng → null (không khớp một phần, không theo tên)', () => {
+    for (const raw of [
+      '',
+      '   ',
+      '0912345',
+      '091234567',
+      '09123456789',
+      '84912345678',
+      '+8491234567',
+      '0012345678',
+      'minh@',
+      '@gmail.com',
+      'minh@gmail',
+      'Nguyễn Văn Minh',
+      '678',
+      `${'a'.repeat(CHECKIN_LOOKUP_QUERY_MAX)}@x.vn`,
+    ]) {
+      expect(parseLookupQuery(raw), raw).toBeNull();
+    }
+  });
+
+  it('lookupQueryKey: một khóa cho mọi cách gõ cùng giá trị', () => {
+    expect(lookupQueryKey(parseLookupQuery('0912 345 678')!)).toBe('phone:+84912345678');
+    expect(lookupQueryKey(parseLookupQuery('+84912345678')!)).toBe('phone:+84912345678');
+    expect(lookupQueryKey(parseLookupQuery(' MINH@gmail.com')!)).toBe('email:minh@gmail.com');
+  });
+
+  it('body tra tay: query chuẩn hóa ở đầu ra; sai dạng → lỗi không mang giá trị', () => {
+    expect(CheckinLookupRequest.parse({ query: '0912 345 678' })).toEqual({ query: { kind: 'phone', phone: '+84912345678' } });
+    expect(CheckinLookupRequest.parse({ query: 'A@B.VN' })).toEqual({ query: { kind: 'email', email: 'a@b.vn' } });
+    for (const body of [{}, { query: '' }, { query: '0912345' }, { query: 'minh@' }, { query: 42 }, null]) {
+      const parsed = CheckinLookupRequest.safeParse(body);
+      expect(parsed.success, JSON.stringify(body)).toBe(false);
+    }
+    const failed = CheckinLookupRequest.safeParse({ query: '0912345' });
+    expect(JSON.stringify(failed.error?.issues.map((i) => ({ path: i.path, code: i.code, message: i.message })))).not.toContain(
+      '0912345',
+    );
+  });
+
+  it('kết quả tra: chỉ bản chụp trên Vé và checkedIn; ticketId uuid, seq/count ≥ 1', () => {
+    const row = {
+      ticketId: TICKET,
+      holderName: 'Nguyễn Văn Minh',
+      ticketTypeName: 'Đôi nam',
+      seq: 1,
+      count: 2,
+      checkedIn: false,
+    };
+    expect(CheckinLookupResult.parse({ tickets: [row] })).toEqual({ tickets: [row] });
+    expect(CheckinLookupResult.parse({ tickets: [] })).toEqual({ tickets: [] });
+    for (const bad of [
+      { ...row, ticketId: 'abc' },
+      { ...row, seq: 0 },
+      { ...row, count: 0 },
+      { ...row, checkedIn: 'no' },
+      { holderName: 'A', ticketTypeName: 'B', seq: 1, count: 1, checkedIn: true },
+    ]) {
+      expect(CheckinLookupResult.safeParse({ tickets: [bad] }).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('giới hạn: cửa sổ 10 phút, 60 lần mỗi tài khoản, 600 lần mỗi IP; 429 kèm retryAfterSeconds dương', () => {
+    expect(CHECKIN_LOOKUP_RATE_LIMITS).toEqual({ windowSeconds: 600, perUser: 60, perIp: 600 });
+    expect(ErrorCode.CHECKIN_LOOKUP_RATE_LIMITED).toBe('CHECKIN_LOOKUP_RATE_LIMITED');
+    expect(CheckinLookupRateLimitedDetails.parse({ retryAfterSeconds: 42 })).toEqual({ retryAfterSeconds: 42 });
+    for (const bad of [{}, { retryAfterSeconds: 0 }, { retryAfterSeconds: 1.5 }]) {
+      expect(CheckinLookupRateLimitedDetails.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
     }
   });
 });

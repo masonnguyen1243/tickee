@@ -253,6 +253,13 @@
       "when": 1795439015079,
       "tag": "0035_ticket_checkin",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1795583478282,
+      "tag": "0036_checkin_lookup_attempts",
+      "breakpoints": true
     }
   ]
 }

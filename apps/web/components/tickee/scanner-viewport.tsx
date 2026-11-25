@@ -1,13 +1,10 @@
 'use client';
 
 import { Search } from 'lucide-react';
-import { useId, type ReactNode, type RefObject } from 'react';
+import type { ReactNode, RefObject } from 'react';
 
 import { OfflineBanner } from '@/components/tickee/offline-banner';
 import { Button } from '@/components/ui/button';
-
-/** "Tra tay" luôn hiện ở Màn quét nhưng chưa dùng được (Story 5.5 nối `manual-lookup`). */
-export const MANUAL_LOOKUP_PENDING = 'Tra tay sắp có';
 
 /** Dòng ở đáy khung camera khi `offline-banner` hiện (Story 5.4, UX-DR31). */
 export const CAMERA_PAUSED_TEXT = 'Camera tạm dừng · tự thử lại';
@@ -15,21 +12,15 @@ export const CAMERA_PAUSED_TEXT = 'Camera tạm dừng · tự thử lại';
 export const SCAN_SENDING_TEXT = 'Đang gửi…';
 
 /**
- * Nút "Tra tay" (`button-secondary`, vùng ngón cái): luôn hiện, bị tắt, kèm dòng lý do hiển thị. Dùng chung cho Màn quét
- * và các màn camera bị từ chối / không mở được.
+ * Nút "Tra tay" (`button-secondary`, vùng ngón cái): luôn hiện, mở `manual-lookup` (Story 5.5). Dùng chung cho Màn quét
+ * và các màn "Bật camera", camera bị từ chối / không mở được.
  */
-export function ManualLookupButton() {
-  const reasonId = useId();
+export function ManualLookupButton({ onClick }: { onClick: () => void }) {
   return (
-    <div className="flex flex-col gap-1">
-      <Button type="button" variant="secondary" className="w-full" disabled aria-describedby={reasonId}>
-        <Search aria-hidden="true" />
-        Tra tay
-      </Button>
-      <p id={reasonId} className="text-center text-meta text-muted-foreground">
-        {MANUAL_LOOKUP_PENDING}
-      </p>
-    </div>
+    <Button type="button" variant="secondary" className="w-full" aria-haspopup="dialog" onClick={onClick}>
+      <Search aria-hidden="true" />
+      Tra tay
+    </Button>
   );
 }
 
@@ -48,14 +39,17 @@ type ScannerViewportProps = {
   offline?: boolean;
   /** Lần gửi quét đang chờ quá 1 giây: "Đang gửi…" ở đáy khung camera. `offline` thắng. */
   sending?: boolean;
+  /** Chạm "Tra tay": mở `manual-lookup`. */
+  onManualLookup: () => void;
 };
 
 /**
  * `scanner-viewport` (UX-DR29, DESIGN.md › Màn quét): đỉnh màn là tên Sự kiện (`text-label`) và "Đã check-in k/N"; giữa
  * là khung camera toàn chiều rộng với khung ngắm vuông bo `rounded-lg`, viền trắng 3px; đáy là "Tra tay" ở vùng ngón cái.
  * Theo theme đang dùng; chỉ khung camera luôn tối. Mất kết nối (UX-DR31): `offline-banner` trên cùng, khung camera tạm
- * dừng; "Tra tay" giữ nguyên. Dòng trạng thái ở đáy khung camera đọc bằng `aria-live="polite"` ("Đang gửi…", "Camera tạm
- * dừng · tự thử lại"); vùng live luôn có mặt để trình đọc màn hình nhận được thay đổi.
+ * dừng; "Tra tay" giữ nguyên (tra tay cũng cần mạng: `manual-lookup` tự báo). Dòng trạng thái ở đáy khung camera đọc
+ * bằng `aria-live="polite"` ("Đang gửi…", "Camera tạm dừng · tự thử lại"); vùng live luôn có mặt để trình đọc màn hình
+ * nhận được thay đổi.
  */
 export function ScannerViewport({
   eventName,
@@ -65,6 +59,7 @@ export function ScannerViewport({
   notice,
   offline = false,
   sending = false,
+  onManualLookup,
 }: ScannerViewportProps) {
   return (
     <div data-slot="scanner-viewport" className="flex min-h-0 flex-1 flex-col">
@@ -119,7 +114,7 @@ export function ScannerViewport({
         </p>
       </div>
       <div className="px-gutter-mobile pt-3.5 pb-4">
-        <ManualLookupButton />
+        <ManualLookupButton onClick={onManualLookup} />
       </div>
     </div>
   );

@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 import { EventDateTime } from './event.js';
+import { EmailAddress } from './identity.js';
+import { BuyerPhone } from './order.js';
 
 // ---------------------------------------------------------------------------------------------------------------
 // Link mời CTV (FR-26, AD-30, Story 5.1)
@@ -205,3 +207,99 @@ export const ScanResult = z.discriminatedUnion('outcome', [
   z.object({ outcome: z.literal(ScanOutcome.INVALID), reason: scanInvalidReasonSchema }),
 ]);
 export type ScanResult = z.infer<typeof ScanResult>;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Tra tay và check-in tay (FR-29, AD-31, AD-35, Story 5.5)
+// ---------------------------------------------------------------------------------------------------------------
+
+/*
+ * Khách không mở được Mã QR vé: CTV (hoặc Owner/Admin) tra Vé của Sự kiện theo SĐT hoặc email **đầy đủ** của Người mua
+ * (bản chụp trên Đơn lúc đặt, không theo tài khoản hiện tại), rồi check-in tay một Vé. Cả hai route cần `checkin.lookup`.
+ * Giá trị đã tra chỉ đi trong body `POST`, không bao giờ trên URL, log, span hay `details` của lỗi.
+ */
+
+/** Đường API (sau `/v1`) tra tay: `POST` (`CheckinLookupRequest` → `CheckinLookupResult`). */
+export const checkinLookupApiPath = (eventId: string): string =>
+  `/checkin/events/${encodeURIComponent(eventId)}/lookups`;
+
+/** Đường API (sau `/v1`) check-in tay một Vé: `POST`, header `Idempotency-Key`, không body (→ `ScanResult`). */
+export const checkinManualCheckinApiPath = (eventId: string, ticketId: string): string =>
+  `/checkin/events/${encodeURIComponent(eventId)}/tickets/${encodeURIComponent(ticketId)}/check-in`;
+
+/** Ô tra tay dài tối đa chừng này ký tự (email dài nhất 254 ký tự). */
+export const CHECKIN_LOOKUP_QUERY_MAX = 254;
+
+/** Giá trị tra tay đã chuẩn hóa: email (trim, chữ thường) hoặc SĐT E.164 (cùng luật với form mua). */
+export type LookupQuery = { kind: 'email'; email: string } | { kind: 'phone'; phone: string };
+
+/**
+ * Phân loại và chuẩn hóa giá trị tra tay, dùng chung web (chỉ gửi khi nhận ra) và api (kiểm lại). Có `@` → email
+ * (`EmailAddress`); còn lại → SĐT (`BuyerPhone`: `0912 345 678`, `+84 912.345.678`… → `+84912345678`). Không đủ dạng
+ * (vd. `0912345`, `minh@`) → `null`: không khớp một phần.
+ */
+export function parseLookupQuery(raw: string): LookupQuery | null {
+  if (raw.length > CHECKIN_LOOKUP_QUERY_MAX) return null;
+  if (raw.includes('@')) {
+    const email = EmailAddress.safeParse(raw);
+    return email.success ? { kind: 'email', email: email.data } : null;
+  }
+  const phone = BuyerPhone.safeParse(raw);
+  return phone.success ? { kind: 'phone', phone: phone.data } : null;
+}
+
+/** Khóa ổn định của một giá trị tra tay đã chuẩn hóa (cache của web): `email:<email>` hoặc `phone:<E.164>`. */
+export const lookupQueryKey = (query: LookupQuery): string =>
+  query.kind === 'email' ? `email:${query.email}` : `phone:${query.phone}`;
+
+/**
+ * Body `POST /v1/checkin/events/:eventId/lookups` (`checkin.lookup`): `query` là chữ trong ô tra; đầu ra đã phân loại và
+ * chuẩn hóa (`parseLookupQuery`). Sai dạng → `400 VALIDATION_FAILED` (không lặp lại giá trị, không tính vào giới hạn).
+ */
+export const CheckinLookupRequest = z.object({
+  query: z
+    .string()
+    .max(CHECKIN_LOOKUP_QUERY_MAX)
+    .transform((raw, ctx) => {
+      const parsed = parseLookupQuery(raw);
+      if (parsed) return parsed;
+      ctx.addIssue({ code: 'custom', message: 'Nhập đủ SĐT hoặc email.' });
+      return z.NEVER;
+    }),
+});
+export type CheckinLookupRequest = z.input<typeof CheckinLookupRequest>;
+
+/**
+ * Một Vé khớp: chỉ bản chụp trên Vé (tên Người mua, Hạng vé, Vé k/N) và trạng thái check-in. Không bao giờ có Mã QR vé,
+ * SĐT hay email.
+ */
+export const CheckinLookupTicket = z.object({
+  ticketId: z.uuid(),
+  holderName: z.string(),
+  ticketTypeName: z.string(),
+  seq: z.number().int().min(1),
+  count: z.number().int().min(1),
+  checkedIn: z.boolean(),
+});
+export type CheckinLookupTicket = z.infer<typeof CheckinLookupTicket>;
+
+/**
+ * Response `POST /v1/checkin/events/:eventId/lookups` (`200`, `no-store`): Vé `valid` của Sự kiện thuộc các Đơn có SĐT
+ * hoặc email Người mua khớp đầy đủ, sắp theo mã Đơn rồi `seq`. Vé đã hủy hay bị vô hiệu không có; không khớp → `[]`.
+ */
+export const CheckinLookupResult = z.object({ tickets: z.array(CheckinLookupTicket) });
+export type CheckinLookupResult = z.infer<typeof CheckinLookupResult>;
+
+/**
+ * Giới hạn tốc độ tra tay (AD-31), đếm trong Postgres theo cửa sổ trượt: mỗi lần tra đủ dạng tới server (kể cả không
+ * khớp) là một lượt. Theo tài khoản là giới hạn chính; theo IP nới rộng vì WiFi sự kiện hay CGNAT dồn nhiều CTV vào một
+ * IP. Check-in tay không bị giới hạn.
+ */
+export const CHECKIN_LOOKUP_RATE_LIMITS = {
+  windowSeconds: 600,
+  perUser: 60,
+  perIp: 600,
+} as const;
+
+/** `details` của `429 CHECKIN_LOOKUP_RATE_LIMITED`: số giây tới khi giới hạn chặn lâu nhất cho tra lại. */
+export const CheckinLookupRateLimitedDetails = z.object({ retryAfterSeconds: z.number().int().positive() });
+export type CheckinLookupRateLimitedDetails = z.infer<typeof CheckinLookupRateLimitedDetails>;

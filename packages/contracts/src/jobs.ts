@@ -132,6 +132,11 @@ export const JobQueue = {
    * không dead-letter: lần chạy kế làm lại.
    */
   OPS_ALERT_SCAN: 'platform.ops-alert-scan',
+  /**
+   * Dọn bộ đếm tra tay (`checkin`, Story 5.5): job cron mỗi 10 phút, chỉ vai worker lên lịch. Không payload, không retry,
+   * không dead-letter: lượt kế làm lại. Xóa lượt tra cũ hơn `CHECKIN_LOOKUP_RATE_LIMITS.windowSeconds` (đồng hồ DB).
+   */
+  CHECKIN_PURGE_LOOKUP_ATTEMPTS: 'checkin.purge-lookup-attempts',
 } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];
 

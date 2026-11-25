@@ -1,10 +1,13 @@
 import type { Page, Request } from '@playwright/test';
+import type { CheckinLookupTicket } from '@tickee/contracts';
 
 import { apiError, corsHeaders, WEB_ORIGIN, type Call, type Reply } from './identity-mock';
 
 /*
  * API CTV giả bằng `page.route`: `/v1/checkin/**` (nhận lời mời `POST /checkin/invites/{preview,accept}` và Sự kiện của
- * Màn quét `GET /checkin/events/:eventId`, Story 5.2; quét `POST /checkin/events/:eventId/scans`, Story 5.3). Lời gọi
+ * Màn quét `GET /checkin/events/:eventId`, Story 5.2; quét `POST /checkin/events/:eventId/scans`, Story 5.3; tra tay
+ * `POST /checkin/events/:eventId/lookups` và check-in tay `POST /checkin/events/:eventId/tickets/:ticketId/check-in`,
+ * Story 5.5 — handler đọc header `Idempotency-Key` bằng `request.headers()`). Lời gọi
  * không có handler → 500; handler trả `'abort'` → lỗi mạng (không có phản hồi). Handler treo quá hạn 3 giây của client
  * (Story 5.4): client đã hủy request nên trả lời sau đó có thể ném; bỏ qua lỗi đó. Trả về danh sách lời gọi để kiểm.
  */
@@ -44,8 +47,26 @@ export const checkinEvent = (
   counts: { checkedInCount: number; validTicketCount: number } = { checkedInCount: 0, validTicketCount: 0 },
 ): Reply => ({ status: 200, body: { eventId, eventName, ...counts } });
 
-/** `ScanResult` `200` của `POST /checkin/events/:eventId/scans`. */
+/** `ScanResult` `200` của `POST /checkin/events/:eventId/scans` (và của check-in tay). */
 export const scanResult = (body: Record<string, unknown>): Reply => ({ status: 200, body });
+
+/** Một Vé của kết quả tra tay. */
+export type LookupTicket = CheckinLookupTicket;
+
+/** `CheckinLookupResult` `200` của `POST /checkin/events/:eventId/lookups`. */
+export const lookupResult = (tickets: LookupTicket[]): Reply => ({ status: 200, body: { tickets } });
+
+/** `429 CHECKIN_LOOKUP_RATE_LIMITED` kèm `retryAfterSeconds`. */
+export const lookupRateLimited = (retryAfterSeconds: number): Reply => ({
+  status: 429,
+  body: {
+    error: {
+      code: 'CHECKIN_LOOKUP_RATE_LIMITED',
+      message: 'Tra quá nhiều lần. Vui lòng thử lại sau.',
+      details: { retryAfterSeconds },
+    },
+  },
+});
 
 export async function mockCheckinApi(page: Page, handlers: Record<string, CheckinHandler> = {}): Promise<Call[]> {
   const calls: Call[] = [];

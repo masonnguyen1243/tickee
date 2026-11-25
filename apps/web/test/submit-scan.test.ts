@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError, isNetworkError } from '@/lib/api/errors';
-import { SCAN_TIMEOUT_MS, submitScan } from '@/lib/checkin/api';
+import { checkInManually, lookupCheckinTickets, SCAN_TIMEOUT_MS, submitScan } from '@/lib/checkin/api';
 
 /*
  * Hạn chờ 3 giây của mỗi lần gửi quét (Story 5.4): quá hạn thì hủy request và ném lỗi mạng (`isNetworkError`) để Màn
@@ -162,4 +162,92 @@ describe('submitScan', () => {
     expect(isNetworkError((late as { error: unknown }).error)).toBe(false);
     expect(fetchMock.mock.calls[1]![1]!.signal!.aborted).toBe(true);
   });
+});
+
+/*
+ * Tra tay và check-in tay (Story 5.5) dùng cùng hạn 3 giây: request treo thì hủy và ném lỗi mạng (check-in tay bấm lại
+ * bằng cùng `Idempotency-Key`, tra tay hiện dải lỗi kèm "Thử lại"); `signal` của nơi gọi hủy theo kiểu thường.
+ */
+describe('lookupCheckinTickets, checkInManually: hạn 3 giây như submitScan', () => {
+  const fetchMock = vi.fn<typeof fetch>();
+  const TICKET_ID = '019a3b2c-0b00-7abc-8def-000000000001';
+  const KEY = '019a3b2c-0d00-7abc-8def-000000000001';
+  const calls: Record<'lookup' | 'checkIn', (signal?: AbortSignal) => Promise<unknown>> = {
+    lookup: (signal?: AbortSignal) => lookupCheckinTickets(EVENT_ID, { kind: 'phone', phone: '+84912345678' }, signal),
+    checkIn: (signal?: AbortSignal) => checkInManually(EVENT_ID, TICKET_ID, KEY, signal),
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', 'http://api.test');
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    fetchMock.mockReset();
+  });
+
+  it('tra tay: POST body là giá trị đã chuẩn hóa; treo tới 3 giây thì hủy request và ném lỗi mạng; không còn timer', async () => {
+    fetchMock.mockImplementation(hangingFetch);
+    const pending = calls.lookup();
+    await vi.advanceTimersByTimeAsync(SCAN_TIMEOUT_MS - 1);
+    expect(await settled(pending)).toBe('pending');
+    await vi.advanceTimersByTimeAsync(1);
+    const { error } = (await settled(pending)) as { error: unknown };
+    expect(isNetworkError(error)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(`http://api.test/v1/checkin/events/${EVENT_ID}/lookups`);
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(init!.body as string)).toEqual({ query: '+84912345678' });
+    expect(init!.signal!.aborted).toBe(true);
+  });
+
+  it('check-in tay: header Idempotency-Key, không body; treo tới 3 giây thì hủy request và ném lỗi mạng; không còn timer', async () => {
+    fetchMock.mockImplementation(hangingFetch);
+    const pending = calls.checkIn();
+    await vi.advanceTimersByTimeAsync(SCAN_TIMEOUT_MS - 1);
+    expect(await settled(pending)).toBe('pending');
+    await vi.advanceTimersByTimeAsync(1);
+    const { error } = (await settled(pending)) as { error: unknown };
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: null });
+    expect(vi.getTimerCount()).toBe(0);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(`http://api.test/v1/checkin/events/${EVENT_ID}/tickets/${TICKET_ID}/check-in`);
+    expect(init?.method).toBe('POST');
+    expect(new Headers(init?.headers).get('idempotency-key')).toBe(KEY);
+    expect(init?.body).toBeUndefined();
+  });
+
+  for (const name of ['lookup', 'checkIn'] as const) {
+    it(`${name}: phản hồi trước 3 giây → kết quả, timer đã xóa; lỗi api giữ status`, async () => {
+      const body = name === 'lookup' ? { tickets: [] } : OK;
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, body));
+      expect(await settled(calls[name]())).toEqual({ value: body });
+      expect(vi.getTimerCount()).toBe(0);
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(503, { error: { code: 'SERVICE_UNAVAILABLE', message: 'Bảo trì.', details: null } }),
+      );
+      const { error } = (await settled(calls[name]())) as { error: unknown };
+      expect(error).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+      expect(isNetworkError(error)).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it(`${name}: signal của nơi gọi hủy → ném lại AbortError nguyên trạng, không phải lỗi mạng; timer đã xóa`, async () => {
+      fetchMock.mockImplementation(hangingFetch);
+      const caller = new AbortController();
+      const pending = calls[name](caller.signal);
+      await vi.advanceTimersByTimeAsync(1000);
+      caller.abort();
+      const { error } = (await settled(pending)) as { error: unknown };
+      expect((error as DOMException).name).toBe('AbortError');
+      expect(isNetworkError(error)).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  }
 });

@@ -1,5 +1,7 @@
 // Mô-đun `ordering`: API công khai cho mô-đun khác chỉ xuất từ file này (AD-10).
 export { type OrderingJobsConfig } from './buyer-email-jobs.js';
+// Tra tay (Story 5.5): id Đơn của Sự kiện khớp SĐT/email Người mua (`flows`).
+export { orderIdsByBuyerContact, type BuyerContactScope } from './buyer-contact-read.js';
 export { enqueueEventChangeEmail, EventChangeEmailQueues, paidBuyerCount } from './event-change-email-jobs.js';
 export {
   eventRevenueOf,

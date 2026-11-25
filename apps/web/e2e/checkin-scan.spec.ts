@@ -178,9 +178,9 @@ test('vào màn: "Bật camera" có tên Sự kiện, chưa xin camera; không S
   const { camera, wakeLock } = await openScanScreen(page);
   await expect(page.getByRole('heading', { name: EVENT_NAME })).toBeVisible();
   await expect(enableButton(page)).toBeVisible();
-  // "Tra tay" luôn hiện, bị tắt kèm lý do (Story 5.5 nối).
-  await expect(manualLookup(page)).toBeDisabled();
-  await expect(page.getByText('Tra tay sắp có')).toBeVisible();
+  // "Tra tay" luôn hiện và bật (Story 5.5: mở `manual-lookup`, kiểm ở `checkin-lookup.spec.ts`).
+  await expect(manualLookup(page)).toBeEnabled();
+  await expect(page.getByText('Tra tay sắp có')).toHaveCount(0);
   await expect(viewport(page)).toHaveCount(0);
   expect((await camera.state()).calls).toEqual([]);
   expect((await wakeLock()).requests).toBe(0);
@@ -207,8 +207,7 @@ test('quét xanh: body POST có đúng code + scanId uuid; overlay xanh, bíp nh
   await startCamera(page, camera);
   expect((await camera.state()).calls).toEqual([{ video: { facingMode: { ideal: 'environment' } }, audio: false }]);
   await expect(page.locator('[data-slot="scanner-count"]')).toHaveText('Đã check-in 3/10');
-  await expect(manualLookup(page)).toBeDisabled();
-  await expect(page.getByText('Tra tay sắp có')).toBeVisible();
+  await expect(manualLookup(page)).toBeEnabled();
   await expect.poll(async () => (await wakeLock()).requests).toBe(1);
   // Chạm "Bật camera" đã mở khóa âm thanh.
   expect((await sound()).unlocks).toBe(1);
@@ -476,7 +475,7 @@ test('treo quá 3 giây: offline-banner + camera tạm dừng lúc 3 giây; gử
   expect(Math.abs(hidden['offline-banner'][0]! - shown['scan-result-overlay'][0]!)).toBeLessThan(300);
 });
 
-test('lỗi mạng ngay: offline-banner trên tên Sự kiện, camera tạm dừng (track vẫn chạy), "Tra tay" giữ nguyên; gửi lại mỗi 1 giây cùng scanId; mã mới không được gửi tới khi banner ẩn và overlay đóng', async ({
+test('lỗi mạng ngay: offline-banner trên tên Sự kiện, camera tạm dừng (track vẫn chạy), "Tra tay" vẫn bật; gửi lại mỗi 1 giây cùng scanId; mã mới không được gửi tới khi banner ẩn và overlay đóng', async ({
   page,
 }) => {
   const timeline = await recordScanTimeline(page);
@@ -500,7 +499,7 @@ test('lỗi mạng ngay: offline-banner trên tên Sự kiện, camera tạm d�
   await expect(statusLine(page)).toHaveText(PAUSED_TEXT);
   await expect(sendFailedStrip(page)).toHaveCount(0);
   await expect(manualLookup(page)).toBeVisible();
-  await expect(manualLookup(page)).toBeDisabled();
+  await expect(manualLookup(page)).toBeEnabled();
   expect((await camera.state()).live).toBe(1);
   await expect(overlay(page)).toHaveCount(0);
 
@@ -771,7 +770,7 @@ test('rời trang (Back về tab "Quét vé"): dừng track camera, nhả Wake L
 });
 
 test.describe('camera không dùng được', () => {
-  test('bị từ chối (NotAllowedError): hướng dẫn Safari iOS / Chrome Android, "Thử lại" xin lại, "Tra tay" tắt kèm lý do', async ({
+  test('bị từ chối (NotAllowedError): hướng dẫn Safari iOS / Chrome Android, "Thử lại" xin lại, "Tra tay" bật', async ({
     page,
   }) => {
     const { camera, wakeLock } = await openScanScreen(page, { camera: 'deny' });
@@ -781,8 +780,7 @@ test.describe('camera không dùng được', () => {
     await expect(help.getByRole('heading', { name: 'Safari trên iPhone' })).toBeVisible();
     await expect(help.getByRole('heading', { name: 'Chrome trên Android' })).toBeVisible();
     await expect(page.getByRole('heading', { name: EVENT_NAME })).toBeVisible();
-    await expect(manualLookup(page)).toBeDisabled();
-    await expect(page.getByText('Tra tay sắp có')).toBeVisible();
+    await expect(manualLookup(page)).toBeEnabled();
     expect((await camera.state()).calls).toHaveLength(1);
 
     await page.getByRole('button', { name: 'Thử lại' }).click();
@@ -791,15 +789,14 @@ test.describe('camera không dùng được', () => {
     expect((await wakeLock()).requests).toBe(0);
   });
 
-  test('không mở được camera (NotFoundError, hay camera bận): "Không mở được camera", "Thử lại" xin lại, "Tra tay" tắt kèm lý do', async ({
+  test('không mở được camera (NotFoundError, hay camera bận): "Không mở được camera", "Thử lại" xin lại, "Tra tay" bật', async ({
     page,
   }) => {
     const { camera } = await openScanScreen(page, { camera: 'not-found' });
     await enableButton(page).click();
     await expect(page.getByRole('heading', { name: 'Không mở được camera' })).toBeVisible();
     await expect(page.getByText(/đang được ứng dụng khác dùng/)).toBeVisible();
-    await expect(manualLookup(page)).toBeDisabled();
-    await expect(page.getByText('Tra tay sắp có')).toBeVisible();
+    await expect(manualLookup(page)).toBeEnabled();
     expect((await camera.state()).calls).toHaveLength(1);
 
     await page.getByRole('button', { name: 'Thử lại' }).click();
@@ -807,13 +804,12 @@ test.describe('camera không dùng được', () => {
     await expect(page.getByRole('heading', { name: 'Không mở được camera' })).toBeVisible();
   });
 
-  test('không có `navigator.mediaDevices`: "Không mở được camera" + "Thử lại" + "Tra tay" tắt kèm lý do', async ({ page }) => {
+  test('không có `navigator.mediaDevices`: "Không mở được camera" + "Thử lại" + "Tra tay" bật', async ({ page }) => {
     await openScanScreen(page, { camera: 'missing' });
     await enableButton(page).click();
     await expect(page.getByRole('heading', { name: 'Không mở được camera' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Thử lại' })).toBeVisible();
-    await expect(manualLookup(page)).toBeDisabled();
-    await expect(page.getByText('Tra tay sắp có')).toBeVisible();
+    await expect(manualLookup(page)).toBeEnabled();
   });
 });
 

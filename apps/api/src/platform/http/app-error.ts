@@ -69,6 +69,7 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   EVENT_IMAGE_RATE_LIMITED: 429,
   CHECKER_INVITE_INVALID: 404,
   CHECKER_REVOKED: 403,
+  CHECKIN_LOOKUP_RATE_LIMITED: 429,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

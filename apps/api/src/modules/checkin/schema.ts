@@ -62,3 +62,22 @@ export const checkers = pgTable(
     check('checkers_status_check', sql`${t.status} IN ('active', 'revoked')`),
   ],
 );
+
+/**
+ * Bộ đếm giới hạn tốc độ tra tay (Story 5.5, AD-31): một dòng cho mỗi lần tra đủ dạng tới server, theo `user_id` và HMAC
+ * của IP (không lưu IP thô, không lưu giá trị đã tra). Job `checkin.purge-lookup-attempts` của vai worker xóa dòng đã ra
+ * khỏi cửa sổ `CHECKIN_LOOKUP_RATE_LIMITS.windowSeconds`. `user_id` không có FK (`checkin` không phụ thuộc `identity`).
+ */
+export const checkinLookupAttempts = pgTable(
+  'checkin_lookup_attempts',
+  {
+    id: id(),
+    userId: uuid('user_id').notNull(),
+    ipHmac: text('ip_hmac').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('checkin_lookup_attempts_user_id_created_at_idx').on(t.userId, t.createdAt),
+    index('checkin_lookup_attempts_ip_hmac_created_at_idx').on(t.ipHmac, t.createdAt),
+  ],
+);
