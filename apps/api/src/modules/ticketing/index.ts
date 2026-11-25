@@ -1,13 +1,14 @@
 // Mô-đun `ticketing`: API công khai cho mô-đun khác chỉ xuất từ file này (AD-10).
-// Check-in đúng một lần (Story 5.3): quét (`flows`), số đã check-in / tổng Vé hợp lệ (`checkin`).
+// Check-in đúng một lần (Story 5.3): quét (`flows`), số đã check-in / tổng Vé hợp lệ theo Hạng vé (`checkin`, Story 5.7).
 export {
   CHECKIN_RECENT_SECONDS,
   checkIn,
-  checkinCountsOf,
+  checkinCountsByTicketType,
   type CheckedInTicket,
   type CheckinCounts,
   type CheckInInput,
   type CheckInResult,
+  type TicketTypeCheckinCounts,
 } from './check-in.js';
 export { issuedTicketCountsByType } from './issued-counts.js';
 // Tra tay (Story 5.5): Vé `valid` của các Đơn khớp SĐT/email (`flows`).

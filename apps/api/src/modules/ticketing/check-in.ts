@@ -167,27 +167,35 @@ async function replayOf(tx: Tx, input: CheckInInput): Promise<CheckedInTicket | 
   return { holderName: row.holderName, seq: row.seq, count: row.count, ticketTypeName: row.ticketTypeName };
 }
 
-/** Số Vé check-in của một Sự kiện: đã check-in trên tổng số Vé hợp lệ. */
+/** Số Vé check-in: đã check-in trên tổng số Vé hợp lệ. */
 export interface CheckinCounts {
   checkedInCount: number;
   validTicketCount: number;
 }
 
+/** Số Vé check-in của một Hạng vé. */
+export interface TicketTypeCheckinCounts extends CheckinCounts {
+  ticketTypeId: string;
+}
+
 /**
- * Số Vé `valid` của Sự kiện `eventId` (BTC `scope`) và số trong đó đã check-in, một câu (cùng snapshot). Vé đã hủy hay
- * bị vô hiệu không tính, kể cả khi đã check-in. Quét theo index `tickets_event_id_idx`.
+ * Số Vé `valid` của Sự kiện `eventId` (BTC `scope`) và số trong đó đã check-in, theo từng Hạng vé (Story 5.7), một câu
+ * `GROUP BY ticket_type_id` (cùng snapshot, nên tổng các nhóm luôn là tổng của Sự kiện). Vé đã hủy hay bị vô hiệu không
+ * tính, kể cả khi đã check-in. Hạng vé chưa có Vé `valid` nào không có nhóm (bên gọi tự điền `0/0`). Không sắp thứ tự.
+ * Quét theo index `tickets_event_id_idx`.
  */
-export async function checkinCountsOf(
+export async function checkinCountsByTicketType(
   db: DbExecutor,
   scope: Pick<AccessContext, 'organizationId'>,
   eventId: string,
-): Promise<CheckinCounts> {
-  const [row] = await db
+): Promise<TicketTypeCheckinCounts[]> {
+  return db
     .select({
+      ticketTypeId: tickets.ticketTypeId,
       checkedInCount: sql<number>`count(*) FILTER (WHERE ${tickets.checkedInAt} IS NOT NULL)`.mapWith(Number),
       validTicketCount: count(),
     })
     .from(tickets)
-    .where(and(orgScope(scope)(tickets), eq(tickets.eventId, eventId), eq(tickets.status, 'valid')));
-  return { checkedInCount: row?.checkedInCount ?? 0, validTicketCount: row?.validTicketCount ?? 0 };
+    .where(and(orgScope(scope)(tickets), eq(tickets.eventId, eventId), eq(tickets.status, 'valid')))
+    .groupBy(tickets.ticketTypeId);
 }

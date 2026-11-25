@@ -1,11 +1,14 @@
 import type { Page, Request } from '@playwright/test';
 import type { EventSaleReason } from '@tickee/contracts';
 
+import { hasCheckinMock } from './checkin-mock';
 import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
 
 /*
- * API BTC giả bằng `page.route`: `/v1/orgs`, `/v1/orgs/**`, `/v1/org-invitations/**` và `/v1/me/memberships`
- * (xem `identity-mock.ts`). Mặc định `GET /me/memberships`, `GET /orgs/:id/notices` (dashboard luôn tải dải banner) và
+ * API BTC giả bằng `page.route`: `/v1/orgs`, `/v1/orgs/**`, `/v1/org-invitations/**`, `/v1/me/memberships`, và số liệu
+ * check-in của tab Check-in (Story 5.7) `GET /v1/checkin/events/:eventId` cùng SSE `…/live` (xem `identity-mock.ts`;
+ * spec nào cài thêm `mockCheckinApi`, trước hay sau, thì API CTV giả đó nhận mọi `/v1/checkin/**`). Mặc định
+ * `GET /me/memberships`, `GET /orgs/:id/notices` (dashboard luôn tải dải banner) và
  * `GET /orgs/:id/events` (trang đích luôn tải danh sách Sự kiện), `GET /orgs/:id/events/:eventId/ticket-types` → `[]`,
  * `GET /orgs/:id/event-sale-status` (thẻ Sự kiện và badge Tổng quan, Story 4.2-c) → `{ events: [] }` (mọi nhãn tính ở
  * máy khách như trước),
@@ -16,7 +19,9 @@ import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
  * `GET /orgs/:id/review-items/summary` (badge "Cần xử lý" của khung, Story 4.3) → `{ openCount: 0 }`,
  * `GET /orgs/:id/review-items` (trang Cần xử lý) → hàng trống không lọc, `GET /orgs/:id/token` (trang Token, Story 4.5-a)
  * → BTC chưa có tài khoản nhận tiền mặc định, không có link portal, chưa đặt ngưỡng cảnh báo (Story 4.5-b),
- * `GET /orgs/:id/events/:eventId/checkers` (tab Check-in, Story 5.6) → chưa có CTV; lời gọi không có handler → 500.
+ * `GET /orgs/:id/events/:eventId/checkers` (tab Check-in, Story 5.6) → chưa có CTV, `GET /checkin/events/:eventId` (khối
+ * `checkin-progress` của tab Check-in, Story 5.7) → chưa có Hạng vé, Vé nào (`emptyCheckinEvent`), SSE
+ * `GET /checkin/events/:eventId/live` → 503 (không realtime: polling 10 giây); lời gọi không có handler → 500.
  *
  * Ảnh Sự kiện (Story 4.8-b): `presignReply` cho handler `POST /orgs/:id/event-images`, `mockImageStorage` giả object
  * storage (host riêng, không qua api) cho PUT của trình duyệt và ảnh công khai.
@@ -25,7 +30,8 @@ import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
 export const ORG_ID = '019a3b2c-5678-7abc-8def-0123456789ab';
 export const OTHER_ORG_ID = '019a3b2c-9999-7abc-8def-0123456789ab';
 
-const ORGANIZER_PATH = /\/v1\/(orgs(\/|$)|org-invitations\/|me\/memberships$)/;
+const ORGANIZER_PATH = /\/v1\/(orgs(\/|$)|org-invitations\/|me\/memberships$|checkin\/events\/[^/]+(\/live)?$)/;
+const CHECKIN_PATH = /\/v1\/checkin\//;
 const NOTICES_KEY = /^GET \/orgs\/[^/]+\/notices$/;
 const EVENTS_KEY = /^GET \/orgs\/[^/]+\/events$/;
 const TICKET_TYPES_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/ticket-types$/;
@@ -39,9 +45,20 @@ const REVIEW_SUMMARY_KEY = /^GET \/orgs\/[^/]+\/review-items\/summary$/;
 const REVIEW_ITEMS_KEY = /^GET \/orgs\/[^/]+\/review-items$/;
 const TOKEN_KEY = /^GET \/orgs\/[^/]+\/token$/;
 const CHECKERS_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/checkers$/;
+const CHECKIN_EVENT_KEY = /^GET \/checkin\/events\/([^/]+)$/;
+const CHECKIN_EVENT_LIVE_KEY = /^GET \/checkin\/events\/[^/]+\/live$/;
 
 /** Đường SSE cấp BTC (Story 4.2-b), để `fakeEventSource` chọn đúng stream giữa stream của khung và stream của trang. */
 export const ORG_LIVE_URL = /\/v1\/orgs\/[^/]+\/live$/;
+
+/** `CheckinEvent` (Story 5.7) của Sự kiện chưa có Hạng vé, Vé nào: tổng 0/0. */
+export const emptyCheckinEvent = (eventId: string) => ({
+  eventId,
+  eventName: 'Sự kiện',
+  checkedInCount: 0,
+  validTicketCount: 0,
+  ticketTypes: [],
+});
 
 /** `EventOverview` của Sự kiện chưa có Đơn nào (Story 3.11), không có mục Cần xử lý (Story 4.3). */
 export const emptyOverview = () => ({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: [], openReviewCount: 0 });
@@ -109,6 +126,10 @@ function defaultHandler(key: string): Handler | undefined {
   if (TOKEN_KEY.test(key)) return () => ({ status: 200, body: tokenOverview() });
   // Tab Check-in luôn tải danh sách CTV (Story 5.6): mặc định chưa CTV nào nhận lời mời.
   if (CHECKERS_KEY.test(key)) return () => ({ status: 200, body: { checkers: [] } });
+  // Tab Check-in luôn tải số liệu check-in và mở SSE (Story 5.7): mặc định chưa có Vé, không realtime.
+  const checkinEvent = CHECKIN_EVENT_KEY.exec(key);
+  if (checkinEvent) return () => ({ status: 200, body: emptyCheckinEvent(decodeURIComponent(checkinEvent[1]!)) });
+  if (CHECKIN_EVENT_LIVE_KEY.test(key)) return () => apiError(503, 'SERVICE_UNAVAILABLE');
   return undefined;
 }
 
@@ -181,6 +202,8 @@ export async function mockOrganizerApi(page: Page, handlers: Record<string, Hand
     (url) => ORGANIZER_PATH.test(url.pathname),
     async (route) => {
       const request = route.request();
+      // Trang có API CTV giả (cài trước `mockOrganizerApi`): nhường cho nó.
+      if (CHECKIN_PATH.test(new URL(request.url()).pathname) && hasCheckinMock(page)) return route.fallback();
       if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
       const path = new URL(request.url()).pathname.replace(/^.*\/v1/, '');
       const key = `${request.method()} ${path}`;

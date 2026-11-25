@@ -1,7 +1,14 @@
 'use client';
 
-import { onlineManager, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ErrorCode, ScanOutcome, type CheckinEvent, type ScanRequest, type ScanResult } from '@tickee/contracts';
+import { onlineManager, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  checkinEventLiveApiPath,
+  ErrorCode,
+  ScanOutcome,
+  type CheckinEvent,
+  type ScanRequest,
+  type ScanResult,
+} from '@tickee/contracts';
 import { Camera, CameraOff, ShieldX, type LucideIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -19,8 +26,10 @@ import { isTotpRequired } from '@/lib/auth/totp';
 import { checkinEventQueryKey, checkinLookupQueryPrefix, fetchCheckinEvent, submitScan } from '@/lib/checkin/api';
 import { createScanSound, type ScanSound } from '@/lib/checkin/scan-sound';
 import { isNoAccessError, noAccessView } from '@/lib/checkin/checker-view';
+import { checkinProgressPollInterval } from '@/lib/checkin/progress-view';
 import { scanView, type ScanView } from '@/lib/checkin/scan-view';
 import { useQrScanner, type QrScanner } from '@/lib/checkin/use-qr-scanner';
+import { useLiveResource } from '@/lib/realtime/use-live-resource';
 
 /** Gửi kết quả quét lỗi có phản hồi (5xx, lỗi khác): không hiện đỏ, quét lại bằng `scanId` mới. */
 export const SCAN_SEND_FAILED = 'Chưa gửi được kết quả quét. Quét lại mã.';
@@ -286,6 +295,10 @@ function ScanFlow({ event, scanner, sound, sendFailed, offline, sending, onManua
  * Sự kiện này.", thêm "Sự kiện đã kết thúc." khi `EVENT_ENDED`). Gửi quét lỗi có phản hồi (5xx, lỗi khác) → dải cảnh
  * báo, quét lại bằng `scanId` mới. Quyền kiểm lại ở mỗi request phía api; không có tín hiệu đẩy khi bị thu hồi.
  *
+ * Số ở đỉnh (Story 5.7, FR-30): `CheckinEvent` tự cập nhật qua `useLiveResource` + `GET …/checkin/events/:id/live` (CTV
+ * khác quét hay check-in tay → số đổi trong khoảng 1 giây), không có SSE thì polling 10 giây; vẫn tải lại khi đóng
+ * overlay xanh. Màn hết quyền hiện (403 lúc tải lại, khi quét, tra tay hay check-in tay) → đóng stream, thôi polling.
+ *
  * Mất mạng (Story 5.4, UX-DR31, AD-15): mỗi lần gửi có hạn 3 giây (`submitScan`); hết hạn hoặc lỗi mạng thì TanStack
  * Query gửi lại đúng biến cũ (cùng `code`, cùng `scanId`) mỗi 1 giây tới khi có phản hồi, tạm dừng khi trình duyệt báo
  * offline và gửi ngay khi có mạng lại. Trong lúc đó, hoặc khi trình duyệt báo offline, `offline-banner` hiện và không
@@ -299,16 +312,24 @@ function ScanFlow({ event, scanner, sound, sendFailed, offline, sending, onManua
 export function CheckinEventScreen({ eventId }: { eventId: string }) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const event = useQuery({
+  /** `403` khi gửi quét: màn hết quyền thay Màn quét. */
+  const [scanNoAccessError, setScanNoAccessError] = useState<unknown>(null);
+  /**
+   * Màn hết quyền đang hiện (Story 5.7): thôi tự cập nhật số (đóng stream, thôi polling, bỏ qua lời nhắc tải lại). Đặt
+   * ngay sau lần render hiện màn đó, vì `eventNoAccess` đọc từ chính truy vấn dưới đây. Đã tắt thì không bật lại trong
+   * lần mount này (không còn lần tải lại nào); chỉ mount lại Màn quét mới tự cập nhật lại.
+   */
+  const [liveStopped, setLiveStopped] = useState(false);
+  const { query: event } = useLiveResource({
     queryKey: checkinEventQueryKey(eventId),
-    queryFn: ({ signal }) => fetchCheckinEvent(eventId, signal),
+    queryFn: (signal) => fetchCheckinEvent(eventId, signal),
+    livePath: checkinEventLiveApiPath(eventId),
+    pollInterval: checkinProgressPollInterval,
+    enabled: !liveStopped,
   });
 
   const [sound] = useState(createScanSound);
   useEffect(() => () => sound.dispose(), [sound]);
-
-  /** `403` khi gửi quét: màn hết quyền thay Màn quét. */
-  const [scanNoAccessError, setScanNoAccessError] = useState<unknown>(null);
   /**
    * Kết quả quét hay check-in tay đang phủ màn; `ok` thì tải lại số đã check-in khi đóng; `reopenLookup` thì mở lại
    * `manual-lookup` khi đóng.
@@ -454,9 +475,16 @@ export function CheckinEventScreen({ eventId }: { eventId: string }) {
     if (eventNoAccess) stopScanner();
   }, [eventNoAccess, stopScanner]);
 
+  // Màn hết quyền hiện (vì bất kỳ lý do nào) → đóng stream số liệu và thôi polling. Màn hết quyền giữ tới khi rời Màn
+  // quét: chỉ mount lại (state mới, TanStack tải lại khi mount) mới tự cập nhật lại.
+  const noAccessShown = Boolean(scanNoAccessError) || eventNoAccess;
+  useEffect(() => {
+    setLiveStopped(noAccessShown);
+  }, [noAccessShown]);
+
   if (scanNoAccessError) return <NoAccessScreen error={scanNoAccessError} />;
 
-  // Trước `data`: lần tải lại (vd. quay lại tab sau `staleTime`) trả 403 thì bỏ tên Sự kiện đã tải.
+  // Trước `data`: lần tải lại (tín hiệu SSE, polling, quay lại tab, đóng overlay xanh) trả 403 thì bỏ tên Sự kiện đã tải.
   if (eventNoAccess) return <NoAccessScreen error={event.error} />;
 
   if (event.data) {

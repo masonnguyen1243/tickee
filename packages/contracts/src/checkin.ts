@@ -137,6 +137,14 @@ export const CHECKER_INVITE_ACCEPT_API_PATH = '/checkin/invites/accept';
 /** Đường API (sau `/v1`) của Sự kiện trên Màn quét: `GET` (`CheckinEvent`). */
 export const checkinEventApiPath = (eventId: string): string => `/checkin/events/${encodeURIComponent(eventId)}`;
 
+/**
+ * Đường SSE (sau `/v1`) của số liệu check-in một Sự kiện (Story 5.7, FR-30, AD-17; `checkin.scan`): Owner, Admin và CTV
+ * `active` được giao (cùng guard nhánh Sự kiện với `GET …/checkin/events/:eventId`, kể cả `403 EVENT_ENDED` cho CTV) chỉ
+ * nhận `event_checkins_changed` của Sự kiện này cùng `resync`. Web tải lại `CheckinEvent` (tab Check-in và đỉnh Màn quét).
+ * Stream đang mở không bị đóng khi CTV bị thu hồi hay hết giờ: lần tải lại kế tiếp nhận `403`, web tự đóng stream.
+ */
+export const checkinEventLiveApiPath = (eventId: string): string => `${checkinEventApiPath(eventId)}/live`;
+
 /*
  * Link mời còn hiệu lực khi: chưa thu hồi, đồng hồ DB còn trước min(`expires_at`, `effective_end_at`), Sự kiện chưa hủy
  * và chưa bấm "Kết thúc" (cùng luật với `CheckerInvite.active`). Mọi lỗi về link là `404 CHECKER_INVITE_INVALID`, không
@@ -171,15 +179,31 @@ export const AcceptedCheckerInvite = z.object({ eventId: z.uuid() });
 export type AcceptedCheckerInvite = z.infer<typeof AcceptedCheckerInvite>;
 
 /**
- * `GET /v1/checkin/events/:eventId` (`checkin.scan`): Sự kiện của Màn quét, kèm số Vé đã check-in trên tổng số Vé hợp lệ
- * (Story 5.3). Cả hai chỉ đếm Vé `valid` của Sự kiện (Vé đã hủy hay bị vô hiệu không tính, kể cả khi đã check-in);
- * `checkedInCount` đếm thêm điều kiện đã check-in.
+ * Số check-in của một Hạng vé (Story 5.7, `checkin-progress`): id, tên hiện tại của Hạng vé, số Vé `valid` đã check-in
+ * trên số Vé `valid` của Hạng vé đó. Hạng vé chưa có Vé hợp lệ nào → `0/0`.
+ */
+export const CheckinTicketTypeProgress = z.object({
+  ticketTypeId: z.uuid(),
+  name: z.string(),
+  checkedInCount: z.number().int().min(0),
+  validTicketCount: z.number().int().min(0),
+});
+export type CheckinTicketTypeProgress = z.infer<typeof CheckinTicketTypeProgress>;
+
+/**
+ * `GET /v1/checkin/events/:eventId` (`checkin.scan`, `no-store`): Sự kiện của Màn quét, kèm số Vé đã check-in trên tổng
+ * số Vé hợp lệ (Story 5.3). Cả hai chỉ đếm Vé `valid` của Sự kiện (Vé đã hủy hay bị vô hiệu không tính, kể cả khi đã
+ * check-in); `checkedInCount` đếm thêm điều kiện đã check-in.
+ *
+ * `ticketTypes` (Story 5.7): mọi Hạng vé của Sự kiện, tạo trước đứng trước (như `ticketTypesOf`), kể cả Hạng vé chưa có
+ * Vé hợp lệ nào (`0/0`), để thứ tự không nhảy khi Hạng vé bán Vé đầu tiên. Hai số tổng là tổng các Hạng vé.
  */
 export const CheckinEvent = z.object({
   eventId: z.uuid(),
   eventName: z.string(),
   checkedInCount: z.number().int().min(0),
   validTicketCount: z.number().int().min(0),
+  ticketTypes: z.array(CheckinTicketTypeProgress),
 });
 export type CheckinEvent = z.infer<typeof CheckinEvent>;
 

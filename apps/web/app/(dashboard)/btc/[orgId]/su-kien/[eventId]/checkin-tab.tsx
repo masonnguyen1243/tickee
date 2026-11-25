@@ -31,9 +31,11 @@ import { isEventEnded } from '../event-status';
 import { useOrigin } from '../public-event-link';
 import { ActionWithReason } from './action-with-reason';
 import { CheckerList } from './checker-list';
+import { CheckinProgress } from './checkin-progress';
 
 /*
- * Tab Check-in của Sự kiện (Story 5.1, FR-26, UX-DR39): thẻ "Màn quét" (Story 5.2: lối vào Màn quét của Owner/Admin, không
+ * Tab Check-in của Sự kiện (Story 5.1, FR-26, UX-DR39): khối `checkin-progress` (Story 5.7, FR-30: số đã check-in tổng và
+ * theo Hạng vé, realtime, `checkin-progress.tsx`), thẻ "Màn quét" (Story 5.2: lối vào Màn quét của Owner/Admin, không
  * cần lời mời, FR-29), khối "Link mời CTV" và khối "CTV soát vé" (Story 5.6, `checker-list.tsx`). Một link chung cho
  * mỗi Sự kiện: trạng thái "Còn hạn"/"Đã hết hạn" kèm thời điểm hết hạn (giờ Việt Nam), "Sao chép link" (toast "Đã sao
  * chép") và "Tạo link mới".
@@ -261,10 +263,14 @@ function ScanScreenCard({ eventId }: { eventId: string }) {
   );
 }
 
-/** Tab "Check-in": thẻ "Màn quét" (Story 5.2), khối link mời CTV (Story 5.1), rồi danh sách CTV (Story 5.6). */
+/**
+ * Tab "Check-in": số đã check-in (Story 5.7), thẻ "Màn quét" (Story 5.2), khối link mời CTV (Story 5.1), rồi danh sách
+ * CTV (Story 5.6).
+ */
 export function CheckinTab({ orgId, event }: { orgId: string; event: EventDetail }) {
   return (
     <div className="flex min-w-0 flex-col gap-section" data-slot="checkin-tab">
+      <CheckinProgress eventId={event.id} />
       <ScanScreenCard eventId={event.id} />
       <CheckerInviteBlock orgId={orgId} event={event} />
       <CheckerList orgId={orgId} event={event} />

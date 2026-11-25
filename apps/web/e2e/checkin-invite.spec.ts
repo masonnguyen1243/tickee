@@ -1,8 +1,9 @@
 import type { Page } from '@playwright/test';
 
-import { checkinEvent, mockCheckinApi } from './checkin-mock';
+import { CHECKIN_LIVE_URL, checkinEvent, mockCheckinApi, type TicketTypeProgress } from './checkin-mock';
 import { expect, test } from './fixtures';
-import { apiError, me, mockIdentityApi, type Call, type Handler, type Reply } from './identity-mock';
+import { apiError, me, mockIdentityApi, unauthenticated, type Call, type Handler, type Reply } from './identity-mock';
+import { fakeEventSource, setVisibility } from './live-mock';
 import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
 
 /*
@@ -14,6 +15,10 @@ import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
  * Story 5.6: khối "CTV soát vé". `GET …/checkers` trả CTV theo lúc nhận; `POST …/checkers/:id/{revoke,restore}` đổi
  * trạng thái (đã ở trạng thái đích → 204 như thường; CTV lạ → 404 NOT_FOUND; khôi phục khi đã kết thúc → 409
  * EVENT_ALREADY_ENDED).
+ *
+ * Story 5.7: khối `checkin-progress` đầu tab: `GET /checkin/events/:eventId` trả `state.checkin`, tự cập nhật qua SSE
+ * `…/live` (giả bằng `EventSource` điều khiển được, hoặc 503 mặc định → polling 10 giây). Ca full-stack (stream thật,
+ * quét → tín hiệu, lọc theo Sự kiện) ở test tích hợp api `test/checkin/checkin-live.test.ts`.
  */
 
 test.use({ timezoneId: 'America/New_York' });
@@ -67,7 +72,34 @@ type State = {
   failList?: boolean;
   /** Thu hồi / khôi phục trả 500. */
   failAction?: boolean;
+  /** `CheckinEvent` của khối `checkin-progress` (Story 5.7). */
+  checkin: ReturnType<typeof progressBody>;
+  /** Số lần `GET /checkin/events/:id` kế tiếp trả 500 (đếm lùi). */
+  failCheckin: number;
+  /** Phiên hết hạn ở lần tải số liệu check-in kế tiếp: lần đó và mọi `GET /identity/me` sau đó trả 401. */
+  expireOnCheckin?: boolean;
+  signedOut?: boolean;
 };
+
+const ticketTypeId = (n: number) => `019a3b2c-0e00-7abc-8def-${String(n).padStart(12, '0')}`;
+/** Số check-in của Hạng vé thứ `n`. */
+const tier = (n: number, name: string, checkedInCount: number, validTicketCount: number): TicketTypeProgress => ({
+  ticketTypeId: ticketTypeId(n),
+  name,
+  checkedInCount,
+  validTicketCount,
+});
+/** `CheckinEvent` như api: tổng là tổng các Hạng vé. */
+function progressBody(ticketTypes: TicketTypeProgress[]) {
+  const sum = (key: 'checkedInCount' | 'validTicketCount') => ticketTypes.reduce((total, t) => total + t[key], 0);
+  return {
+    eventId: EVENT_ID,
+    eventName: EVENT_NAME,
+    checkedInCount: sum('checkedInCount'),
+    validTicketCount: sum('validTicketCount'),
+    ticketTypes,
+  };
+}
 
 const eventOf = (state: State) => ({
   id: EVENT_ID,
@@ -91,6 +123,8 @@ const eventOf = (state: State) => ({
 
 const checkerId = (n: number) => `019a3b2c-0c00-7abc-8def-${String(n).padStart(12, '0')}`;
 const checkersPath = `${eventPath}/checkers`;
+/** Số liệu check-in của tab (Story 5.7): đường REST dùng chung với Màn quét. */
+const checkinApi = `/checkin/events/${EVENT_ID}`;
 const actionPath = (id: string, action: 'revoke' | 'restore') => `${checkersPath}/${id}/${action}`;
 
 /** CTV có tên, đang hoạt động. */
@@ -144,6 +178,8 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
     endedManuallyAt: null,
     invites: [],
     created: 0,
+    checkin: progressBody([]),
+    failCheckin: 0,
     ...initial,
     // Bản sao: API giả đổi trạng thái CTV tại chỗ, không được chạm hằng dùng chung giữa các test.
     checkers: (initial.checkers ?? []).map((checker) => ({ ...checker })),
@@ -155,7 +191,7 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
       actionHandlers[`POST ${actionPath(id, action)}`] = () => checkerAction(state, id, action);
     }
   }
-  await mockIdentityApi(page, { 'GET /identity/me': () => me(CONSENTED) });
+  await mockIdentityApi(page, { 'GET /identity/me': () => (state.signedOut ? unauthenticated() : me(CONSENTED)) });
   const handlers: Record<string, Handler> = {
     [`GET /orgs/${ORG_ID}`]: () => organization({ role: 'admin' }),
     'GET /me/memberships': () => ({ status: 200, body: [{ organizationId: ORG_ID, name: ORG_NAME, role: 'admin' }] }),
@@ -175,6 +211,17 @@ async function openApi(page: Page, initial: Partial<State> = {}): Promise<{ call
     },
     [`GET ${checkersPath}`]: () =>
       state.failList ? apiError(500, 'INTERNAL_ERROR') : { status: 200, body: { checkers: state.checkers } },
+    [`GET ${checkinApi}`]: () => {
+      if (state.expireOnCheckin || state.signedOut) {
+        state.signedOut = true;
+        return unauthenticated();
+      }
+      if (state.failCheckin > 0) {
+        state.failCheckin -= 1;
+        return apiError(500, 'INTERNAL_ERROR');
+      }
+      return { status: 200, body: state.checkin };
+    },
     ...actionHandlers,
   };
   const calls = await mockOrganizerApi(page, handlers);
@@ -375,7 +422,7 @@ test('Sự kiện vừa kết thúc ở server (409 EVENT_ALREADY_ENDED): toast,
   await expect(block(page).locator('[data-slot="status-banner"]')).toHaveCount(0);
 });
 
-test('thẻ "Màn quét" đứng trước khối link mời, khối "CTV soát vé" sau cùng; "Mở Màn quét" mở Màn quét của Sự kiện (Owner/Admin không cần lời mời)', async ({
+test('khối checkin-progress đầu tab, rồi thẻ "Màn quét", khối link mời, khối "CTV soát vé" sau cùng; "Mở Màn quét" mở Màn quét của Sự kiện (Owner/Admin không cần lời mời)', async ({
   page,
 }) => {
   await openApi(page);
@@ -385,7 +432,7 @@ test('thẻ "Màn quét" đứng trước khối link mời, khối "CTV soát v
   const order = await page
     .locator('[data-slot="checkin-tab"] > section')
     .evaluateAll((sections) => sections.map((s) => s.getAttribute('data-slot')));
-  expect(order).toEqual(['scan-screen-card', 'checker-invite', 'checker-list']);
+  expect(order).toEqual(['checkin-progress', 'scan-screen-card', 'checker-invite', 'checker-list']);
   await expect(scanLink(page)).toHaveAttribute('href', SCAN_PATH);
 
   await scanLink(page).click();
@@ -625,4 +672,234 @@ test('320px: hàng CTV email dài không làm cuộn ngang, nút "Thu hồi" n�
   expect(box.x + box.width).toBeLessThanOrEqual(320);
   expect(box.width).toBeGreaterThanOrEqual(24);
   expect(box.height).toBeGreaterThanOrEqual(24);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Khối `checkin-progress` (Story 5.7)
+// ---------------------------------------------------------------------------------------------------------------
+
+const progress = (page: Page) => page.locator('[data-slot="checkin-progress"]');
+const progressValue = (page: Page) => progress(page).locator('[data-slot="stat-card-value"]');
+const progressCaption = (page: Page) => progress(page).locator('[data-slot="checkin-progress-caption"]');
+const totalBar = (page: Page) => progress(page).locator('[data-slot="stat-card"]').getByRole('progressbar');
+const progressRows = (page: Page) => progress(page).locator('[data-slot="checkin-progress-row"]');
+const checkinGets = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === checkinApi);
+const checkinLiveGets = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === `${checkinApi}/live`);
+/** Bề rộng phần đầy so với cả thanh (0–1). */
+const fillRatio = (bar: ReturnType<Page['locator']>) =>
+  bar.evaluate((el) => {
+    const fill = el.querySelector('[data-slot="progress-bar-fill"]')!;
+    return fill.getBoundingClientRect().width / el.getBoundingClientRect().width;
+  });
+const colorsOf = (bar: ReturnType<Page['locator']>) =>
+  bar.evaluate((el) => ({
+    track: getComputedStyle(el).backgroundColor,
+    fill: getComputedStyle(el.querySelector('[data-slot="progress-bar-fill"]')!).backgroundColor,
+  }));
+
+/** Ba Hạng vé theo thứ tự api; "Vé mời" chưa có Vé hợp lệ nào. */
+const TIERS = [tier(1, 'Vé thường', 30, 50), tier(2, 'Vé VIP', 11, 16), tier(3, 'Vé mời', 0, 0)];
+/** "Bây giờ" của các ca cần nhãn giờ cố định: 25/11/2026 10:04 giờ Việt Nam. */
+const NOW = new Date('2026-11-25T10:04:00+07:00');
+const STALE_LABEL = /^Cập nhật lúc 10:04:\d{2}$/;
+
+test('checkin-progress: stat-card "Check-in" k/N + thanh (stage-line/brand) + "Cập nhật liên tục"; mỗi Hạng vé một hàng theo thứ tự api trên card sáng (thanh text, dark: brand); Hạng vé chưa có Vé → 0/0, thanh rỗng; ARIA đọc được tên và k trên N', async ({
+  page,
+}) => {
+  await openApi(page, { checkin: progressBody(TIERS) });
+  await page.goto(checkinTab);
+  await expect(progress(page).locator('[data-slot="stat-card-label"]')).toHaveText('Check-in');
+  await expect(progressValue(page)).toHaveText('41/66');
+  await expect(progressCaption(page)).toHaveText('Cập nhật liên tục');
+  await expect(totalBar(page)).toHaveAttribute('aria-valuemin', '0');
+  await expect(totalBar(page)).toHaveAttribute('aria-valuemax', '66');
+  await expect(totalBar(page)).toHaveAttribute('aria-valuenow', '41');
+  await expect(totalBar(page)).toHaveAccessibleName('Tổng đã check-in');
+  await expect(totalBar(page)).toHaveAttribute('aria-valuetext', '41 trên 66 Vé đã check-in');
+  expect(await fillRatio(totalBar(page))).toBeCloseTo(41 / 66, 1);
+  expect(await colorsOf(totalBar(page))).toEqual({ track: 'rgb(42, 32, 35)', fill: 'rgb(255, 77, 106)' });
+
+  await expect(progressRows(page).locator('[data-slot="checkin-progress-name"]')).toHaveText(['Vé thường', 'Vé VIP', 'Vé mời']);
+  await expect(progressRows(page).locator('[data-slot="checkin-progress-count"]')).toHaveText(['30/50', '11/16', '0/0']);
+  const vip = progress(page).getByRole('progressbar', { name: 'Vé VIP' });
+  await expect(vip).toHaveAttribute('aria-valuemin', '0');
+  await expect(vip).toHaveAttribute('aria-valuemax', '16');
+  await expect(vip).toHaveAttribute('aria-valuenow', '11');
+  await expect(vip).toHaveAttribute('aria-valuetext', '11 trên 16 Vé đã check-in');
+  expect(await fillRatio(vip)).toBeCloseTo(11 / 16, 1);
+  // Light: nền surface-sunken, phần đầy text.
+  expect(await colorsOf(vip)).toEqual({ track: 'rgb(240, 235, 234)', fill: 'rgb(28, 25, 23)' });
+  // Hạng vé chưa có Vé hợp lệ: "0/0", thanh rỗng (không chia cho 0).
+  const empty = progress(page).getByRole('progressbar', { name: 'Vé mời' });
+  await expect(empty).toHaveAttribute('aria-valuemax', '0');
+  await expect(empty).toHaveAttribute('aria-valuenow', '0');
+  expect(await fillRatio(empty)).toBe(0);
+  // Số ở tab không đọc liên tục: không aria-live trên số.
+  await expect(progressValue(page)).not.toHaveAttribute('aria-live');
+
+  // Dark: phần đầy của thanh Hạng vé là brand.
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.reload();
+  await expect(progressValue(page)).toHaveText('41/66');
+  expect((await colorsOf(progress(page).getByRole('progressbar', { name: 'Vé VIP' }))).fill).toBe('rgb(255, 77, 106)');
+});
+
+test('checkin-progress: Sự kiện chưa có Vé nào → "0/0", thanh rỗng', async ({ page }) => {
+  await openApi(page, { checkin: progressBody([tier(1, 'Vé thường', 0, 0)]) });
+  await page.goto(checkinTab);
+  await expect(progressValue(page)).toHaveText('0/0');
+  await expect(totalBar(page)).toHaveAttribute('aria-valuemax', '0');
+  expect(await fillRatio(totalBar(page))).toBe(0);
+  await expect(progressRows(page).locator('[data-slot="checkin-progress-count"]')).toHaveText(['0/0']);
+});
+
+test('checkin-progress tự cập nhật: tín hiệu SSE → tải lại, tổng và hàng của đúng Hạng vé tăng, không tải lại trang', async ({
+  page,
+}) => {
+  const sse = await fakeEventSource(page, { url: CHECKIN_LIVE_URL });
+  const { state, calls } = await openApi(page, { checkin: progressBody(TIERS) });
+  await page.goto(checkinTab);
+  await expect(progressValue(page)).toHaveText('41/66');
+  await expect.poll(sse.count).toBe(1);
+  const info = await sse.info();
+  expect(info.withCredentials).toBe(true);
+  expect(info.url).toMatch(new RegExp(`/v1/checkin/events/${EVENT_ID}/live$`));
+
+  const beforeOpen = checkinGets(calls).length;
+  await sse.open();
+  await expect.poll(() => checkinGets(calls).length).toBe(beforeOpen + 1);
+
+  // CTV quét một Vé VIP ở cổng.
+  state.checkin = progressBody([TIERS[0]!, tier(2, 'Vé VIP', 12, 16), TIERS[2]!]);
+  await sse.message('event_checkins_changed');
+  await expect(progressValue(page)).toHaveText('42/66', { timeout: 2_500 });
+  await expect(progressRows(page).locator('[data-slot="checkin-progress-count"]')).toHaveText(['30/50', '12/16', '0/0']);
+  await expect(progress(page).getByRole('progressbar', { name: 'Vé VIP' })).toHaveAttribute('aria-valuenow', '12');
+  await expect(totalBar(page)).toHaveAttribute('aria-valuenow', '42');
+  await expect(progressCaption(page)).toHaveText('Cập nhật liên tục');
+  expect(await sse.count()).toBe(1);
+});
+
+test('checkin-progress không có SSE (503) → polling 10 giây; tab hiện lại → tải ngay', async ({ page }) => {
+  test.setTimeout(45_000);
+  const { state, calls } = await openApi(page, { checkin: progressBody(TIERS) });
+  await page.goto(checkinTab);
+  await expect(progressValue(page)).toHaveText('41/66');
+  await expect.poll(() => checkinLiveGets(calls).length).toBeGreaterThanOrEqual(1);
+  const start = checkinGets(calls).length;
+  const startedAt = Date.now();
+
+  state.checkin = progressBody([tier(1, 'Vé thường', 31, 50), TIERS[1]!, TIERS[2]!]);
+  await page.waitForTimeout(7_000);
+  expect(checkinGets(calls).length).toBe(start);
+  await expect(progressValue(page)).toHaveText('42/66', { timeout: 8_000 });
+  expect(checkinGets(calls).length).toBe(start + 1);
+  expect(Date.now() - startedAt).toBeLessThan(13_000);
+
+  // Tab hiện lại: tải ngay, không chờ nhịp polling kế tiếp.
+  state.checkin = progressBody([tier(1, 'Vé thường', 32, 50), TIERS[1]!, TIERS[2]!]);
+  const beforeVisible = checkinGets(calls).length;
+  await setVisibility(page, 'hidden');
+  await setVisibility(page, 'visible');
+  await expect(progressValue(page)).toHaveText('43/66', { timeout: 2_000 });
+  expect(checkinGets(calls).length).toBe(beforeVisible + 1);
+});
+
+test('checkin-progress: lần tải lại lỗi mà vẫn còn số cũ → giữ số + "Cập nhật lúc HH:MM:SS" (giờ Việt Nam); tải lại được → "Cập nhật liên tục"', async ({
+  page,
+}) => {
+  await page.clock.install({ time: NOW });
+  const sse = await fakeEventSource(page, { url: CHECKIN_LIVE_URL });
+  const { state } = await openApi(page, { checkin: progressBody(TIERS) });
+  await page.goto(checkinTab);
+  await expect(progressValue(page)).toHaveText('41/66');
+  await expect.poll(sse.count).toBe(1);
+  await sse.open();
+
+  // Mọi lần tải lại kế tiếp trả 500 (kể cả 2 lần thử lại).
+  state.failCheckin = 10;
+  state.checkin = progressBody([TIERS[0]!, tier(2, 'Vé VIP', 12, 16), TIERS[2]!]);
+  await sse.message('event_checkins_changed');
+  await expect(progressCaption(page)).toHaveText(STALE_LABEL, { timeout: 10_000 });
+  await expect(progressValue(page)).toHaveText('41/66');
+  await expect(progressRows(page)).toHaveCount(3);
+  await expect(progress(page).locator('[data-slot="checkin-progress-error"]')).toHaveCount(0);
+
+  state.failCheckin = 0;
+  await sse.message('event_checkins_changed');
+  await expect(progressValue(page)).toHaveText('42/66', { timeout: 5_000 });
+  await expect(progressCaption(page)).toHaveText('Cập nhật liên tục');
+});
+
+test('checkin-progress mất mạng: giữ số + "Cập nhật lúc HH:MM:SS"; có mạng lại → tải lại, "Cập nhật liên tục"', async ({
+  page,
+}) => {
+  await page.clock.install({ time: NOW });
+  const { state, calls } = await openApi(page, { checkin: progressBody(TIERS) });
+  await page.goto(checkinTab);
+  await expect(progressValue(page)).toHaveText('41/66');
+  await expect(progressCaption(page)).toHaveText('Cập nhật liên tục');
+
+  await page.context().setOffline(true);
+  await expect(progressCaption(page)).toHaveText(STALE_LABEL);
+  await expect(progressValue(page)).toHaveText('41/66');
+  const beforeOnline = checkinGets(calls).length;
+
+  state.checkin = progressBody([tier(1, 'Vé thường', 31, 50), TIERS[1]!, TIERS[2]!]);
+  await page.context().setOffline(false);
+  await expect(progressValue(page)).toHaveText('42/66', { timeout: 5_000 });
+  await expect(progressCaption(page)).toHaveText('Cập nhật liên tục');
+  expect(checkinGets(calls).length).toBeGreaterThan(beforeOnline);
+});
+
+test('checkin-progress tải lần đầu: skeleton; lỗi → StatusBanner "Chưa tải được số liệu check-in" kèm "Thử lại" → số liệu', async ({
+  page,
+}) => {
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  // Lỗi 5xx được thử lại 2 lần trước khi báo; lần đầu giữ lại để thấy skeleton.
+  const { state } = await openApi(page, { checkin: progressBody(TIERS), failCheckin: 3 });
+  await page.route(
+    (url) => url.pathname.endsWith(checkinApi),
+    async (route) => {
+      await held;
+      await route.fallback();
+    },
+  );
+  await page.goto(checkinTab);
+  await expect(progress(page).locator('[data-slot="checkin-progress-skeleton"]')).toBeVisible();
+  release();
+  const error = progress(page).locator('[data-slot="checkin-progress-error"]');
+  await expect(error).toContainText('Chưa tải được số liệu check-in', { timeout: 15_000 });
+  await expect(progress(page).locator('[data-slot="stat-card"]')).toHaveCount(0);
+  expect(state.failCheckin).toBe(0);
+
+  await error.getByRole('button', { name: 'Thử lại' }).click();
+  await expect(progressValue(page)).toHaveText('41/66');
+  await expect(error).toHaveCount(0);
+});
+
+test('checkin-progress 401 → sang đăng nhập, quay lại đúng trang này', async ({ page }) => {
+  await openApi(page, { expireOnCheckin: true });
+  await page.goto(checkinTab);
+  await page.waitForURL(`**/dang-nhap?returnTo=${encodeURIComponent(base)}`);
+});
+
+test('320px: tên Hạng vé dài xuống dòng, không cuộn ngang, "k/N" nằm trọn trong màn', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 667 });
+  const long = 'Vé VIP hạng kim cương có chỗ ngồi hàng đầu, quà lưu niệm và gặp gỡ vận động viên sau giải';
+  await openApi(page, { checkin: progressBody([tier(1, long, 1234, 5678), TIERS[2]!]) });
+  await page.goto(checkinTab);
+  const row = progressRows(page).first();
+  await expect(row.locator('[data-slot="checkin-progress-name"]')).toHaveText(long);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+  ).toBeLessThanOrEqual(0);
+  const count = (await row.locator('[data-slot="checkin-progress-count"]').boundingBox())!;
+  const name = (await row.locator('[data-slot="checkin-progress-name"]').boundingBox())!;
+  expect(count.x + count.width).toBeLessThanOrEqual(320);
+  // Tên xuống nhiều dòng, "k/N" một dòng bên phải tên.
+  expect(name.height).toBeGreaterThan(count.height * 1.5);
+  expect(count.x).toBeGreaterThanOrEqual(name.x + name.width);
+  await expect(row.locator('[data-slot="checkin-progress-count"]')).toHaveText('1234/5678');
 });

@@ -762,7 +762,10 @@ describe('GET /v1/checkin/events/:eventId: số đã check-in / tổng Vé hợp
       const ownerView = await h.http.get(`/v1/checkin/events/${sale.event.id}`).set('cookie', org.owner.cookie).expect(200);
       expect(ownerView.body).toEqual(res.body);
       expect(event).toMatchObject({ eventId: sale.event.id, eventName: sale.event.name });
-      return { checkedInCount: event.checkedInCount, validTicketCount: event.validTicketCount };
+      const totals = { checkedInCount: event.checkedInCount, validTicketCount: event.validTicketCount };
+      // Một Hạng vé duy nhất (Story 5.7): số của Hạng vé bằng tổng.
+      expect(event.ticketTypes).toEqual([{ ticketTypeId: sale.tiers[0]!.id, name: TIER, ...totals }]);
+      return totals;
     };
     expect(await counts()).toEqual({ checkedInCount: 0, validTicketCount: 0 });
 

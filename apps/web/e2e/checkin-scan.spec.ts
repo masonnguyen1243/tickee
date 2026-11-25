@@ -4,6 +4,7 @@ import { fakeCamera, recordScanSound, type CameraMode, type CameraSize } from '.
 import {
   checkerRevoked,
   CHECKER_REVOKED_MESSAGE,
+  CHECKIN_LIVE_URL,
   checkinEvent,
   EVENT_ENDED_MESSAGE,
   EVENT_ENDED_NOTE,
@@ -14,7 +15,7 @@ import {
 } from './checkin-mock';
 import { expect, test } from './fixtures';
 import { apiError, me, mockIdentityApi, unauthenticated, type Call } from './identity-mock';
-import { setVisibility } from './live-mock';
+import { fakeEventSource, setVisibility } from './live-mock';
 import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
 import { recordWakeLock } from './wake-lock-mock';
 
@@ -26,6 +27,9 @@ import { recordWakeLock } from './wake-lock-mock';
  *
  * Story 5.4 (mất mạng, UX-DR31): "Đang gửi…" sau 1 giây, hạn 3 giây rồi `offline-banner` + camera tạm dừng + gửi lại
  * cùng `scanId` mỗi 1 giây, lỗi mạng ngay, trình duyệt báo offline khi rảnh, 320px khi offline.
+ *
+ * Story 5.7 (số ở đỉnh tự cập nhật): tín hiệu SSE `…/live` (`EventSource` giả điều khiển được) → tải lại số; không có SSE
+ * (503 mặc định của API giả) → polling 10 giây; 403 khi tải lại sau tín hiệu → màn hết quyền, stream đóng, thôi polling.
  */
 
 const CONSENTED = '2026-10-29T01:02:03.000Z';
@@ -47,6 +51,7 @@ type ScanBody = { code: string; scanId: string };
 
 const scans = (calls: Call[]) => calls.filter((c) => c.method === 'POST' && c.path === SCAN_API).map((c) => c.body as ScanBody);
 const eventLoads = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === EVENT_API).length;
+const liveLoads = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === `${EVENT_API}/live`).length;
 
 const enableButton = (page: Page) => page.getByRole('button', { name: 'Bật camera' });
 const overlay = (page: Page) => page.locator('[data-slot="scan-result-overlay"]');
@@ -602,12 +607,17 @@ test('gửi lại nhiều lần rồi nhận 403 CHECKER_REVOKED: màn hết quy
   expect(new Set(sent.map((b) => b.scanId)).size).toBe(1);
 });
 
-test('mất quyền giữa chừng: POST scans → 403 CHECKER_REVOKED → màn hết quyền với câu của api, camera tắt, nhả Wake Lock', async ({
+test('mất quyền giữa chừng: POST scans → 403 CHECKER_REVOKED → màn hết quyền với câu của api, camera tắt, nhả Wake Lock; stream số liệu đóng, không tải lại khi tab hiện lại (Story 5.7)', async ({
   page,
 }) => {
-  const { camera, wakeLock } = await openScanScreen(page, { scan: checkerRevoked });
+  const sse = await fakeEventSource(page, { url: CHECKIN_LIVE_URL });
+  const { camera, wakeLock, calls } = await openScanScreen(page, { scan: checkerRevoked });
   await startCamera(page, camera);
   await expect.poll(async () => (await wakeLock()).requests).toBe(1);
+  await expect.poll(sse.count).toBe(1);
+  const beforeOpen = eventLoads(calls);
+  await sse.open();
+  await expect.poll(() => eventLoads(calls)).toBe(beforeOpen + 1);
   await camera.show(ticketCode(1));
   await expect(page.getByRole('heading', { name: CHECKER_REVOKED_MESSAGE })).toBeVisible();
   // Thu hồi (Story 5.6): không có dòng "Sự kiện đã kết thúc.".
@@ -620,6 +630,15 @@ test('mất quyền giữa chừng: POST scans → 403 CHECKER_REVOKED → màn 
   // Không tự bật lại camera.
   await page.waitForTimeout(500);
   expect((await camera.state()).calls).toHaveLength(1);
+
+  // Lần tải Sự kiện vẫn 200, nhưng màn hết quyền đã hiện: stream đóng, tab hiện lại không tải lại, không mở lại stream.
+  await expect.poll(async () => (await sse.all()).map((s) => s.readyState)).toEqual([2]);
+  const loads = eventLoads(calls);
+  await setVisibility(page, 'hidden');
+  await setVisibility(page, 'visible');
+  await page.waitForTimeout(1_500);
+  expect(eventLoads(calls)).toBe(loads);
+  expect(await sse.count()).toBe(1);
 });
 
 test('Sự kiện vừa kết thúc khi đang quét (Story 5.6): POST scans → 403 EVENT_ENDED → màn hết quyền kèm "Sự kiện đã kết thúc.", camera tắt, không gửi lại', async ({
@@ -660,6 +679,96 @@ test('Sự kiện tải lại trả 403 khi đang quét (sau lần xanh): màn h
   await expect.poll(async () => (await camera.state()).live).toBe(0);
   await expect.poll(async () => (await wakeLock()).released).toBe(1);
   expect(scans(calls)).toHaveLength(1);
+});
+
+test('số ở đỉnh tự cập nhật (Story 5.7): CTV khác quét → tín hiệu SSE → số đổi mà không cần quét hay tải lại; không số theo Hạng vé, không aria-live trên số', async ({
+  page,
+}) => {
+  const sse = await fakeEventSource(page, { url: CHECKIN_LIVE_URL });
+  let checkedIn = 3;
+  // API trả cả số theo Hạng vé; Màn quét chỉ hiện tổng.
+  const tiers = [
+    { ticketTypeId: '019a3b2c-0e00-7abc-8def-000000000001', name: 'Đôi nam', checkedInCount: 3, validTicketCount: 10 },
+  ];
+  const { camera, calls } = await openScanScreen(page, {
+    event: () => checkinEvent(EVENT_ID, EVENT_NAME, { checkedInCount: checkedIn, validTicketCount: 10 }, tiers),
+  });
+  await startCamera(page, camera);
+  const count = page.locator('[data-slot="scanner-count"]');
+  await expect(count).toHaveText('Đã check-in 3/10');
+  await expect.poll(sse.count).toBe(1);
+  const info = await sse.info();
+  expect(info.withCredentials).toBe(true);
+  expect(info.url).toMatch(new RegExp(`/v1/checkin/events/${EVENT_ID}/live$`));
+  const beforeOpen = eventLoads(calls);
+  await sse.open();
+  await expect.poll(() => eventLoads(calls)).toBe(beforeOpen + 1);
+
+  // CTV ở cổng khác quét xanh.
+  checkedIn = 4;
+  await sse.message('event_checkins_changed');
+  await expect(count).toHaveText('Đã check-in 4/10', { timeout: 2_500 });
+  expect(scans(calls)).toEqual([]);
+  await expect(overlay(page)).toHaveCount(0);
+  await expect(page.getByRole('progressbar')).toHaveCount(0);
+  await expect(page.getByText('Đôi nam')).toHaveCount(0);
+  await expect(count).not.toHaveAttribute('aria-live');
+  await expect(count.locator('[aria-live]')).toHaveCount(0);
+  // Camera vẫn chạy.
+  expect((await camera.state()).live).toBe(1);
+});
+
+test('số ở đỉnh không có SSE (503) → polling 10 giây', async ({ page }) => {
+  test.setTimeout(45_000);
+  let checkedIn = 3;
+  const { camera, calls } = await openScanScreen(page, {
+    event: () => checkinEvent(EVENT_ID, EVENT_NAME, { checkedInCount: checkedIn, validTicketCount: 10 }),
+  });
+  await startCamera(page, camera);
+  const count = page.locator('[data-slot="scanner-count"]');
+  await expect(count).toHaveText('Đã check-in 3/10');
+  await expect.poll(() => liveLoads(calls)).toBeGreaterThanOrEqual(1);
+  const start = eventLoads(calls);
+  const startedAt = Date.now();
+  checkedIn = 5;
+  await page.waitForTimeout(6_000);
+  expect(eventLoads(calls)).toBe(start);
+  await expect(count).toHaveText('Đã check-in 5/10', { timeout: 8_000 });
+  expect(Date.now() - startedAt).toBeLessThan(13_000);
+});
+
+test('403 CHECKER_REVOKED khi tải lại sau tín hiệu (Story 5.7): màn hết quyền, camera tắt, stream đóng; thôi polling và không tải lại khi tab hiện lại', async ({
+  page,
+}) => {
+  test.setTimeout(45_000);
+  const sse = await fakeEventSource(page, { url: CHECKIN_LIVE_URL });
+  let revoked = false;
+  const { camera, calls } = await openScanScreen(page, {
+    event: () => (revoked ? checkerRevoked() : checkinEvent(EVENT_ID, EVENT_NAME, { checkedInCount: 3, validTicketCount: 10 })),
+  });
+  await startCamera(page, camera);
+  await expect.poll(sse.count).toBe(1);
+  await sse.open();
+  await expect(page.locator('[data-slot="scanner-count"]')).toHaveText('Đã check-in 3/10');
+
+  // Owner thu hồi CTV này; CTV khác quét → tín hiệu → tải lại nhận 403.
+  revoked = true;
+  await sse.message('event_checkins_changed');
+  await expect(page.getByRole('heading', { name: CHECKER_REVOKED_MESSAGE })).toBeVisible({ timeout: 2_500 });
+  await expect(page.getByText(EVENT_NAME)).toHaveCount(0);
+  await expect.poll(async () => (await camera.state()).live).toBe(0);
+  await expect.poll(async () => (await sse.all()).map((s) => s.readyState)).toEqual([2]);
+
+  const loads = eventLoads(calls);
+  const streams = await sse.count();
+  // Tab ẩn rồi hiện lại: không tải lại, không mở lại stream.
+  await setVisibility(page, 'hidden');
+  await setVisibility(page, 'visible');
+  // Không còn SSE: polling (nếu còn) đã chạy sau 10 giây.
+  await page.waitForTimeout(11_000);
+  expect(eventLoads(calls)).toBe(loads);
+  expect(await sse.count()).toBe(streams);
+  await expect(page.getByRole('heading', { name: CHECKER_REVOKED_MESSAGE })).toBeVisible();
 });
 
 test('401 khi gửi quét: sang đăng nhập với returnTo là Màn quét, camera tắt', async ({ page }) => {
