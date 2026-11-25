@@ -1,15 +1,16 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { onlineManager, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ErrorCode, ScanOutcome, type CheckinEvent, type ScanRequest } from '@tickee/contracts';
 import { Camera, CameraOff, ShieldX, type LucideIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 
 import { ScanResultOverlay } from '@/components/tickee/scan-result-overlay';
 import { ManualLookupButton, ScannerViewport } from '@/components/tickee/scanner-viewport';
 import { StatusBanner } from '@/components/tickee/status-banner';
 import { Button } from '@/components/ui/button';
+import { isNetworkError } from '@/lib/api/errors';
 import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
 import { LOGIN_PATH, withReturnTo } from '@/lib/auth/return-to';
@@ -19,8 +20,21 @@ import { createScanSound, type ScanSound } from '@/lib/checkin/scan-sound';
 import { scanView, type ScanView } from '@/lib/checkin/scan-view';
 import { useQrScanner, type QrScanner } from '@/lib/checkin/use-qr-scanner';
 
-/** Gửi kết quả quét lỗi (mạng, 5xx, lỗi khác): không hiện đỏ, quét lại bằng `scanId` mới. */
+/** Gửi kết quả quét lỗi có phản hồi (5xx, lỗi khác): không hiện đỏ, quét lại bằng `scanId` mới. */
 export const SCAN_SEND_FAILED = 'Chưa gửi được kết quả quét. Quét lại mã.';
+
+/** Lỗi mạng hay hết hạn 3 giây: gửi lại cùng `code` và `scanId` sau chừng này mili giây, không giới hạn số lần. */
+export const SCAN_RETRY_DELAY_MS = 1000;
+/** Lần gửi chưa xong sau chừng này mili giây: "Đang gửi…" trên khung camera. */
+export const SCAN_SENDING_HINT_MS = 1000;
+
+/**
+ * Trạng thái mạng theo `onlineManager` của TanStack Query (sự kiện `online`/`offline`): cùng nguồn với việc tạm dừng
+ * gửi lại, nên banner và việc gửi lại không bao giờ lệch nhau.
+ */
+const subscribeOnline = (onChange: () => void) => onlineManager.subscribe(() => onChange());
+const browserOnline = () => onlineManager.isOnline();
+const onlineOnServer = () => true;
 
 /**
  * `403` của route CTV: người xem không quét được Sự kiện này (`NOT_A_MEMBER`, cả Sự kiện lạ hay id sai dạng), hoặc CTV
@@ -175,11 +189,15 @@ type ScanFlowProps = {
   sound: ScanSound;
   result: ScanView | null;
   sendFailed: boolean;
+  /** `offline-banner` hiện: khung camera tạm dừng; dải "Chưa gửi được…" ẩn (banner thắng). */
+  offline: boolean;
+  /** Lần gửi quét chưa xong sau 1 giây. */
+  sending: boolean;
   onCloseResult: () => void;
 };
 
 /** Phần của Màn quét sau khi tải xong Sự kiện: Bật camera → bị từ chối / lỗi camera → đang quét → overlay. */
-function ScanFlow({ event, scanner, sound, result, sendFailed, onCloseResult }: ScanFlowProps) {
+function ScanFlow({ event, scanner, sound, result, sendFailed, offline, sending, onCloseResult }: ScanFlowProps) {
   const enable = () => {
     // Trong chính lần chạm: mở khóa âm thanh trước, rồi mới xin camera.
     sound.unlock();
@@ -209,7 +227,9 @@ function ScanFlow({ event, scanner, sound, result, sendFailed, onCloseResult }: 
             checkedInCount={event.checkedInCount}
             validTicketCount={event.validTicketCount}
             videoRef={scanner.videoRef}
-            notice={sendFailed ? <StatusBanner tone="warning" title={SCAN_SEND_FAILED} /> : null}
+            notice={sendFailed && !offline ? <StatusBanner tone="warning" title={SCAN_SEND_FAILED} /> : null}
+            offline={offline}
+            sending={sending}
           />
           {result ? (
             <ScanResultOverlay view={result} onClose={result.autoCloseMs === null ? closeByTap : onCloseResult} />
@@ -223,7 +243,13 @@ function ScanFlow({ event, scanner, sound, result, sendFailed, onCloseResult }: 
  * Màn quét (Story 5.3, `/events/:eventId`): tải `GET /v1/checkin/events/:eventId` (Owner/Admin của BTC hoặc CTV `active`
  * của Sự kiện) → "Bật camera" → camera chạy liên tục, mỗi mã đọc được gửi `POST …/scans` với một `scanId` mới → overlay
  * xanh / trung tính / đỏ có âm thanh. `401` → màn đăng nhập rồi quay lại đúng trang này; `403` (lúc tải hay lúc quét) →
- * câu của api, tắt camera. Gửi quét lỗi mạng / 5xx → dải cảnh báo, quét tiếp được. Quyền kiểm lại ở mỗi request phía api.
+ * câu của api, tắt camera. Gửi quét lỗi có phản hồi (5xx, lỗi khác) → dải cảnh báo, quét lại bằng `scanId` mới. Quyền
+ * kiểm lại ở mỗi request phía api.
+ *
+ * Mất mạng (Story 5.4, UX-DR31, AD-15): mỗi lần gửi có hạn 3 giây (`submitScan`); hết hạn hoặc lỗi mạng thì TanStack
+ * Query gửi lại đúng biến cũ (cùng `code`, cùng `scanId`) mỗi 1 giây tới khi có phản hồi, tạm dừng khi trình duyệt báo
+ * offline và gửi ngay khi có mạng lại. Trong lúc đó, hoặc khi trình duyệt báo offline, `offline-banner` hiện và không
+ * giải mã mã mới (camera vẫn chạy). Không có hàng đợi quét offline. Rời Màn quét thì hủy lần gửi đang chạy và thôi gửi lại.
  */
 export function CheckinEventScreen({ eventId }: { eventId: string }) {
   const router = useRouter();
@@ -242,8 +268,21 @@ export function CheckinEventScreen({ eventId }: { eventId: string }) {
   const [result, setResult] = useState<{ view: ScanView; ok: boolean } | null>(null);
   const [sendFailed, setSendFailed] = useState(false);
 
+  /** Hủy khi rời Màn quét: lần gửi đang chạy dừng, không gửi lại nữa (tạo trong effect để chịu được StrictMode). */
+  const screenAbort = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    screenAbort.current = controller;
+    return () => controller.abort();
+  }, []);
+  const hasLeft = () => screenAbort.current?.signal.aborted ?? false;
+
   const submit = useMutation({
-    mutationFn: (body: ScanRequest) => submitScan(eventId, body),
+    mutationFn: (body: ScanRequest) => submitScan(eventId, body, screenAbort.current?.signal),
+    // Chỉ lỗi mạng / hết hạn mới gửi lại (cùng biến), không giới hạn số lần khi còn ở Màn quét. `onError` chỉ chạy khi
+    // thôi gửi lại, nên 401/403/5xx giữ nguyên xử lý của 5.3-b.
+    retry: (_failureCount, error) => !hasLeft() && isNetworkError(error),
+    retryDelay: SCAN_RETRY_DELAY_MS,
     onSuccess: (scanned) => {
       const view = scanView(scanned);
       setSendFailed(false);
@@ -251,6 +290,7 @@ export function CheckinEventScreen({ eventId }: { eventId: string }) {
       if (view.sound) sound.play(view.sound);
     },
     onError: (error) => {
+      if (hasLeft()) return;
       if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) {
         scanner.stop();
         router.replace(loginHere());
@@ -261,16 +301,35 @@ export function CheckinEventScreen({ eventId }: { eventId: string }) {
         setScanNoAccessError(error);
         return;
       }
-      // 2FA và đồng ý NĐ 13 do `Providers` xử lý; mạng, 5xx và lỗi khác: không đỏ, báo rồi quét tiếp.
+      // 2FA và đồng ý NĐ 13 do `Providers` xử lý; 5xx và lỗi khác có phản hồi: không đỏ, báo rồi quét tiếp.
       if (!isTotpRequired(error) && !hasErrorCode(error, ErrorCode.CONSENT_REQUIRED)) setSendFailed(true);
       scanner.release();
     },
   });
 
-  // Mỗi lần đọc một `scanId` mới. `mutate` của TanStack Query ổn định giữa các lần render.
+  // `offline-banner`: một lần quét đang chờ gửi lại (lỗi mạng / hết hạn, kể cả lúc tạm dừng vì offline), hoặc trình
+  // duyệt báo offline. Ẩn khi lần gửi lại nhận phản hồi HTTP, hoặc khi có mạng lại mà không còn lần quét nào chờ.
+  const online = useSyncExternalStore(subscribeOnline, browserOnline, onlineOnServer);
+  const resending = submit.isPending && isNetworkError(submit.failureReason);
+  const offline = resending || !online;
+
+  // "Đang gửi…": lần gửi (theo `submittedAt`) chưa xong sau `SCAN_SENDING_HINT_MS`; ẩn khi có kết quả hoặc banner hiện.
+  const pendingSince = submit.isPending ? submit.submittedAt : null;
+  const [slowSince, setSlowSince] = useState<number | null>(null);
+  useEffect(() => {
+    if (pendingSince === null) return;
+    const timer = setTimeout(
+      () => setSlowSince(pendingSince),
+      Math.max(0, pendingSince + SCAN_SENDING_HINT_MS - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [pendingSince]);
+  const sending = pendingSince !== null && slowSince === pendingSince && !offline;
+
+  // Mỗi lần đọc một `scanId` mới; lần gửi lại (TanStack) giữ nguyên `scanId` đó. `mutate` ổn định giữa các lần render.
   const { mutate } = submit;
   const onCode = useCallback((code: string) => mutate({ code, scanId: crypto.randomUUID() }), [mutate]);
-  const scanner = useQrScanner({ onCode });
+  const scanner = useQrScanner({ onCode, paused: offline });
 
   const closeResult = useCallback(() => {
     const wasOk = result?.ok ?? false;
@@ -311,6 +370,8 @@ export function CheckinEventScreen({ eventId }: { eventId: string }) {
         sound={sound}
         result={result?.view ?? null}
         sendFailed={sendFailed}
+        offline={offline}
+        sending={sending}
         onCloseResult={closeResult}
       />
     );

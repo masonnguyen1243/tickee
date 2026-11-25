@@ -42,6 +42,9 @@ import {
  * CTV `active`; BTC có Owner và Admin. Trạng thái Vé, Sự kiện, tên tài khoản và mốc check-in đặt bằng SQL (role
  * `tickee_app` ghi được các cột này). Tín hiệu realtime đọc bằng kết nối `LISTEN` riêng; span `checkin scan` và histogram
  * thời gian quét đọc bằng tracer/meter provider trong bộ nhớ (đăng ký toàn cục cho file này).
+ *
+ * Story 5.4: gửi lại cùng `scanId` sau khi Sự kiện đóng hay Vé bị hủy; quét song song cùng một Vé (FR-28) với khóa dòng
+ * Vé giữ bằng một kết nối riêng tới khi mọi request đang chờ khóa, để chắc các request thật sự tranh nhau.
  */
 
 class TestReader extends MetricReader {
@@ -188,6 +191,56 @@ const backdateCheckin = (ticketId: string, seconds: number) =>
   h.db.orm.execute(
     sql`UPDATE tickets SET checked_in_at = checked_in_at - make_interval(secs => ${seconds}) WHERE id = ${ticketId}`,
   );
+
+/** Số request của app đang chờ khóa ở câu SQL khớp `query` (ILIKE) trên bảng `tickets`. */
+async function waitingOnLock(query: string): Promise<number> {
+  const { rows } = await h.db.pool.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM pg_stat_activity
+      WHERE datname = current_database() AND application_name = 'tickee-api' AND wait_event_type = 'Lock'
+        AND query ILIKE $1`,
+    [query],
+  );
+  return rows[0]!.n;
+}
+
+/** Câu UPDATE check-in của `ticketing.checkIn`. */
+const TICKET_UPDATE = 'update "tickets"%';
+/** Câu đọc Vé `FOR SHARE` của `replayOf` (nhánh Sự kiện đóng). */
+const TICKET_REPLAY_READ = 'select %from "tickets"%for share';
+
+/**
+ * Chạy `lock` (giữ khóa dòng Vé) trong transaction của một kết nối riêng (ngoài pool của app, `max: 10`), gửi các request,
+ * COMMIT khi cả N request đang chờ khóa ở câu khớp `waitingQuery`: chúng thật sự tranh nhau cùng một dòng. Trả response
+ * theo thứ tự gửi. Lỗi giữa chừng thì ROLLBACK và chờ các request xong trước khi đóng kết nối (không để lại khóa).
+ */
+async function whileLocked<T>(
+  lock: [string, unknown[]],
+  waitingQuery: string,
+  send: () => PromiseLike<T>[],
+): Promise<T[]> {
+  const locker = new pg.Client({ connectionString: databaseUrl() });
+  await locker.connect();
+  let pending: Promise<T[]> | undefined;
+  try {
+    await locker.query('BEGIN');
+    await locker.query(...lock);
+    const requests = send();
+    pending = Promise.all(requests);
+    await expect.poll(() => waitingOnLock(waitingQuery), { timeout: 15_000, interval: 50 }).toBe(requests.length);
+    await locker.query('COMMIT');
+    return await pending;
+  } catch (err) {
+    await locker.query('ROLLBACK').catch(() => undefined);
+    await pending?.catch(() => undefined);
+    throw err;
+  } finally {
+    await locker.end();
+  }
+}
+
+/** Giữ khóa dòng Vé (`FOR UPDATE`), nhả khi cả N request đang chờ ở câu UPDATE check-in. */
+const whileTicketLocked = <T>(ticketId: string, send: () => PromiseLike<T>[]) =>
+  whileLocked(['SELECT id FROM tickets WHERE id = $1 FOR UPDATE', [ticketId]], TICKET_UPDATE, send);
 
 describe('POST /v1/checkin/events/:eventId/scans', () => {
   it('xanh: Vé valid chưa check-in → 200 ok (bản chụp trên Vé); ghi checked_in_at, checked_in_by, checkin_scan_id; phát event_checkins_changed', async () => {
@@ -445,6 +498,32 @@ describe('POST /v1/checkin/events/:eventId/scans', () => {
     expect(await ticketRow(tickets[3]!.id)).toEqual(checkedIn);
   });
 
+  it.each([
+    [TICKET_CANCEL_REASON.EVENT_CANCELLED, 'CANCELLED'],
+    [TICKET_CANCEL_REASON.VOIDED, 'VOIDED'],
+  ] as const)(
+    'gửi lại cùng scanId sau lần ok rồi Vé bị hủy (%s) → ok như lần đầu; scanId mới, hay người khác dùng scanId đó → %s; không ghi gì',
+    async (cancelReason, reason) => {
+      const [ticket] = await issue(main);
+      const scanId = randomUUID();
+      const signalCount = checkinSignals(main.event.id).length;
+      const first = await scanOk(main.event.id, ctv, ticket!.qr, scanId);
+      expect(first).toEqual(okOf(ticket!));
+      await h.db.orm.execute(
+        sql`UPDATE tickets SET status = 'cancelled', cancel_reason = ${cancelReason} WHERE id = ${ticket!.id}`,
+      );
+      const row = await ticketRow(ticket!.id);
+
+      for (const id of [scanId, scanId.toUpperCase()]) {
+        expect(await scanOk(main.event.id, ctv, ticket!.qr, id)).toEqual(first);
+      }
+      expect(await scanOk(main.event.id, ctv, ticket!.qr)).toEqual(invalid(reason));
+      expect(await scanOk(main.event.id, ctv2, ticket!.qr, scanId)).toEqual(invalid(reason));
+      expect(await ticketRow(ticket!.id)).toEqual(row);
+      await signalsSettled(main.event.id, signalCount + 1);
+    },
+  );
+
   const CLOSE = {
     /** Đồng hồ DB đã qua `effective_end_at`. */
     time_ended: (eventId: string) =>
@@ -482,6 +561,62 @@ describe('POST /v1/checkin/events/:eventId/scans', () => {
     for (const ticket of [fresh!, other!, foreign!]) expect(await ticketRow(ticket.id)).toMatchObject(NOT_CHECKED_IN);
     await sleep(150);
     expect(checkinSignals(sale.event.id)).toHaveLength(0);
+  });
+
+  it.each([
+    ['time_ended', 'EVENT_ENDED', false],
+    ['ended_manually', 'EVENT_ENDED', false],
+    // Hủy Sự kiện thì Vé (kể cả đã check-in) cũng chuyển `cancelled`: `replayOf` vẫn phát lại trên Vé đã hủy.
+    ['cancelled', 'CANCELLED', true],
+    ['cancelled_and_ended', 'CANCELLED', true],
+  ] as const)(
+    'gửi lại cùng scanId sau lần ok rồi Sự kiện đóng (%s) → ok như lần đầu; scanId mới, hay người khác dùng scanId đó → invalid %s; không ghi gì',
+    async (state, reason, cancelTicket) => {
+      const sale = await freeEvent();
+      const [ticket, untouched] = await issue(sale, 2);
+      const scanId = randomUUID();
+      const first = await scanOk(sale.event.id, org.owner, ticket!.qr, scanId);
+      expect(first).toEqual(okOf(ticket!));
+      await signalsSettled(sale.event.id, 1);
+      await CLOSE[state](sale.event.id);
+      if (cancelTicket) {
+        await h.db.orm.execute(
+          sql`UPDATE tickets SET status = 'cancelled', cancel_reason = ${TICKET_CANCEL_REASON.EVENT_CANCELLED}
+              WHERE id = ${ticket!.id}`,
+        );
+      }
+      const row = await ticketRow(ticket!.id);
+
+      for (const id of [scanId, scanId.toUpperCase()]) {
+        expect(await scanOk(sale.event.id, org.owner, ticket!.qr, id)).toEqual(first);
+      }
+      expect(await scanOk(sale.event.id, org.owner, ticket!.qr)).toEqual(invalid(reason));
+      expect(await scanOk(sale.event.id, admin, ticket!.qr, scanId)).toEqual(invalid(reason));
+      // scanId của lần ok không mở được Vé khác của Sự kiện đã đóng.
+      expect(await scanOk(sale.event.id, org.owner, untouched!.qr, scanId)).toEqual(invalid(reason));
+      expect(await ticketRow(ticket!.id)).toEqual(row);
+      expect(await ticketRow(untouched!.id)).toMatchObject(NOT_CHECKED_IN);
+      await signalsSettled(sale.event.id, 1);
+    },
+  );
+
+  it('Sự kiện đóng khi lần đầu còn chạy (UPDATE chưa commit): lần gửi lại cùng scanId chờ lần đầu commit → ok bản chụp của Vé', async () => {
+    const sale = await freeEvent();
+    const saleChecker = await checkerOf(sale);
+    const [ticket] = await issue(sale);
+    const scanId = randomUUID();
+    // Lần đầu đã qua cổng (Sự kiện còn mở) và ghi Vé nhưng chưa commit (kết nối riêng); đồng hồ qua `effective_end_at`.
+    const [res] = await whileLocked(
+      [
+        'UPDATE tickets SET checked_in_at = now(), checked_in_by = $2, checkin_scan_id = $3 WHERE id = $1',
+        [ticket!.id, saleChecker.userId, scanId],
+      ],
+      TICKET_REPLAY_READ,
+      () => [CLOSE.time_ended(sale.event.id).then(() => scan(sale.event.id, saleChecker, ticket!.qr, scanId))],
+    );
+    expect(res!.status, res!.text).toBe(200);
+    expect(ScanResult.parse(res!.body)).toEqual(okOf(ticket!));
+    expect(await ticketRow(ticket!.id)).toMatchObject({ checked_in_by: saleChecker.userId, checkin_scan_id: scanId });
   });
 
   it('Sự kiện bị khóa hoặc đã Ẩn vẫn check-in được: khóa chỉ chặn bán', async () => {
@@ -556,6 +691,63 @@ describe('POST /v1/checkin/events/:eventId/scans', () => {
       expect(res.text).not.toContain(ticket!.qr);
     }
     expect(await ticketRow(ticket!.id)).toMatchObject(NOT_CHECKED_IN);
+  });
+});
+
+describe('quét song song cùng một Vé (FR-28, AD-15): các request cùng chờ khóa dòng Vé', () => {
+  it('8 người, 8 scanId → đúng 1 ok, 7 already kèm checkedInAt của lượt đầu; dòng Vé giữ người và scanId của người thắng; đúng 1 tín hiệu; quét thêm không đổi checked_in_at', async () => {
+    const more: User[] = [];
+    for (let i = 0; i < 4; i++) more.push(await checkerOf(main));
+    const scanners: (User | Org['owner'])[] = [ctv, ctv2, org.owner, admin, ...more];
+    expect(scanners).toHaveLength(8);
+    const [ticket] = await issue(main);
+    const scanIds = scanners.map(() => randomUUID());
+    const signalCount = checkinSignals(main.event.id).length;
+
+    const responses = await whileTicketLocked(ticket!.id, () =>
+      scanners.map((scanner, i) => scan(main.event.id, scanner, ticket!.qr, scanIds[i])),
+    );
+    const results = responses.map((res) => {
+      expect(res.status, res.text).toBe(200);
+      return ScanResult.parse(res.body);
+    });
+    const winners = [...results.keys()].filter((i) => results[i]!.outcome === 'ok');
+    expect(winners).toHaveLength(1);
+    const winner = winners[0]!;
+    expect(results[winner]).toEqual(okOf(ticket!));
+
+    const row = await ticketRow(ticket!.id);
+    expect(row).toMatchObject({ checked_in_by: scanners[winner]!.userId, checkin_scan_id: scanIds[winner] });
+    const checkedInAt = toEventIso(row.checked_in_at!);
+    for (const [i, result] of results.entries()) {
+      if (i !== winner) expect(result, `${i}`).toMatchObject({ outcome: 'already', checkedInAt });
+    }
+    await signalsSettled(main.event.id, signalCount + 1);
+
+    // Quét thêm (mỗi người một scanId mới): không ai được ok nữa, checked_in_at giữ giá trị của lượt đầu.
+    for (const [i, scanner] of scanners.entries()) {
+      const again = await scanOk(main.event.id, scanner, ticket!.qr);
+      expect(again, `${i}`).toEqual(i === winner ? { outcome: 'recent' } : expect.objectContaining({ outcome: 'already', checkedInAt }));
+    }
+    expect(await ticketRow(ticket!.id)).toEqual(row);
+    await signalsSettled(main.event.id, signalCount + 1);
+  });
+
+  it('cùng người, cùng scanId, 2 request song song (gửi lại khi lần đầu còn chạy ở server) → cả hai ok giống nhau; đúng 1 tín hiệu', async () => {
+    const [ticket] = await issue(main);
+    const scanId = randomUUID();
+    const signalCount = checkinSignals(main.event.id).length;
+
+    const responses = await whileTicketLocked(ticket!.id, () => [
+      scan(main.event.id, ctv, ticket!.qr, scanId),
+      scan(main.event.id, ctv, ticket!.qr, scanId),
+    ]);
+    for (const res of responses) {
+      expect(res.status, res.text).toBe(200);
+      expect(ScanResult.parse(res.body)).toEqual(okOf(ticket!));
+    }
+    expect(await ticketRow(ticket!.id)).toMatchObject({ checked_in_by: ctv.userId, checkin_scan_id: scanId });
+    await signalsSettled(main.event.id, signalCount + 1);
   });
 });
 

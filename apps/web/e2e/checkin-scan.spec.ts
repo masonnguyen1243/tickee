@@ -11,8 +11,11 @@ import { recordWakeLock } from './wake-lock-mock';
 /*
  * Màn quét `/events/:eventId` (Story 5.3) với API giả và camera giả (`canvas.captureStream()` vẽ Mã QR do `qrcode` sinh,
  * giải mã thật bằng jsQR): "Bật camera" ở mọi lần vào, bị từ chối / không có camera, quét xanh (số đã check-in tải lại),
- * quét lặp, đỏ (đã check-in, Vé không hợp lệ) có âm thanh, mất quyền giữa chừng, lỗi mạng/5xx, rời màn (tab ẩn, rời
- * trang), hai mã liên tiếp, 320px. Tải Sự kiện (401, 403, lỗi) ở `checker-invite-accept.spec.ts`.
+ * quét lặp, đỏ (đã check-in, Vé không hợp lệ) có âm thanh, mất quyền giữa chừng, 5xx, rời màn (tab ẩn, rời trang), hai
+ * mã liên tiếp, 320px. Tải Sự kiện (401, 403, lỗi) ở `checker-invite-accept.spec.ts`.
+ *
+ * Story 5.4 (mất mạng, UX-DR31): "Đang gửi…" sau 1 giây, hạn 3 giây rồi `offline-banner` + camera tạm dừng + gửi lại
+ * cùng `scanId` mỗi 1 giây, lỗi mạng ngay, trình duyệt báo offline khi rảnh, 320px khi offline.
  */
 
 const CONSENTED = '2026-10-29T01:02:03.000Z';
@@ -39,6 +42,16 @@ const enableButton = (page: Page) => page.getByRole('button', { name: 'Bật cam
 const overlay = (page: Page) => page.locator('[data-slot="scan-result-overlay"]');
 const viewport = (page: Page) => page.locator('[data-slot="scanner-viewport"]');
 const manualLookup = (page: Page) => page.getByRole('button', { name: 'Tra tay' });
+const offlineBanner = (page: Page) => page.locator('[data-slot="offline-banner"]');
+const sendFailedStrip = (page: Page) => viewport(page).locator('[data-slot="status-banner"]');
+const sendingLine = (page: Page) => page.locator('[data-slot="scanner-sending"]');
+const pausedCover = (page: Page) => page.locator('[data-slot="scanner-paused"]');
+const statusLine = (page: Page) => page.locator('[data-slot="scanner-status"]');
+
+const OFFLINE_TEXT = 'Mất kết nối — chưa quét được';
+const PAUSED_TEXT = 'Camera tạm dừng · tự thử lại';
+const SENDING_TEXT = 'Đang gửi…';
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 type Setup = {
   camera?: CameraMode;
@@ -68,33 +81,68 @@ async function startCamera(page: Page, camera: Awaited<ReturnType<typeof fakeCam
   await expect.poll(async () => (await camera.state()).live).toBe(1);
 }
 
-type ScanTimeline = { sends: number[]; closes: number[] };
+/** Phần tử (`data-slot`) được ghi giờ xuất hiện / rời DOM. */
+const WATCHED_SLOTS = ['scan-result-overlay', 'offline-banner', 'scanner-sending'] as const;
+type WatchedSlot = (typeof WATCHED_SLOTS)[number];
+
+type RawTimeline = {
+  /** Giờ gửi mỗi `POST …/scans` và body (chuỗi JSON) của lần gửi đó, cùng thứ tự. */
+  sends: number[];
+  bodies: string[];
+  shown: Record<string, number[]>;
+  hidden: Record<string, number[]>;
+};
+
+type ScanTimeline = RawTimeline & {
+  /** Giờ overlay kết quả rời DOM. */
+  closes: number[];
+  shown: Record<WatchedSlot, number[]>;
+  hidden: Record<WatchedSlot, number[]>;
+};
 
 /**
- * Ghi giờ (đồng hồ của trang) mỗi lần gửi `POST …/scans` (bọc `fetch`) và mỗi lần overlay kết quả rời DOM
- * (`MutationObserver`), để đo khoảng cách giữa lúc overlay đóng và lần gửi kế tiếp.
+ * Ghi giờ (đồng hồ của trang) mỗi lần gửi `POST …/scans` (bọc `fetch`, kèm body) và mỗi lần overlay kết quả,
+ * `offline-banner`, "Đang gửi…" xuất hiện / rời DOM (`MutationObserver`), để đo khoảng cách giữa các mốc.
  */
 async function recordScanTimeline(page: Page): Promise<() => Promise<ScanTimeline>> {
-  await page.addInitScript(() => {
-    const timeline: ScanTimeline = { sends: [], closes: [] };
-    (window as unknown as { __scanTimeline: ScanTimeline }).__scanTimeline = timeline;
+  await page.addInitScript((slots: readonly string[]) => {
+    const timeline: RawTimeline = { sends: [], bodies: [], shown: {}, hidden: {} };
+    for (const slot of slots) {
+      timeline.shown[slot] = [];
+      timeline.hidden[slot] = [];
+    }
+    (window as unknown as { __scanTimeline: RawTimeline }).__scanTimeline = timeline;
     const nativeFetch = window.fetch.bind(window);
     window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
       const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
-      if (method === 'POST' && url.pathname.endsWith('/scans')) timeline.sends.push(Date.now());
+      if (method === 'POST' && url.pathname.endsWith('/scans')) {
+        timeline.sends.push(Date.now());
+        timeline.bodies.push(typeof init?.body === 'string' ? init.body : '');
+      }
       return nativeFetch(input, init);
     };
-    const isOverlay = (node: Node) =>
-      node instanceof Element &&
-      (node.matches('[data-slot="scan-result-overlay"]') || node.querySelector('[data-slot="scan-result-overlay"]') !== null);
+    const has = (node: Node, slot: string) =>
+      node instanceof Element && (node.matches(`[data-slot="${slot}"]`) || node.querySelector(`[data-slot="${slot}"]`) !== null);
     new MutationObserver((records) => {
+      const now = Date.now();
       for (const record of records) {
-        for (const node of record.removedNodes) if (isOverlay(node)) timeline.closes.push(Date.now());
+        for (const slot of slots) {
+          for (const node of record.addedNodes) if (has(node, slot)) timeline.shown[slot]!.push(now);
+          for (const node of record.removedNodes) if (has(node, slot)) timeline.hidden[slot]!.push(now);
+        }
       }
     }).observe(document, { childList: true, subtree: true });
-  });
-  return () => page.evaluate(() => (window as unknown as { __scanTimeline: ScanTimeline }).__scanTimeline);
+  }, WATCHED_SLOTS);
+  return async () => {
+    const raw = await page.evaluate(() => (window as unknown as { __scanTimeline: RawTimeline }).__scanTimeline);
+    return {
+      ...raw,
+      shown: raw.shown as ScanTimeline['shown'],
+      hidden: raw.hidden as ScanTimeline['hidden'],
+      closes: raw.hidden['scan-result-overlay']!,
+    };
+  };
 }
 
 /**
@@ -316,35 +364,233 @@ test('hai mã khác nhau liên tiếp: không có request thứ hai khi request 
   expect(second!.scanId).not.toBe(first!.scanId);
 });
 
-test('lỗi mạng hay 5xx khi gửi: không đỏ, dải cảnh báo "Chưa gửi được kết quả quét. Quét lại mã."; quét tiếp được', async ({
+test('5xx khi gửi: không đỏ, không offline-banner, dải "Chưa gửi được kết quả quét. Quét lại mã."; quét lại bằng scanId mới', async ({
   page,
 }) => {
-  let mode: 'error' | 'abort' | 'ok' = 'error';
+  let mode: 'error' | 'ok' = 'error';
   const { camera, sound, calls } = await openScanScreen(page, {
-    scan: () => (mode === 'error' ? apiError(503, 'SERVICE_UNAVAILABLE') : mode === 'abort' ? 'abort' : scanResult(OK)),
+    scan: () => (mode === 'error' ? apiError(503, 'SERVICE_UNAVAILABLE') : scanResult(OK)),
   });
   await startCamera(page, camera);
   await camera.show(ticketCode(1));
-  const banner = viewport(page).locator('[data-slot="status-banner"]');
-  await expect(banner).toHaveText(SEND_FAILED);
-  await expect(banner).toHaveAttribute('data-tone', 'warning');
+  await expect(sendFailedStrip(page)).toHaveText(SEND_FAILED);
+  // Bỏ mã khỏi khung: lần quét lại chỉ xảy ra khi test đưa mã vào lại.
+  await camera.show(null);
+  await expect(sendFailedStrip(page)).toHaveAttribute('data-tone', 'warning');
   await expect(overlay(page)).toHaveCount(0);
+  await expect(offlineBanner(page)).toHaveCount(0);
+  await expect(pausedCover(page)).toHaveCount(0);
+  expect((await sound()).tones).toEqual([]);
+  // Có phản hồi (503): không gửi lại cùng scanId.
+  await page.waitForTimeout(1500);
+  expect(scans(calls)).toHaveLength(1);
+
+  // Trình duyệt báo offline khi dải đang hiện: offline-banner thắng, hai dải không hiện cùng lúc.
+  await page.context().setOffline(true);
+  await expect(offlineBanner(page)).toBeVisible();
+  await expect(sendFailedStrip(page)).toHaveCount(0);
+  await page.context().setOffline(false);
+  await expect(offlineBanner(page)).toHaveCount(0);
+  await expect(sendFailedStrip(page)).toHaveText(SEND_FAILED);
+
+  // Quét lại cùng mã (sau 2 giây bỏ qua mã lặp) bằng scanId mới.
+  mode = 'ok';
+  await camera.show(ticketCode(1));
+  await expect(overlay(page)).toHaveAttribute('data-tone', 'success', { timeout: 5000 });
+  await expect(sendFailedStrip(page)).toHaveCount(0);
+  await expect(offlineBanner(page)).toHaveCount(0);
+  const sent = scans(calls);
+  expect(sent).toHaveLength(2);
+  expect(sent.every((b) => b.code === ticketCode(1))).toBe(true);
+  expect(sent[1]!.scanId).not.toBe(sent[0]!.scanId);
+});
+
+test('chậm 1–3 giây: "Đang gửi…" (aria-live polite) từ giây 1, ẩn khi overlay hiện; không offline-banner, không gửi lại', async ({
+  page,
+}) => {
+  const timeline = await recordScanTimeline(page);
+  const { camera, calls } = await openScanScreen(page, {
+    scan: async () => {
+      await sleep(1500);
+      return scanResult(OK);
+    },
+  });
+  await startCamera(page, camera);
+  await expect(statusLine(page)).toHaveAttribute('aria-live', 'polite');
+  await camera.show(ticketCode(1));
+  await expect(sendingLine(page)).toHaveText(SENDING_TEXT);
+  await expect(statusLine(page)).toHaveText(SENDING_TEXT);
+  await expect(overlay(page)).toHaveAttribute('data-tone', 'success', { timeout: 4000 });
+  await expect(sendingLine(page)).toHaveCount(0);
+
+  const { sends, shown, hidden } = await timeline();
+  expect(sends).toHaveLength(1);
+  expect(shown['scanner-sending']).toHaveLength(1);
+  const sendingAfter = shown['scanner-sending'][0]! - sends[0]!;
+  expect(sendingAfter).toBeGreaterThanOrEqual(950);
+  expect(sendingAfter).toBeLessThan(1500);
+  // Ẩn cùng lúc overlay hiện.
+  expect(Math.abs(hidden['scanner-sending'][0]! - shown['scan-result-overlay'][0]!)).toBeLessThan(300);
+  expect(shown['offline-banner']).toEqual([]);
+  expect(scans(calls)).toHaveLength(1);
+});
+
+test('treo quá 3 giây: offline-banner + camera tạm dừng lúc 3 giây; gửi lại cùng code và scanId; phản hồi tới thì banner ẩn, overlay xanh', async ({
+  page,
+}) => {
+  const timeline = await recordScanTimeline(page);
+  let n = 0;
+  const { camera, sound, calls } = await openScanScreen(page, {
+    scan: async () => {
+      // Lần đầu treo quá hạn 3 giây của client (client hủy trước khi có phản hồi); lần gửi lại trả xanh.
+      if (n++ === 0) await sleep(3500);
+      return scanResult(OK);
+    },
+  });
+  await startCamera(page, camera);
+  await camera.show(ticketCode(1));
+  await expect(sendingLine(page)).toHaveText(SENDING_TEXT);
+  await expect(offlineBanner(page)).toBeVisible({ timeout: 4000 });
+  await expect(overlay(page)).toHaveAttribute('data-tone', 'success', { timeout: 4000 });
+  await expect(offlineBanner(page)).toHaveCount(0);
+  expect((await sound()).tones).toEqual(['sine']);
+
+  const { sends, bodies, shown, hidden } = await timeline();
+  expect(sends).toHaveLength(2);
+  // Mọi body giống hệt nhau: cùng code, cùng scanId.
+  expect(new Set(bodies).size).toBe(1);
+  const sent = scans(calls);
+  expect(sent).toHaveLength(2);
+  expect(sent[0]!.code).toBe(ticketCode(1));
+  expect(sent[0]!.scanId).toMatch(UUID);
+  expect(sent[1]).toEqual(sent[0]);
+  // Banner hiện ở ~3 giây, thay "Đang gửi…"; gửi lại 1 giây sau đó; banner ẩn khi overlay xanh hiện.
+  expect(shown['offline-banner']).toHaveLength(1);
+  const bannerAfter = shown['offline-banner'][0]! - sends[0]!;
+  expect(bannerAfter).toBeGreaterThanOrEqual(2950);
+  expect(bannerAfter).toBeLessThan(3800);
+  expect(shown['scanner-sending'][0]! - sends[0]!).toBeLessThan(bannerAfter);
+  expect(Math.abs(hidden['scanner-sending'][0]! - shown['offline-banner'][0]!)).toBeLessThan(300);
+  expect(sends[1]! - sends[0]!).toBeGreaterThanOrEqual(3950);
+  expect(sends[1]! - sends[0]!).toBeLessThan(5000);
+  expect(Math.abs(hidden['offline-banner'][0]! - shown['scan-result-overlay'][0]!)).toBeLessThan(300);
+});
+
+test('lỗi mạng ngay: offline-banner trên tên Sự kiện, camera tạm dừng (track vẫn chạy), "Tra tay" giữ nguyên; gửi lại mỗi 1 giây cùng scanId; mã mới không được gửi tới khi banner ẩn và overlay đóng', async ({
+  page,
+}) => {
+  const timeline = await recordScanTimeline(page);
+  let failing = true;
+  const { camera, sound, calls } = await openScanScreen(page, {
+    scan: () => (failing ? 'abort' : scanResult(OK)),
+  });
+  await startCamera(page, camera);
+  await camera.show(ticketCode(1));
+
+  const banner = offlineBanner(page);
+  await expect(banner).toHaveText(OFFLINE_TEXT);
+  await expect(banner).toHaveAttribute('role', 'status');
+  await expect(banner.locator('svg')).toHaveAttribute('aria-hidden', 'true');
+  // Trên cùng màn: trên tên Sự kiện.
+  const bannerBox = (await banner.boundingBox())!;
+  const headingBox = (await page.getByRole('heading', { name: EVENT_NAME }).boundingBox())!;
+  expect(bannerBox.y + bannerBox.height).toBeLessThanOrEqual(headingBox.y);
+  await expect(page.locator('[data-slot="scanner-camera"]')).toHaveAttribute('data-paused', '');
+  await expect(pausedCover(page)).toBeVisible();
+  await expect(statusLine(page)).toHaveText(PAUSED_TEXT);
+  await expect(sendFailedStrip(page)).toHaveCount(0);
+  await expect(manualLookup(page)).toBeVisible();
+  await expect(manualLookup(page)).toBeDisabled();
+  expect((await camera.state()).live).toBe(1);
+  await expect(overlay(page)).toHaveCount(0);
+
+  // Banner đang hiện: đổi sang mã khác, không có request nào cho mã đó.
+  await expect.poll(() => scans(calls).length, { timeout: 5000 }).toBeGreaterThanOrEqual(3);
+  await camera.show(ticketCode(2));
+  await page.waitForTimeout(1200);
+  expect(scans(calls).every((b) => b.code === ticketCode(1))).toBe(true);
+  await expect(banner).toBeVisible();
   expect((await sound()).tones).toEqual([]);
 
-  // Mất mạng hẳn (không phản hồi): cũng vậy. Mỗi lần gửi lại là một scanId mới.
-  mode = 'abort';
-  const before = scans(calls).length;
-  await expect.poll(() => scans(calls).length, { timeout: 5000 }).toBeGreaterThan(before);
-  await page.waitForTimeout(300);
-  await expect(banner).toHaveText(SEND_FAILED);
-  await expect(overlay(page)).toHaveCount(0);
-
-  mode = 'ok';
-  await expect(overlay(page)).toHaveAttribute('data-tone', 'success', { timeout: 5000 });
+  failing = false;
+  await expect(overlay(page)).toHaveAttribute('data-tone', 'success', { timeout: 3000 });
   await expect(banner).toHaveCount(0);
-  const ids = scans(calls).map((b) => b.scanId);
-  expect(new Set(ids).size).toBe(ids.length);
-  expect(scans(calls).every((b) => b.code === ticketCode(1))).toBe(true);
+  await expect(pausedCover(page)).toHaveCount(0);
+  await expect(page.locator('[data-slot="scanner-camera"]')).not.toHaveAttribute('data-paused');
+  // Overlay xanh tự đóng → mã mới được gửi với scanId mới.
+  await expect(overlay(page)).toHaveCount(0, { timeout: 4000 });
+  await expect.poll(() => scans(calls).filter((b) => b.code === ticketCode(2)).length, { timeout: 5000 }).toBe(1);
+  await expect(overlay(page)).toHaveAttribute('data-tone', 'success');
+
+  const sent = scans(calls);
+  const retried = sent.filter((b) => b.code === ticketCode(1));
+  expect(retried.length).toBeGreaterThanOrEqual(4);
+  expect(new Set(retried.map((b) => b.scanId)).size).toBe(1);
+  expect(sent.find((b) => b.code === ticketCode(2))!.scanId).not.toBe(retried[0]!.scanId);
+
+  const { sends, bodies, shown, closes } = await timeline();
+  // Banner hiện ngay sau lần gửi lỗi đầu tiên; các lần gửi lại cách nhau ~1 giây.
+  expect(shown['offline-banner'][0]! - sends[0]!).toBeLessThan(800);
+  const firstOfCode2 = bodies.findIndex((b) => b.includes(ticketCode(2)));
+  for (let i = 1; i < firstOfCode2; i++) {
+    const gap = sends[i]! - sends[i - 1]!;
+    expect(gap, `${i}`).toBeGreaterThanOrEqual(950);
+    expect(gap, `${i}`).toBeLessThan(2000);
+  }
+  expect(sends[firstOfCode2]!).toBeGreaterThanOrEqual(closes[0]!);
+});
+
+test('trình duyệt báo offline khi rảnh: offline-banner + camera tạm dừng, mã trước camera không gửi; có mạng lại thì banner ẩn và quét tiếp', async ({
+  page,
+}) => {
+  const { camera, calls } = await openScanScreen(page, { scan: () => scanResult(OK) });
+  await startCamera(page, camera);
+  await expect(offlineBanner(page)).toHaveCount(0);
+
+  await page.context().setOffline(true);
+  await expect(offlineBanner(page)).toHaveText(OFFLINE_TEXT);
+  await expect(pausedCover(page)).toBeVisible();
+  await expect(statusLine(page)).toHaveText(PAUSED_TEXT);
+  await camera.show(ticketCode(1));
+  await page.waitForTimeout(1500);
+  expect(scans(calls)).toHaveLength(0);
+  expect((await camera.state()).live).toBe(1);
+
+  // Bỏ mã khỏi khung trước khi có mạng lại: nếu mã đã bị giải mã lúc offline, TanStack tạm dừng lần gửi đó rồi gửi khi
+  // có mạng, nên vẫn có request. Không có request nào chứng tỏ lúc offline không giải mã. Chờ khung trắng tới `<video>`
+  // (camera giả vẽ lại mỗi 100ms) để lúc có mạng không giải mã nhầm khung cũ còn mã; lần gửi đã tạm dừng thì vẫn bị bắt.
+  await camera.show(null);
+  await page.waitForTimeout(500);
+  await page.context().setOffline(false);
+  await expect(offlineBanner(page)).toHaveCount(0);
+  await page.waitForTimeout(1500);
+  expect(scans(calls)).toHaveLength(0);
+
+  // Có mạng: quét tiếp.
+  await camera.show(ticketCode(1));
+  await expect(overlay(page)).toHaveAttribute('data-tone', 'success', { timeout: 3000 });
+  const sent = scans(calls);
+  expect(sent).toHaveLength(1);
+  expect(sent[0]!.code).toBe(ticketCode(1));
+});
+
+test('gửi lại nhiều lần rồi nhận 403 CHECKER_REVOKED: màn hết quyền, offline-banner biến mất, camera tắt, thôi gửi lại', async ({
+  page,
+}) => {
+  let n = 0;
+  const { camera, calls } = await openScanScreen(page, { scan: () => (n++ < 2 ? 'abort' : checkerRevoked()) });
+  await startCamera(page, camera);
+  await camera.show(ticketCode(1));
+  await expect(offlineBanner(page)).toBeVisible();
+  await expect(page.getByRole('heading', { name: CHECKER_REVOKED_MESSAGE })).toBeVisible({ timeout: 5000 });
+  await expect(offlineBanner(page)).toHaveCount(0);
+  await expect(viewport(page)).toHaveCount(0);
+  await expect(overlay(page)).toHaveCount(0);
+  await expect.poll(async () => (await camera.state()).live).toBe(0);
+  await page.waitForTimeout(1500);
+  const sent = scans(calls);
+  expect(sent).toHaveLength(3);
+  expect(new Set(sent.map((b) => b.scanId)).size).toBe(1);
 });
 
 test('mất quyền giữa chừng: POST scans → 403 CHECKER_REVOKED → màn hết quyền với câu của api, camera tắt, nhả Wake Lock', async ({
@@ -457,7 +703,11 @@ test('track camera tự kết thúc (ứng dụng khác chiếm camera) khi tab 
   expect(scans(calls)).toHaveLength(1);
 });
 
-test('rời trang (Back về tab "Quét vé"): dừng track camera, nhả Wake Lock', async ({ page }) => {
+/**
+ * Vào Màn quét từ tab "Quét vé" của Owner (điều hướng phía client) và bật camera; `leave()` bấm Back về tab đó (cũng phía
+ * client: Màn quét unmount trong cùng document).
+ */
+async function openViaScanTab(page: Page, scan?: CheckinHandler) {
   const camera = await fakeCamera(page);
   const wakeLock = await recordWakeLock(page);
   await mockIdentityApi(page, { 'GET /identity/me': () => me(CONSENTED) });
@@ -482,17 +732,40 @@ test('rời trang (Back về tab "Quét vé"): dừng track camera, nhả Wake L
       ],
     }),
   });
-  await mockCheckinApi(page, { [`GET ${EVENT_API}`]: () => checkinEvent(EVENT_ID, EVENT_NAME) });
+  const calls = await mockCheckinApi(page, {
+    [`GET ${EVENT_API}`]: () => checkinEvent(EVENT_ID, EVENT_NAME),
+    ...(scan ? { [`POST ${SCAN_API}`]: scan } : {}),
+  });
 
   await page.goto(`/btc/${ORG_ID}/quet-ve`);
   await page.getByRole('link', { name: new RegExp(EVENT_NAME) }).click();
   await page.waitForURL((url) => url.pathname === SCAN_PATH);
   await startCamera(page, camera);
+  const leave = async () => {
+    await page.goBack();
+    await page.waitForURL((url) => url.pathname === `/btc/${ORG_ID}/quet-ve`);
+    await expect(page.getByRole('heading', { name: 'Chọn Sự kiện để quét' })).toBeVisible();
+  };
+  return { camera, wakeLock, calls, leave };
+}
+
+test('rời Màn quét khi đang gửi lại (lỗi mạng): thôi gửi lại', async ({ page }) => {
+  const { camera, calls, leave } = await openViaScanTab(page, () => 'abort');
+  await camera.show(ticketCode(1));
+  await expect(offlineBanner(page)).toBeVisible();
+  await expect.poll(() => scans(calls).length, { timeout: 5000 }).toBeGreaterThanOrEqual(2);
+
+  await leave();
+  const after = scans(calls).length;
+  await page.waitForTimeout(2500);
+  expect(scans(calls)).toHaveLength(after);
+});
+
+test('rời trang (Back về tab "Quét vé"): dừng track camera, nhả Wake Lock', async ({ page }) => {
+  const { camera, wakeLock, leave } = await openViaScanTab(page);
   await expect.poll(async () => (await wakeLock()).requests).toBe(1);
 
-  await page.goBack();
-  await page.waitForURL((url) => url.pathname === `/btc/${ORG_ID}/quet-ve`);
-  await expect(page.getByRole('heading', { name: 'Chọn Sự kiện để quét' })).toBeVisible();
+  await leave();
   await expect.poll(async () => (await camera.state()).live).toBe(0);
   await expect.poll(async () => (await wakeLock()).released).toBe(1);
 });
@@ -576,6 +849,27 @@ test.describe('320px: không cuộn ngang, nút đáy không bị che', () => {
     await camera.show(ticketCode(2));
     await expect(page.getByRole('heading', { name: CHECKER_REVOKED_MESSAGE })).toBeVisible();
     expect(await overflow(page)).toBeLessThanOrEqual(0);
+  });
+
+  test('mất kết nối: offline-banner + khung tạm dừng, không cuộn ngang, "Tra tay" không bị che', async ({ page }) => {
+    const { camera, calls } = await openScanScreen(page, { scan: () => 'abort' });
+    await startCamera(page, camera);
+    await page.context().setOffline(true);
+    await expect(offlineBanner(page)).toHaveText(OFFLINE_TEXT);
+    await expect(statusLine(page)).toHaveText(PAUSED_TEXT);
+    expect(await overflow(page)).toBeLessThanOrEqual(0);
+    await expectReachable(page, manualLookup(page));
+    await expectReachable(page, offlineBanner(page));
+
+    // Có mạng lại → banner ẩn; rồi quét gặp lỗi mạng → banner hiện lại (chờ gửi lại), bố cục vẫn vừa.
+    await page.context().setOffline(false);
+    await expect(offlineBanner(page)).toHaveCount(0);
+    await camera.show(ticketCode(1));
+    await expect.poll(() => scans(calls).length, { timeout: 5000 }).toBeGreaterThanOrEqual(2);
+    await expect(offlineBanner(page)).toBeVisible();
+    await expect(statusLine(page)).toHaveText(PAUSED_TEXT);
+    expect(await overflow(page)).toBeLessThanOrEqual(0);
+    await expectReachable(page, manualLookup(page));
   });
 
   test('bị từ chối và không có camera', async ({ page }) => {

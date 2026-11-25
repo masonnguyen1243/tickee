@@ -12,6 +12,7 @@ import { useScreenWakeLock } from '@/lib/tickets/wake-lock';
  *   Màn quét);
  * - đọc được mã thì khóa quét và gọi `onCode`; nơi gọi mở khóa bằng `release()` khi overlay kết quả đóng (hoặc gửi lỗi).
  *   Cùng mã đọc lại trong 2 giây sau khi mở khóa thì bỏ qua;
+ * - `paused` (mất kết nối, Story 5.4): không giải mã mã mới nhưng track camera vẫn chạy, để có mạng lại là quét tiếp ngay;
  * - tab ẩn hoặc rời trang thì dừng mọi track camera, tab hiện lại thì bật lại; giữ màn hình sáng khi camera chạy.
  * Không bao giờ log chuỗi đọc được.
  */
@@ -100,7 +101,13 @@ export type QrScanner = {
   release(): void;
 };
 
-export function useQrScanner({ onCode }: { onCode: (code: string) => void }): QrScanner {
+export type QrScannerOptions = {
+  onCode: (code: string) => void;
+  /** `true`: không giải mã (camera vẫn chạy), vd. khi `offline-banner` hiện. */
+  paused?: boolean;
+};
+
+export function useQrScanner({ onCode, paused = false }: QrScannerOptions): QrScanner {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [status, setStatus] = useState<CameraStatus>('idle');
   /** Người dùng đã bật camera và chưa tắt hẳn. */
@@ -116,6 +123,11 @@ export function useQrScanner({ onCode }: { onCode: (code: string) => void }): Qr
   useEffect(() => {
     onCodeRef.current = onCode;
   }, [onCode]);
+  /** Đọc trong vòng giải mã (không dựng lại vòng khi đổi). */
+  const pausedRef = useRef(paused);
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
 
   // Mở Màn quét là bắt đầu tải thư viện giải mã, để camera vừa chạy là giải mã được ngay.
   useEffect(() => {
@@ -241,7 +253,8 @@ export function useQrScanner({ onCode }: { onCode: (code: string) => void }): Qr
       try {
         const width = video.videoWidth;
         const height = video.videoHeight;
-        if (decode && context && !gateRef.current.locked && video.readyState >= 2 && width > 0 && height > 0) {
+        const decoding = !gateRef.current.locked && !pausedRef.current;
+        if (decode && context && decoding && video.readyState >= 2 && width > 0 && height > 0) {
           const side = Math.min(width, height);
           const size = Math.min(side, SCAN_DECODE_MAX_SIZE);
           if (canvas.width !== size) canvas.width = size;
