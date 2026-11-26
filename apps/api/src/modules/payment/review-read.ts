@@ -81,6 +81,26 @@ export function openReviewItemsOf(db: DbExecutor, scope: ReviewScope): Promise<O
     .orderBy(asc(reviewItems.createdAt), asc(reviewItems.id));
 }
 
+/** Một mục Cần xử lý của một Đơn (mọi trạng thái): loại, trạng thái, lúc mở mục. */
+export interface OrderReviewItemRow {
+  type: ReviewItemType;
+  status: ReviewItemStatus;
+  createdAt: Date;
+}
+
+/**
+ * Mọi mục Cần xử lý (mọi trạng thái) gắn Đơn `orderId` của BTC `scope`, cũ nhất trước (`created_at` rồi `id`; index
+ * `review_items_order_id_idx`): lịch sử Đơn của tab Đơn (Story 6.1). Mục `unmatched` đã ghép không gắn `order_id` nên
+ * không có. Một câu.
+ */
+export function reviewItemsOfOrder(db: DbExecutor, scope: ReviewScope, orderId: string): Promise<OrderReviewItemRow[]> {
+  return db
+    .select({ type: reviewItems.type, status: reviewItems.status, createdAt: reviewItems.createdAt })
+    .from(reviewItems)
+    .where(and(orgScope(scope)(reviewItems), eq(reviewItems.orderId, orderId)))
+    .orderBy(asc(reviewItems.createdAt), asc(reviewItems.id));
+}
+
 /** Số mục `open` của BTC (badge "Cần xử lý"). */
 export async function openReviewCountOf(db: DbExecutor, scope: ReviewScope): Promise<number> {
   const [row] = await db

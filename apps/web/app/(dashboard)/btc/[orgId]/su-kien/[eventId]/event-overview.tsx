@@ -1,7 +1,7 @@
 'use client';
 
 import { useQueryClient } from '@tanstack/react-query';
-import { ErrorCode, eventOverviewLiveApiPath, formatVnd, reviewQueuePath, type RecentOrder } from '@tickee/contracts';
+import { ErrorCode, EventOrderFilter, eventOverviewLiveApiPath, formatVnd, type RecentOrder } from '@tickee/contracts';
 import Link from 'next/link';
 import { useEffect, useId, useRef } from 'react';
 import { toast } from 'sonner';
@@ -18,6 +18,7 @@ import { hasErrorCode } from '@/lib/auth/api';
 import { useGoToLogin } from '@/lib/auth/use-go-to-login';
 import { useLiveResource } from '@/lib/realtime/use-live-resource';
 import { eventOverviewQueryKey, fetchEventOverview } from '@/lib/reporting/api';
+import { ALL_ORDERS_LINK, eventOrdersTabPath } from '@/lib/reporting/orders';
 import {
   eventOverviewPollInterval,
   orderStatusBadge,
@@ -115,8 +116,11 @@ function OrdersList({ orders, now }: { orders: RecentOrder[]; now: number }) {
   );
 }
 
-/** `recent-orders-block` (card sáng phẳng): 5 Đơn mới nhất; chưa có Đơn → "Chưa có Đơn nào.". */
-function RecentOrdersBlock({ orders }: { orders: RecentOrder[] }) {
+/**
+ * `recent-orders-block` (card sáng phẳng): 5 Đơn mới nhất; chưa có Đơn → "Chưa có Đơn nào.". Link "Xem tất cả Đơn" sang
+ * tab Đơn (Story 6.1; chuyển tab ngay trong trang).
+ */
+function RecentOrdersBlock({ orgId, eventId, orders }: { orgId: string; eventId: string; orders: RecentOrder[] }) {
   const headingId = useId();
   const now = Date.now();
   return (
@@ -125,9 +129,18 @@ function RecentOrdersBlock({ orders }: { orders: RecentOrder[] }) {
       data-slot="recent-orders-block"
       className="flex min-w-0 flex-col gap-stack rounded-lg bg-card p-card-padding shadow-card"
     >
-      <h2 id={headingId} className="text-title">
-        Đơn gần đây
-      </h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-stack gap-y-1">
+        <h2 id={headingId} className="text-title">
+          Đơn gần đây
+        </h2>
+        <Link
+          href={eventOrdersTabPath(orgId, eventId)}
+          data-slot="all-orders-link"
+          className="text-label font-bold text-brand-text underline-offset-4 hover:underline"
+        >
+          {ALL_ORDERS_LINK}
+        </Link>
+      </div>
       {orders.length === 0 ? (
         <p data-slot="recent-orders-empty" className="text-body text-muted-foreground">
           Chưa có Đơn nào.
@@ -144,8 +157,8 @@ function RecentOrdersBlock({ orders }: { orders: RecentOrder[] }) {
 
 /**
  * `needs-action-card` (card sáng phẳng cạnh `stat-card`, Story 4.3): số mục Cần xử lý `open` của Sự kiện. Có mục →
- * "{n} mục Cần xử lý" kèm liên kết sang trang Cần xử lý đã lọc theo Sự kiện (`?suKien=`; Story 6.1 đổi đích sang tab Đơn
- * lọc Cần xử lý). 0 mục → "Không có gì cần xử lý.", không liên kết.
+ * "{n} mục Cần xử lý" kèm liên kết sang tab Đơn đã lọc Cần xử lý (Story 6.1; `?tab=don&trangThai=can-xu-ly`, chuyển tab
+ * ngay trong trang). 0 mục → "Không có gì cần xử lý.", không liên kết.
  */
 function NeedsActionCard({ orgId, eventId, count }: { orgId: string; eventId: string; count: number }) {
   const headingId = useId();
@@ -163,7 +176,7 @@ function NeedsActionCard({ orgId, eventId, count }: { orgId: string; eventId: st
       </p>
       {count > 0 ? (
         <Link
-          href={reviewQueuePath(orgId, eventId)}
+          href={eventOrdersTabPath(orgId, eventId, { status: EventOrderFilter.NEEDS_ACTION, search: null })}
           className="self-start text-label font-bold text-brand-text underline-offset-4 hover:underline"
         >
           {NEEDS_ACTION_LINK}
@@ -268,7 +281,7 @@ export function EventOverviewLive({ orgId, eventId }: { orgId: string; eventId: 
           <NeedsActionCard orgId={orgId} eventId={eventId} count={data.openReviewCount} />
         </div>
       </div>
-      <RecentOrdersBlock orders={data.recentOrders} />
+      <RecentOrdersBlock orgId={orgId} eventId={eventId} orders={data.recentOrders} />
     </div>
   );
 }

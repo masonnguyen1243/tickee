@@ -14,7 +14,9 @@ import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
  * máy khách như trước),
  * `GET /orgs/:id/events/:eventId/form` → `{ questions: [] }`, `GET /orgs/:id/events/:eventId/publish-readiness` → bốn
  * điều kiện luôn có, đều đạt (`readyConditions`), `GET /orgs/:id/events/:eventId/overview` → chưa có Đơn
- * (`emptyOverview`), SSE `GET /orgs/:id/events/:eventId/overview/live` → 503 (không realtime: polling 10 giây), SSE cấp
+ * (`emptyOverview`), SSE `GET /orgs/:id/events/:eventId/overview/live` → 503 (không realtime: polling 10 giây),
+ * `GET /orgs/:id/events/:eventId/orders` (tab Đơn, Story 6.1) → chưa có Đơn (`emptyOrderPage`),
+ * `GET /orgs/:id/events/:eventId/orders/:code` → 404 `ORDER_NOT_FOUND`, SSE cấp
  * BTC `GET /orgs/:id/live` (khung dashboard luôn mở, Story 4.2-b) → 503 (dải banner polling 10 giây),
  * `GET /orgs/:id/review-items/summary` (badge "Cần xử lý" của khung, Story 4.3) → `{ openCount: 0 }`,
  * `GET /orgs/:id/review-items` (trang Cần xử lý) → hàng trống không lọc, `GET /orgs/:id/token` (trang Token, Story 4.5-a)
@@ -39,6 +41,8 @@ const EVENT_FORM_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/form$/;
 const READINESS_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/publish-readiness$/;
 const OVERVIEW_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/overview$/;
 const OVERVIEW_LIVE_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/overview\/live$/;
+const EVENT_ORDERS_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/orders$/;
+const EVENT_ORDER_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/orders\/[^/]+$/;
 const ORG_LIVE_KEY = /^GET \/orgs\/[^/]+\/live$/;
 const SALE_STATUS_KEY = /^GET \/orgs\/[^/]+\/event-sale-status$/;
 const REVIEW_SUMMARY_KEY = /^GET \/orgs\/[^/]+\/review-items\/summary$/;
@@ -62,6 +66,9 @@ export const emptyCheckinEvent = (eventId: string) => ({
 
 /** `EventOverview` của Sự kiện chưa có Đơn nào (Story 3.11), không có mục Cần xử lý (Story 4.3). */
 export const emptyOverview = () => ({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: [], openReviewCount: 0 });
+
+/** `EventOrderPage` của Sự kiện chưa có Đơn nào (tab Đơn, Story 6.1). */
+export const emptyOrderPage = () => ({ orders: [], nextCursor: null });
 
 /** Một lần đọc Token được (`TokenReading` `ok`, Story 4.5-a): khả dụng = số dư + hạn mức như api. */
 export const tokenReading = (balance: number, creditLimit: number, readAt = '2026-11-16T03:04:05.000Z') => ({
@@ -115,6 +122,9 @@ function defaultHandler(key: string): Handler | undefined {
   // Tab Tổng quan của Sự kiện đã rời nháp luôn tải số liệu và mở SSE (Story 3.11): mặc định chưa có Đơn, không realtime.
   if (OVERVIEW_KEY.test(key)) return () => ({ status: 200, body: emptyOverview() });
   if (OVERVIEW_LIVE_KEY.test(key)) return () => apiError(503, 'SERVICE_UNAVAILABLE');
+  // Tab Đơn (Story 6.1): mặc định chưa có Đơn nào; chi tiết một Đơn → không tìm thấy.
+  if (EVENT_ORDERS_KEY.test(key)) return () => ({ status: 200, body: emptyOrderPage() });
+  if (EVENT_ORDER_KEY.test(key)) return () => apiError(404, 'ORDER_NOT_FOUND');
   // Dải banner của khung dashboard mở SSE cấp BTC (Story 4.2-b): mặc định không realtime.
   if (ORG_LIVE_KEY.test(key)) return () => apiError(503, 'SERVICE_UNAVAILABLE');
   // Nhãn trạng thái bán của thẻ Sự kiện và badge Tổng quan (Story 4.2-c): mặc định không có Sự kiện nào → nhãn dự phòng.

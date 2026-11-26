@@ -360,7 +360,7 @@ test('Kết thúc qua Dialog nêu hậu quả: "Hủy" không gọi api; xác nh
 
   await page.getByRole('tab', { name: 'Tổng quan' }).click();
   await expect(page.locator('[data-slot="event-overview"] [data-slot="status-badge"]')).toHaveText('Đã kết thúc');
-  // Đổi tab gọi `router.replace` (bỏ `?tab=`): chờ xong rồi mới `goto`, không thì hai lần điều hướng đè nhau.
+  // Đổi tab thay URL (bỏ `?tab=`): chờ xong rồi mới `goto`, không thì hai lần điều hướng đè nhau.
   await page.waitForURL((url) => url.pathname === base && url.search === '');
   await page.goto(`/btc/${ORG_ID}`);
   await expect(page.locator('[data-slot="event-card"] [data-slot="status-badge"]')).toHaveText('Đã kết thúc');

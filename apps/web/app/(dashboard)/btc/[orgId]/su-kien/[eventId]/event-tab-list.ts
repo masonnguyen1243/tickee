@@ -1,7 +1,7 @@
 /** Tab cấp Sự kiện (UX: Tổng quan · Đơn · Hạng vé · Form mua · Check-in · Cài đặt), chọn bằng `?tab=`. */
 export const EVENT_TABS = [
   { key: 'tong-quan', label: 'Tổng quan' },
-  { key: 'don', label: 'Đơn', soon: 'Đơn của Người mua sẽ hiện ở đây.' },
+  { key: 'don', label: 'Đơn' },
   { key: 'hang-ve', label: 'Hạng vé' },
   { key: 'form-mua', label: 'Form mua' },
   { key: 'check-in', label: 'Check-in' },

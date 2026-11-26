@@ -305,5 +305,5 @@ export const eventFilterLabel = (name: string): string => `Sự kiện: ${name}`
 /** Giá trị của `needs-action-card`: "{n} mục Cần xử lý"; 0 → "Không có gì cần xử lý.". */
 export const needsActionValue = (count: number): string => (count > 0 ? `${count} mục Cần xử lý` : REVIEW_QUEUE_EMPTY);
 
-/** Liên kết của `needs-action-card` (chỉ khi có mục). */
-export const NEEDS_ACTION_LINK = 'Xem các mục Cần xử lý';
+/** Liên kết của `needs-action-card` (chỉ khi có mục): sang tab Đơn đã lọc Cần xử lý (Story 6.1). */
+export const NEEDS_ACTION_LINK = 'Mở tab Đơn, lọc Cần xử lý';

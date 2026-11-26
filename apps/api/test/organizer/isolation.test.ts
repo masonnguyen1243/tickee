@@ -136,6 +136,9 @@ describe('cách ly BTC', () => {
     // Story 3.11: Tổng quan Sự kiện của `reporting` (REST và SSE, `orders.view`).
     expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/overview');
     expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/overview/live');
+    // Story 6.1: tab Đơn của `reporting` (danh sách và chi tiết, `orders.view`).
+    expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/orders');
+    expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/orders/:code');
     // Story 4.2-b: stream cấp BTC của `reporting` (Owner và Admin, như `notices`).
     expect(guarded).toContain('GET /v1/orgs/:orgId/live');
     // Story 4.2-c: trạng thái bán trên dashboard của `ordering` (ngoài tiền tố `…/events/`, như danh sách Sự kiện).
@@ -174,6 +177,8 @@ describe('cách ly BTC', () => {
     }
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/overview')).toBe(Permission.ORDERS_VIEW);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/overview/live')).toBe(Permission.ORDERS_VIEW);
+    expect(permissionOf('/v1/orgs/:orgId/events/:eventId/orders')).toBe(Permission.ORDERS_VIEW);
+    expect(permissionOf('/v1/orgs/:orgId/events/:eventId/orders/:code')).toBe(Permission.ORDERS_VIEW);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/pending-payment-count')).toBe(Permission.EVENTS_MANAGE);
     expect(permissionOf('/v1/orgs/:orgId/live')).toBe(Permission.ORG_READ);
     expect(permissionOf('/v1/orgs/:orgId/notices')).toBe(Permission.ORG_READ);
@@ -396,8 +401,9 @@ describe('cách ly BTC', () => {
 
   it('route Sự kiện trên BTC A: body {} → 400, id ngẫu nhiên → 404 EVENT_NOT_FOUND', async () => {
     const eventRoutes = routes.filter((r) => r.permission && r.path.startsWith('/v1/orgs/:orgId/events'));
-    // Story 5.1: thêm `GET`/`POST …/checker-invite` (25). Story 5.6: danh sách, thu hồi, khôi phục CTV (28).
-    expect(eventRoutes).toHaveLength(28);
+    // Story 5.1: thêm `GET`/`POST …/checker-invite` (25). Story 5.6: danh sách, thu hồi, khôi phục CTV (28). Story 6.1:
+    // danh sách và chi tiết Đơn (30).
+    expect(eventRoutes).toHaveLength(30);
     for (const route of eventRoutes) {
       const res = await call(route, orgA, ownerA.cookie);
       // Body được kiểm trước khi chạm DB; danh sách Sự kiện của BTC trả 200; còn lại Sự kiện ngẫu nhiên → 404.

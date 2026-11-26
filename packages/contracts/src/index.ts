@@ -3,6 +3,7 @@ export * from './checkin.js';
 export * from './checkout.js';
 export * from './errors.js';
 export * from './event.js';
+export * from './event-orders.js';
 export * from './form.js';
 export * from './identity.js';
 export * from './jobs.js';

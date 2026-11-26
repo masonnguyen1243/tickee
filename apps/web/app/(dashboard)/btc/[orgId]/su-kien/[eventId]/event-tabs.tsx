@@ -1,13 +1,11 @@
 'use client';
 
 import { eventPath, formatEventDateTime, type EventDetail } from '@tickee/contracts';
-import { Construction } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import { useState, type ReactNode } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
+import type { ReactNode } from 'react';
 
 import { useCurrentOrganization } from '@/components/tickee/current-organization';
-import { EmptyState } from '@/components/tickee/empty-state';
 import { PageHeading } from '@/components/tickee/page-heading';
 import { StatusBadge } from '@/components/tickee/status-badge';
 import { Button } from '@/components/ui/button';
@@ -24,6 +22,7 @@ import { CheckinTab } from './checkin-tab';
 import { EventOverviewLive } from './event-overview';
 import { EventSettings } from './event-settings';
 import { DEFAULT_EVENT_TAB, EVENT_TABS, isEventTab, type EventTab } from './event-tab-list';
+import { OrdersTab } from './orders-tab';
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -91,17 +90,22 @@ function EventInfo({ orgId, event }: { orgId: string; event: EventDetail }) {
   );
 }
 
-/** Khung tab của một Sự kiện; tab đổi thì cập nhật `?tab=` (Tổng quan là mặc định, không ghi vào URL). */
-export function EventTabs({ eventId, initialTab }: { eventId: string; initialTab: EventTab }) {
+/**
+ * Khung tab của một Sự kiện. URL là nguồn của tab đang mở (`?tab=`, Tổng quan là mặc định, không ghi vào URL): link
+ * trong trang đổi `?tab=` (vd. "Xem tất cả Đơn", `needs-action-card` của Story 6.1) thì khung không remount mà vẫn chuyển
+ * tab, và bộ lọc tab Đơn (`trangThai`, `tim`) đọc cùng URL. Bấm tab → thay URL bằng `history.replaceState` (Next đồng bộ
+ * `useSearchParams`, không tải lại trang, không gọi server), chỉ giữ `?tab=`.
+ */
+export function EventTabs({ eventId }: { eventId: string }) {
   const organization = useCurrentOrganization();
-  const router = useRouter();
   const pathname = usePathname();
-  const [tab, setTab] = useState<EventTab>(initialTab);
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const tab: EventTab = isEventTab(tabParam) ? tabParam : DEFAULT_EVENT_TAB;
 
   const select = (value: string) => {
-    if (!isEventTab(value)) return;
-    setTab(value);
-    router.replace(value === DEFAULT_EVENT_TAB ? pathname : `${pathname}?tab=${value}`, { scroll: false });
+    if (!isEventTab(value) || value === tab) return;
+    window.history.replaceState(null, '', value === DEFAULT_EVENT_TAB ? pathname : `${pathname}?tab=${value}`);
   };
 
   return (
@@ -119,13 +123,8 @@ export function EventTabs({ eventId, initialTab }: { eventId: string; initialTab
             </TabsList>
             {EVENT_TABS.map((t) => (
               <TabsContent key={t.key} value={t.key}>
-                {'soon' in t ? (
-                  <EmptyState
-                    icon={Construction}
-                    title="Sắp có"
-                    description={t.soon}
-                    className="rounded-lg bg-card px-card-padding shadow-card"
-                  />
+                {t.key === 'don' ? (
+                  <OrdersTab orgId={organization.id} event={event} />
                 ) : t.key === 'hang-ve' ? (
                   <TicketTypesEditor orgId={organization.id} event={event} />
                 ) : t.key === 'form-mua' ? (
