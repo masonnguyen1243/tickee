@@ -1173,6 +1173,7 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: F4. Quy ước phân trang `cursor` + `limit` của spine (bảng quy ước API, `ARCHITECTURE-SPINE.md:438`) chưa có chỗ dùng; Epic 4 thêm bốn danh sách không phân trang (Cần xử lý, BTC đang tạm ngừng bán, dead-letter, Đơn ứng viên để ghép).
   evidence: Retro Epic 4 F4 ("Đối chiếu spec", lệch toàn dự án). Danh sách Đơn đầy đủ của Story 6.1 là danh sách lớn đầu tiên, nên là chỗ dùng đầu tiên của quy ước. Sprint change proposal 21/11/2026 ghi mục này ngoài phạm vi E4-7.
   story: 6.1
+- Đã xử lý (26/11/2026, 6.1): mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-6-1-tab-don-day-du.md`. Bằng chứng: `packages/contracts/src/event-orders.ts:101`; `packages/contracts/src/event-orders.ts:146`; `apps/api/src/modules/ordering/event-orders-read.ts:111`.
 
 ## Deferred from: code review of spec-epic-4-e4-8-ve-sinh-deferred-work.md (2026-11-21)
 
