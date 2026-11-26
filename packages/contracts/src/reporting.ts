@@ -202,11 +202,33 @@ export const RecentOrder = z.object({
 export type RecentOrder = z.infer<typeof RecentOrder>;
 
 /**
- * `GET /v1/orgs/:orgId/events/:eventId/overview` (Owner, Admin: `orders.view`): doanh thu = tổng `total_amount` của các
- * Đơn `paid` của Sự kiện, `paidOrders` = số Đơn `paid` (tính cả Đơn 0đ); `recentOrders` = tối đa `RECENT_ORDERS_LIMIT`
- * Đơn mới nhất ở mọi trạng thái, xếp theo lúc tạo rồi id, giảm dần; `openReviewCount` = số mục Cần xử lý `open` gắn Đơn
- * của Sự kiện (`needs-action-card`, Story 4.3; mục `unmatched` không gắn Sự kiện nào nên không tính). Web tải lại khi
- * stream `GET …/overview/live` báo `event_orders_changed` hoặc `org_review_items_changed`.
+ * Một Hạng vé của khối "Vé theo Hạng vé" trên Tổng quan (Story 6.2, FR-31): tên và giá hiện tại, sức chứa, số Vé đã
+ * bán, số đang giữ chỗ cho Đơn chờ thanh toán, và số còn lại `max(0, capacity − sold − held)` (tính ở api). Không có id
+ * nội bộ, không có doanh thu theo Hạng vé (`paid_amount` là của cả Đơn, không chia được khi duyệt tay lệch tiền).
+ */
+export const EventOverviewTicketType = z.object({
+  name: z.string(),
+  price: z.number().int().nonnegative(),
+  capacity: z.number().int().nonnegative(),
+  sold: z.number().int().nonnegative(),
+  held: z.number().int().nonnegative(),
+  remaining: z.number().int().nonnegative(),
+});
+export type EventOverviewTicketType = z.infer<typeof EventOverviewTicketType>;
+
+/**
+ * `GET /v1/orgs/:orgId/events/:eventId/overview` (Owner, Admin: `orders.view`):
+ * - `revenue`: `amount` = tổng `paid_amount` (tiền đã nhận) của các Đơn `paid` của Sự kiện (Story 6.2: Đơn duyệt tay
+ *   lệch tiền tính số đã nhận, khớp danh sách hoàn tiền AD-28), `paidOrders` = số Đơn `paid` (tính cả Đơn 0đ);
+ * - `recentOrders` = tối đa `RECENT_ORDERS_LIMIT` Đơn mới nhất ở mọi trạng thái, xếp theo lúc tạo rồi id, giảm dần;
+ * - `openReviewCount` = số mục Cần xử lý `open` gắn Đơn của Sự kiện (`needs-action-card`, Story 4.3; mục `unmatched`
+ *   không gắn Sự kiện nào nên không tính);
+ * - `checkin` (Story 6.2): số Vé `valid` đã check-in trên tổng số Vé `valid` của Sự kiện, cùng số với tab Check-in
+ *   (`CheckinEvent`; Vé hủy hay bị vô hiệu không tính, kể cả đã check-in);
+ * - `ticketTypes` (Story 6.2): Hạng vé của Sự kiện, tạo trước đứng trước; Hạng vé không còn dòng tồn kho thì bỏ.
+ *
+ * Web tải lại khi stream `GET …/overview/live` báo `event_orders_changed`, `event_checkins_changed` hoặc
+ * `org_review_items_changed`.
  */
 export const EventOverview = z.object({
   revenue: z.object({
@@ -215,6 +237,11 @@ export const EventOverview = z.object({
   }),
   recentOrders: z.array(RecentOrder).max(RECENT_ORDERS_LIMIT),
   openReviewCount: z.number().int().nonnegative(),
+  checkin: z.object({
+    checkedInCount: z.number().int().nonnegative(),
+    validTicketCount: z.number().int().nonnegative(),
+  }),
+  ticketTypes: z.array(EventOverviewTicketType),
 });
 export type EventOverview = z.infer<typeof EventOverview>;
 
@@ -223,8 +250,10 @@ export const eventOverviewApiPath = (organizationId: string, eventId: string): s
   `/orgs/${encodeURIComponent(organizationId)}/events/${encodeURIComponent(eventId)}/overview`;
 
 /**
- * Đường SSE (sau `/v1`) của Tổng quan Sự kiện: đẩy `event_orders_changed` của Sự kiện này, `org_review_items_changed`
- * của BTC (tín hiệu cấp BTC: mọi mục của BTC, kể cả mục của Sự kiện khác; tải lại thừa nhưng rẻ) và `resync`.
+ * Đường SSE (sau `/v1`) của Tổng quan Sự kiện: đẩy `event_orders_changed` và `event_checkins_changed` (Story 6.2) của
+ * Sự kiện này, `org_review_items_changed` của BTC (tín hiệu cấp BTC: mọi mục của BTC, kể cả mục của Sự kiện khác; tải
+ * lại thừa nhưng rẻ) và `resync`. Tab Đơn và `Sheet` chi tiết Đơn dùng chung stream này (Story 6.1), nên cũng tải lại
+ * khi có check-in.
  */
 export const eventOverviewLiveApiPath = (organizationId: string, eventId: string): string =>
   `${eventOverviewApiPath(organizationId, eventId)}/live`;

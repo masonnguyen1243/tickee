@@ -31,12 +31,14 @@ import { listen, openSse, sleep, type SseClient } from '../platform/sse-client.j
  * Story 5.7: số check-in theo Hạng vé của `GET /v1/checkin/events/:eventId` và stream `GET …/live`
  * (`event_checkins_changed` lọc theo Sự kiện và BTC, dùng chung cho Owner, Admin và CTV được giao) trên Postgres thật,
  * server HTTP thật và client SSE thật. Vé lấy từ Đơn 0đ (`markPaid` nguồn `free`); tạo Đơn cũng phát
- * `event_orders_changed` cho cùng Sự kiện, nên mỗi ca kiểm luôn rằng topic khác không lọt vào stream check-in. Trạng thái
- * Vé, CTV, tên Hạng vé và mốc kết thúc đặt bằng SQL.
+ * `event_orders_changed` cho cùng Sự kiện. Story 6.2: stream của Owner/Admin nhận thêm `event_orders_changed` của
+ * đúng Sự kiện (Vé mới phát làm tăng mẫu số N), stream của CTV không bao giờ nhận (AD-17). Trạng thái Vé, CTV, tên Hạng
+ * vé và mốc kết thúc đặt bằng SQL.
  */
 
 const TIERS = ['Vé thường', 'Vé VIP', 'Vé mời'] as const;
 const CHECKINS_CHANGED = '{"type":"event_checkins_changed"}';
+const ORDERS_CHANGED = '{"type":"event_orders_changed"}';
 const NO_LONGER = 'Bạn không còn quyền soát vé cho Sự kiện này.';
 
 let h: Harness;
@@ -230,19 +232,20 @@ describe('GET /v1/checkin/events/:eventId: số theo Hạng vé (Story 5.7)', ()
 });
 
 describe('stream GET /v1/checkin/events/:eventId/live (Story 5.7, AD-17)', () => {
-  it('Owner, Admin và CTV được giao (id thường hay HOA) nhận {type} dưới 1 giây sau khi quét xanh và sau check-in tay; Sự kiện khác cùng BTC và BTC khác không lọt; tạo Đơn (event_orders_changed) không lọt', async () => {
+  it('Owner, Admin và CTV được giao (id thường hay HOA) nhận {type} dưới 1 giây sau khi quét xanh và sau check-in tay; Sự kiện khác cùng BTC và BTC khác không lọt', async () => {
     const x = await tieredEvent();
     const y = await tieredEvent();
     const z = await tieredEvent(otherOrg);
     const ctv = await checkerOf(x);
 
-    const ownStreams = [
+    const memberStreams = [
       await live(x.event.id, org.owner.cookie),
       await live(x.event.id, admin.cookie),
-      await live(x.event.id, ctv.cookie),
       // Id Sự kiện viết HOA trên URL vẫn khớp `eventId` (chữ thường) của tín hiệu.
-      await live(x.event.id.toUpperCase(), ctv.cookie),
+      await live(x.event.id.toUpperCase(), org.owner.cookie),
     ];
+    const checkerStreams = [await live(x.event.id, ctv.cookie), await live(x.event.id.toUpperCase(), ctv.cookie)];
+    const ownStreams = [...memberStreams, ...checkerStreams];
     const streamY = await live(y.event.id, org.owner.cookie);
     const streamZ = await live(z.event.id, otherOrg.owner.cookie);
     for (const s of [...ownStreams, streamY, streamZ]) {
@@ -251,41 +254,82 @@ describe('stream GET /v1/checkin/events/:eventId/live (Story 5.7, AD-17)', () =>
       expect(s.headers['access-control-allow-origin']).toBe(TEST_WEB_ORIGIN);
     }
 
-    // Tạo Đơn ở cả ba Sự kiện phát `event_orders_changed`: không stream check-in nào nhận.
+    // Tạo Đơn ở cả ba Sự kiện (Story 6.2: xem ca riêng bên dưới): mỗi Sự kiện một `event_orders_changed`.
     const xTickets = await issue(x, 0, 2);
     const [yTicket] = await issue(y, 1);
     const [zTicket] = await issue(z, 2);
+    for (const s of [...memberStreams, streamY, streamZ]) await s.waitForMessages(1, 1_000);
     await sleep(300);
-    for (const s of [...ownStreams, streamY, streamZ]) expect(s.messages).toEqual([]);
+    for (const s of checkerStreams) expect(s.messages).toEqual([]);
+    // Số tin mỗi stream đã có trước khi quét.
+    const base = new Map(ownStreams.map((s) => [s, s.messages.length]));
 
     // Quét xanh ở X (CTV).
     await scanOk(x.event.id, ctv, xTickets[0]!);
     for (const s of ownStreams) {
-      const [signal] = await s.waitForMessages(1, 1_000);
+      const signal = (await s.waitForMessages(base.get(s)! + 1, 1_000)).at(-1);
       expect(signal!.raw).toBe(CHECKINS_CHANGED);
     }
     // Check-in tay ở X (Admin).
     await checkInByHandOk(x.event.id, admin, xTickets[1]!);
     for (const s of ownStreams) {
-      const [, signal] = await s.waitForMessages(2, 1_000);
+      const signal = (await s.waitForMessages(base.get(s)! + 2, 1_000)).at(-1);
       expect(signal!.raw).toBe(CHECKINS_CHANGED);
     }
     await sleep(300);
-    expect(streamY.messages).toEqual([]);
-    expect(streamZ.messages).toEqual([]);
+    expect(streamY.messages.map((m) => m.raw)).toEqual([ORDERS_CHANGED]);
+    expect(streamZ.messages.map((m) => m.raw)).toEqual([ORDERS_CHANGED]);
 
     // Check-in ở Sự kiện khác cùng BTC và ở BTC khác: chỉ stream của Sự kiện đó nhận.
     await scanOk(y.event.id, org.owner, yTicket!);
     await scanOk(z.event.id, otherOrg.owner, zTicket!);
-    expect((await streamY.waitForMessages(1, 1_000))[0]!.raw).toBe(CHECKINS_CHANGED);
-    expect((await streamZ.waitForMessages(1, 1_000))[0]!.raw).toBe(CHECKINS_CHANGED);
+    expect((await streamY.waitForMessages(2, 1_000))[1]!.raw).toBe(CHECKINS_CHANGED);
+    expect((await streamZ.waitForMessages(2, 1_000))[1]!.raw).toBe(CHECKINS_CHANGED);
     await sleep(300);
-    for (const s of ownStreams) {
+    for (const s of memberStreams) {
+      expect(s.messages.map((m) => m.raw)).toEqual([ORDERS_CHANGED, CHECKINS_CHANGED, CHECKINS_CHANGED]);
+      expect(s.isEnded()).toBe(false);
+    }
+    for (const s of checkerStreams) {
       expect(s.messages.map((m) => m.raw)).toEqual([CHECKINS_CHANGED, CHECKINS_CHANGED]);
       expect(s.isEnded()).toBe(false);
     }
-    expect(streamY.messages).toHaveLength(1);
-    expect(streamZ.messages).toHaveLength(1);
+    expect(streamY.messages).toHaveLength(2);
+    expect(streamZ.messages).toHaveLength(2);
+  });
+
+  it('Story 6.2: Đơn mới của Sự kiện chuyển paid → stream Owner/Admin nhận event_orders_changed dưới 1 giây, mẫu số N tăng không cần check-in; CTV, Sự kiện khác cùng BTC và BTC khác không nhận', async () => {
+    const x = await tieredEvent();
+    const y = await tieredEvent();
+    const z = await tieredEvent(otherOrg);
+    const ctv = await checkerOf(x);
+    const ownerX = await live(x.event.id, org.owner.cookie);
+    const adminX = await live(x.event.id, admin.cookie);
+    const ctvX = await live(x.event.id, ctv.cookie);
+    const ownerY = await live(y.event.id, org.owner.cookie);
+    const otherOwnerZ = await live(z.event.id, otherOrg.owner.cookie);
+    for (const s of [ownerX, adminX, ctvX, ownerY, otherOwnerZ]) expect(s.status).toBe(200);
+    expect((await checkinEventOf(x.event.id, org.owner)).validTicketCount).toBe(0);
+
+    // Đơn 0đ của X: `markPaid` nguồn `free` phát Vé, chỉ phát `event_orders_changed`.
+    await issue(x, 1, 3);
+    for (const s of [ownerX, adminX]) {
+      expect((await s.waitForMessages(1, 1_000))[0]!.raw).toBe(ORDERS_CHANGED);
+    }
+    // Web tải lại `CheckinEvent`: N tăng mà chưa có lần check-in nào.
+    expect(await checkinEventOf(x.event.id, org.owner)).toMatchObject({ checkedInCount: 0, validTicketCount: 3 });
+
+    // Đơn ở Sự kiện khác cùng BTC và ở BTC khác: chỉ stream Owner của Sự kiện đó nhận.
+    await issue(y, 0);
+    await issue(z, 0);
+    expect((await ownerY.waitForMessages(1, 1_000))[0]!.raw).toBe(ORDERS_CHANGED);
+    expect((await otherOwnerZ.waitForMessages(1, 1_000))[0]!.raw).toBe(ORDERS_CHANGED);
+    await sleep(300);
+    for (const s of [ownerX, adminX]) expect(s.messages.map((m) => m.raw)).toEqual([ORDERS_CHANGED]);
+    expect(ctvX.messages).toEqual([]);
+    expect(ctvX.isEnded()).toBe(false);
+    expect(ownerY.messages).toHaveLength(1);
+    expect(otherOwnerZ.messages).toHaveLength(1);
   });
 
   it('quét không ghi gì (Vé đã check-in, Vé của Sự kiện khác) → không tín hiệu', async () => {

@@ -1,5 +1,5 @@
 import { Controller, Get, Header, Inject, Req, Res } from '@nestjs/common';
-import { ErrorCode, Permission, RealtimeTopic, type CheckinEvent } from '@tickee/contracts';
+import { ErrorCode, Permission, RealtimeTopic, roleHasPermission, type CheckinEvent } from '@tickee/contracts';
 import type { Request, Response } from 'express';
 import { EventAccess, RequirePermission, type EventAccessContext } from '../../platform/access/index.js';
 import { DATABASE, type Database } from '../../platform/db/index.js';
@@ -23,21 +23,26 @@ export class CheckinEventController {
 
   /**
    * `GET /v1/checkin/events/:eventId/live` (Story 5.7, FR-30, AD-17): stream SSE dùng chung cho Owner, Admin và CTV
-   * được giao, chỉ đẩy `event_checkins_changed` có `eventId` và `organizationId` khớp ctx, cùng `resync` khi hub vừa nối
-   * lại `LISTEN`. Dữ liệu chỉ `{ type }`: web tự tải lại `GET /v1/checkin/events/:eventId`. Guard nhánh Sự kiện quyết
-   * quyền trước khi mở stream (`403` là JSON, không treo); `LISTEN` chưa sẵn sàng → `503`. Không kiểm lại quyền trên
-   * stream đang mở: thu hồi hay hết giờ không đóng stream, lần tải lại kế tiếp nhận `403` và web tự đóng stream.
+   * được giao, đẩy `event_checkins_changed` có `eventId` và `organizationId` khớp ctx, cùng `resync` khi hub vừa nối
+   * lại `LISTEN`. Owner/Admin (quyền `orders.view`, như stream Tổng quan) nhận thêm `event_orders_changed` của Sự kiện
+   * (Story 6.2, mục hoãn của 5.7): Vé mới phát chỉ phát tín hiệu Đơn, nên mẫu số N ở tab Check-in tăng mà không cần chờ
+   * lần check-in kế tiếp. CTV (`role` `null`) không nhận topic Đơn (AD-17). Dữ liệu chỉ `{ type }`: web tự tải lại
+   * `GET /v1/checkin/events/:eventId`. Guard nhánh Sự kiện quyết quyền trước khi mở stream (`403` là JSON, không treo);
+   * `LISTEN` chưa sẵn sàng → `503`. Không kiểm lại quyền trên stream đang mở: thu hồi hay hết giờ không đóng stream,
+   * lần tải lại kế tiếp nhận `403` và web tự đóng stream.
    */
   @Get('live')
   @RequirePermission(Permission.CHECKIN_SCAN)
   live(@EventAccess() ctx: EventAccessContext, @Req() req: Request, @Res() res: Response): void {
     // Guard đã chuẩn hóa `eventId` về chữ thường, như `eventId` của tín hiệu.
     const { eventId, organizationId } = ctx;
+    const seesOrders = ctx.role !== null && roleHasPermission(ctx.role, Permission.ORDERS_VIEW);
     this.realtime.open(
       req,
       res,
       (signal) =>
-        signal.type === RealtimeTopic.EVENT_CHECKINS_CHANGED &&
+        (signal.type === RealtimeTopic.EVENT_CHECKINS_CHANGED ||
+          (seesOrders && signal.type === RealtimeTopic.EVENT_ORDERS_CHANGED)) &&
         signal.eventId === eventId &&
         signal.organizationId === organizationId,
     );

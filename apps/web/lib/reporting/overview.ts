@@ -5,14 +5,18 @@ import {
   isSameVnDay,
   OrderStatus,
   ReviewItemType,
+  type EventOverviewTicketType,
   type RecentOrder,
 } from '@tickee/contracts';
 
 import type { StatusTone } from '@/components/tickee/tone';
+import { CHECKIN_PROGRESS_LIVE } from '@/lib/checkin/progress-view';
+import { priceLabel } from '@/lib/event/selection';
 
 /*
- * Tổng quan Sự kiện (Story 3.11, FR-31, UX-DR35): nhãn, tone và dòng phụ của `stat-card` doanh thu và
- * `recent-orders-block`. Hàm thuần, kiểm bằng Vitest môi trường node; giờ luôn theo giờ Việt Nam (không theo múi giờ máy).
+ * Tổng quan Sự kiện (Story 3.11, FR-31, UX-DR35): nhãn, tone và dòng phụ của `stat-card` doanh thu,
+ * `recent-orders-block`, thẻ check-in và khối "Vé theo Hạng vé" (Story 6.2). Hàm thuần, kiểm bằng Vitest môi trường
+ * node; giờ luôn theo giờ Việt Nam (không theo múi giờ máy).
  */
 
 /** Polling khi SSE chưa kết nối (AD-17: 10 giây ở dashboard). */
@@ -82,3 +86,47 @@ export const revenueCaption = (paidOrders: number): string => `Chỉ tính Đơn
 
 /** Nhãn khi mất mạng: "Cập nhật lúc HH:MM" theo lần tải thành công gần nhất (giờ Việt Nam). */
 export const updatedAtLabel = (updatedAt: number): string => `Cập nhật lúc ${formatVnTime(updatedAt)}`;
+
+/**
+ * Dòng phụ của thẻ check-in trên Tổng quan (Story 6.2): "Cập nhật liên tục" khi SSE đang nối và số liệu không cũ. Số
+ * liệu có thể đã cũ (`stale`) → không có dòng phụ, vì nhãn "Cập nhật lúc HH:MM" ở đầu khối đã báo; chưa nối SSE (đang
+ * polling) → cũng không có.
+ */
+export const checkinCardCaption = ({ connected, stale }: { connected: boolean; stale: boolean }): string | null =>
+  connected && !stale ? CHECKIN_PROGRESS_LIVE : null;
+
+/** Tiêu đề khối Hạng vé của Tổng quan (`card` sáng, Story 6.2). */
+export const TICKET_TYPES_TITLE = 'Vé theo Hạng vé';
+
+/** Chữ đi kèm Hạng vé không còn suất nào (không chỉ dựa vào màu). */
+export const SOLD_OUT_LABEL = 'Hết vé';
+
+type TicketTypeStock = Pick<EventOverviewTicketType, 'capacity' | 'sold' | 'held' | 'remaining'>;
+
+/** Tóm tắt bên phải tiêu đề khối: "{tổng đã bán}/{tổng sức chứa} Vé đã bán" (vd. "66/72 Vé đã bán"). */
+export function ticketTypesSoldSummary(types: readonly Pick<EventOverviewTicketType, 'sold' | 'capacity'>[]): string {
+  let sold = 0;
+  let capacity = 0;
+  for (const type of types) {
+    sold += type.sold;
+    capacity += type.capacity;
+  }
+  return `${sold}/${capacity} Vé đã bán`;
+}
+
+/** Hạng vé đã hết suất (bán + giữ chỗ = sức chứa). */
+export const isSoldOut = (type: Pick<EventOverviewTicketType, 'remaining'>): boolean => type.remaining === 0;
+
+/** Cột "Còn lại": "{còn lại} / {sức chứa}" (vd. "2 / 32"). */
+export const remainingLabel = (type: Pick<EventOverviewTicketType, 'remaining' | 'capacity'>): string =>
+  `${type.remaining} / ${type.capacity}`;
+
+/** Giá của Hạng vé trong khối: như trang Sự kiện ("150.000đ", 0đ → "Miễn phí"). */
+export const ticketTypePriceLabel = (type: Pick<EventOverviewTicketType, 'price'>): string => priceLabel(type.price);
+
+/**
+ * Dòng số liệu của một Hạng vé dưới `md`: "Đã bán 30 · Đang giữ 0 · Còn 2 / 32". Hết vé thì nơi render thêm
+ * " · Hết vé" (`SOLD_OUT_LABEL`, không ngắt dòng giữa chữ).
+ */
+export const ticketTypeStockLine = (type: TicketTypeStock): string =>
+  `Đã bán ${type.sold} · Đang giữ ${type.held} · Còn ${remainingLabel(type)}`;

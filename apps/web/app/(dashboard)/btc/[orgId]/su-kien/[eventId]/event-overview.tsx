@@ -1,11 +1,20 @@
 'use client';
 
 import { useQueryClient } from '@tanstack/react-query';
-import { ErrorCode, EventOrderFilter, eventOverviewLiveApiPath, formatVnd, type RecentOrder } from '@tickee/contracts';
+import {
+  ErrorCode,
+  EventOrderFilter,
+  eventOverviewLiveApiPath,
+  formatVnd,
+  type EventOverview,
+  type EventOverviewTicketType,
+  type RecentOrder,
+} from '@tickee/contracts';
 import Link from 'next/link';
 import { useEffect, useId, useRef } from 'react';
 import { toast } from 'sonner';
 
+import { ProgressBar } from '@/components/tickee/progress-bar';
 import { StatCard } from '@/components/tickee/stat-card';
 import { StatusBadge } from '@/components/tickee/status-badge';
 import { StatusBanner } from '@/components/tickee/status-banner';
@@ -16,20 +25,35 @@ import { handledElsewhere } from '@/lib/api/handled-elsewhere';
 import { messageOf } from '@/lib/api/message-of';
 import { hasErrorCode } from '@/lib/auth/api';
 import { useGoToLogin } from '@/lib/auth/use-go-to-login';
+import {
+  CHECKIN_PROGRESS_LABEL,
+  CHECKIN_PROGRESS_TOTAL,
+  progressLabel,
+  progressValueText,
+} from '@/lib/checkin/progress-view';
 import { useLiveResource } from '@/lib/realtime/use-live-resource';
 import { eventOverviewQueryKey, fetchEventOverview } from '@/lib/reporting/api';
 import { ALL_ORDERS_LINK, eventOrdersTabPath } from '@/lib/reporting/orders';
 import {
+  checkinCardCaption,
   eventOverviewPollInterval,
+  isSoldOut,
   orderStatusBadge,
   orderTimeLabel,
   OVERVIEW_OFFLINE_TOAST,
   OVERVIEW_OFFLINE_TOAST_ID,
+  remainingLabel,
   revenueCaption,
   reviewLine,
+  SOLD_OUT_LABEL,
   ticketCountLabel,
+  TICKET_TYPES_TITLE,
+  ticketTypePriceLabel,
+  ticketTypesSoldSummary,
+  ticketTypeStockLine,
   updatedAtLabel,
 } from '@/lib/reporting/overview';
+import { cn } from '@/lib/utils';
 import { NEEDS_ACTION_LINK, needsActionValue } from '@/lib/reporting/review-queue';
 
 /** Badge trạng thái kèm dòng loại Cần xử lý (nếu có). */
@@ -160,13 +184,23 @@ function RecentOrdersBlock({ orgId, eventId, orders }: { orgId: string; eventId:
  * "{n} mục Cần xử lý" kèm liên kết sang tab Đơn đã lọc Cần xử lý (Story 6.1; `?tab=don&trangThai=can-xu-ly`, chuyển tab
  * ngay trong trang). 0 mục → "Không có gì cần xử lý.", không liên kết.
  */
-function NeedsActionCard({ orgId, eventId, count }: { orgId: string; eventId: string; count: number }) {
+function NeedsActionCard({
+  orgId,
+  eventId,
+  count,
+  className,
+}: {
+  orgId: string;
+  eventId: string;
+  count: number;
+  className?: string;
+}) {
   const headingId = useId();
   return (
     <section
       aria-labelledby={headingId}
       data-slot="needs-action-card"
-      className="flex min-w-0 flex-col gap-1 rounded-lg bg-card p-card-padding shadow-card"
+      className={cn('flex min-w-0 flex-col gap-1 rounded-lg bg-card p-card-padding shadow-card', className)}
     >
       <h2 id={headingId} className="text-label text-muted-foreground">
         Cần xử lý
@@ -186,32 +220,154 @@ function NeedsActionCard({ orgId, eventId, count }: { orgId: string; eventId: st
   );
 }
 
+/**
+ * `stat-card` check-in (Story 6.2, UX-DR35): cùng khuôn với thẻ tổng của tab Check-in (`checkin-progress`): "k/N" Vé
+ * hợp lệ đã check-in, thanh tiến độ nền `stage-line` phần đầy `brand`. Dòng phụ "Cập nhật liên tục" khi SSE đang nối;
+ * số liệu có thể đã cũ → không có dòng phụ (nhãn "Cập nhật lúc…" ở đầu khối đã báo).
+ */
+function CheckinStatCard({ checkin, caption }: { checkin: EventOverview['checkin']; caption: string | null }) {
+  const { checkedInCount, validTicketCount } = checkin;
+  return (
+    <StatCard
+      label={CHECKIN_PROGRESS_LABEL}
+      value={progressLabel(checkedInCount, validTicketCount)}
+      meter={
+        <ProgressBar
+          tone="stage"
+          value={checkedInCount}
+          max={validTicketCount}
+          label={CHECKIN_PROGRESS_TOTAL}
+          valueText={progressValueText(checkedInCount, validTicketCount)}
+        />
+      }
+      caption={caption}
+    />
+  );
+}
+
+/** Hạng vé hết suất: " · Hết vé" (chữ, không chỉ dựa vào màu; không ngắt dòng giữa chữ). Còn suất → không có gì. */
+function SoldOutSuffix({ type }: { type: EventOverviewTicketType }) {
+  if (!isSoldOut(type)) return null;
+  return (
+    <>
+      {' · '}
+      <span data-slot="sold-out" className="whitespace-nowrap text-muted-foreground">
+        {SOLD_OUT_LABEL}
+      </span>
+    </>
+  );
+}
+
+/** Từ `md` trở lên: bảng phẳng Hạng vé (tên, giá) · Đã bán · Đang giữ chỗ · Còn lại; số tabular căn phải. */
+function TicketTypesTable({ types }: { types: EventOverviewTicketType[] }) {
+  return (
+    <div className="hidden md:block" data-slot="ticket-types-table">
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead>Hạng vé</TableHead>
+            <TableHead className="text-right">Đã bán</TableHead>
+            <TableHead className="text-right">Đang giữ chỗ</TableHead>
+            <TableHead className="text-right">Còn lại</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {types.map((type, index) => (
+            // api không trả id; thứ tự Hạng vé cố định (tạo trước đứng trước).
+            <TableRow key={index} data-slot="ticket-type-row" className="hover:bg-transparent">
+              <TableCell className="align-top whitespace-normal">
+                <span className="block wrap-break-word">{type.name}</span>{' '}
+                <span className="block text-meta text-muted-foreground tabular-nums">{ticketTypePriceLabel(type)}</span>
+              </TableCell>
+              <TableCell className="text-right align-top tabular-nums">{type.sold}</TableCell>
+              <TableCell className="text-right align-top tabular-nums">{type.held}</TableCell>
+              <TableCell className="text-right align-top tabular-nums">
+                {remainingLabel(type)}
+                <SoldOutSuffix type={type} />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+/** Dưới `md`: mỗi Hạng vé hai dòng — "tên · giá", rồi "Đã bán 30 · Đang giữ 0 · Còn 2 / 32" (hết thì "· Hết vé"). */
+function TicketTypesList({ types }: { types: EventOverviewTicketType[] }) {
+  return (
+    <ul className="flex flex-col divide-y divide-border md:hidden" data-slot="ticket-types-list">
+      {types.map((type, index) => (
+        <li key={index} data-slot="ticket-type-item" className="flex min-w-0 flex-col gap-0.5 py-stack">
+          <p data-slot="ticket-type-name" className="text-label wrap-break-word">
+            {type.name} <span className="text-muted-foreground tabular-nums">· {ticketTypePriceLabel(type)}</span>
+          </p>
+          <p data-slot="ticket-type-stock" className="text-meta text-muted-foreground tabular-nums">
+            {ticketTypeStockLine(type)}
+            <SoldOutSuffix type={type} />
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Khối "Vé theo Hạng vé" (Story 6.2, FR-31; `card` sáng, không stage): tổng "đã bán/sức chứa Vé đã bán" bên phải tiêu
+ * đề; bảng từ `md`, danh sách dưới `md`. Không có cột doanh thu theo Hạng vé (lệch có chủ đích so với mockup:
+ * `paid_amount` là của cả Đơn). Nơi gọi không render khi Sự kiện chưa có Hạng vé nào.
+ */
+function TicketTypesBlock({ types }: { types: EventOverviewTicketType[] }) {
+  const headingId = useId();
+  return (
+    <section
+      aria-labelledby={headingId}
+      data-slot="ticket-types-block"
+      className="flex min-w-0 flex-col gap-stack rounded-lg bg-card p-card-padding shadow-card"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-stack gap-y-1">
+        <h2 id={headingId} className="text-title">
+          {TICKET_TYPES_TITLE}
+        </h2>
+        <p data-slot="ticket-types-summary" className="text-meta text-muted-foreground tabular-nums">
+          {ticketTypesSoldSummary(types)}
+        </p>
+      </div>
+      <TicketTypesTable types={types} />
+      <TicketTypesList types={types} />
+    </section>
+  );
+}
+
 function OverviewSkeleton() {
   return (
     <div role="status" aria-busy="true" data-slot="event-overview-skeleton" className="flex flex-col gap-section">
       <span className="sr-only">Đang tải số liệu Sự kiện</span>
-      <div className="grid gap-stack md:grid-cols-2">
+      <div className="grid gap-stack md:grid-cols-2 lg:grid-cols-3">
         <Skeleton className="h-28" />
         <Skeleton className="h-28" />
+        <Skeleton className="h-28 md:col-span-2 lg:col-span-1" />
       </div>
+      <Skeleton className="h-40" />
       <Skeleton className="h-48" />
     </div>
   );
 }
 
 /**
- * Các khối đầu tab Tổng quan (Story 3.11, FR-31, UX-DR35): `stat-card` doanh thu (chỉ Đơn Đã thanh toán) cạnh
- * `needs-action-card` (số mục Cần xử lý, Story 4.3), và `recent-orders-block` 5 Đơn mới nhất. Tự cập nhật qua
- * `useLiveResource` + `GET …/overview/live` (tín hiệu `event_orders_changed` hoặc `org_review_items_changed` → tải lại
- * REST); không có SSE thì polling 10 giây. Mất mạng → một toast mỗi lần mất mạng, số
- * liệu giữ giá trị cuối kèm "Cập nhật lúc HH:MM"; có mạng lại thì tải lại và ẩn nhãn. Lần tải lại lỗi khác (vd. 5xx)
- * khi đã có dữ liệu → cùng nhãn, không toast; tải lại được thì ẩn. Tải lần đầu lỗi → banner trong
- * khối kèm "Thử lại"; `401` → đăng nhập. Chỉ render cho Sự kiện không ở `draft` (nơi gọi quyết).
+ * Các khối đầu tab Tổng quan (Story 3.11, FR-31, UX-DR35): hàng số liệu `stat-card` doanh thu (chỉ Đơn Đã thanh toán,
+ * tiền đã nhận) · `stat-card` check-in (Story 6.2) · `needs-action-card` (số mục Cần xử lý, Story 4.3) — một cột dưới
+ * `md`, ba cột từ `lg`; khối "Vé theo Hạng vé" (Story 6.2) và `recent-orders-block` 5 Đơn mới nhất. Tự cập nhật qua
+ * `useLiveResource` + `GET …/overview/live` (tín hiệu `event_orders_changed`, `event_checkins_changed` hoặc
+ * `org_review_items_changed` → tải lại REST); không có SSE thì polling 10 giây. Mất mạng → một toast mỗi lần mất mạng,
+ * số liệu giữ giá trị cuối kèm "Cập nhật lúc HH:MM"; có mạng lại thì tải lại và ẩn nhãn. Lần tải lại lỗi khác (vd. 5xx)
+ * khi đã có dữ liệu → cùng nhãn, không toast; tải lại được thì ẩn. Tải lần đầu lỗi → banner trong khối kèm "Thử lại";
+ * `401` → đăng nhập. Chỉ render cho Sự kiện không ở `draft` (nơi gọi quyết).
  */
 export function EventOverviewLive({ orgId, eventId }: { orgId: string; eventId: string }) {
   const queryClient = useQueryClient();
   const goToLogin = useGoToLogin();
-  const { query, offline } = useLiveResource({
+  const { query, offline, connected } = useLiveResource({
     queryKey: eventOverviewQueryKey(orgId, eventId),
     queryFn: (signal) => fetchEventOverview(orgId, eventId, signal),
     livePath: eventOverviewLiveApiPath(orgId, eventId),
@@ -272,15 +428,22 @@ export function EventOverviewLive({ orgId, eventId }: { orgId: string; eventId: 
             </p>
           ) : null}
         </div>
-        <div className="grid gap-stack md:grid-cols-2">
+        <div data-slot="overview-stats" className="grid gap-stack md:grid-cols-2 lg:grid-cols-3">
           <StatCard
             label="Doanh thu"
             value={formatVnd(data.revenue.amount)}
             caption={revenueCaption(data.revenue.paidOrders)}
           />
-          <NeedsActionCard orgId={orgId} eventId={eventId} count={data.openReviewCount} />
+          <CheckinStatCard checkin={data.checkin} caption={checkinCardCaption({ connected, stale })} />
+          <NeedsActionCard
+            orgId={orgId}
+            eventId={eventId}
+            count={data.openReviewCount}
+            className="md:col-span-2 lg:col-span-1"
+          />
         </div>
       </div>
+      {data.ticketTypes.length > 0 ? <TicketTypesBlock types={data.ticketTypes} /> : null}
       <RecentOrdersBlock orgId={orgId} eventId={eventId} orders={data.recentOrders} />
     </div>
   );

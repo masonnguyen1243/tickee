@@ -9,24 +9,32 @@ import { orderItems, orders } from './schema.js';
  * `index.ts`, không join bảng `orders`/`order_items`), hàng Cần xử lý (Story 4.3, `reviewOrdersOf`) và số Đơn đang chờ
  * thanh toán của `Dialog` "Kết thúc" (E3-2, `flows`). Như `paidBuyerCount`: hàm query thay cho view `ordering_read_*`,
  * nên đổi cột chỉ sửa ở đây. Mọi hàm lọc `organization_id` (`orgScope`); hàm theo Sự kiện lọc thêm `event_id` (người
- * gọi đã kiểm Sự kiện thuộc BTC). Chỉ đọc bản chụp trên Đơn (tên Người mua, tổng tiền), không bao giờ trả email hay SĐT.
+ * gọi đã kiểm Sự kiện thuộc BTC). Chỉ đọc bản chụp trên Đơn (tên Người mua, tổng tiền, tiền đã nhận), không bao giờ trả
+ * email hay SĐT.
  */
 
 /** Phạm vi BTC của người xem. */
 export type EventOrdersScope = Pick<AccessContext, 'organizationId'>;
 
-/** Doanh thu của Sự kiện: tổng `total_amount` của các Đơn `paid` và số Đơn đó (tính cả Đơn 0đ). */
+/**
+ * Doanh thu của Sự kiện: tổng `paid_amount` (tiền đã nhận) của các Đơn `paid` và số Đơn đó (tính cả Đơn 0đ,
+ * `paid_amount` 0). Story 6.2: Đơn duyệt tay lệch tiền (Đơn 300.000đ, nhận 250.000đ) tính 250.000đ, khớp danh sách hoàn
+ * tiền AD-28.
+ */
 export interface EventRevenue {
   amount: number;
   paidOrders: number;
 }
 
-/** Doanh thu của Sự kiện (Đơn `paid`); chưa có Đơn nào → `{ amount: 0, paidOrders: 0 }`. */
+/**
+ * Doanh thu của Sự kiện (Đơn `paid`); chưa có Đơn nào → `{ amount: 0, paidOrders: 0 }`. CHECK `orders_paid_check` bảo
+ * đảm Đơn `paid` luôn có `paid_amount`.
+ */
 export async function eventRevenueOf(db: DbExecutor, scope: EventOrdersScope, eventId: string): Promise<EventRevenue> {
   const [row] = await db
     .select({
       // `bigint`: doanh thu một Sự kiện có thể vượt 2^31 đồng.
-      amount: sql<number>`COALESCE(SUM(${orders.totalAmount}), 0)::bigint`.mapWith(Number),
+      amount: sql<number>`COALESCE(SUM(${orders.paidAmount}), 0)::bigint`.mapWith(Number),
       paidOrders: sql<number>`count(*)::int`.mapWith(Number),
     })
     .from(orders)

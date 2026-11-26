@@ -139,9 +139,11 @@ export const checkinEventApiPath = (eventId: string): string => `/checkin/events
 
 /**
  * Đường SSE (sau `/v1`) của số liệu check-in một Sự kiện (Story 5.7, FR-30, AD-17; `checkin.scan`): Owner, Admin và CTV
- * `active` được giao (cùng guard nhánh Sự kiện với `GET …/checkin/events/:eventId`, kể cả `403 EVENT_ENDED` cho CTV) chỉ
- * nhận `event_checkins_changed` của Sự kiện này cùng `resync`. Web tải lại `CheckinEvent` (tab Check-in và đỉnh Màn quét).
- * Stream đang mở không bị đóng khi CTV bị thu hồi hay hết giờ: lần tải lại kế tiếp nhận `403`, web tự đóng stream.
+ * `active` được giao (cùng guard nhánh Sự kiện với `GET …/checkin/events/:eventId`, kể cả `403 EVENT_ENDED` cho CTV)
+ * nhận `event_checkins_changed` của Sự kiện này cùng `resync`. Owner/Admin (quyền `orders.view`) nhận thêm
+ * `event_orders_changed` của Sự kiện này (Story 6.2): Vé mới phát chỉ phát tín hiệu Đơn, nên mẫu số N ở tab Check-in
+ * tăng mà không cần lần check-in nào. CTV không nhận topic Đơn (AD-17). Web tải lại `CheckinEvent` (tab Check-in và đỉnh Màn quét). Stream đang mở
+ * không bị đóng khi CTV bị thu hồi hay hết giờ: lần tải lại kế tiếp nhận `403`, web tự đóng stream.
  */
 export const checkinEventLiveApiPath = (eventId: string): string => `${checkinEventApiPath(eventId)}/live`;
 

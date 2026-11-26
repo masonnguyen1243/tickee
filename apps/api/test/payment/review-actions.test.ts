@@ -180,6 +180,13 @@ async function duplicateItem(org: ActionOrg, sale: SaleEvent) {
   return { placed, itemId };
 }
 
+/** Tổng quan Sự kiện (`GET …/overview`, Owner): doanh thu cộng `paid_amount` của Đơn `paid` (Story 6.2). */
+async function overviewOf(org: Org, eventId: string): Promise<EventOverview> {
+  const res = await h.http.get(`/v1/orgs/${org.orgId}/events/${eventId}/overview`).set('cookie', org.owner.cookie);
+  expect(res.status, JSON.stringify(res.body)).toBe(200);
+  return EventOverview.parse(res.body);
+}
+
 /** Mã đúng `ORDER_CODE_PATTERN` mà không có Đơn nào. */
 const strayCode = () =>
   `TK${Array.from({ length: 8 }, () => ORDER_CODE_ALPHABET[randomInt(ORDER_CODE_ALPHABET.length)]).join('')}`;
@@ -387,6 +394,8 @@ describe('Duyệt tay phát Vé', () => {
     expect((await orderState(h, placed.code)).paid_at).toEqual(await paymentTimeOf(itemId));
     expect((await orderState(h, placed.code)).paid_at!.toISOString()).toBe(paidAt);
     expect(await inventory(h, sale.tiers[0]!.id)).toEqual({ capacity: 10, sold: 2, held: 0 });
+    // Story 6.2: doanh thu là tiền đã nhận (250.000đ), không phải tổng Đơn (300.000đ); khớp danh sách hoàn tiền AD-28.
+    expect((await overviewOf(org, sale.event.id)).revenue).toEqual({ amount: 250_000, paidOrders: 1 });
     expect((await emailJobsOf(placed.orderId)).map((j) => j.data)).toEqual([
       { kind: BuyerEmailKind.TICKETS, orderId: placed.orderId },
     ]);
@@ -424,11 +433,10 @@ describe('Duyệt tay phát Vé', () => {
     );
     expect(rows[0]!.open).toBe(0);
     expect(await orderRowOf(placed.orderId)).toMatchObject({ status: 'paid', paid_amount: '120000' });
-    const overview = EventOverview.parse(
-      (await h.http.get(`/v1/orgs/${org.orgId}/events/${sale.event.id}/overview`).set('cookie', org.owner.cookie).expect(200))
-        .body,
-    );
+    const overview = await overviewOf(org, sale.event.id);
     expect(overview.openReviewCount).toBe(0);
+    // Story 6.2: doanh thu cộng đúng số đã nhận của khoản duyệt tay (120.000đ), như danh sách hoàn tiền.
+    expect(overview.revenue).toEqual({ amount: 120_000, paidOrders: 1 });
   });
 
   it('hết chỗ (Đơn hai Hạng vé, Hạng thứ hai đã hết): 409 TICKET_TYPE_SOLD_OUT; Đơn giữ review, mục open, không bán dòng nào; nhật ký "Duyệt tay không thành · Hết chỗ" kèm người làm', async () => {
@@ -603,11 +611,7 @@ describe('Từ chối và Đã hoàn tay', () => {
     const org = await freshOrg();
     const sale = await eventOnSale(org, [TIER]);
     const { placed, itemId } = await duplicateItem(org, sale);
-    const overview = async () =>
-      EventOverview.parse(
-        (await h.http.get(`/v1/orgs/${org.orgId}/events/${sale.event.id}/overview`).set('cookie', org.owner.cookie).expect(200))
-          .body,
-      );
+    const overview = () => overviewOf(org, sale.event.id);
     const revenueBefore = (await overview()).revenue;
     expect(await detailOf(org, itemId)).toMatchObject({ actions: ['refund', 'dismiss'], approveBlockedReason: null });
     for (const action of ['approve', 'reject'] as const) {
@@ -943,11 +947,6 @@ describe('Ghép với Đơn (Story 4.4-b)', () => {
     );
     return rows[0]!;
   }
-
-  const overviewOf = async (org: Org, eventId: string) =>
-    EventOverview.parse(
-      (await h.http.get(`/v1/orgs/${org.orgId}/events/${eventId}/overview`).set('cookie', org.owner.cookie).expect(200)).body,
-    );
 
   it('Đơn hết hạn còn chỗ: Đơn paid (manual, paid_amount = số nhận, paid_at = lúc tiền về), 2 Vé, một email Vé, mục approved rời hàng, liên kết ghi; audit có người làm; tín hiệu khi commit', async () => {
     const org = await freshOrg();

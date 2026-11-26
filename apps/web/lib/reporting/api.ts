@@ -43,11 +43,17 @@ export const fetchStatusNotices = (orgId: string, signal?: AbortSignal) =>
 /** Polling dải banner khi stream cấp BTC chưa kết nối (AD-17: 10 giây ở dashboard). */
 export const STATUS_NOTICES_POLL_MS = 10_000;
 
-/** Khóa TanStack Query: Tổng quan (doanh thu + Đơn gần đây) của một Sự kiện (Story 3.11). */
+/**
+ * Khóa TanStack Query: Tổng quan (doanh thu, Đơn gần đây, số mục Cần xử lý, check-in và Vé theo Hạng vé) của một Sự
+ * kiện (Story 3.11, 6.2).
+ */
 export const eventOverviewQueryKey = (orgId: string, eventId: string) =>
   ['reporting', 'event-overview', orgId, eventId] as const;
 
-/** `GET /v1/orgs/:orgId/events/:eventId/overview`: doanh thu (Đơn `paid`) và 5 Đơn mới nhất ở mọi trạng thái. */
+/**
+ * `GET /v1/orgs/:orgId/events/:eventId/overview`: doanh thu (tổng `paid_amount` của Đơn `paid`), 5 Đơn mới nhất ở mọi
+ * trạng thái, số mục Cần xử lý, số check-in và Vé theo Hạng vé (Story 6.2).
+ */
 export const fetchEventOverview = (orgId: string, eventId: string, signal?: AbortSignal) =>
   apiRequest(eventOverviewApiPath(orgId, eventId), { schema: EventOverview, init: { signal } });
 

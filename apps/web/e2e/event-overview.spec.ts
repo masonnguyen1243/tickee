@@ -11,7 +11,8 @@ import { emptyOverview, mockOrganizerApi, organization, ORG_ID, saleStatus } fro
  * trên thẻ "Thông tin", tự cập nhật qua `useLiveResource` (SSE `…/overview/live` giả bằng `EventSource` điều khiển được,
  * hoặc 503 → polling 10 giây). Giờ luôn theo giờ Việt Nam: trình duyệt chạy múi giờ New York. Ca full-stack (stream thật,
  * IPN → tín hiệu, lọc theo Sự kiện) ở test tích hợp api `test/reporting/event-overview.test.ts`. Story 4.2-c: badge của
- * thẻ "Thông tin" lấy từ `GET …/event-sale-status`, dự phòng bằng nhãn tính ở máy khách.
+ * thẻ "Thông tin" lấy từ `GET …/event-sale-status`, dự phòng bằng nhãn tính ở máy khách. Story 6.2: hàng số liệu ba thẻ
+ * (Doanh thu · Check-in · Cần xử lý) và khối "Vé theo Hạng vé" (bảng từ `md`, danh sách dưới `md`).
  */
 
 test.use({ timezoneId: 'America/New_York' });
@@ -89,7 +90,19 @@ const ORDERS: RecentOrder[] = [
   }),
   order({ code: 'TK1Q4Z8HAB', buyerName: 'Võ Minh Thư', totalAmount: 150_000, status: 'expired', createdAt: '2026-11-11T22:10:00+07:00' }),
 ];
-const OVERVIEW = { revenue: { amount: 450_000, paidOrders: 1 }, recentOrders: ORDERS, openReviewCount: 2 };
+/** Ba Hạng vé như mock `key-dashboard-event.html` (66/72 Vé đã bán), Hạng cuối hết vé. */
+const TICKET_TYPES = [
+  { name: 'Đơn nam', price: 150_000, capacity: 32, sold: 30, held: 0, remaining: 2 },
+  { name: 'Đôi nam', price: 300_000, capacity: 24, sold: 20, held: 2, remaining: 2 },
+  { name: 'Đơn nữ', price: 0, capacity: 16, sold: 16, held: 0, remaining: 0 },
+];
+const OVERVIEW = {
+  revenue: { amount: 450_000, paidOrders: 1 },
+  recentOrders: ORDERS,
+  openReviewCount: 2,
+  checkin: { checkedInCount: 41, validTicketCount: 66 },
+  ticketTypes: TICKET_TYPES,
+};
 
 const SALE_STATUS_PATH = `/orgs/${ORG_ID}/event-sale-status`;
 /** `GET …/event-sale-status` trả đúng một dòng cho Sự kiện của spec này. */
@@ -145,9 +158,18 @@ async function openApi(
 
 const overviewGets = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === overviewPath);
 const liveGets = (calls: Call[]) => calls.filter((c) => c.method === 'GET' && c.path === `${overviewPath}/live`);
-const statCard = (page: Page) => page.locator('[data-slot="stat-card"]');
-const statValue = (page: Page) => page.locator('[data-slot="stat-card-value"]');
-const statCaption = (page: Page) => page.locator('[data-slot="stat-card-caption"]');
+const statCards = (page: Page) => page.locator('[data-slot="stat-card"]');
+/** `stat-card` theo nhãn (hàng số liệu có hai thẻ: "Doanh thu" và "Check-in", Story 6.2). */
+const statCardOf = (page: Page, label: string) =>
+  statCards(page).filter({ has: page.locator('[data-slot="stat-card-label"]', { hasText: new RegExp(`^${label}$`) }) });
+const revenueCard = (page: Page) => statCardOf(page, 'Doanh thu');
+const statValue = (page: Page) => revenueCard(page).locator('[data-slot="stat-card-value"]');
+const statCaption = (page: Page) => revenueCard(page).locator('[data-slot="stat-card-caption"]');
+const checkinCard = (page: Page) => statCardOf(page, 'Check-in');
+const checkinValue = (page: Page) => checkinCard(page).locator('[data-slot="stat-card-value"]');
+const checkinCaption = (page: Page) => checkinCard(page).locator('[data-slot="stat-card-caption"]');
+const needsActionCard = (page: Page) => page.locator('[data-slot="needs-action-card"]');
+const ticketTypesBlock = (page: Page) => page.locator('[data-slot="ticket-types-block"]');
 const cards = (page: Page) => page.locator('[data-slot="recent-order-card"]');
 const rows = (page: Page) => page.locator('[data-slot="recent-order-row"]');
 const offlineToasts = (page: Page) => page.locator('[data-sonner-toast]', { hasText: 'Mất kết nối. Đang thử lại…' });
@@ -180,8 +202,8 @@ test.describe('Tổng quan Sự kiện: stat-card doanh thu và Đơn gần đâ
     await openApi(page);
     await page.goto(base);
 
-    await expect(statCard(page)).toBeVisible();
-    await expect(page.locator('[data-slot="stat-card-label"]')).toHaveText('Doanh thu');
+    await expect(revenueCard(page)).toBeVisible();
+    await expect(page.locator('[data-slot="stat-card-label"]')).toHaveText(['Doanh thu', 'Check-in']);
     await expect(statValue(page)).toHaveText('450.000đ');
     await expect(statCaption(page)).toHaveText('Chỉ tính Đơn Đã thanh toán · 1 Đơn');
 
@@ -209,9 +231,14 @@ test.describe('Tổng quan Sự kiện: stat-card doanh thu và Đơn gần đâ
     await expect(expired.locator('[data-slot="status-badge"]')).toHaveAttribute('data-tone', 'neutral');
     await expect(expired).toContainText('TK1Q4Z8HAB · 1 Vé · 11/11 · 22:10');
 
-    // Thứ tự: stat-card → Đơn gần đây → thẻ "Thông tin".
+    // Thứ tự: hàng số liệu → Vé theo Hạng vé → Đơn gần đây → thẻ "Thông tin".
     const tops = await Promise.all(
-      ['[data-slot="stat-card"]', '[data-slot="recent-orders-block"]', '[data-slot="event-overview"]'].map(
+      [
+        '[data-slot="overview-stats"]',
+        '[data-slot="ticket-types-block"]',
+        '[data-slot="recent-orders-block"]',
+        '[data-slot="event-overview"]',
+      ].map(
         async (sel) => (await page.locator(sel).boundingBox())!.y,
       ),
     );
@@ -263,8 +290,9 @@ test.describe('Tổng quan Sự kiện: stat-card doanh thu và Đơn gần đâ
     await expect(page.locator('[data-slot="event-overview"]')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Tiếp tục thiết lập' })).toBeVisible();
     await page.waitForTimeout(500);
-    await expect(statCard(page)).toHaveCount(0);
+    await expect(statCards(page)).toHaveCount(0);
     await expect(page.locator('[data-slot="recent-orders-block"]')).toHaveCount(0);
+    await expect(ticketTypesBlock(page)).toHaveCount(0);
     expect(overviewGets(calls)).toHaveLength(0);
     expect(liveGets(calls)).toHaveLength(0);
   });
@@ -277,6 +305,143 @@ test.describe('Tổng quan Sự kiện: stat-card doanh thu và Đơn gần đâ
     await page.reload();
     await expect(statValue(page)).toHaveText('450.000đ');
     await expect(cards(page)).toHaveCount(5);
+  });
+});
+
+test.describe('Story 6.2: thẻ check-in và Vé theo Hạng vé', () => {
+  const summary = (page: Page) => ticketTypesBlock(page).locator('[data-slot="ticket-types-summary"]');
+  const items = (page: Page) => ticketTypesBlock(page).locator('[data-slot="ticket-type-item"]');
+  const noHorizontalScroll = (page: Page) =>
+    page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+  /** Khung của ba thẻ hàng số liệu, theo thứ tự Doanh thu · Check-in · Cần xử lý. */
+  const statBoxes = (page: Page) =>
+    Promise.all(
+      [revenueCard(page), checkinCard(page), needsActionCard(page)].map(async (card) => (await card.boundingBox())!),
+    );
+
+  test('dưới md (375px, 320px): ba thẻ một cột theo thứ tự Doanh thu · Check-in · Cần xử lý; check-in 41/66 kèm thanh tiến độ; Hạng vé là danh sách hai dòng, "Hết vé"; không cuộn ngang', async ({
+    page,
+  }) => {
+    await openApi(page);
+    await page.goto(base);
+
+    await expect(checkinValue(page)).toHaveText('41/66');
+    const bar = checkinCard(page).getByRole('progressbar', { name: 'Tổng đã check-in' });
+    await expect(bar).toHaveAttribute('data-tone', 'stage');
+    await expect(bar).toHaveAttribute('aria-valuenow', '41');
+    await expect(bar).toHaveAttribute('aria-valuemax', '66');
+    await expect(bar).toHaveAttribute('aria-valuetext', '41 trên 66 Vé đã check-in');
+    // SSE 503 (đang polling): không có "Cập nhật liên tục".
+    await expect(checkinCaption(page)).toHaveCount(0);
+
+    const block = ticketTypesBlock(page);
+    await expect(block.getByRole('heading', { name: 'Vé theo Hạng vé', level: 2 })).toBeVisible();
+    await expect(summary(page)).toHaveText('66/72 Vé đã bán');
+    await expect(block.locator('[data-slot="ticket-types-table"]')).toBeHidden();
+    await expect(items(page)).toHaveCount(3);
+    await expect(items(page).locator('[data-slot="ticket-type-name"]')).toHaveText([
+      'Đơn nam · 150.000đ',
+      'Đôi nam · 300.000đ',
+      'Đơn nữ · Miễn phí',
+    ]);
+    await expect(items(page).locator('[data-slot="ticket-type-stock"]')).toHaveText([
+      'Đã bán 30 · Đang giữ 0 · Còn 2 / 32',
+      'Đã bán 20 · Đang giữ 2 · Còn 2 / 24',
+      'Đã bán 16 · Đang giữ 0 · Còn 0 / 16 · Hết vé',
+    ]);
+
+    for (const width of [375, 320]) {
+      await page.setViewportSize({ width, height: 667 });
+      await expect(items(page), String(width)).toHaveCount(3);
+      await expect(block.locator('[data-slot="ticket-types-list"]')).toBeVisible();
+      const boxes = await statBoxes(page);
+      // Một cột: cùng mép trái, xếp từ trên xuống theo thứ tự.
+      expect(new Set(boxes.map((b) => Math.round(b.x))).size, String(width)).toBe(1);
+      expect(boxes[0]!.y + boxes[0]!.height).toBeLessThanOrEqual(boxes[1]!.y);
+      expect(boxes[1]!.y + boxes[1]!.height).toBeLessThanOrEqual(boxes[2]!.y);
+      expect(await noHorizontalScroll(page), String(width)).toBe(true);
+    }
+  });
+
+  test('1024px: ba thẻ cùng một hàng; bảng Hạng vé · Đã bán · Đang giữ chỗ · Còn lại (số căn phải, "Hết vé"), không danh sách; khối nằm giữa hàng số liệu và Đơn gần đây', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1024, height: 900 });
+    await openApi(page);
+    await page.goto(base);
+
+    const table = ticketTypesBlock(page).locator('[data-slot="ticket-types-table"]');
+    await expect(table).toBeVisible();
+    await expect(ticketTypesBlock(page).locator('[data-slot="ticket-types-list"]')).toBeHidden();
+    await expect(summary(page)).toHaveText('66/72 Vé đã bán');
+    await expect(table.getByRole('columnheader')).toHaveText(['Hạng vé', 'Đã bán', 'Đang giữ chỗ', 'Còn lại']);
+    const rows = table.locator('[data-slot="ticket-type-row"]');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0).getByRole('cell')).toHaveText(['Đơn nam 150.000đ', '30', '0', '2 / 32']);
+    await expect(rows.nth(1).getByRole('cell')).toHaveText(['Đôi nam 300.000đ', '20', '2', '2 / 24']);
+    await expect(rows.nth(2).getByRole('cell')).toHaveText(['Đơn nữ Miễn phí', '16', '0', '0 / 16 · Hết vé']);
+    for (const column of [1, 2, 3]) {
+      await expect(rows.nth(0).getByRole('cell').nth(column)).toHaveClass(/text-right/);
+      await expect(rows.nth(0).getByRole('cell').nth(column)).toHaveClass(/tabular-nums/);
+    }
+
+    // Ba thẻ một hàng, theo thứ tự trái sang phải.
+    const boxes = await statBoxes(page);
+    expect(new Set(boxes.map((b) => Math.round(b.y))).size).toBe(1);
+    expect(boxes[0]!.x + boxes[0]!.width).toBeLessThanOrEqual(boxes[1]!.x);
+    expect(boxes[1]!.x + boxes[1]!.width).toBeLessThanOrEqual(boxes[2]!.x);
+    await expect(checkinValue(page)).toHaveText('41/66');
+
+    const stats = (await page.locator('[data-slot="overview-stats"]').boundingBox())!;
+    const block = (await ticketTypesBlock(page).boundingBox())!;
+    const orders = (await page.locator('[data-slot="recent-orders-block"]').boundingBox())!;
+    expect(stats.y + stats.height).toBeLessThanOrEqual(block.y);
+    expect(block.y + block.height).toBeLessThanOrEqual(orders.y);
+    expect(await noHorizontalScroll(page)).toBe(true);
+  });
+
+  test('Sự kiện chưa có Hạng vé, Vé nào: không có khối Hạng vé; thẻ check-in 0/0, thanh rỗng', async ({ page }) => {
+    await openApi(page, { overview: emptyOverview() });
+    await page.goto(base);
+    await expect(statValue(page)).toHaveText('0đ');
+    await expect(checkinValue(page)).toHaveText('0/0');
+    await expect(checkinCard(page).getByRole('progressbar')).toHaveAttribute('aria-valuemax', '0');
+    await expect(ticketTypesBlock(page)).toHaveCount(0);
+  });
+
+  test('stream Tổng quan: "Cập nhật liên tục" khi SSE nối; event_checkins_changed → thẻ check-in đổi số; event_orders_changed (Vé mới) → N và bảng Hạng vé đổi; không tải lại trang', async ({
+    page,
+  }) => {
+    const sse = await fakeEventSource(page, { url: OVERVIEW_LIVE_URL });
+    const { state } = await openApi(page);
+    await page.goto(base);
+    await expect(checkinValue(page)).toHaveText('41/66');
+    await expect(checkinCaption(page)).toHaveCount(0);
+    await expect.poll(sse.count).toBe(1);
+    await sse.open();
+    await expect(checkinCaption(page)).toHaveText('Cập nhật liên tục');
+    await page.evaluate(() => ((window as unknown as { __mark: boolean }).__mark = true));
+
+    // Quét xanh một Vé ở máy khác.
+    state.overview = { ...OVERVIEW, checkin: { checkedInCount: 42, validTicketCount: 66 } };
+    await sse.message('event_checkins_changed');
+    await expect(checkinValue(page)).toHaveText('42/66', { timeout: 2_500 });
+    await expect(checkinCard(page).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '42');
+
+    // Đơn mới chuyển Đã thanh toán: 2 Vé "Đơn nam" mới, hạng hết vé.
+    state.overview = {
+      ...OVERVIEW,
+      checkin: { checkedInCount: 42, validTicketCount: 68 },
+      ticketTypes: [{ ...TICKET_TYPES[0]!, sold: 32, remaining: 0 }, ...TICKET_TYPES.slice(1)],
+    };
+    await sse.message('event_orders_changed');
+    await expect(checkinValue(page)).toHaveText('42/68', { timeout: 2_500 });
+    await expect(summary(page)).toHaveText('68/72 Vé đã bán');
+    await expect(items(page).nth(0).locator('[data-slot="ticket-type-stock"]')).toHaveText(
+      'Đã bán 32 · Đang giữ 0 · Còn 0 / 32 · Hết vé',
+    );
+    expect(await page.evaluate(() => (window as unknown as { __mark?: boolean }).__mark)).toBe(true);
+    expect(await sse.count()).toBe(1);
   });
 });
 
@@ -300,9 +465,9 @@ test.describe('Tổng quan tự cập nhật', () => {
     // Người mua đăng ký Sự kiện miễn phí: Đơn 0đ đã thanh toán hiện đầu khối.
     const fresh = order({ code: 'TK7M2P9XAB', buyerName: 'Đỗ Thị Lan', ticketCount: 2, totalAmount: 0 });
     state.overview = {
+      ...OVERVIEW,
       revenue: { amount: 450_000, paidOrders: 2 },
       recentOrders: [fresh, ...ORDERS.slice(0, 4)],
-      openReviewCount: 2,
     };
     await sse.message('event_orders_changed');
     await expect(cards(page).nth(0)).toContainText('Đỗ Thị Lan', { timeout: 2_500 });
@@ -313,7 +478,7 @@ test.describe('Tổng quan tự cập nhật', () => {
 
     // IPN trả Đơn đang chờ (Lê Hoàng Nam, 150.000đ).
     const paid = [fresh, ...ORDERS.slice(0, 4)].map((o) => (o.code === 'TK3J6N4DAB' ? { ...o, status: 'paid' } : o));
-    state.overview = { revenue: { amount: 600_000, paidOrders: 3 }, recentOrders: paid, openReviewCount: 2 };
+    state.overview = { ...OVERVIEW, revenue: { amount: 600_000, paidOrders: 3 }, recentOrders: paid };
     await sse.message('event_orders_changed');
     await expect(statValue(page)).toHaveText('600.000đ', { timeout: 2_500 });
     await expect(cards(page).nth(3).locator('[data-slot="status-badge"]')).toHaveText('Đã thanh toán');
@@ -329,7 +494,7 @@ test.describe('Tổng quan tự cập nhật', () => {
     const start = overviewGets(calls).length;
     const startedAt = Date.now();
 
-    state.overview = { revenue: { amount: 750_000, paidOrders: 2 }, recentOrders: ORDERS, openReviewCount: 2 };
+    state.overview = { ...OVERVIEW, revenue: { amount: 750_000, paidOrders: 2 } };
     await page.waitForTimeout(7_000);
     // Không polling dày hơn 10 giây (vd. 2 giây của màn chờ thanh toán).
     expect(overviewGets(calls).length).toBe(start);
@@ -363,7 +528,7 @@ test.describe('Tổng quan tự cập nhật', () => {
     await expect(statValue(page)).toHaveText('450.000đ');
     const beforeOnline = overviewGets(calls).length;
 
-    state.overview = { revenue: { amount: 900_000, paidOrders: 2 }, recentOrders: ORDERS, openReviewCount: 2 };
+    state.overview = { ...OVERVIEW, revenue: { amount: 900_000, paidOrders: 2 } };
     // Toast vẫn đang hiện ngay trước khi có mạng lại (chưa tới hạn tự đóng 4 giây của sonner).
     await expect(offlineToasts(page)).toHaveCount(1);
     await page.context().setOffline(false);
@@ -393,13 +558,16 @@ test.describe('Tổng quan tự cập nhật', () => {
     await expect.poll(sse.count).toBe(1);
     await sse.open();
     await expect(updatedAt(page)).toHaveCount(0);
+    await expect(checkinCaption(page)).toHaveText('Cập nhật liên tục');
 
     // Mọi lần tải lại kế tiếp trả 500 (kể cả 2 lần thử lại).
     state.fail = 10;
-    state.overview = { revenue: { amount: 900_000, paidOrders: 2 }, recentOrders: ORDERS, openReviewCount: 2 };
+    state.overview = { ...OVERVIEW, revenue: { amount: 900_000, paidOrders: 2 } };
     await sse.message('event_orders_changed');
     await expect(updatedAt(page)).toHaveText('Cập nhật lúc 10:04', { timeout: 10_000 });
     await expect(statValue(page)).toHaveText('450.000đ');
+    // Số liệu có thể đã cũ: thẻ check-in không còn "Cập nhật liên tục" (nhãn ở đầu khối đã báo).
+    await expect(checkinCaption(page)).toHaveCount(0);
     await expect(cards(page)).toHaveCount(5);
     await expect(page.locator('[data-slot="event-overview-error"]')).toHaveCount(0);
     expect(await toastsShown()).toBe(0);
@@ -408,6 +576,7 @@ test.describe('Tổng quan tự cập nhật', () => {
     await sse.message('event_orders_changed');
     await expect(statValue(page)).toHaveText('900.000đ', { timeout: 5_000 });
     await expect(updatedAt(page)).toHaveCount(0);
+    await expect(checkinCaption(page)).toHaveText('Cập nhật liên tục');
     expect(await toastsShown()).toBe(0);
   });
 
@@ -417,7 +586,7 @@ test.describe('Tổng quan tự cập nhật', () => {
     await page.goto(base);
     const error = page.locator('[data-slot="event-overview-error"]');
     await expect(error).toContainText('Chưa tải được số liệu Sự kiện', { timeout: 15_000 });
-    await expect(statCard(page)).toHaveCount(0);
+    await expect(statCards(page)).toHaveCount(0);
     // Thẻ "Thông tin" vẫn hiện.
     await expect(page.locator('[data-slot="event-overview"]')).toBeVisible();
 
