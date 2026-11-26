@@ -10,20 +10,31 @@ import { describe, expect, it } from 'vitest';
 
 import { eventOverviewQueryKey } from '@/lib/reporting/api';
 import {
+  checkinCardCaption,
   EVENT_OVERVIEW_POLL_MS,
   eventOverviewPollInterval,
+  isSoldOut,
   ORDER_STATUS_BADGE,
   orderStatusBadge,
   orderTimeLabel,
+  remainingLabel,
   REVIEW_TYPE_LABEL,
   revenueCaption,
   reviewLine,
+  SOLD_OUT_LABEL,
   ticketCountLabel,
+  TICKET_TYPES_TITLE,
+  ticketTypePriceLabel,
+  ticketTypesSoldSummary,
+  ticketTypeStockLine,
   updatedAtLabel,
 } from '@/lib/reporting/overview';
 import { NEEDS_ACTION_LINK, needsActionValue } from '@/lib/reporting/review-queue';
 
-/* Story 3.11: nhãn, tone và dòng phụ của Tổng quan Sự kiện (`stat-card` doanh thu, `recent-orders-block`). */
+/*
+ * Story 3.11: nhãn, tone và dòng phụ của Tổng quan Sự kiện (`stat-card` doanh thu, `recent-orders-block`). Story 6.2:
+ * dòng phụ của thẻ check-in và khối "Vé theo Hạng vé".
+ */
 
 const order = (patch: Partial<RecentOrder> = {}): RecentOrder => ({
   code: 'TK5R8W1CAB',
@@ -109,10 +120,56 @@ describe('tải và tự cập nhật', () => {
     expect(eventOverviewQueryKey('o', 'e')).toEqual(['reporting', 'event-overview', 'o', 'e']);
     expect(eventOverviewQueryKey('o', 'e')).not.toEqual(eventOverviewQueryKey('o', 'f'));
     expect(eventOverviewApiPath('o', 'e')).toBe('/orgs/o/events/e/overview');
+    const overview = {
+      revenue: { amount: 0, paidOrders: 0 },
+      recentOrders: [order()],
+      openReviewCount: 1,
+      checkin: { checkedInCount: 41, validTicketCount: 66 },
+      ticketTypes: [{ name: 'Đơn nam', price: 150_000, capacity: 32, sold: 30, held: 0, remaining: 2 }],
+    };
+    expect(EventOverview.safeParse(overview).success).toBe(true);
+    // Shape cũ (trước Story 6.2) không còn hợp lệ: thiếu `checkin`, `ticketTypes`.
     expect(
-      EventOverview.safeParse({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: [order()], openReviewCount: 1 })
-        .success,
-    ).toBe(true);
+      EventOverview.safeParse({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: [], openReviewCount: 0 }).success,
+    ).toBe(false);
+    const negative = { ...overview, ticketTypes: [{ ...overview.ticketTypes[0], sold: -1 }] };
+    expect(EventOverview.safeParse(negative).success).toBe(false);
+  });
+});
+
+describe('thẻ check-in (Story 6.2)', () => {
+  it('"Cập nhật liên tục" khi SSE đang nối; đang polling hoặc số liệu có thể đã cũ → không có dòng phụ', () => {
+    expect(checkinCardCaption({ connected: true, stale: false })).toBe('Cập nhật liên tục');
+    expect(checkinCardCaption({ connected: true, stale: true })).toBeNull();
+    expect(checkinCardCaption({ connected: false, stale: false })).toBeNull();
+    expect(checkinCardCaption({ connected: false, stale: true })).toBeNull();
+  });
+});
+
+describe('khối "Vé theo Hạng vé" (Story 6.2)', () => {
+  const types = [
+    { name: 'Đơn nam', price: 150_000, capacity: 32, sold: 30, held: 0, remaining: 2 },
+    { name: 'Đôi nam', price: 300_000, capacity: 24, sold: 20, held: 2, remaining: 2 },
+    { name: 'Đơn nữ', price: 0, capacity: 16, sold: 14, held: 2, remaining: 0 },
+  ];
+
+  it('tiêu đề và tóm tắt "đã bán/sức chứa Vé đã bán"', () => {
+    expect(TICKET_TYPES_TITLE).toBe('Vé theo Hạng vé');
+    expect(ticketTypesSoldSummary(types)).toBe('64/72 Vé đã bán');
+    expect(ticketTypesSoldSummary([])).toBe('0/0 Vé đã bán');
+  });
+
+  it('giá như trang Sự kiện; còn lại "k / N"; hết vé có chữ "Hết vé"', () => {
+    expect(types.map(ticketTypePriceLabel)).toEqual(['150.000đ', '300.000đ', 'Miễn phí']);
+    expect(types.map(remainingLabel)).toEqual(['2 / 32', '2 / 24', '0 / 16']);
+    expect(types.map(isSoldOut)).toEqual([false, false, true]);
+    expect(SOLD_OUT_LABEL).toBe('Hết vé');
+  });
+
+  it('dòng số liệu dưới md (chữ "Hết vé" do nơi render thêm)', () => {
+    expect(ticketTypeStockLine(types[0]!)).toBe('Đã bán 30 · Đang giữ 0 · Còn 2 / 32');
+    expect(ticketTypeStockLine(types[1]!)).toBe('Đã bán 20 · Đang giữ 2 · Còn 2 / 24');
+    expect(ticketTypeStockLine(types[2]!)).toBe('Đã bán 14 · Đang giữ 2 · Còn 0 / 16');
   });
 });
 

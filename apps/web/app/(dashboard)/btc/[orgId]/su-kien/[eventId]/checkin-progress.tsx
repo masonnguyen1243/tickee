@@ -64,8 +64,8 @@ function TicketTypeRow({ type }: { type: CheckinTicketTypeProgress }) {
  * `checkin-progress` (Story 5.7, FR-30, UX-DR39): khối đầu tab Check-in. Tổng ở `stat-card` ("Check-in", "k/N", thanh
  * nền `stage-line` phần đầy `brand`), dưới đó mỗi Hạng vé một hàng trên `card` sáng, theo thứ tự api (tạo trước đứng
  * trước; Hạng vé chưa có Vé hợp lệ → "0/0", thanh rỗng). Tự cập nhật qua `useLiveResource` + `GET …/checkin/events/:id/
- * live` (tín hiệu `event_checkins_changed` → tải lại `CheckinEvent`, cùng khóa với Màn quét); không có SSE thì polling
- * 10 giây. Dòng phụ "Cập nhật liên tục"; số liệu có thể đã cũ (mất mạng, hoặc lần tải lại lỗi mà vẫn còn dữ liệu cũ) →
+ * live` (tín hiệu `event_checkins_changed`, và với Owner/Admin cả `event_orders_changed` khi có Vé mới, Story 6.2 → tải
+ * lại `CheckinEvent`, cùng khóa với Màn quét); không có SSE thì polling 10 giây. Dòng phụ "Cập nhật liên tục"; số liệu có thể đã cũ (mất mạng, hoặc lần tải lại lỗi mà vẫn còn dữ liệu cũ) →
  * "Cập nhật lúc HH:MM:SS". Tải lần đầu → skeleton; lỗi lần đầu → `StatusBanner` kèm "Thử lại"; `401` → đăng nhập.
  */
 export function CheckinProgress({ eventId }: { eventId: string }) {

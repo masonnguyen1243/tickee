@@ -64,8 +64,17 @@ export const emptyCheckinEvent = (eventId: string) => ({
   ticketTypes: [],
 });
 
-/** `EventOverview` của Sự kiện chưa có Đơn nào (Story 3.11), không có mục Cần xử lý (Story 4.3). */
-export const emptyOverview = () => ({ revenue: { amount: 0, paidOrders: 0 }, recentOrders: [], openReviewCount: 0 });
+/**
+ * `EventOverview` của Sự kiện chưa có Đơn nào (Story 3.11), không có mục Cần xử lý (Story 4.3), chưa có Vé hay Hạng vé
+ * nào (Story 6.2: check-in 0/0, không có khối "Vé theo Hạng vé").
+ */
+export const emptyOverview = () => ({
+  revenue: { amount: 0, paidOrders: 0 },
+  recentOrders: [],
+  openReviewCount: 0,
+  checkin: { checkedInCount: 0, validTicketCount: 0 },
+  ticketTypes: [],
+});
 
 /** `EventOrderPage` của Sự kiện chưa có Đơn nào (tab Đơn, Story 6.1). */
 export const emptyOrderPage = () => ({ orders: [], nextCursor: null });

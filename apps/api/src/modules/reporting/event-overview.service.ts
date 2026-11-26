@@ -1,17 +1,24 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { OrderStatus, RECENT_ORDERS_LIMIT, type EventOverview } from '@tickee/contracts';
+import {
+  OrderStatus,
+  RECENT_ORDERS_LIMIT,
+  type EventOverview,
+  type EventOverviewTicketType,
+} from '@tickee/contracts';
 import type { AccessContext } from '../../platform/access/index.js';
 import { DATABASE, type Database } from '../../platform/db/index.js';
-import { assertEventOfOrganization } from '../event/index.js';
-import { eventRevenueOf, recentOrdersOf } from '../ordering/index.js';
+import { assertEventOfOrganization, ticketTypesOf } from '../event/index.js';
+import { eventRevenueOf, inventoryOf, recentOrdersOf } from '../ordering/index.js';
 import { openReviewsOf } from '../payment/index.js';
+import { checkinCountsByTicketType } from '../ticketing/index.js';
 import { eventOpenReviewItemsOf } from './event-open-reviews.js';
 
 /**
- * Tổng quan Sự kiện (Story 3.11, FR-31, AD-33): doanh thu, Đơn gần đây và số mục Cần xử lý (Story 4.3), chỉ đọc qua
- * read model của mô-đun sở hữu — `ordering` (`eventRevenueOf`, `recentOrdersOf`, `reviewOrdersOf`) và `payment`
- * (`openReviewsOf`, `openReviewItemsOf`; ghép ở `reporting` vì `ordering` không được gọi `payment`). Không join bảng của mô-đun
- * khác, không truy vấn theo từng Đơn.
+ * Tổng quan Sự kiện (Story 3.11, FR-31, AD-33): doanh thu, Đơn gần đây, số mục Cần xử lý (Story 4.3), số check-in và Vé
+ * theo Hạng vé (Story 6.2), chỉ đọc qua read model của mô-đun sở hữu — `ordering` (`eventRevenueOf`, `recentOrdersOf`,
+ * `reviewOrdersOf`, `inventoryOf`), `payment` (`openReviewsOf`, `openReviewItemsOf`; ghép ở `reporting` vì `ordering`
+ * không được gọi `payment`), `event` (`ticketTypesOf`) và `ticketing` (`checkinCountsByTicketType`). Không join bảng
+ * của mô-đun khác, không truy vấn theo từng Đơn hay từng Hạng vé: số câu truy vấn cố định mỗi lần đọc. Đọc không khóa.
  */
 @Injectable()
 export class EventOverviewService {
@@ -24,10 +31,12 @@ export class EventOverviewService {
 
   async overview(ctx: AccessContext, eventId: string): Promise<EventOverview> {
     await this.assertEvent(ctx, eventId);
-    const [revenue, recent, openReviewCount] = await Promise.all([
+    const [revenue, recent, openReviewCount, ticketTypes, checkin] = await Promise.all([
       eventRevenueOf(this.db.orm, ctx, eventId),
       recentOrdersOf(this.db.orm, ctx, eventId, RECENT_ORDERS_LIMIT),
       this.eventOpenReviewCountOf(ctx, eventId),
+      this.ticketTypeStockOf(ctx, eventId),
+      this.checkinOf(ctx, eventId),
     ]);
     const reviews = await openReviewsOf(
       this.db.orm,
@@ -48,7 +57,44 @@ export class EventOverviewService {
           review: review ? { type: review.type, receivedAmount: review.receivedAmount } : null,
         };
       }),
+      checkin,
+      ticketTypes,
     };
+  }
+
+  /**
+   * Khối "Vé theo Hạng vé" (Story 6.2): Hạng vé của Sự kiện theo thứ tự `ticketTypesOf` (tạo trước đứng trước), kèm tồn
+   * kho `inventoryOf` (hai câu, như `listTicketTypes`: Hạng vé bị xóa xen giữa, không còn dòng tồn kho, thì bỏ). Tên và
+   * giá hiện tại; `remaining` = `max(0, capacity − sold − held)`. Không trả id nội bộ.
+   */
+  private async ticketTypeStockOf(ctx: AccessContext, eventId: string): Promise<EventOverviewTicketType[]> {
+    const types = await ticketTypesOf(this.db.orm, ctx, eventId);
+    const stock = await inventoryOf(
+      this.db.orm,
+      types.map((t) => t.id),
+    );
+    return types.flatMap((type) => {
+      const row = stock.get(type.id);
+      if (!row) return [];
+      const { capacity, sold, held } = row;
+      const remaining = Math.max(0, capacity - sold - held);
+      return [{ name: type.name, price: type.price, capacity, sold, held, remaining }];
+    });
+  }
+
+  /**
+   * Thẻ check-in (Story 6.2): tổng các nhóm `checkinCountsByTicketType` (chỉ Vé `valid`; Vé hủy hay bị vô hiệu không
+   * tính, kể cả đã check-in), cùng số với tab Check-in (`CheckinEvent`).
+   */
+  private async checkinOf(ctx: AccessContext, eventId: string): Promise<EventOverview['checkin']> {
+    const groups = await checkinCountsByTicketType(this.db.orm, ctx, eventId);
+    let checkedInCount = 0;
+    let validTicketCount = 0;
+    for (const group of groups) {
+      checkedInCount += group.checkedInCount;
+      validTicketCount += group.validTicketCount;
+    }
+    return { checkedInCount, validTicketCount };
   }
 
   /**

@@ -323,8 +323,8 @@ function OrdersSkeleton() {
 /**
  * Danh sách Đơn của một bộ lọc: phân trang bằng ngăn xếp cursor giữ trong state ("Trang trước"/"Trang sau", không đếm
  * tổng, không cuộn vô hạn). Nơi gọi đặt `key` theo bộ lọc nên đổi bộ lọc là về trang đầu. Tự cập nhật bằng
- * `useLiveResource` qua stream Tổng quan (`event_orders_changed`, `org_review_items_changed`), polling 10 giây khi chưa
- * kết nối.
+ * `useLiveResource` qua stream Tổng quan (`event_orders_changed`, `event_checkins_changed` từ Story 6.2,
+ * `org_review_items_changed`): mỗi check-in cũng làm danh sách tải lại; polling 10 giây khi chưa kết nối.
  */
 function OrdersResults({
   orgId,

@@ -34,8 +34,9 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /**
- * Tab Tổng quan: Sự kiện đã rời nháp → `stat-card` doanh thu và "Đơn gần đây" tự cập nhật (Story 3.11) nằm trên thẻ
- * "Thông tin"; nháp → chỉ thẻ "Thông tin" (không gọi API Tổng quan). Thẻ "Thông tin": nháp → "Tiếp tục thiết lập"; đã mở
+ * Tab Tổng quan: Sự kiện đã rời nháp → các thẻ Doanh thu, Check-in, Cần xử lý, khối "Vé theo Hạng vé" (Story 6.2) và
+ * "Đơn gần đây" (Story 3.11), tự cập nhật, nằm trên thẻ "Thông tin"; nháp → chỉ thẻ "Thông tin" (không gọi API Tổng
+ * quan). Thẻ "Thông tin": nháp → "Tiếp tục thiết lập"; đã mở
  * bán (kể cả Ẩn, Đã hủy: link vẫn mở được) → link trang Sự kiện công khai kèm "Sao chép link".
  */
 function Overview({ orgId, event }: { orgId: string; event: EventDetail }) {

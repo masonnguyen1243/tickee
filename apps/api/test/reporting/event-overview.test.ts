@@ -1,8 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { ErrorResponse, EventOverview, RealtimeTopic, Role } from '@tickee/contracts';
+import {
+  CheckinEvent,
+  ErrorResponse,
+  EventOverview,
+  RealtimeTopic,
+  Role,
+  ScanResult,
+  type BuyerTicket,
+} from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TICKET_CANCEL_REASON } from '../../src/modules/ticketing/schema.js';
 import type { TingeeCredential } from '../../src/modules/tingee/index.js';
 import { REALTIME_CHANNEL, realtime } from '../../src/platform/realtime/index.js';
 import { databaseUrl, TEST_WEB_ORIGIN } from '../helpers.js';
@@ -29,6 +38,10 @@ import {
  * model của `ordering` và `payment`) và stream `GET …/overview/live` (`event_orders_changed` lọc theo Sự kiện) trên
  * Postgres thật, Tingee fake, server HTTP thật và client SSE thật. Điểm phát tín hiệu: mọi chỗ phát `order_changed`, và
  * một lệnh riêng sau khi TX1 tạo Đơn commit (Đơn 0đ lẫn Đơn có phí); TX1 rollback thì không có gì.
+ *
+ * Story 6.2: doanh thu cộng `paid_amount`, số check-in (chỉ Vé `valid`), Vé theo Hạng vé (đã bán · đang giữ chỗ · còn
+ * lại, đọc qua `event` + `ordering`), và stream Tổng quan nhận thêm `event_checkins_changed` của Sự kiện. Duyệt tay
+ * lệch tiền (doanh thu = số nhận) ở `test/payment/review-actions.test.ts`.
  */
 
 const MAIN: TingeeCredential = { clientId: 'tg-overview-main-4d1e', secretToken: 'tg-overview-main-secret-Qw8Er7Ty6' };
@@ -116,15 +129,17 @@ interface Placed {
   orderId: string;
   total: number;
   buyer: User;
+  /** Vé của Đơn (chỉ Đơn 0đ có Vé ngay khi tạo). */
+  tickets: BuyerTicket[];
 }
 
 /**
- * Người mua (mặc định mới) đặt `quantity` Vé của Hạng vé `tier` (0: có phí, 1: 0đ), tên `name`. Đơn có phí có link
- * thanh toán của Tingee fake, trừ khi `link: false` (Tingee từ chối `create-link`, Đơn vẫn chờ).
+ * Người mua (mặc định mới) đặt `quantity` Vé của Hạng vé thứ `tier` (với `saleEvent`: 0 có phí, 1 0đ), tên `name`. Đơn
+ * có phí có link thanh toán của Tingee fake, trừ khi `link: false` (Tingee từ chối `create-link`, Đơn vẫn chờ).
  */
 async function place(
   sale: SaleEvent,
-  options: { tier?: 0 | 1; quantity?: number; name?: string; buyer?: User; link?: boolean } = {},
+  options: { tier?: number; quantity?: number; name?: string; buyer?: User; link?: boolean } = {},
 ): Promise<Placed> {
   const buyer = options.buyer ?? (await signUp(h));
   if (options.link === false) fake.merchant(MAIN.clientId).linkReplies = [{ code: '1006' }];
@@ -134,11 +149,23 @@ async function place(
   expect(res.status, JSON.stringify(res.body)).toBe(201);
   const order = parseOrder(res.body);
   const { id } = await orderState(h, order.code);
-  return { code: order.code, orderId: id, total: order.totalAmount, buyer };
+  return { code: order.code, orderId: id, total: order.totalAmount, buyer, tickets: order.tickets };
 }
 
 const sendIpn = (placed: Pick<Placed, 'code' | 'total'>, overrides: Record<string, unknown> = {}) =>
   postIpn(h, ipnKey, signIpn(MAIN.secretToken, fakeIpnPayload(placed.code, placed.total, overrides)));
+
+/** Owner quét Mã QR vé `ticket` ở Sự kiện `eventId` (Màn quét, Story 5.3): đòi kết quả xanh. */
+async function scanOk(eventId: string, ticket: BuyerTicket, scanner: User = org.owner): Promise<void> {
+  const res = await h.http
+    .post(`/v1/checkin/events/${eventId}/scans`)
+    .set('cookie', scanner.cookie)
+    .send({ code: ticket.qr, scanId: randomUUID() });
+  expect(res.status, res.text).toBe(200);
+  expect(ScanResult.parse(res.body).outcome).toBe('ok');
+}
+
+const CHECKINS_CHANGED = '{"type":"event_checkins_changed"}';
 
 const signalsOf = (filter: { id?: string; eventId?: string; type?: string }) =>
   notified.filter(
@@ -157,6 +184,11 @@ describe('GET …/overview: doanh thu và Đơn gần đây', () => {
       revenue: { amount: 0, paidOrders: 0 },
       recentOrders: [],
       openReviewCount: 0,
+      checkin: { checkedInCount: 0, validTicketCount: 0 },
+      ticketTypes: [
+        { name: 'Vé thường', price: PRICE, capacity: 20, sold: 0, held: 0, remaining: 20 },
+        { name: 'Vé mời', price: 0, capacity: 20, sold: 0, held: 0, remaining: 20 },
+      ],
     });
   });
 
@@ -257,6 +289,119 @@ describe('GET …/overview: doanh thu và Đơn gần đây', () => {
   });
 });
 
+describe('Story 6.2: doanh thu theo tiền đã nhận, Vé theo Hạng vé, check-in', () => {
+  it('doanh thu cộng paid_amount của Đơn paid; Đơn 0đ: paidOrders +1, số tiền không đổi; Đơn chờ không tính', async () => {
+    const sale = await saleEvent();
+    const paid = await place(sale);
+    await sendIpn(paid).expect(200);
+    expect((await overviewOf(sale.event.id)).revenue).toEqual({ amount: PRICE, paidOrders: 1 });
+
+    await place(sale, { tier: 1, quantity: 2 });
+    await place(sale, { quantity: 1 });
+    expect((await overviewOf(sale.event.id)).revenue).toEqual({ amount: PRICE, paidOrders: 2 });
+
+    // Doanh thu đọc `paid_amount`, không đọc `total_amount` (duyệt tay lệch tiền đi luồng thật ở review-actions.test).
+    await h.db.orm.execute(sql`UPDATE orders SET paid_amount = 250000 WHERE id = ${paid.orderId}`);
+    expect((await overviewOf(sale.event.id)).revenue).toEqual({ amount: 250_000, paidOrders: 2 });
+  });
+
+  it('Vé theo Hạng vé: thứ tự tạo, tên và giá hiện tại; đã bán, đang giữ chỗ (Đơn chờ), còn lại = sức chứa − bán − giữ; hết vé → 0; không có id nội bộ', async () => {
+    const sale = await eventOnSale(org, [
+      { name: 'Vé đôi', price: PRICE, capacity: 10 },
+      { name: 'Vé mời', price: 0, capacity: 5 },
+      { name: 'Vé VIP', price: 500_000, capacity: 2 },
+    ]);
+    const [pair, guest, vip] = sale.tiers.map((t) => t.id) as [string, string, string];
+
+    // Sức chứa 10: 3 bán, 2 Đơn chờ giữ 4 → còn 3.
+    const sold = await place(sale, { tier: 0, quantity: 3 });
+    await sendIpn(sold).expect(200);
+    await place(sale, { tier: 0, quantity: 2 });
+    await place(sale, { tier: 0, quantity: 2 });
+    await place(sale, { tier: 1, quantity: 2 });
+    const res = await h.http.get(overviewPath(sale.event.id)).set('cookie', org.owner.cookie).expect(200);
+    expect(EventOverview.parse(res.body).ticketTypes).toEqual([
+      { name: 'Vé đôi', price: PRICE, capacity: 10, sold: 3, held: 4, remaining: 3 },
+      { name: 'Vé mời', price: 0, capacity: 5, sold: 2, held: 0, remaining: 3 },
+      { name: 'Vé VIP', price: 500_000, capacity: 2, sold: 0, held: 0, remaining: 2 },
+    ]);
+    expect(Object.keys(res.body.ticketTypes[0]).sort()).toEqual(
+      ['capacity', 'held', 'name', 'price', 'remaining', 'sold'].sort(),
+    );
+    for (const id of [pair, guest, vip, sale.event.id]) expect(res.text, id).not.toContain(id);
+
+    // Đơn chờ thứ ba giữ 3 suất cuối: bán + giữ = sức chứa → còn 0.
+    await place(sale, { tier: 0, quantity: 3 });
+    // Đổi tên, đổi giá Hạng vé: Tổng quan hiện tên và giá hiện tại.
+    await h.db.orm.execute(sql`UPDATE ticket_types SET name = 'Vé VIP sân 1', price = 450000 WHERE id = ${vip}`);
+    expect((await overviewOf(sale.event.id)).ticketTypes).toEqual([
+      { name: 'Vé đôi', price: PRICE, capacity: 10, sold: 3, held: 7, remaining: 0 },
+      { name: 'Vé mời', price: 0, capacity: 5, sold: 2, held: 0, remaining: 3 },
+      { name: 'Vé VIP sân 1', price: 450_000, capacity: 2, sold: 0, held: 0, remaining: 2 },
+    ]);
+
+    // Hạng vé không còn dòng tồn kho (bị xóa xen giữa hai câu đọc) bị bỏ, như `listTicketTypes`.
+    await h.db.orm.execute(sql`DELETE FROM ticket_type_inventory WHERE ticket_type_id = ${vip}`);
+    expect((await overviewOf(sale.event.id)).ticketTypes.map((t) => t.name)).toEqual(['Vé đôi', 'Vé mời']);
+  });
+
+  it('số câu truy vấn DB của một GET …/overview cố định: không tăng theo số Hạng vé hay số Vé đã check-in', async () => {
+    const countQueries = async (eventId: string): Promise<number> => {
+      const spy = vi.spyOn(pg.Client.prototype, 'query');
+      try {
+        await overviewOf(eventId);
+        return spy.mock.calls.length;
+      } finally {
+        spy.mockRestore();
+      }
+    };
+    // Một Hạng vé, một Đơn (Vé đã check-in).
+    const single = await eventOnSale(org, [{ name: 'Vé mời', price: 0, capacity: 20 }]);
+    await scanOk(single.event.id, (await place(single, { tier: 0 })).tickets[0]!);
+    // Bốn Hạng vé, Đơn ở ba hạng, vài Vé đã check-in.
+    const many = await eventOnSale(
+      org,
+      ['Vé A', 'Vé B', 'Vé C', 'Vé D'].map((name) => ({ name, price: 0, capacity: 20 })),
+    );
+    for (const tier of [0, 1, 2]) {
+      const { tickets } = await place(many, { tier, quantity: 2 });
+      await scanOk(many.event.id, tickets[0]!);
+    }
+
+    await countQueries(single.event.id);
+    const one = await countQueries(single.event.id);
+    expect(one).toBeGreaterThan(0);
+    const several = await countQueries(many.event.id);
+    expect((await overviewOf(many.event.id)).ticketTypes).toHaveLength(4);
+    expect(several).toBe(one);
+  });
+
+  it('check-in: chỉ Vé valid (Vé hủy đã check-in không tính), cùng số với tab Check-in; Sự kiện khác không lẫn', async () => {
+    const sale = await saleEvent();
+    const tickets = [
+      ...(await place(sale, { tier: 1, quantity: 4 })).tickets,
+      ...(await place(sale, { tier: 1, quantity: 2 })).tickets,
+    ];
+    expect(tickets).toHaveLength(6);
+    // Vé đã check-in ở Sự kiện khác (cùng BTC) không tính.
+    const elsewhere = await saleEvent();
+    await scanOk(elsewhere.event.id, (await place(elsewhere, { tier: 1 })).tickets[0]!);
+    expect((await overviewOf(sale.event.id)).checkin).toEqual({ checkedInCount: 0, validTicketCount: 6 });
+
+    for (const ticket of tickets.slice(0, 3)) await scanOk(sale.event.id, ticket);
+    // Vé đã check-in rồi bị vô hiệu: ra khỏi cả hai số.
+    await h.db.orm.execute(sql`
+      UPDATE tickets SET status = 'cancelled', cancel_reason = ${TICKET_CANCEL_REASON.VOIDED}
+       WHERE id = ${tickets[0]!.id}`);
+    const overview = await overviewOf(sale.event.id);
+    expect(overview.checkin).toEqual({ checkedInCount: 2, validTicketCount: 5 });
+    const tab = CheckinEvent.parse(
+      (await h.http.get(`/v1/checkin/events/${sale.event.id}`).set('cookie', org.owner.cookie).expect(200)).body,
+    );
+    expect({ checkedInCount: tab.checkedInCount, validTicketCount: tab.validTicketCount }).toEqual(overview.checkin);
+  });
+});
+
 describe('quyền và phạm vi (REST và SSE)', () => {
   it('Admin xem được; chưa đăng nhập → 401; không phải thành viên → 403 NOT_A_MEMBER, không mở stream', async () => {
     const sale = await saleEvent();
@@ -339,7 +484,7 @@ describe('stream …/overview/live: event_orders_changed theo Sự kiện', () =
     expect(streamXUpper.messages).toHaveLength(1);
   });
 
-  it('Đơn có phí được IPN trả → stream nhận tín hiệu; doanh thu + total_amount, badge paid; Đơn của Sự kiện khác không tới', async () => {
+  it('Đơn có phí được IPN trả → stream nhận tín hiệu; doanh thu + paid_amount, badge paid; Đơn của Sự kiện khác không tới', async () => {
     const x = await saleEvent();
     const y = await saleEvent();
     const placed = await place(x, { quantity: 1 });
@@ -399,6 +544,45 @@ describe('stream …/overview/live: org_review_items_changed (Story 4.3)', () =>
     ]);
     expect((await overviewOf(y.event.id)).openReviewCount).toBe(1);
     expect((await overviewOf(x.event.id)).openReviewCount).toBe(0);
+  });
+});
+
+describe('stream …/overview/live: event_checkins_changed (Story 6.2)', () => {
+  it('quét xanh một Vé của X → stream Tổng quan X nhận {type} dưới 1 giây, REST thấy số mới; Sự kiện Y cùng BTC và BTC khác không nhận', async () => {
+    const x = await saleEvent();
+    const y = await saleEvent();
+    const other = await paidReadyOrg(h, { name: 'BTC khác' });
+    const z = await eventOnSale(other, [{ name: 'Vé mời', price: 0, capacity: 20 }]);
+    const xOrder = await place(x, { tier: 1, quantity: 2 });
+    const yOrder = await place(y, { tier: 1 });
+    const zOrder = await place(z, { tier: 0 });
+    for (const placed of [xOrder, yOrder, zOrder]) {
+      await expect.poll(() => signalsOf({ id: placed.orderId }).length).toBe(1);
+    }
+    await sleep(200);
+    const streamX = await live(x.event.id, org.owner.cookie);
+    const streamY = await live(y.event.id, org.owner.cookie);
+    const streamZ = await live(z.event.id, other.owner.cookie, other.orgId);
+    for (const s of [streamX, streamY, streamZ]) expect(s.status).toBe(200);
+    expect((await overviewOf(x.event.id)).checkin).toEqual({ checkedInCount: 0, validTicketCount: 2 });
+
+    // Mốc số tin của mỗi stream ngay trước khi quét: hub có thể nhận NOTIFY tạo Đơn muộn hơn listener của test, nên
+    // `event_orders_changed` có thể tới stream sau khi mở. Chỉ xét tín hiệu check-in tới sau mốc.
+    const marks = new Map([streamX, streamY, streamZ].map((s) => [s, s.messages.length]));
+    const checkinsAfterMark = (s: SseClient) =>
+      s.messages.slice(marks.get(s)).filter((m) => m.raw === CHECKINS_CHANGED).length;
+
+    await scanOk(x.event.id, xOrder.tickets[0]!);
+    await expect.poll(() => checkinsAfterMark(streamX), { timeout: 1_000 }).toBe(1);
+    expect((await overviewOf(x.event.id)).checkin).toEqual({ checkedInCount: 1, validTicketCount: 2 });
+
+    // Check-in ở BTC khác chỉ tới stream của Sự kiện đó.
+    await scanOk(z.event.id, zOrder.tickets[0]!, other.owner);
+    await expect.poll(() => checkinsAfterMark(streamZ), { timeout: 1_000 }).toBe(1);
+    await sleep(300);
+    expect(checkinsAfterMark(streamX)).toBe(1);
+    expect(checkinsAfterMark(streamY)).toBe(0);
+    expect(checkinsAfterMark(streamZ)).toBe(1);
   });
 });
 
