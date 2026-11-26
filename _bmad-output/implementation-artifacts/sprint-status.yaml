@@ -29,7 +29,7 @@
 # - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-26-2026 09:50
+last_updated: 11-26-2026 10:03
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -319,6 +319,8 @@ action_items:
     owner: "Mason"
     status: in-progress
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
+    note: "Phần Spec Change Log đã quyết (26/11/2026, E5-6): bỏ luật AI-4; Change Log
+      chỉ ghi khi bad_spec, ghi ở _bmad/custom/bmad-build.toml. Các phần còn lại vẫn mở"
   - id: "epic-3-retro-e3-1-siet-ipn-secret-tingee-cu"
     epic: 3
     action: "E3-1 (bảo mật, trước khi bán Vé có phí thật): siết điều kiện nhận IPN
@@ -605,8 +607,12 @@ action_items:
       bước đặt done hỏi về AC kiểm thủ công chưa làm; quyết giữ hay bỏ Spec Change
       Log và ngưỡng token của spec (retro G2, G3, G7, G8)"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
+    note: "Xong qua _bmad/custom/bmad-build.toml (26/11/2026, bmad-customize): persistent
+      facts cho action item có điều kiện thứ tự (G2), gỡ phần tử UI (A3), ngưỡng spec
+      5.000 token và Spec Change Log chỉ ghi khi bad_spec (G7, G8, Mason chốt: bỏ AI-4);
+      on_complete thêm mục Kiểm thủ công chưa làm chạy trước khi đặt done (G3)"
   - id: "epic-5-retro-e5-7-moi-truong-dev"
     epic: 5
     action: "E5-7 (ngay): chốt .env local về Tingee fake hoặc UAT, không trỏ production;
