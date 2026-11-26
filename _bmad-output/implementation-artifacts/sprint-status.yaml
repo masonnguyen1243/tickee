@@ -29,7 +29,7 @@
 # - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-25-2026 17:05
+last_updated: 11-26-2026 08:46
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -84,7 +84,7 @@ development_status:
   4-8-ảnh-sự-kiện-trên-object-storage: done
   epic-4-retrospective: done
 
-  epic-5: in-progress
+  epic-5: done
   5-1-link-mời-ctv-và-tab-check-in: done
   5-2-ctv-nhận-lời-mời: done
   5-3-quét-mã-qr-vé-xanh-đỏ: done
@@ -92,7 +92,7 @@ development_status:
   5-5-tra-tay-và-check-in-tay: done
   5-6-thu-hồi-khôi-phục-ctv-và-hết-quyền: done
   5-7-theo-dõi-check-in-realtime: done
-  epic-5-retrospective: optional
+  epic-5-retrospective: done
 
   epic-6: backlog
   6-1-tab-đơn-đầy-đủ: backlog
@@ -458,8 +458,8 @@ action_items:
     note: "Phần A (luật cấu hình) xong qua _bmad-output/implementation-artifacts/spec-epic-4-e4-3-luat-cau-hinh-tingee-va-canh-bao.md:
       production bắt buộc OPS_ALERT_EMAILS và giữ TINGEE_ORDER_STATUS_QUERY tắt; development
       từ chối TINGEE_BASE_URL không phải host local trừ khi đặt TINGEE_ALLOW_REAL_IN_DEVELOPMENT=true.
-      Còn lại phần B: single-flight + cooldown cho GET /v1/orgs/:orgId/token (ghi ở deferred-work.md).
-      Phần B xong qua _bmad-output/implementation-artifacts/spec-epic-4-e4-3-b-gom-loi-goi-doc-token.md"
+      Còn lại phần B: single-flight + cooldown cho GET /v1/orgs/:orgId/token (ghi
+      ở deferred-work.md). Phần B xong qua _bmad-output/implementation-artifacts/spec-epic-4-e4-3-b-gom-loi-goi-doc-token.md"
   - id: "epic-4-retro-e4-4-bao-mat-cong-khai"
     epic: 4
     action: "E4-4 (bảo mật; Next: ngay, còn lại trước Closed Beta): đối chiếu advisory
@@ -502,9 +502,9 @@ action_items:
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
     note: "Xong qua _bmad-output/planning-artifacts/sprint-change-proposal-2026-11-21-doi-chieu-spec-epic-4.md
       (21/11/2026), gồm cả phần AC 9.1. Mason chốt: câu Phase 1 thành \"đạt trên Tingee
-      fake, phần sandbox chờ Tingee và UAT (E3-3)\"; tên action audit mới dùng thì quá
-      khứ, giữ 9 tên mệnh lệnh cũ; queue của shared kernel dùng tiền tố platform. deferred-work.md
-      để E4-8 ghi \"Đã có AC 9.1\""
+      fake, phần sandbox chờ Tingee và UAT (E3-3)\"; tên action audit mới dùng thì
+      quá khứ, giữ 9 tên mệnh lệnh cũ; queue của shared kernel dùng tiền tố platform.
+      deferred-work.md để E4-8 ghi \"Đã có AC 9.1\""
   - id: "epic-4-retro-e4-8-ve-sinh-deferred-work"
     epic: 4
     action: "E4-8 (trước Story 5.1): gán story cho mọi mục mồ côi trong deferred-work.md;
@@ -542,3 +542,71 @@ action_items:
     owner: "Mason"
     status: open
     ref: "_bmad-output/implementation-artifacts/spec-epic-4-e4-8-ve-sinh-deferred-work.md"
+  - id: "epic-5-retro-e5-1-thu-hoi-ctv-chan-vao-lai"
+    epic: 5
+    action: "E5-1 (bảo mật, trước Sự kiện thật đầu tiên dùng check-in): thu hồi CTV
+      chặn được đường vào lại — tự xoay link mời hoặc hộp thoại bắt chọn Tạo link
+      mới, sửa câu chữ checker-view.ts:98; ghi vết tra tay (người, Sự kiện, thời điểm);
+      removeMember thu hồi dòng checkers trong BTC; CTV không nhận ticketTypes; màn
+      không có quyền có lối đăng xuất. Chi tiết ở ghi chú bảo mật local (retro A1,
+      A2, A3, R3)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
+  - id: "epic-5-retro-e5-2-realtime-o-cong"
+    epic: 5
+    action: "E5-2 (trước Sự kiện thật đầu tiên dùng check-in; hạn mới của E3-4, Mason
+      chốt 26/11): làm E3-4, thêm server đóng stream sau khoảng 15 phút và jitter
+      khi resync; tạm thời poll CheckinEvent 60 giây kể cả khi connected nếu E3-4
+      chưa kịp (retro R1, R4, R6)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
+  - id: "epic-5-retro-e5-3-kiem-thiet-bi-that"
+    epic: 5
+    action: "E5-3 (trước Sự kiện thật đầu tiên dùng check-in): checklist iPhone Safari
+      + Android Chrome qua HTTPS (camera, âm thanh, wake lock, chế độ máy bay, hai
+      máy đổi số ~1 giây); README đưa web dev qua HTTPS tới điện thoại; spec e2e-fullstack
+      cho quét và một test EventSource thật; giới hạn tuổi gửi lại; hướng dẫn vận
+      hành ở cổng (retro S1, R2, S4, R5)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
+  - id: "epic-5-retro-e5-4-doi-chieu-spec"
+    epic: 5
+    action: "E5-4 (trước Story 6.1 cho epics.md và spine; trước 7.6, 9.1, 9.2 cho
+      AC tương ứng): đối chiếu spine (bảng sở hữu checkin và flows, AD-25, AD-26,
+      AD-15, AD-31) và epics.md (NFR-3 thành NFR-2, AC 5.3 p95 ở staging chuyển 9.2,
+      nhãn người quét trước); AC 7.6 ẩn danh không parse được; AC 9.1 runbook xoay
+      khóa QR ràng qr_key_version; mục 9.2 chi phí fan-out (retro F1, F4, F5, F6,
+      S2, S3, S6, R7)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
+  - id: "epic-5-retro-e5-5-no-ky-thuat"
+    epic: 5
+    action: "E5-5: gom 4 bộ giới hạn tốc độ Postgres thành một helper (trước story
+      đầu tiên cần giới hạn mới); hash token vào platform/crypto; helper clientIp
+      và Idempotency-Key; tách checkin-event-screen.tsx trước story đầu tiên chạm
+      lại; cột checkin_method cùng 6.1 hoặc 6.5 (retro F2, F3, F7, S5)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
+  - id: "epic-5-retro-e5-6-quy-trinh-build"
+    epic: 5
+    action: "E5-6 (trước Story 6.1): bmad-build.toml bước 02 đọc action_items chưa
+      done có điều kiện khớp story hoặc file sắp chạm và trích nguyên văn điều kiện;
+      bước đặt done hỏi về AC kiểm thủ công chưa làm; quyết giữ hay bỏ Spec Change
+      Log và ngưỡng token của spec (retro G2, G3, G7, G8)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
+  - id: "epic-5-retro-e5-7-moi-truong-dev"
+    epic: 5
+    action: "E5-7 (ngay): chốt .env local về Tingee fake hoặc UAT, không trỏ production;
+      gỡ key merchant thật khỏi BTC test ở DB local; dev tự chạy migration khi khởi
+      động hoặc chuyển nhánh; README ghi các giới hạn hay chạm khi kiểm tay (retro
+      G4, G5)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
