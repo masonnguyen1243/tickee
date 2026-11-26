@@ -202,6 +202,7 @@ context:
 - **`orderTicketsOf(db, scope, eventId, orderId)`** nhận thêm `eventId` để lọc `event_id` theo Always. `reviewItemsOfOrder` chỉ lọc `orgScope` + `order_id` vì `review_items` không có `event_id`; Đơn đã được kiểm thuộc Sự kiện trước đó.
 - **Query sai và Sự kiện lạ:** route danh sách kiểm query (không chạm DB) trước, rồi kiểm Sự kiện trước mọi lần đọc; Sự kiện lạ kèm query hợp lệ → `404 EVENT_NOT_FOUND`. Route chi tiết kiểm Sự kiện trước mã Đơn.
 - **Phân trang trên web:** chỉ hiện nút dùng được ("Trang trước" ẩn ở trang đầu, "Trang sau" ẩn ở trang cuối) thay vì nút tắt, theo ràng buộc "nút bị tắt luôn kèm lý do". Có thêm nhãn "Trang n"; đổi trang thì focus về đầu danh sách.
+- Kiểm thủ công (26/11/2026): mở tab Đơn của một Sự kiện có Đơn thật ở 320px và 1280px; lọc và tìm; F5 vẫn giữ bộ lọc; mở `Sheet` thấy câu trả lời form và Vé — đạt. Mason tự kiểm trên dev stack local (`pnpm dev`, BTC Demo) theo danh sách: chip lọc và `trangThai` trên URL, tìm theo mã Đơn/email/số điện thoại, F5, `Sheet` của một Đơn.
 
 ## Spec Change Log
 
