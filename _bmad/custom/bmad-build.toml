@@ -7,6 +7,8 @@
 # `deferred-work.md`. Các luật dưới áp ở step-02 (nạp mục hoãn khi lập kế hoạch) và step-04/oneshot/step-01/step-02
 # (mục defer mới phải có đích), nên nằm ở `persistent_facts` chứ không ở bước kích hoạt. Luật mã và luật đóng mục dùng
 # chung cho step-02 và `on_complete`. Bước kết sổ nằm trong `on_complete`, chạy trước mục sprint-status.
+# Retro Epic 5 (G2, A3, G7, G8; E5-6): thêm luật action item có điều kiện thứ tự, luật gỡ phần tử UI, và quy ước cỡ spec
+# cùng Spec Change Log (Mason chốt 26/11/2026). Luật kiểm thủ công (G3) nằm ở `on_complete`, mục đầu tiên.
 persistent_facts = [
 '''
 Mục defer mới trong `{project-root}/_bmad-output/implementation-artifacts/deferred-work.md` phải có đích (Retro Epic 4 G1,
@@ -56,15 +58,80 @@ E4-8). Dùng chung cho luật nạp mục hoãn ở step-02 và mục "Mục ho�
   đóng mục bằng cách nêu tên nó. Dòng chứa "Story nhận (…): <mã>" giữ mục mở cho `<mã>`, kể cả khi dòng đó mở đầu bằng
   "Chấp nhận", "Trùng" hay "Đã có AC …". Phần chưa đóng của mục vẫn mở.
 ''',
+'''
+Action item có điều kiện thứ tự (Retro Epic 5 G2, E5-6). Ở step-02, cùng lúc nạp mục hoãn và trước khi viết spec, đọc
+mọi mục `action_items` có `status` khác `done` trong `{project-root}/_bmad-output/implementation-artifacts/sprint-status.yaml`.
+- Điều kiện thứ tự của một mục gom từ `action`, `note`, và khi `ref` là file retro thì cả cột hạn của dòng mục đó trong
+  bảng "Action item" của retro (bảng này có thể chặt hơn `action`: E3-4 ghi "trước Closed Beta" trong `action`, còn retro
+  Epic 4 ghi "nên xong trước 5.7"). Điều kiện thứ tự là các cụm như "trước Story X", "trước X.Y", "trước Epic N", "cùng X
+  hoặc Y", "trước story đầu tiên chạm `<file>`", "tách file trước story đầu tiên chạm lại".
+- Mục khớp khi điều kiện nêu: số story đang làm, hoặc một story sau nó mà story này phải đứng trước (so số như luật mã,
+  không khớp số kề); epic của story đang làm, khi đây là story đầu tiên của epic đó; hoặc một file hay thư mục có trong
+  Code Map hoặc Tasks của spec.
+- Mỗi mục khớp thành một mục `## Open Questions`, hỏi ở gate của step-02: trích nguyên văn điều kiện kèm `id`, rồi các
+  lựa chọn: làm trong spec này (thành Task), để lại (ghi vào Boundaries & Constraints › Never kèm `id` và lý do), hoặc
+  người dùng dời hạn (ghi thêm `note` vào mục trong `sprint-status.yaml`, nêu hạn mới và ngày). Không diễn đạt lại hạn,
+  không chỉ nêu hạn chung (vd. "trước Closed Beta") khi một nguồn có hạn chặt hơn. Khuyến nghị của agent đứng sau phần
+  trích.
+''',
+'''
+Gỡ phần tử UI (Retro Epic 5 A3, E5-6). Story, hoặc lượt sửa ở step-04, gỡ, ẩn hay thay một phần tử UI dùng chung
+(header, footer, menu, nút hay link điều hướng, banner, layout của route group) thì grep Review Triage Log của các spec
+trước (`{project-root}/_bmad-output/implementation-artifacts/spec-*.md`) theo tên phần tử, component và file của nó (vd.
+`SiteHeader`, `app/(checkin)/layout.tsx`). Ở step-02 grep trước khi chốt spec; ở step-04 grep trước khi áp lượt sửa.
+Lời bác (`reject`, `false`) nào dựa vào phần tử đó thì không còn đứng được: đưa vào spec thành Task (bù lối thay thế)
+hoặc Boundaries & Constraints › Never kèm lý do, và nêu spec cũ cùng dòng triage trong Code Map. Không gỡ phần tử nào
+thì bỏ qua luật này.
+''',
+'''
+Cỡ spec và Spec Change Log của dự án (Retro Epic 5 G7, G8; Mason chốt 26/11/2026, E5-6).
+- Ngưỡng token: dự án dùng 5.000 token thay cho 1.600 ở SCOPE STANDARD, ở gate "Token count" của step-02 và ở CHECKPOINT
+  1. Spec tới 5.000 token thì không hỏi Split, không cảnh báo; trên 5.000 mới hỏi như step-02 mô tả. Yêu cầu "một mục
+  tiêu người dùng" của SCOPE STANDARD giữ nguyên.
+- Spec Change Log giữ đúng nghĩa của skill: chỉ ghi khi step-04 quay lại vì `bad_spec`. Luật AI-4 của retro Epic 1 (ghi
+  mọi lệch spec vào Change Log) đã bỏ. Lệch có chủ đích so với `epics.md` hay spine ghi ở Boundaries & Constraints hoặc
+  Design Notes; lần đối chiếu spec sau mỗi retro gom các lệch đó về `epics.md` và spine.
+''',
 ]
 
 # Retro Epic 3 (F1, E3-9): Build chỉ đặt story `review`, nên sprint-status lệch sau mỗi story và phải sửa tay trên
 # `main`. Override này đặt `done` ngay trong nhánh của story, bằng một commit riêng sau commit của Build.
+# Retro Epic 5 (G3, E5-6): mục kiểm thủ công chạy đầu tiên, trước khi đặt `done`.
 on_complete = '''
+### Kiểm thủ công chưa làm
+
+Retro Epic 5 (G3, E5-6): 5/9 spec có mục kiểm thủ công không làm mà story vẫn `done`, và không mục nào thành mục hoãn.
+Chạy mục này đầu tiên, trước hai mục dưới. Đây là lần dừng chờ người dùng duy nhất được phép trước mục sprint-status.
+
+1. Kiểm nhánh như bước 1 của mục sprint-status. Nhánh là `main` (hoặc rỗng) thì không sửa file, không commit, báo người
+   dùng, rồi bỏ qua mục này.
+2. Đọc `{spec_file}`, lấy mọi mục kiểm thủ công: dòng trong `## Verification` › "Manual checks", và mọi AC ghi "kiểm
+   thủ công", "kiểm tay", "thử tay", "điện thoại thật" hay "thiết bị thật". Đối chiếu với `## Implementation Notes`,
+   kết quả review và những gì đã chạy trong lượt này. Mục chưa có bằng chứng đã kiểm (ghi "Chưa làm", "chưa thử tay",
+   hoặc không nhắc tới) là mục chưa làm. Không có mục chưa làm thì sang mục kế tiếp.
+3. Có mục chưa làm: hỏi người dùng đúng một câu, liệt kê từng mục (trích nguyên văn) với hai lựa chọn:
+   - **Kiểm ngay**: người dùng kiểm, hoặc agent kiểm khi làm được trên stack local (vd. Playwright, trình duyệt).
+   - **Hoãn**: kèm story hay action item nhận; agent đề xuất đích.
+   "Chấp nhận không kiểm" chỉ khi người dùng nói rõ. Dừng chờ trả lời; chưa chạy hai mục dưới.
+4. Theo trả lời, với mỗi mục (`<ngày>` dạng `dd/mm/yyyy`):
+   - Kiểm ngay, đạt: thêm vào `## Implementation Notes` của spec dòng
+     `- Kiểm thủ công (<ngày>): <mục> — đạt. <ai kiểm, kiểm thế nào>.`
+   - Kiểm ngay, không đạt: không đặt `done` và không chạy hai mục dưới. Báo người dùng; story giữ `review` để sửa.
+   - Hoãn hoặc chấp nhận: thêm một mục defer mới vào
+     `{project-root}/_bmad-output/implementation-artifacts/deferred-work.md` theo mẫu trong persistent facts
+     (`source_spec: {spec_file}`, summary nêu mục kiểm, evidence trích AC hoặc check, `story: <đích>` hoặc
+     `story: chấp nhận: <lý do>`), và thêm vào Implementation Notes dòng
+     `- Kiểm thủ công hoãn (<ngày>): <mục> → <đích>.`
+5. Có file đổi ở bước 4 thì commit riêng trên nhánh hiện tại, chỉ các file đó:
+   `git commit --only {spec_file} {project-root}/_bmad-output/implementation-artifacts/deferred-work.md -m "chore: <story_key hoặc id action item> kiểm thủ công"`
+   (bỏ `deferred-work.md` khỏi lệnh khi file này không đổi). Không push; báo người dùng một dòng kèm hash commit. Rồi
+   chạy hai mục dưới.
+
 ### Mục hoãn trong `deferred-work.md`
 
 Retro Epic 4 (G1, G9; E4-8): mục hoãn ghi "Story X" bị rơi khi story X đóng mà không bước nào quét lại. Chạy mục này
-ngay, trước mục "Sprint-status `done` trong nhánh của story" và trước khi dừng chờ người dùng.
+ngay sau mục "Kiểm thủ công chưa làm", trước mục "Sprint-status `done` trong nhánh của story" và trước khi dừng chờ
+người dùng.
 
 File: `{project-root}/_bmad-output/implementation-artifacts/deferred-work.md`. Không có file này thì bỏ qua mục này.
 `<ngày>` là ngày hệ thống dạng `dd/mm/yyyy`. `<mã>`, cách grep, mục giao cho `<mã>` và mục đã đóng theo đúng luật
@@ -106,7 +173,8 @@ File: `{project-root}/_bmad-output/implementation-artifacts/deferred-work.md`. K
 
 ### Sprint-status `done` trong nhánh của story
 
-Chạy mục này ngay, trước khi dừng chờ người dùng (kể cả khi bước trên vừa nói "Stop and wait for the user").
+Chạy mục này ngay sau hai mục trên, trước khi dừng chờ người dùng (kể cả khi bước trên vừa nói "Stop and wait for the
+user"). Mục "Kiểm thủ công chưa làm" có mục không đạt thì không chạy mục này.
 
 File: `{project-root}/_bmad-output/implementation-artifacts/sprint-status.yaml`. Không có file này thì bỏ qua mục này.
 

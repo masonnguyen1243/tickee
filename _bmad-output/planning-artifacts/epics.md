@@ -326,7 +326,7 @@ Người mua chọn Vé, đăng nhập, điền form, thanh toán qua Gateway, t
 **UX-DR chính:** UX-DR38, UX-DR40 (Token, Closed Beta bị thu hồi), UX-DR7 và UX-DR10 (ảnh Sự kiện, Story 4.8)
 
 ### Epic 5: Check-in tại cổng
-CTV nhận link mời, quét Vé xanh/đỏ dưới 1 giây, tra tay; Owner/Admin theo dõi check-in realtime và thu hồi CTV. Kiểm thử tải NFR-3 chuyển sang Story 9.2.
+CTV nhận link mời, quét Vé xanh/đỏ dưới 1 giây, tra tay; Owner/Admin theo dõi check-in realtime và thu hồi CTV. Kiểm thử tải phần quét (NFR-2) và đo p95 ở staging chuyển sang Story 9.2.
 **FRs covered:** FR-26, FR-27, FR-28, FR-29, FR-30
 **UX-DR chính:** UX-DR27–33, UX-DR39
 
@@ -1585,7 +1585,7 @@ So that trang Sự kiện và preview khi chia sẻ lên Zalo/Facebook hiện đ
 
 ## Epic 5: Check-in tại cổng
 
-CTV nhận link mời, quét Vé xanh/đỏ dưới 1 giây, tra tay; Owner/Admin theo dõi check-in realtime và thu hồi CTV. Kiểm thử tải NFR-3 chuyển sang Story 9.2.
+CTV nhận link mời, quét Vé xanh/đỏ dưới 1 giây, tra tay; Owner/Admin theo dõi check-in realtime và thu hồi CTV. Kiểm thử tải phần quét (NFR-2) và đo p95 ở staging chuyển sang Story 9.2.
 
 ### Story 5.1: Link mời CTV và tab Check-in
 
@@ -1673,14 +1673,14 @@ So that hàng người ở cổng đi nhanh và không ai vào bằng vé giả 
 
 **Given** UPDATE trả 0 dòng
 **When** đọc lại Vé
-**Then** cùng `scanId` → trả lại đúng kết quả lần đầu; cùng người quét trong 60 giây → kết quả trung tính "Bạn vừa check-in Vé này"; đã check-in bởi lượt khác → đỏ "Đã check-in lúc HH:MM · bởi {người}"; Vé `cancelled`, của Sự kiện khác, Sự kiện đã kết thúc → đỏ "Vé không hợp lệ" + một dòng lý do theo `ScanResult` (`CANCELLED`, `VOIDED`, `OTHER_EVENT`, `EVENT_ENDED`…) (FR-27, FR-28, AD-15)
+**Then** cùng `scanId` → trả lại đúng kết quả lần đầu; cùng người quét trong 60 giây → kết quả trung tính "Bạn vừa check-in Vé này"; đã check-in bởi lượt khác → đỏ "Đã check-in lúc HH:MM · bởi {người}", với {người} là tên tài khoản nếu có (Google), "bạn" nếu là chính người đang quét, còn lại là nhãn vai trò Owner, Admin hoặc "CTV khác" (tài khoản OTP không có tên); không lộ email *(spec 5.3-a)*; Vé `cancelled`, của Sự kiện khác, Sự kiện đã kết thúc → đỏ "Vé không hợp lệ" + một dòng lý do theo `ScanResult` (`CANCELLED`, `VOIDED`, `OTHER_EVENT`, `EVENT_ENDED`…) (FR-27, FR-28, AD-15)
 
 **Given** kết quả đỏ
 **When** hiển thị
 **Then** `scan-danger`, icon X bát giác, có âm thanh, giữ tới khi chạm "Chạm để quét tiếp"; mọi kết quả đọc bằng `aria-live="assertive"`; reduced motion → hiện tức thì (UX-DR30)
 
 **And** response quét không bao giờ chứa Mã QR vé, SĐT hay email; schema `ScanResult` trong `packages/contracts` (AD-15)
-**And** p95 thời gian từ lúc gửi tới lúc nhận kết quả < 1 giây ở staging, có metric riêng (NFR-2)
+**And** có metric riêng phía server cho lần quét (`tickee.checkin.scan.duration`). Phần "p95 từ lúc gửi tới lúc nhận kết quả < 1 giây ở staging" chuyển sang Story 9.2, vì Epic 5 chưa có staging (NFR-2) *(E5-4, retro Epic 5 F4)*
 
 ### Story 5.4: Quét song song và mất mạng
 
@@ -1700,7 +1700,7 @@ So that không có "đỏ giả" làm khách bị chặn oan, và không vé nà
 
 **Given** hai CTV quét cùng một Vé gần như đồng thời
 **When** cả hai request tới server
-**Then** đúng một người thấy xanh, người kia thấy đỏ kèm giờ và tên người quét lần trước (FR-28)
+**Then** đúng một người thấy xanh, người kia thấy đỏ kèm giờ và người quét lần trước (tên hoặc nhãn vai trò, như Story 5.3) (FR-28)
 
 **And** có test tích hợp chạy N request check-in song song (khác `scanId`, khác người quét) trên cùng một Vé với Postgres thật: đúng 1 thành công, `checked_in_at` không đổi sau lượt đầu; và test thử lại cùng `scanId` trả cùng kết quả (FR-28, AD-15)
 **And** không có hàng đợi quét offline; khi mất mạng chỉ báo, không ghi nhận cục bộ (ngoài phạm vi MVP)
@@ -1835,7 +1835,8 @@ So that tôi biết Hạng vé nào sắp hết để quyết định mở thêm
 **When** commit
 **Then** số liệu cập nhật realtime qua `event_orders_changed` và `event_checkins_changed` bằng `useLiveResource` (AD-17)
 
-**And** doanh thu chỉ tính Đơn `paid` theo `paid_amount`; Đơn `refunded` và `cancelled` không tính (FR-31)
+**And** doanh thu chỉ tính Đơn `paid` theo `paid_amount` (tiền đã nhận, khớp danh sách hoàn tiền AD-28); Đơn `refunded` và `cancelled` không tính (FR-31)
+**And** Story 3.11 dựng doanh thu bằng `total_amount`: story này đổi `ordering.eventRevenueOf` sang `SUM(paid_amount)` (spine AD-33) và thêm assert `revenue` vào test Duyệt tay lệch tiền (Đơn 300.000đ, nhận 250.000đ → doanh thu 250.000đ) *(Mason chốt 26/11/2026, E4-5 C1)*
 
 ### Story 6.3: Xuất CSV danh sách Đơn
 
@@ -1953,7 +1954,8 @@ So that không ai mua thêm, Vé cũ không vào cổng được và mọi Ngư�
 **Given** đã xác nhận
 **When** gọi `flows.cancelEvent`
 **Then** trong một transaction: khóa dòng Sự kiện `FOR UPDATE` và chuyển `cancelled` bằng compare-and-set; Đơn `pending` → `cancelled` (nhả chỗ); Đơn `paid` → `cancelled` với `cancel_reason = event_cancelled`; mọi Vé `valid` (kể cả đã check-in) → `cancelled`; enqueue email cho từng Người mua có Vé; audit ghi lại (FR-33, AD-27, AD-28, NFR-5)
-**And** Đơn đang `review` giữ nguyên `review` và loại cũ; `review_item` đang `open` của Đơn đó vẫn mở, nút "Duyệt tay phát Vé" bị tắt (Story 4.4); khoản tiền của mục đó nằm trong danh sách hoàn tiền của Story 7.2 (AD-28), vì Đơn `review` không ghi `paid_amount`
+**And** Đơn đang `review` → `cancelled` (`event_cancelled`) trong cùng transaction; `review_item` đang `open` của Đơn đó vẫn mở, và khoản tiền của mục nằm trong danh sách hoàn tiền của Story 7.2 (AD-28), vì Đơn `review` không ghi `paid_amount` *(Mason chốt 26/11/2026, E4-5 C3)*
+**And** mục `open` gắn Đơn `cancelled` (`event_cancelled`) hoặc `refunded`, mọi loại, chỉ có "Đã hoàn tay" và "Bỏ qua". Cả hai chỉ đóng mục, Đơn giữ nguyên. Sửa `closesOnly` và `reviewActionsFor` (`payment/review-actions.ts`) cùng bảng thao tác chép ở web (`can-xu-ly/review-actions.tsx`). Có test cho kịch bản: Đơn `review` lệch tiền → Ghép đủ tiền → `paid` → hủy Sự kiện → "Đã hoàn tay" đóng được mục lệch tiền, kể cả sau khi Đơn đã `refunded` *(retro Epic 4 C2)*
 
 **Given** Sự kiện đã hủy
 **When** người mua mở trang công khai, "Vé của tôi" hoặc link chia sẻ Vé
@@ -1961,7 +1963,7 @@ So that không ai mua thêm, Vé cũ không vào cổng được và mọi Ngư�
 
 **Given** tiền về cho Đơn của Sự kiện đã hủy sau thời điểm hủy
 **When** IPN hoặc Đối soát bù xử lý
-**Then** tạo `review_item` loại `event_cancelled`, không phát Vé (AD-7, AD-28)
+**Then** tạo `review_item` loại `event_cancelled`, không phát Vé; Đơn `expired` → `cancelled` (`event_cancelled`) thay vì `review` (sửa nhánh `event_cancelled` của `markPaid`); Đơn `cancelled`, `refunded` giữ nguyên (AD-3, AD-7, AD-28) *(E4-5 C3; đóng mục `deferred-work.md` "Đơn `review` chỉ có mục `event_cancelled`")*
 
 **And** email hủy có tên Sự kiện, mã Đơn, số tiền đã trả và câu "BTC sẽ liên hệ hoàn tiền"; khóa idempotent theo `(event, order)` (AD-12)
 **And** sửa Sự kiện, Hạng vé, link mời CTV đều bị chặn sau khi hủy; có test cho cả luồng hủy trong lúc có Đơn đang `pending`
@@ -1990,7 +1992,8 @@ So that tôi không sót người nào và biết lúc nào đã hoàn hết.
 **When** mở dashboard
 **Then** banner chuyển sang trạng thái "Đã hoàn tay hết" (UX-DR40)
 
-**And** dòng `review_item` (phần 2) dùng chung thao tác "Đã hoàn tay" của Story 4.4 (mục → `resolved` `refunded`); một khoản không bao giờ vào cả hai phần, vì "Duyệt tay phát Vé" của 4.4 đóng mục và ghi `paid_amount` qua `markPaid` trong cùng transaction
+**And** dòng `review_item` (phần 2) dùng chung thao tác "Đã hoàn tay" của Story 4.4 (mục → `resolved` `refunded`). Sau khi hủy, mọi Đơn có mục `open` đã ở `cancelled` (`event_cancelled`) hoặc `refunded` (Story 7.1). Vì vậy "Đã hoàn tay" bấm được ngay trên mọi dòng phần (2): BTC không phải "Từ chối" trước, và Người mua không nhận email "BTC đã hủy Đơn này" *(retro Epic 4 C3)*
+**And** một khoản không bao giờ vào cả hai phần, vì "Duyệt tay phát Vé" của 4.4 đóng mục và ghi `paid_amount` qua `markPaid` trong cùng transaction
 
 ### Story 7.3: Người mua báo cáo Sự kiện
 
@@ -2099,6 +2102,7 @@ So that dữ liệu cá nhân của tôi không còn được dùng, đúng quy�
 **Given** job `anonymize_user` chạy
 **When** xong
 **Then** tên, SĐT, email trên Đơn/Vé được thay bằng giá trị ẩn danh; Đơn, `payment_events`, `audit_events` không bị xóa cứng; số tiền, mã Đơn, thời điểm giữ lại ở dạng tối thiểu (FR-38, NFR-8)
+**And** giá trị ẩn danh của `orders.buyer_phone` và `orders.buyer_email` (hai cột `NOT NULL`) là giá trị mà `parseLookupQuery` (`packages/contracts/src/checkin.ts`) từ chối. Như vậy tra tay (Story 5.5, khớp đầy đủ sau chuẩn hóa) không bao giờ ra Vé của Người mua đã ẩn danh. Có test tra tay bằng chính giá trị ẩn danh *(retro Epic 5 S6)*
 **And** người đó không còn trong danh sách Đơn, CSV, Sheets của Sự kiện sắp diễn ra; Vé đã phát vẫn check-in được bằng mã nhưng không tra tay được (AD-24)
 **And** handler ẩn danh của mô-đun đồng bộ Sheets enqueue `integration.sheet_row_changed` cho mọi Đơn bị ẩn danh thuộc Sự kiện có kết nối Google Sheets, để lần flush kế tiếp ghi đè các cột tên, SĐT, email trên Sheet bằng giá trị ẩn danh (Story 6.5)
 **And** kết nối đang `auth_revoked` thì các dòng này được giữ trong hàng tồn đọng và ghi đè ngay khi BTC kết nối lại (Story 6.6); dashboard của BTC hiện cảnh báo "Có dữ liệu cần cập nhật lên Sheet"
@@ -2240,6 +2244,12 @@ So that Checkout, IPN và check-in luôn chạy, và một sự cố DB không l
 **Then** bucket bật CORS `GET` cho origin web. Trước khi mở upload ảnh, lặp lại 8 bước kiểm tay presign của spec 4.8-a trên nhà cung cấp thật: PUT dư 1 byte hoặc khác `content-type` đã ký bị từ chối, liệt kê bucket ẩn danh bị từ chối, CORS đúng origin (AD-22) *(retro Epic 4 E3)*
 **And** khi đặt CDN trước web, revalidate Sự kiện purge cả `/e/{slug}` lẫn đường dẫn ảnh OG của Sự kiện
 
+**Given** runbook xoay khóa Mã QR vé (`TICKET_QR_KEYS`; `deferred-work.md`, mục "Quy trình xoay khóa QR")
+**When** viết runbook và diễn tập ở staging
+**Then** runbook chọn một phương án ký lại (giữ khóa cũ tới khi mọi Vé của nó qua `effective_end_at`, công cụ ký lại tính lại `share_token_hash`, hoặc tách khóa link chia sẻ) và có lệnh tra `SELECT qr_key_version, count(*) FROM tickets WHERE status = 'valid' GROUP BY 1`. Khóa đã lộ không bao giờ được giữ lại trong `TICKET_QR_KEYS`; giữ khóa cũ chỉ áp cho xoay định kỳ (AD-16) *(retro Epic 5 S2)*
+**And** lệnh quét chỉ nhận Mã QR vé có phiên bản khóa `k` bằng `tickets.qr_key_version` (thêm điều kiện vào UPDATE check-in của AD-15)
+**And** mã đúng dạng mà instance thiếu phiên bản khóa thì phát marker `ticket_qr_key_missing` và gắn thuộc tính `unknown_key` cho metric quét, thay vì trả đỏ `BAD_SIGNATURE` mà không log gì *(retro Epic 5 S2, S3)*
+
 **Given** Postgres production có PITR và failover tự động
 **When** cấu hình sao lưu
 **Then** RPO ≤ 5 phút, RTO ≤ 1 giờ, giữ 14 ngày (NFR-5)
@@ -2268,7 +2278,9 @@ So that chúng tôi biết không bán quá số suất và biết khi nào ph�
 
 **Given** kịch bản check-in song song (vd. 20 CTV quét 300 Vé, có quét trùng)
 **When** chạy
-**Then** p95 quét < 1 giây và không Vé nào check-in hai lần (NFR-2, FR-28)
+**Then** p95 quét < 1 giây, đo phía client: script tải tính từ lúc gửi `POST /v1/checkin/events/:eventId/scans` tới lúc nhận đủ response (gồm mạng, session và guard), tính cả lượt đỏ; không Vé nào check-in hai lần (NFR-2, FR-28; chuyển từ AC 5.3)
+**And** báo cáo ghi kèm p95 của `http.server.request.duration` cho route quét và của `tickee.checkin.scan.duration` để chẩn đoán, không dùng làm tiêu chí *(Mason chốt 26/11/2026, E5-4)*
+**And** trong cùng lượt chạy, đo tải fan-out realtime: mỗi check-in làm mọi client đang mở tải lại `GET /v1/checkin/events/:eventId` (khoảng 7 câu SQL mỗi lần). Ghi p95 của GET này và tải DB (`deferred-work.md`, mục 5.7 có `story: 9.2`) *(retro Epic 5 R7)*
 
 **And** script tải nằm trong repo, chạy lại được bằng một lệnh; kết quả lưu thành báo cáo trong `docs/`
 **And** nếu không đạt, báo cáo ghi rõ điểm nghẽn và kích hoạt điều kiện xem lại phòng chờ (AD-37, Câu hỏi mở #5 của PRD)
