@@ -128,6 +128,7 @@ context:
 - **Ngoài Code Map:** `packages/contracts/test/event-overview.test.ts` khẳng định shape cũ nên phải sửa, thêm kiểm `checkin`, `ticketTypes`.
 - **Sau review:** stream check-in cho tín hiệu Đơn theo quyền `orders.view` (`roleHasPermission`), không theo `role !== null`; thêm test đếm số câu truy vấn của `GET …/overview` (1 Hạng vé và 4 Hạng vé bằng nhau); test stream `event_checkins_changed` chỉ xét tin sau mốc trước khi quét.
 - **Kiểm chứng (26/11/2026):** `pnpm typecheck`, `pnpm lint:deps` sạch; `pnpm test` xanh (contracts 378, web 493, api 1809); `pnpm test:e2e` 1386 xanh trên `ios-webkit` và `android-chromium`. Ảnh chụp Tổng quan ở 320, 768, 1024, 1280px bằng mock e2e lúc làm.
+- Kiểm thủ công (26/11/2026): Trên dev stack: mở Tổng quan của một Sự kiện có Đơn và check-in ở 320px và 1280px. Quét một Vé ở máy khác thì thẻ check-in đổi số; thêm một Đơn thì bảng Hạng vé và tab Check-in đổi số — đạt. Claude kiểm trên stack local `e2e:stack` (DB `tickee_e2e`, Tingee fake, Mailpit) + `next start`, đăng nhập BTC demo bằng OTP trong trình duyệt của app: 1280px và 1024px ba thẻ một hàng, 320px một cột, khối Hạng vé dạng danh sách, không cuộn ngang; quét Vé qua API (máy khác) → thẻ check-in 0/3 → 1/3 không tải lại trang; Đơn 0đ mới → bảng 3/15 → 5/15 Vé đã bán, thẻ check-in 1/3 → 1/5; trên tab Check-in, Đơn mới → 1/5 → 1/6 không cần check-in.
 
 ## Spec Change Log
 
