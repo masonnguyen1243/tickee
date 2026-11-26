@@ -3,6 +3,17 @@ export { type OrderingJobsConfig } from './buyer-email-jobs.js';
 // Tra tay (Story 5.5): id Đơn của Sự kiện khớp SĐT/email Người mua (`flows`).
 export { orderIdsByBuyerContact, type BuyerContactScope } from './buyer-contact-read.js';
 export { enqueueEventChangeEmail, EventChangeEmailQueues, paidBuyerCount } from './event-change-email-jobs.js';
+// Tab Đơn (Story 6.1): danh sách lọc ở server, phân trang keyset, chi tiết một Đơn (`reporting`).
+export {
+  eventOrderDetailOf,
+  eventOrdersPageOf,
+  type EventOrderAnswerRow,
+  type EventOrderDetailRow,
+  type EventOrderItemRow,
+  type EventOrderListRow,
+  type EventOrdersPageFilter,
+  type EventOrdersPageRows,
+} from './event-orders-read.js';
 export {
   eventRevenueOf,
   pendingPaymentCountOf,

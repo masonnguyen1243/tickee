@@ -3,13 +3,14 @@ import { OrderStatus, RECENT_ORDERS_LIMIT, type EventOverview } from '@tickee/co
 import type { AccessContext } from '../../platform/access/index.js';
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { assertEventOfOrganization } from '../event/index.js';
-import { eventRevenueOf, recentOrdersOf, reviewOrdersOf } from '../ordering/index.js';
-import { openReviewItemsOf, openReviewsOf } from '../payment/index.js';
+import { eventRevenueOf, recentOrdersOf } from '../ordering/index.js';
+import { openReviewsOf } from '../payment/index.js';
+import { eventOpenReviewItemsOf } from './event-open-reviews.js';
 
 /**
  * Tổng quan Sự kiện (Story 3.11, FR-31, AD-33): doanh thu, Đơn gần đây và số mục Cần xử lý (Story 4.3), chỉ đọc qua
  * read model của mô-đun sở hữu — `ordering` (`eventRevenueOf`, `recentOrdersOf`, `reviewOrdersOf`) và `payment`
- * (`openReviewsOf`, `openReviewItemsOf`; ghép ở đây vì `ordering` không được gọi `payment`). Không join bảng của mô-đun
+ * (`openReviewsOf`, `openReviewItemsOf`; ghép ở `reporting` vì `ordering` không được gọi `payment`). Không join bảng của mô-đun
  * khác, không truy vấn theo từng Đơn.
  */
 @Injectable()
@@ -52,16 +53,9 @@ export class EventOverviewService {
 
   /**
    * Số mục Cần xử lý `open` gắn Đơn của Sự kiện (`needs-action-card`, Story 4.3), ở mọi trạng thái Đơn (vd. trả trùng
-   * cho Đơn `paid`). Mục `open` của một BTC chỉ vài chục: đọc cả hàng của BTC rồi lọc theo Sự kiện của Đơn.
+   * cho Đơn `paid`). Cùng cách lấy với chip "Cần xử lý" của tab Đơn (`eventOpenReviewItemsOf`, Story 6.1).
    */
   private async eventOpenReviewCountOf(ctx: AccessContext, eventId: string): Promise<number> {
-    const items = await openReviewItemsOf(this.db.orm, ctx);
-    const orders = await reviewOrdersOf(
-      this.db.orm,
-      ctx,
-      items.flatMap((item) => (item.orderId ? [item.orderId] : [])),
-    );
-    const event = eventId.toLowerCase();
-    return items.filter((item) => item.orderId && orders.get(item.orderId)?.eventId === event).length;
+    return (await eventOpenReviewItemsOf(this.db.orm, ctx, eventId)).length;
   }
 }

@@ -234,8 +234,9 @@ export const eventOverviewLiveApiPath = (organizationId: string, eventId: string
 // ---------------------------------------------------------------------------------------------------------------
 
 /**
- * Tham số lọc theo Sự kiện của trang Cần xử lý trên web (`/btc/{id}/can-xu-ly?suKien={eventId}`): đích của
- * `needs-action-card` ở Tổng quan Sự kiện cho tới khi Story 6.1 đổi sang tab Đơn đã lọc.
+ * Tham số lọc theo Sự kiện của trang Cần xử lý trên web (`/btc/{id}/can-xu-ly?suKien={eventId}`): link "Xử lý ở trang
+ * Cần xử lý" trong `Sheet` chi tiết Đơn của tab Đơn (Story 6.1) dẫn tới đây. `needs-action-card` dẫn sang tab Đơn đã lọc
+ * Cần xử lý.
  */
 export const REVIEW_QUEUE_EVENT_PARAM = 'suKien';
 

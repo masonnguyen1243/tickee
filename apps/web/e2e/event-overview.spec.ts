@@ -436,21 +436,11 @@ test.describe('Tổng quan tự cập nhật', () => {
 
 test.describe('needs-action-card (Story 4.3)', () => {
   const card = (page: Page) => page.locator('[data-slot="needs-action-card"]');
-  const REVIEW_PATH = `/orgs/${ORG_ID}/review-items`;
 
-  test('có mục: "2 mục Cần xử lý" + "Xem các mục Cần xử lý" → trang Cần xử lý lọc theo Sự kiện, chip "Sự kiện: {tên} · Bỏ lọc"', async ({
+  test('có mục: "2 mục Cần xử lý" + "Mở tab Đơn, lọc Cần xử lý" → tab Đơn mở với chip "Cần xử lý" bật, URL trangThai=can-xu-ly, không tải lại trang (Story 6.1)', async ({
     page,
   }) => {
-    let filter: string | null = null;
-    await openApi(page, {}, {
-      [`GET ${REVIEW_PATH}`]: (request) => {
-        filter = new URL(request.url()).searchParams.get('eventId');
-        return {
-          status: 200,
-          body: { event: filter ? { id: EVENT_ID, name: 'Giải cầu lông Ba Đình 2026' } : null, items: [] },
-        };
-      },
-    });
+    const { calls } = await openApi(page);
     await page.goto(base);
     await expect(card(page)).toBeVisible();
     await expect(card(page).getByRole('heading', { name: 'Cần xử lý' })).toBeVisible();
@@ -460,14 +450,36 @@ test.describe('needs-action-card (Story 4.3)', () => {
     const ordersBox = (await page.locator('[data-slot="recent-orders-block"]').boundingBox())!;
     expect(cardBox.y + cardBox.height).toBeLessThanOrEqual(ordersBox.y);
 
-    const link = card(page).getByRole('link', { name: 'Xem các mục Cần xử lý' });
-    await expect(link).toHaveAttribute('href', `/btc/${ORG_ID}/can-xu-ly?suKien=${EVENT_ID}`);
+    const link = card(page).getByRole('link', { name: 'Mở tab Đơn, lọc Cần xử lý' });
+    await expect(link).toHaveAttribute('href', `${base}?tab=don&trangThai=can-xu-ly`);
+    await page.evaluate(() => ((window as unknown as { __mark: boolean }).__mark = true));
     await link.click();
-    await page.waitForURL(`**/btc/${ORG_ID}/can-xu-ly?suKien=${EVENT_ID}`);
-    const chip = page.locator('[data-slot="review-filter-chip"]');
-    await expect(chip).toContainText('Sự kiện: Giải cầu lông Ba Đình 2026');
-    await expect(chip.getByRole('link', { name: 'Bỏ lọc' })).toBeVisible();
-    expect(filter).toBe(EVENT_ID);
+    await page.waitForURL(`**${base}?tab=don&trangThai=can-xu-ly`);
+    await expect(page.getByRole('tab', { name: 'Đơn' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('button', { name: 'Cần xử lý', pressed: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Tất cả', pressed: false })).toBeVisible();
+    await expect
+      .poll(() => calls.filter((c) => c.method === 'GET' && c.path === `${eventPath}/orders`).length)
+      .toBeGreaterThanOrEqual(1);
+    expect(await page.evaluate(() => (window as unknown as { __mark?: boolean }).__mark)).toBe(true);
+  });
+
+  test('"Xem tất cả Đơn" của Đơn gần đây → tab Đơn (chip "Tất cả"), không tải lại trang (Story 6.1)', async ({ page }) => {
+    await openApi(page);
+    await page.goto(base);
+    const link = page.locator('[data-slot="recent-orders-block"]').getByRole('link', { name: 'Xem tất cả Đơn' });
+    await expect(link).toHaveAttribute('href', `${base}?tab=don`);
+    await page.evaluate(() => ((window as unknown as { __mark: boolean }).__mark = true));
+    await link.click();
+    await page.waitForURL(`**${base}?tab=don`);
+    await expect(page.getByRole('tab', { name: 'Đơn' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('button', { name: 'Tất cả', pressed: true })).toBeVisible();
+    expect(await page.evaluate(() => (window as unknown as { __mark?: boolean }).__mark)).toBe(true);
+    // Bấm lại tab Tổng quan: về URL gốc, vẫn không tải lại trang.
+    await page.getByRole('tab', { name: 'Tổng quan' }).click();
+    await page.waitForURL(`**${base}`);
+    await expect(statValue(page)).toHaveText('450.000đ');
+    expect(await page.evaluate(() => (window as unknown as { __mark?: boolean }).__mark)).toBe(true);
   });
 
   test('0 mục: "Không có gì cần xử lý.", không có liên kết', async ({ page }) => {
@@ -491,7 +503,7 @@ test.describe('needs-action-card (Story 4.3)', () => {
     await expect(card(page).locator('[data-slot="needs-action-value"]')).toHaveText('3 mục Cần xử lý', {
       timeout: 2_500,
     });
-    await expect(card(page).getByRole('link', { name: 'Xem các mục Cần xử lý' })).toBeVisible();
+    await expect(card(page).getByRole('link', { name: 'Mở tab Đơn, lọc Cần xử lý' })).toBeVisible();
     expect(await page.evaluate(() => (window as unknown as { __mark?: boolean }).__mark)).toBe(true);
   });
 });

@@ -43,8 +43,10 @@ export {
   openReviewItemsOf,
   openReviewsOf,
   reviewItemDetailOf,
+  reviewItemsOfOrder,
   type OpenReview,
   type OpenReviewItemRow,
+  type OrderReviewItemRow,
   type ReviewItemDetailRow,
   type ReviewScope,
 } from './review-read.js';

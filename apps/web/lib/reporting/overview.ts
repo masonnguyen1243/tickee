@@ -50,14 +50,23 @@ export const REVIEW_TYPE_LABEL: Readonly<Record<ReviewItemType, string>> = {
 };
 
 /**
- * Dòng loại dưới badge "Cần xử lý": lệch số tiền → "Lệch số tiền · nhận 250.000đ / Đơn 300.000đ" (không rõ số tiền nhận
- * → chỉ tên loại); loại khác → tên loại. Đơn không ở `review`, hay `review` mà không còn mục mở → `null`.
+ * Dòng loại của mục Cần xử lý `open` của một Đơn, ở mọi trạng thái Đơn (tab Đơn, Story 6.1: vd. trả trùng cho Đơn Đã
+ * thanh toán): lệch số tiền → "Lệch số tiền · nhận 250.000đ / Đơn 300.000đ" (không rõ số tiền nhận → chỉ tên loại); loại
+ * khác → tên loại. Không có mục mở → `null`.
  */
-export function reviewLine(order: Pick<RecentOrder, 'status' | 'review' | 'totalAmount'>): string | null {
-  if (order.status !== OrderStatus.REVIEW || !order.review) return null;
+export function reviewItemLine(order: Pick<RecentOrder, 'review' | 'totalAmount'>): string | null {
+  if (!order.review) return null;
   const label = REVIEW_TYPE_LABEL[order.review.type];
   if (order.review.type !== ReviewItemType.AMOUNT_MISMATCH || order.review.receivedAmount === null) return label;
   return `${label} · nhận ${formatVnd(order.review.receivedAmount)} / Đơn ${formatVnd(order.totalAmount)}`;
+}
+
+/**
+ * Dòng loại dưới badge "Cần xử lý" của "Đơn gần đây" (`reviewItemLine` chỉ cho Đơn `review`). Đơn không ở `review`, hay
+ * `review` mà không còn mục mở → `null`.
+ */
+export function reviewLine(order: Pick<RecentOrder, 'status' | 'review' | 'totalAmount'>): string | null {
+  return order.status === OrderStatus.REVIEW ? reviewItemLine(order) : null;
 }
 
 /** Cột Thời gian: "HH:mm" nếu cùng ngày với `now` (giờ Việt Nam), còn lại "dd/MM · HH:mm". */

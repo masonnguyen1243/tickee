@@ -1,6 +1,8 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import type { ApiConfig } from '../../platform/config/index.js';
 import { tingeePortalUrl } from '../organizer/index.js';
+import { EventOrdersController } from './event-orders.controller.js';
+import { EventOrdersService } from './event-orders.service.js';
 import { EventOverviewController } from './event-overview.controller.js';
 import { EventOverviewService } from './event-overview.service.js';
 import { NoticesController } from './notices.controller.js';
@@ -13,18 +15,25 @@ import { ReviewQueueService } from './review-queue.service.js';
 export type ReportingConfig = Pick<ApiConfig, 'TINGEE_BASE_URL'>;
 
 /**
- * Báo cáo, thông báo trạng thái (AD-34) kèm stream cấp BTC, Tổng quan Sự kiện và hàng Cần xử lý (Story 4.3) — chỉ đọc
- * qua read model của mô-đun khác (AD-33). Cần `DbModule` và `RealtimeModule` (toàn cục) ở gốc DI.
+ * Báo cáo, thông báo trạng thái (AD-34) kèm stream cấp BTC, Tổng quan Sự kiện, tab Đơn (Story 6.1) và hàng Cần xử lý
+ * (Story 4.3) — chỉ đọc qua read model của mô-đun khác (AD-33). Cần `DbModule` và `RealtimeModule` (toàn cục) ở gốc DI.
  */
 @Module({})
 export class ReportingModule {
   static forRoot(config: ReportingConfig): DynamicModule {
     return {
       module: ReportingModule,
-      controllers: [NoticesController, OrganizationLiveController, EventOverviewController, ReviewQueueController],
+      controllers: [
+        NoticesController,
+        OrganizationLiveController,
+        EventOverviewController,
+        EventOrdersController,
+        ReviewQueueController,
+      ],
       providers: [
         NoticesService,
         EventOverviewService,
+        EventOrdersService,
         ReviewQueueService,
         {
           provide: NOTICES_SETTINGS,

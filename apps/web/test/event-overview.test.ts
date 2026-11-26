@@ -121,10 +121,12 @@ describe('needs-action-card (Story 4.3)', () => {
     expect(needsActionValue(1)).toBe('1 mục Cần xử lý');
     expect(needsActionValue(12)).toBe('12 mục Cần xử lý');
     expect(needsActionValue(0)).toBe('Không có gì cần xử lý.');
-    expect(NEEDS_ACTION_LINK).toBe('Xem các mục Cần xử lý');
+    expect(NEEDS_ACTION_LINK).toBe('Mở tab Đơn, lọc Cần xử lý');
   });
+});
 
-  it('liên kết sang trang Cần xử lý đã lọc theo Sự kiện (?suKien=)', () => {
+describe('link "Xử lý ở trang Cần xử lý" trong Sheet chi tiết Đơn (Story 6.1)', () => {
+  it('reviewQueuePath: trang Cần xử lý đã lọc theo Sự kiện (?suKien=)', () => {
     const org = '019a3b2c-5678-7abc-8def-0123456789ab';
     const event = '019a3b2c-0712-7abc-8def-0123456789ab';
     expect(reviewQueuePath(org, event)).toBe(`/btc/${org}/can-xu-ly?suKien=${event}`);
