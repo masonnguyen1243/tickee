@@ -462,6 +462,7 @@ Các mục dưới đây bị reject trong triage của Epic 1 với lý do "ch�
   evidence: Review 3.3 (BH) triage #8. `ticketsOfOrder` → `signTicketQr` ném lỗi khi thiếu khóa, đúng như thiết kế; README đã dặn giữ khóa cũ. Cần một runbook xoay khóa (`SELECT DISTINCT qr_key_version FROM tickets`), và tùy chọn kiểm lúc khởi động.
 - Ghi thêm (13/11/2026, retro Epic 3 D1, E3-5): phạm vi xoay khóa rộng hơn Trang Đơn. Token link chia sẻ (AD-29, `ticketing/share-token.ts`) là HMAC bằng khóa con suy từ khóa `qr_key_version` của Vé. (1) Gỡ một phiên bản khóa: route công khai `GET /v1/shared-tickets/:token` 500, Chi tiết Vé 500, job email Vé retry rồi vào dead-letter. Spec nhỏ trước 4.1 sửa route công khai về `404` chung và thêm test Vé khóa cũ (Sprint Change Proposal 13/11/2026 §4.6); Chi tiết Vé, Trang Đơn và email vẫn là lỗi cấu hình. (2) Ký lại bằng `UPDATE tickets SET qr_key_version = 2`: QR đúng nhưng `share_token_hash` vẫn là hash của token cũ, nên mọi link, kể cả trong email đã gửi, 404 im lặng. Runbook của 4.7 phải chọn một trong ba: giữ khóa cũ trong `TICKET_QR_KEYS` tới khi mọi Vé của nó qua `effective_end_at` (chỉ ngừng ký Vé mới bằng khóa đó); công cụ ký lại tính lại `share_token_hash` và gửi lại email Vé (link cũ chết); hoặc tách khóa link chia sẻ khỏi khóa QR (đổi AD-29). Kèm lệnh tra `SELECT qr_key_version, count(*) FROM tickets WHERE status = 'valid' GROUP BY 1`.
 - Story nhận (21/11/2026, E4-8): 9.1. Phần còn lại là runbook xoay khóa QR (chọn phương án ký lại); kiểm lúc khởi động đã có ở 4.7-g.
+- Ghi thêm (26/11/2026, retro Epic 5 S2, S3, E5-4): AC 9.1 đã có khối runbook xoay khóa: khóa đã lộ không được giữ, quét ràng `qr_key_version`, marker `ticket_qr_key_missing` khi thiếu khóa. Spine AD-16 ghi luật ràng phiên bản.
 - source_spec: `_bmad-output/implementation-artifacts/spec-3-3-dang-ky-su-kien-mien-phi-va-nhan-ve-ngay.md`
   summary: Story 3.9/7.5. `BuyerTicket` chưa có `status`/`checkedInAt`, và `ticketsOfOrder` không lọc Vé `cancelled`. Khi đã có luồng hủy hoặc vô hiệu Vé, Vé đã hủy vẫn hiện thẻ với QR quét được.
   evidence: Review 3.3 (BH, EC) triage #11. Hiện chưa có đường nào đặt `tickets.status = 'cancelled'`. Story làm hủy Vé (7.1/7.5) hoặc hiển thị Vé (3.9: đã check-in hay đã hủy thì QR mờ .25 + badge) phải thêm `status` vào contract và render đúng.
@@ -844,6 +845,7 @@ Spec 4.2 đầy đủ khoảng 5.500 token. Mason chọn tách ba ngày 13/11/20
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-4-a-duyet-tay-tu-choi-va-hoan-tay.md`
   summary: Story 7.1/7.2. Đơn `review` chỉ có mục `event_cancelled` (tiền về sau khi Sự kiện bị hủy) giữ `review` sau khi BTC "Đã hoàn tay"/"Bỏ qua" mọi mục của nó, vì AD-3 không có `review → refunded` và 4.4-a chỉ đóng mục. Người mua thấy "BTC đang kiểm tra" mãi. Khi làm hủy Sự kiện, chốt chuyển Đơn này sang `cancelled` (`event_cancelled`) rồi `refunded`, hoặc để `flows.cancelEvent` chuyển cả Đơn `review`.
   evidence: Build 4.4-a. `payment/review-actions.ts` › `apply` (nhánh refund-only chỉ `closeItem`); test `review-actions.test.ts` "Sự kiện đã hủy: Đã hoàn tay đóng mục, Đơn giữ review". Hiện chưa xảy ra được: hủy Sự kiện là Story 7.1.
+- Story nhận (26/11/2026, E5-4): 7.1. Mason chốt Đơn `review` và Đơn `expired` có tiền về sau khi hủy chuyển `cancelled` (`event_cancelled`); mục của chúng chỉ đóng. AC 7.1, AD-3, AD-7, AD-28 đã ghi.
 
 ## Deferred from: code review of spec-4-4-b-ghep-voi-don.md (2026-11-16)
 
@@ -1275,3 +1277,11 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Chưa đo (maybe-false, nếu đúng thì medium): mỗi check-in làm mọi client đang mở (mọi điện thoại CTV + tab Owner/Admin) tải lại `GET /v1/checkin/events/:eventId` (3 câu: Sự kiện, `ticket_types`, `GROUP BY ticket_type_id` trên mọi Vé của Sự kiện qua `tickets_event_id_idx`), gom 1 giây mỗi client; Màn quét trả phí số theo Hạng vé mà không hiện. Đo p95 của GET này và tải DB lúc cổng đông; nếu nặng thì thêm index một phần `(event_id, ticket_type_id) WHERE status = 'valid'` kèm `checked_in_at`, hoặc đường chỉ tổng cho Màn quét.
   evidence: Review 5.7 (Blind Hunter BH12). `checkin/checkin-event.controller.ts` (`get`), `ticketing/check-in.ts` (`checkinCountsByTicketType`). Design Notes của spec 5.7 đã ghi đo ở 9.2.
   story: 9.2
+- Ghi thêm (26/11/2026, retro Epic 5 R7, E5-4): đếm thiếu. Mỗi lần tải lại tốn khoảng 7 câu SQL, không phải 3: tra session (không có `cookieCache`, `identity/auth.ts:59`), guard (`checkinEventById`, `checkerStatusOf`, tra membership), handler (`checkinEventById` lần nữa, `ticketTypesOf`, câu `GROUP BY`). Máy vừa quét xanh tải hai lần: một lần do tín hiệu SSE, một lần do `closeResult` invalidate (`checkin-event-screen.tsx:437`). Gợi ý: bỏ invalidate khi đang connected. AC 9.2 đã ghi phép đo.
+
+## Deferred from: đối chiếu spec sau Epic 5 (E5-4, 2026-11-26)
+
+- source_spec: `_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md` (F6)
+  summary: CTV đăng nhập bằng OTP không có tên, nên kết quả đỏ "đã check-in" hiện "bởi CTV khác" với mọi CTV. Khi nhiều CTV cùng cổng thì không biết ai quét trước. Cân nhắc cho CTV đặt tên hiển thị lúc nhận lời mời (Story 5.2).
+  evidence: Spec 5.3-a (`:25`), quyết định nhãn vai trò; kiểm hành vi retro Epic 5. AC 5.3, 5.4 đã sửa theo nhãn vai trò (E5-4).
+  story: chưa có; xét cùng E5-1 (luồng lời mời CTV).

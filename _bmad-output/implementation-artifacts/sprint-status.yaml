@@ -29,7 +29,7 @@
 # - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-26-2026 08:46
+last_updated: 11-26-2026 09:50
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -479,8 +479,12 @@ action_items:
       cho Đơn cancelled(event_cancelled) đã Ghép hoặc ghi cho 7.1; Trang Đơn có còn
       mời trả qua link khi BTC Tạm ngừng bán (retro C1, C2, C3, B2)"
     owner: "Mason"
-    status: open
+    status: in-progress
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
+    note: "C1, C2, C3 chốt qua _bmad-output/planning-artifacts/sprint-change-proposal-2026-11-26-doi-chieu-spec-epic-5.md (26/11/2026): doanh thu theo paid_amount
+      (AC 6.2, AD-33); Đơn review và Đơn expired có tiền về sau khi hủy Sự kiện chuyển
+      cancelled(event_cancelled), mục chỉ đóng (AC 7.1/7.2, AD-3, AD-7, AD-28). Còn
+      B2"
   - id: "epic-4-retro-e4-6-giu-cho-hang-loat"
     epic: 4
     action: "E4-6 (bảo mật, trước Closed Beta): chốt cách chặn giữ chỗ hàng loạt (trần
@@ -581,8 +585,10 @@ action_items:
       khóa QR ràng qr_key_version; mục 9.2 chi phí fan-out (retro F1, F4, F5, F6,
       S2, S3, S6, R7)"
     owner: "Mason"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
+    note: "Xong qua _bmad-output/planning-artifacts/sprint-change-proposal-2026-11-26-doi-chieu-spec-epic-5.md (26/11/2026), gồm cả AC 7.6, 9.1, 9.2. p95 quét
+      ở 9.2 đo phía client (câu hỏi mở 6)"
   - id: "epic-5-retro-e5-5-no-ky-thuat"
     epic: 5
     action: "E5-5: gom 4 bộ giới hạn tốc độ Postgres thành một helper (trước story

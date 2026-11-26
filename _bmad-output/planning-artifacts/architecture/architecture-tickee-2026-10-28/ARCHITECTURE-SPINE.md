@@ -35,7 +35,7 @@ companions:
 | `ordering` | Đơn, dòng Đơn, câu trả lời form (kèm nhãn), bản chụp người mua, mã Đơn, link Gateway, tồn kho `ticket_type_inventory`, sự kiện phễu mua |
 | `payment` | `payment_events`, Đối soát bù, hàng Cần xử lý (`review_items`) |
 | `ticketing` | Vé, bản chụp trên Vé, Mã QR vé, link chia sẻ Vé, trạng thái Vé và check-in |
-| `checkin` | Lời mời CTV, phân công CTV theo Sự kiện, màn quét, tra tay |
+| `checkin` | Lời mời CTV (`checker_invites`), CTV theo Sự kiện (`checkers`), cổng `CheckerAccessResolver` (AD-26), API đọc của Màn quét và tab Check-in (số check-in theo Hạng vé, GET và SSE), bộ giới hạn tốc độ tra tay. Điều phối quét, tra tay và check-in tay nằm ở `flows` (AD-25) vì chạm nhiều mô-đun. Module `@Global()` (như `ticketing`, `tingee`) để `PermissionGuard` của `organizer` lấy được cổng |
 | `reporting` | Dashboard, CSV, danh sách hoàn tiền, thông báo trạng thái (`notices`) — chỉ đọc |
 | `integration` | Kết nối Google Sheets và ánh xạ dòng, danh mục thông báo |
 | `admin` | Báo cáo vi phạm; endpoint của Quản trị Tingee. Ghi dữ liệu của mô-đun khác bằng service công khai của mô-đun đó (vd. Closed Beta qua `organizer`); chỉ luồng ghi từ hai mô-đun trở lên mới qua `flows` (AD-25: `lockEvent`/`lockOrganization`, `voidTickets`) |
@@ -124,13 +124,14 @@ stateDiagram-v2
   state "Đã hoàn tay" as refunded
   [*] --> pending: tạo Đơn (TX1)
   pending --> paid: IPN, Đối soát bù hoặc Đơn 0đ, số tiền khớp
-  pending --> review: lệch số tiền, Sự kiện đã hủy hoặc đã kết thúc
+  pending --> review: lệch số tiền hoặc Sự kiện đã kết thúc
   pending --> expired: Tingee xác nhận chưa trả, chưa có link sau 60s, hoặc quá trần cứng
   pending --> cancelled: Sự kiện bị hủy
   expired --> paid: tiền về muộn, còn chỗ
-  expired --> review: tiền về muộn mà hết chỗ, đã kết thúc hoặc bị khóa; lệch tiền; Sự kiện đã hủy
+  expired --> review: tiền về muộn mà hết chỗ, đã kết thúc hoặc bị khóa; lệch tiền
+  expired --> cancelled: tiền về sau khi Sự kiện bị hủy
   review --> paid: Owner/Admin duyệt tay, còn chỗ
-  review --> cancelled: Owner/Admin từ chối
+  review --> cancelled: Owner/Admin từ chối; Sự kiện bị hủy
   paid --> cancelled: Sự kiện bị hủy
   cancelled --> refunded: BTC đánh dấu đã hoàn tay
 ```
@@ -165,7 +166,7 @@ IPN `success` đi theo thứ tự kiểm cố định, dừng ở nhánh đầu 
 | --- | --- | --- |
 | 1 | `orderId` không tồn tại | không theo định dạng mã Đơn Tickee (AD-20) → lưu `payment_events`, không tạo `review_item` (BTC dùng Tingee cho việc khác); đúng định dạng → lưu `payment_events` với `order_id` null, `review_item` loại `unmatched` gắn BTC sở hữu `ipnKey`, cảnh báo |
 | 2 | Đơn của `orderId` không thuộc BTC sở hữu `ipnKey` (Tài khoản lệch) | lưu với `order_id` null, `review_item` loại `unmatched` gắn BTC sở hữu `ipnKey`, cảnh báo; không đụng Đơn của BTC kia |
-| 3 | Sự kiện đã hủy | Đơn → `review`; `review_item` loại `event_cancelled` (mỗi khoản tiền một mục), vào danh sách hoàn tiền |
+| 3 | Sự kiện đã hủy | Đơn `expired` → `cancelled` (`event_cancelled`) (từ Story 7.1; trước đó → `review`), trạng thái khác giữ nguyên; `review_item` loại `event_cancelled` (mỗi khoản tiền một mục), vào danh sách hoàn tiền |
 | 4 | Đơn đã `paid`/`cancelled`/`refunded`/`review` | `review_item` loại `duplicate_payment` gắn Đơn, Đơn giữ nguyên |
 | 5 | `paidAmount` ≠ `total_amount` | Đơn → `review`; `review_item` loại `amount_mismatch`, không phát Vé |
 | 6 | Tiền về muộn: Đơn `expired`, hoặc đồng hồ DB đã quá `effective_end_at` | đã kết thúc → `orphan` lý do `event_ended`; Đơn `expired` mà Sự kiện hoặc BTC bị khóa → `orphan` `event_locked` (Đơn `pending` của Sự kiện bị khóa đi bước 7); còn lại bán có điều kiện cả Đơn (AD-2): đủ chỗ → `expired` → `paid` + phát Vé, thiếu chỗ → `orphan` `sold_out`. `orphan` → Đơn `review` |
@@ -236,7 +237,8 @@ IPN của Cổng thanh toán không có trường số tài khoản/VA, nên kh�
 
 - **Binds:** FR-27, FR-28, FR-29, NFR-2; `ticketing`, `checkin`
 - **Prevents:** Hai CTV cùng thấy xanh cho một Vé; CTV thấy đỏ cho chính lượt mình vừa quét khi mất phản hồi.
-- **Rule:** Mọi check-in (quét hay tay) đi qua `ticketing.checkIn(tx, ticketId, eventId, userId, scanId)`. Hàm gọi `event.assertCheckinOpen(tx, eventId)` (chưa quá `effective_end_at`, không bị hủy) rồi chạy `UPDATE tickets SET checked_in_at=now(), checked_in_by=:user, checkin_scan_id=:scanId WHERE id=:id AND event_id=:event AND status='valid' AND checked_in_at IS NULL`. 0 dòng → đọc lại: cùng `scanId` → trả lại kết quả lần đầu; cùng người quét trong 60 giây → kết quả trung tính "Bạn vừa check-in Vé này"; còn lại → đỏ "đã check-in lúc X bởi Y" hoặc "vé không hợp lệ" theo lý do. Kết quả theo schema `ScanResult` trong `packages/contracts` (lý do: `BAD_SIGNATURE`, `CANCELLED`, `VOIDED`, `OTHER_EVENT`, `EXPIRED`, `CHECKER_REVOKED`, `EVENT_ENDED`). Response quét và tra tay không bao giờ chứa Mã QR vé. Client timeout 3 giây → hiện `offline-banner`, thử lại cùng `scanId`.
+- **Rule:** Mọi check-in (quét hay tay) đi qua `ticketing.checkIn(tx, ticketId, eventId, userId, scanId)`. Hàm gọi `event.assertCheckinOpen(tx, eventId)` (chưa quá `effective_end_at`, không bị hủy) rồi chạy `UPDATE tickets SET checked_in_at=now(), checked_in_by=:user, checkin_scan_id=:scanId WHERE id=:id AND event_id=:event AND status='valid' AND checked_in_at IS NULL`. 0 dòng → đọc lại: cùng `scanId` → trả lại kết quả lần đầu; cùng người quét trong 60 giây → kết quả trung tính "Bạn vừa check-in Vé này"; còn lại → đỏ "đã check-in lúc X bởi Y" hoặc "vé không hợp lệ" theo lý do. Kết quả theo schema `ScanResult` trong `packages/contracts` (lý do Vé không hợp lệ: `BAD_SIGNATURE`, `CANCELLED`, `VOIDED`, `OTHER_EVENT`, `EVENT_ENDED`). Không có `EXPIRED` riêng, vì Vé hết hiệu lực đúng lúc Sự kiện kết thúc. CTV bị thu hồi không nhận kết quả quét mà nhận `403 CHECKER_REVOKED` từ guard (AD-26). Response quét và tra tay không bao giờ chứa Mã QR vé. Client timeout 3 giây → hiện `offline-banner`, thử lại cùng `scanId`.
+- **Giới hạn của phát lại (Story 5.6):** từ mốc Sự kiện kết thúc, guard chặn CTV bằng `403 EVENT_ENDED` trước khi tới flow. Vì vậy CTV gửi lại cùng `scanId` ngay sau mốc đó nhận màn hết quyền, không nhận lại kết quả lần đầu; Owner/Admin vẫn được phát lại. Ca này chỉ xảy ra khi phản hồi mất đúng lúc BTC bấm "Kết thúc", hoặc ở mốc `effective_end_at`.
 
 ### AD-16 — Định dạng Mã QR vé
 
@@ -244,6 +246,7 @@ IPN của Cổng thanh toán không có trường số tài khoản/VA, nên kh�
 - **Prevents:** Mã QR vé giả hoặc đoán được; mã lộ thông tin cá nhân.
 - **Rule:** Nội dung `t<k>.<ticketId>.<sig>`, với `sig` = base64url(HMAC-SHA256(key_k, `t<k>.<ticketId>`)). Khóa đánh số phiên bản `k` (env), giữ khóa cũ để verify khi xoay vòng. Không chứa thông tin cá nhân. Khi quét: kiểm chữ ký trước, rồi tra DB (AD-15). Ảnh Social Ticket Card không chứa mã.
 - **Quyết định (Mason, 11/11/2026, Story 3.8):** không thêm `qr_version` vào phần được ký. Mã QR vé của một Vé không đổi suốt đời Vé; "Tạo lại link" chia sẻ (AD-29) chỉ thu hồi đường xem, không thu hồi mã đã bị thấy hay chụp. Đổi mã khi gửi nhầm chưa có ở MVP.
+- **Ràng phiên bản khóa khi quét** *(từ Story 9.1, retro Epic 5 S2)*: phiên bản `k` trong mã phải bằng `tickets.qr_key_version`. Trước 9.1, mọi phiên bản có trong `TICKET_QR_KEYS` đều được nhận. Khóa đã lộ không được giữ lại trong env; giữ khóa cũ để verify chỉ áp cho xoay định kỳ (runbook ở Story 9.1).
 
 ### AD-17 — Realtime chỉ là tín hiệu, REST là sự thật
 
@@ -317,14 +320,22 @@ Hiện thực (Story 3.11):
 
 - **Binds:** FR-8, FR-33, FR-35, FR-38; `apps/api/src/flows`
 - **Prevents:** Phụ thuộc vòng; mỗi người build tự lách ranh giới mô-đun theo một kiểu khi một luồng phải ghi nhiều mô-đun trong một transaction.
-- **Rule:** Luồng ghi chạm từ hai mô-đun trở lên trong một transaction nằm ở `flows/`, mở `tx` và gọi service công khai của từng mô-đun. Mô-đun không bao giờ gọi `flows`. Danh sách flow MVP: `createTicketType` (event + tồn kho ordering, kiểm trần 200 suất miễn phí; Sự kiện đã mở bán: tạo Hạng vé có phí hoặc đổi 0đ → có phí cần `paidSalesAllowed`, không thì `409 PAID_TICKET_TYPE_NOT_ALLOWED`; Sự kiện không còn nháp không xóa được Hạng vé cuối, `409 LAST_TICKET_TYPE`), `changeCapacity`, `updateEvent` (Story 3.10: `PATCH /v1/orgs/:orgId/events/:eventId` chuyển từ `event` sang `flows/event-edit.controller.ts`, cùng đường dẫn; `event.applyEventEdit(tx, …)` rồi enqueue email đổi giờ/địa điểm của `ordering` trong cùng `tx`, AD-12; cùng controller có `GET …/events/:eventId/buyer-count` → `{ buyers }`, `events.manage`), `cancelEvent` (AD-28), `lockEvent`/`lockOrganization` và `voidTickets` (AD-28), `deleteAccount` (AD-24), `acceptCheckerInvite` (AD-30).
+- **Rule:** Luồng ghi chạm từ hai mô-đun trở lên trong một transaction nằm ở `flows/`, mở `tx` và gọi service công khai của từng mô-đun. Mô-đun không bao giờ gọi `flows`. Danh sách flow MVP: `createTicketType` (event + tồn kho ordering, kiểm trần 200 suất miễn phí; Sự kiện đã mở bán: tạo Hạng vé có phí hoặc đổi 0đ → có phí cần `paidSalesAllowed`, không thì `409 PAID_TICKET_TYPE_NOT_ALLOWED`; Sự kiện không còn nháp không xóa được Hạng vé cuối, `409 LAST_TICKET_TYPE`), `changeCapacity`, `updateEvent` (Story 3.10: `PATCH /v1/orgs/:orgId/events/:eventId` chuyển từ `event` sang `flows/event-edit.controller.ts`, cùng đường dẫn; `event.applyEventEdit(tx, …)` rồi enqueue email đổi giờ/địa điểm của `ordering` trong cùng `tx`, AD-12; cùng controller có `GET …/events/:eventId/buyer-count` → `{ buyers }`, `events.manage`), `cancelEvent` (AD-28), `lockEvent`/`lockOrganization` và `voidTickets` (AD-28), `deleteAccount` (AD-24), `acceptCheckerInvite` (AD-30), `scanTicket` (AD-15), `lookupTickets` và `manualCheckIn` (tra tay, check-in tay).
+- **Luồng đọc ghép (từ Epic 5):** `flows/` còn chứa luồng chỉ đọc cần dữ liệu của từ hai mô-đun trở lên cho một màn, kèm controller của chúng (vd. `listCheckers`, `previewCheckerInvite`, `listTicketTypes`, `eventBuyerCount`). Luồng đọc ghép không mở transaction ghi. Màn BTC đọc nhiều mô-đun theo kiểu báo cáo (dashboard, CSV, Sheets) vẫn đi qua `reporting`/`integration` và read model (AD-33).
 
 ### AD-26 — Kiểm soát truy cập
 
 - **Binds:** FR-1, FR-2, FR-4, FR-26, FR-29, NFR-6, NFR-7; `platform`, `organizer`, `checkin`, `identity`, `admin`
 - **Prevents:** Mỗi mô-đun tự truy vấn vai trò theo một kiểu; Admin làm được việc chỉ Owner được làm; tài khoản đã bật 2FA dùng được mà chưa nhập mã; session bị đánh cắp đổi được tài khoản nhận tiền, chuyển quyền Owner hay đổi cách xác nhận lại của tài khoản mà không xác nhận lại.
 - **Rule:**
-  - `platform` định nghĩa cổng `AccessResolver` và decorator `@RequirePermission(perm)`; `organizer` và `checkin` cài đặt cổng (đăng ký lúc khởi động). Guard dựng `ctx = { userId, organizationId, role, assignedEventIds, stepUpAt }` trước controller; không mô-đun nào tự truy vấn vai trò.
+  - `platform` định nghĩa decorator `@RequirePermission(perm)` và hai cổng:
+    - `AccessResolver`: vai trò của user ở một BTC, do `organizer` cài đặt.
+    - `CheckerAccessResolver`: BTC sở hữu Sự kiện, trạng thái CTV của user ở Sự kiện (`active` | `revoked` | chưa nhận), và Sự kiện đã kết thúc chưa. Do `checkin` cài đặt; `PermissionGuard` inject bằng `@Optional()`.
+
+    Hai cổng đọc lại ở mỗi request, không cache. Không mô-đun nào tự truy vấn vai trò. Guard dựng ctx trước controller:
+    - Route BTC (`/v1/orgs/:orgId/…`): `AccessContext = { userId, organizationId, role, assignedEventIds, stepUpAt }`.
+    - Route CTV (`/v1/checkin/events/:eventId/…`): `EventAccessContext = { userId, organizationId, eventId, role, assignedEventIds, stepUpAt }`. Owner/Admin của BTC có `role` là vai và `assignedEventIds: []`; CTV `active` có `role: null` và `assignedEventIds: [eventId]`.
+    - CTV `revoked` nhận `403 CHECKER_REVOKED`. Từ mốc Sự kiện kết thúc, CTV nhận `403 EVENT_ENDED` từ guard (Story 5.6).
   - Enum quyền và ma trận FR-4 khai báo một lần trong `packages/contracts`. Mọi endpoint của BTC nằm dưới `/v1/orgs/:orgId/…`; endpoint của CTV nằm dưới `/v1/checkin/events/:eventId/…`.
   - Mỗi BTC có đúng một Owner: unique index một phần `members(organization_id) WHERE role='owner'`.
   - 2FA (TOTP, Better Auth `twoFactor`, `allowPasswordless: true`) là tính năng mọi tài khoản tự bật/tắt (`users.two_factor_enabled`). Tài khoản đã bật: session mới (Google hoặc OTP email) chưa qua lớp hai (`sessions.step_up_at` rỗng); mọi request ngoài danh sách miễn trả `TOTP_REQUIRED` cho tới khi nhập TOTP hoặc mã khôi phục; hiệu lực hết session. Luật này nằm ở một guard toàn cục của `identity`, chạy ngay sau `SessionGuard`, không nằm trong `PermissionGuard`. Danh sách miễn khai báo một chỗ trong `packages/contracts`. Step-up do `identity` tự dựng vì Better Auth không hỏi TOTP khi đăng nhập bằng Google hay OTP email.
@@ -346,7 +357,7 @@ Hiện thực (Story 3.11):
 
 - **Binds:** FR-33, FR-35, FR-37; `flows`, `event`, `ordering`, `ticketing`
 - **Prevents:** Vé hợp lệ được phát hoặc còn quét xanh cho Sự kiện đã hủy; danh sách hoàn tiền thiếu khoản tiền đã về, dù về trước hay sau khi hủy.
-- **Rule:** `flows.cancelEvent` trong một transaction: khóa dòng Sự kiện `FOR UPDATE` và chuyển `cancelled`; Đơn `pending` → `cancelled` (nhả chỗ); Đơn `paid` → `cancelled` với `cancel_reason = event_cancelled`; mọi Vé `valid` → `cancelled`; enqueue email cho người mua. Tiền về sau đó đi theo AD-7 (bước 3): mỗi khoản một `review_item` loại `event_cancelled`; Đơn `pending`/`expired` → `review`, Đơn `cancelled` (và `paid`, `review`) giữ nguyên. Danh sách hoàn tiền là truy vấn động gồm hai phần: (1) mọi Đơn có `paid_amount` > 0 thuộc Sự kiện, chưa `refunded`; (2) mọi `review_items` còn `open` gắn Đơn của Sự kiện, mọi loại (`event_cancelled`, `amount_mismatch`, `orphan`, `duplicate_payment`), mở trước hay sau khi hủy, mỗi mục một dòng, số tiền lấy từ `payment_events` của mục. Phần (2) phủ các khoản tiền đã về mà không thành `paid_amount`: Đơn `review`/`cancelled` không ghi `paid_amount`, và khoản trả thứ hai của Đơn `paid` nằm ở mục `duplicate_payment`. Mục `unmatched` không gắn Đơn nên không vào danh sách; nó ở hàng Cần xử lý của BTC. Một khoản không vào cả hai phần: duyệt tay phát Vé (Story 4.4) đóng mục và ghi `paid_amount` qua `markPaid` trong cùng transaction. Khóa Sự kiện hoặc BTC chỉ chặn bán (AD-21); Đơn `pending` vẫn được trả tiền và phát Vé, Đơn `expired` thì không được bán lại (AD-7 bước 6: `orphan` `event_locked`). `flows.voidTickets` (Quản trị Tingee chọn vô hiệu) chuyển Vé `valid` → `cancelled` với `cancel_reason = voided`, ghi audit.
+- **Rule:** `flows.cancelEvent` trong một transaction: khóa dòng Sự kiện `FOR UPDATE` và chuyển `cancelled`; Đơn `pending` → `cancelled` (nhả chỗ); Đơn `paid` và `review` → `cancelled` với `cancel_reason = event_cancelled`, mục `open` của Đơn giữ nguyên; mọi Vé `valid` → `cancelled`; enqueue email cho người mua. Tiền về sau đó đi theo AD-7 (bước 3): mỗi khoản một `review_item` loại `event_cancelled`; Đơn `expired` → `cancelled` (`event_cancelled`), Đơn `cancelled` và `refunded` giữ nguyên. Mục `open` gắn Đơn `cancelled` (`event_cancelled`) hoặc `refunded` chỉ có "Đã hoàn tay" và "Bỏ qua", cả hai chỉ đóng mục (Mason chốt 26/11/2026, E4-5 C2, C3). Danh sách hoàn tiền là truy vấn động gồm hai phần: (1) mọi Đơn có `paid_amount` > 0 thuộc Sự kiện, chưa `refunded`; (2) mọi `review_items` còn `open` gắn Đơn của Sự kiện, mọi loại (`event_cancelled`, `amount_mismatch`, `orphan`, `duplicate_payment`), mở trước hay sau khi hủy, mỗi mục một dòng, số tiền lấy từ `payment_events` của mục. Phần (2) phủ các khoản tiền đã về mà không thành `paid_amount`: Đơn `review`/`cancelled` không ghi `paid_amount`, và khoản trả thứ hai của Đơn `paid` nằm ở mục `duplicate_payment`. Mục `unmatched` không gắn Đơn nên không vào danh sách; nó ở hàng Cần xử lý của BTC. Một khoản không vào cả hai phần: duyệt tay phát Vé (Story 4.4) đóng mục và ghi `paid_amount` qua `markPaid` trong cùng transaction. Khóa Sự kiện hoặc BTC chỉ chặn bán (AD-21); Đơn `pending` vẫn được trả tiền và phát Vé, Đơn `expired` thì không được bán lại (AD-7 bước 6: `orphan` `event_locked`). `flows.voidTickets` (Quản trị Tingee chọn vô hiệu) chuyển Vé `valid` → `cancelled` với `cancel_reason = voided`, ghi audit.
 
 ### AD-29 — Link chia sẻ Vé
 
@@ -367,6 +378,7 @@ Hiện thực (Story 3.11):
 - **Binds:** FR-12, FR-13, FR-21, FR-27, FR-29, NFR-3; `ordering`, `payment`, `checkin`
 - **Prevents:** Mạng chập chờn sinh hai Đơn giữ gấp đôi chỗ; bấm hai lần ra hai thao tác.
 - **Rule:** Mọi `POST` tạo tài nguyên hoặc đổi trạng thái từ trình duyệt (tạo Đơn, thao tác Cần xử lý, đánh dấu hoàn tay, check-in tay) nhận header `Idempotency-Key` (UUID do client sinh). Tạo Đơn: `UNIQUE (user_id, idempotency_key)` trên `orders`; request trùng khóa trả Đơn đã có với trạng thái hiện tại và link nếu có. Mỗi người mua tối đa một Đơn `pending` cho mỗi Sự kiện (unique index một phần). Quét dùng `scanId` theo AD-15. Giới hạn tốc độ tạo Đơn và tra tay theo user và IP, đếm trong Postgres. Thao tác Cần xử lý (Story 4.4) bắt buộc `Idempotency-Key` nhưng không lưu khóa. Chống trùng dựa vào trạng thái mục: gửi lại đúng thao tác cho mục đã ở kết quả đó thì trả trạng thái hiện tại; thao tác không còn hợp lệ thì trả `409`.
+- **Ngoại lệ có chủ đích (Story 5.1, 5.6):** tạo link mời CTV và thu hồi/khôi phục CTV không nhận `Idempotency-Key`. Gửi lại lệnh tạo link chỉ sinh thêm một link và thu hồi link trước (AD-30). Thu hồi/khôi phục khi CTV đã ở trạng thái đích trả `204`, không ghi gì. Khác tiền lệ 4.4 (bắt buộc header nhưng không lưu): ở đây không đòi header.
 
 ### AD-32 — Trạng thái dịch vụ thanh toán của BTC
 
@@ -394,7 +406,7 @@ Hiện thực (Story 3.11):
 - **Binds:** FR-21, FR-30, FR-31, FR-32, FR-33; `reporting`, `integration`, `admin`, mô-đun sở hữu dữ liệu
 - **Prevents:** Dashboard và CSV join thẳng bảng của mô-đun khác, hoặc gọi service gây N+1.
 - **Rule:** Mô-đun sở hữu xuất read model chỉ đọc: view SQL `<module>_read_*` (migration của mô-đun đó) hoặc hàm query trong `index.ts`. `reporting`, `integration` và `admin` chỉ đọc dữ liệu mô-đun khác qua read model, không ghi. Đổi cột của bảng không được làm vỡ view mà không sửa view trong cùng migration.
-- **Hiện thực (Story 3.11, read model đầu tiên của `reporting`):** chọn hàm query, theo mẫu `ordering.paidBuyerCount`: đổi cột chỉ sửa hàm, và lọc được theo cả `organization_id` (`orgScope`) lẫn `event_id`. `ordering` xuất `eventRevenueOf` (tổng `total_amount` và số Đơn `paid`, tính cả Đơn 0đ) và `recentOrdersOf` (N Đơn mới nhất mọi trạng thái theo `created_at`, `id` giảm dần, kèm tổng `quantity`; hai câu, không gom dòng của mọi Đơn); `payment` xuất `openReviewsOf(db, orderIds)` (mục `review_items` `open` cũ nhất mỗi Đơn kèm `payment_events.paid_amount`, một câu `DISTINCT ON`). `ordering` không được gọi `payment`, nên `reporting` ghép loại Cần xử lý vào Đơn. Response `EventOverview` không có id nội bộ, email hay SĐT.
+- **Hiện thực (Story 3.11, read model đầu tiên của `reporting`):** chọn hàm query, theo mẫu `ordering.paidBuyerCount`: đổi cột chỉ sửa hàm, và lọc được theo cả `organization_id` (`orgScope`) lẫn `event_id`. `ordering` xuất `eventRevenueOf` (tổng `paid_amount` và số Đơn `paid`, tính cả Đơn 0đ; doanh thu là tiền đã nhận, khớp danh sách hoàn tiền AD-28. Story 3.11 dựng bằng `total_amount`, Story 6.2 đổi; Mason chốt 26/11/2026, E4-5 C1) và `recentOrdersOf` (N Đơn mới nhất mọi trạng thái theo `created_at`, `id` giảm dần, kèm tổng `quantity`; hai câu, không gom dòng của mọi Đơn); `payment` xuất `openReviewsOf(db, orderIds)` (mục `review_items` `open` cũ nhất mỗi Đơn kèm `payment_events.paid_amount`, một câu `DISTINCT ON`). `ordering` không được gọi `payment`, nên `reporting` ghép loại Cần xử lý vào Đơn. Response `EventOverview` không có id nội bộ, email hay SĐT.
 
 ### AD-34 — Thông báo trạng thái và điều kiện mở bán
 
