@@ -1294,3 +1294,4 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-3-xuat-csv-danh-sach-don.md`
   summary: Chưa kiểm (maybe-false, nếu đúng thì medium): `saveBlob` (`apps/web/lib/reporting/orders.ts`) thu hồi object URL ở `setTimeout(0)` ngay sau `click()`; với CSV vài MB, Safari hoặc Firefox có thể hủy tải trước khi đọc xong `Blob`. Hướng sửa nếu đúng: giữ URL lâu hơn (FileSaver.js giữ 40 giây).
   evidence: Review 6.3 (Edge Case Hunter, Review Triage #23). Mẫu `enroll-form.tsx:150-161` và e2e `ios-webkit` chỉ tải file nhỏ. Cần thử tải CSV vài MB (vài nghìn Đơn) trên Safari và Firefox thật.
+  story: E5-3
