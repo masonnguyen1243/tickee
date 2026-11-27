@@ -45,6 +45,10 @@ function apiRoleEnv(): Record<string, string> {
     TINGEE_BASE_URL: c.TINGEE_BASE_URL,
     TINGEE_CREDENTIAL_KEYS: c.TINGEE_CREDENTIAL_KEYS,
     TICKET_QR_KEYS: c.TICKET_QR_KEYS,
+    // Google Sheets (Story 6.4): bắt buộc ở vai api và worker.
+    GOOGLE_SHEETS_CLIENT_ID: c.GOOGLE_SHEETS_CLIENT_ID,
+    GOOGLE_SHEETS_CLIENT_SECRET: c.GOOGLE_SHEETS_CLIENT_SECRET,
+    GOOGLE_SHEETS_TOKEN_KEYS: c.GOOGLE_SHEETS_TOKEN_KEYS,
     // Ảnh Sự kiện (Story 4.8-a): bắt buộc ở vai api, worker không đọc.
     S3_ENDPOINT: c.S3_ENDPOINT,
     S3_BUCKET: c.S3_BUCKET,
@@ -201,6 +205,9 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
           'BETTER_AUTH_SECRET',
           'GOOGLE_CLIENT_ID',
           'GOOGLE_CLIENT_SECRET',
+          'GOOGLE_SHEETS_CLIENT_ID',
+          'GOOGLE_SHEETS_CLIENT_SECRET',
+          'GOOGLE_SHEETS_TOKEN_KEYS',
           'S3_ACCESS_KEY_ID',
           'S3_ENDPOINT',
           'S3_PUBLIC_BASE_URL',
@@ -215,6 +222,9 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
         'worker',
         // E4-3: `.env.example` để trống người nhận cảnh báo và bật Đối soát bù (hợp đồng tạm).
         [
+          'GOOGLE_SHEETS_CLIENT_ID',
+          'GOOGLE_SHEETS_CLIENT_SECRET',
+          'GOOGLE_SHEETS_TOKEN_KEYS',
           'OPS_ALERT_EMAILS',
           'REVALIDATE_SECRET',
           'TICKET_QR_KEYS',
@@ -364,6 +374,9 @@ describe('main.js theo APP_ROLE (tiến trình thật)', () => {
       TINGEE_BASE_URL: c.TINGEE_BASE_URL,
       TINGEE_CREDENTIAL_KEYS: c.TINGEE_CREDENTIAL_KEYS,
       TICKET_QR_KEYS: c.TICKET_QR_KEYS,
+      GOOGLE_SHEETS_CLIENT_ID: c.GOOGLE_SHEETS_CLIENT_ID,
+      GOOGLE_SHEETS_CLIENT_SECRET: c.GOOGLE_SHEETS_CLIENT_SECRET,
+      GOOGLE_SHEETS_TOKEN_KEYS: c.GOOGLE_SHEETS_TOKEN_KEYS,
       // Không có biến `S3_*`: object storage chỉ là việc của vai api (Story 4.8-a).
     });
     try {

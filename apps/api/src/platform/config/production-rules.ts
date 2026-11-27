@@ -15,17 +15,21 @@ export const ENV_EXAMPLE_SECRETS = {
   REVALIDATE_SECRET: 'local-dev-only-revalidate-doi-khoa-nay-o-moi-truong-that',
   GOOGLE_CLIENT_ID: 'local-placeholder.apps.googleusercontent.com',
   GOOGLE_CLIENT_SECRET: 'local-placeholder-secret',
+  GOOGLE_SHEETS_CLIENT_ID: 'local-placeholder-sheets.apps.googleusercontent.com',
+  GOOGLE_SHEETS_CLIENT_SECRET: 'local-placeholder-sheets-secret',
   S3_ACCESS_KEY_ID: 'tickee-local',
   S3_SECRET_ACCESS_KEY: 'tickee-local-secret',
 } as const;
 
 /**
- * Danh sách khóa mẫu của `.env.example` (`v<k>:<base64 của 32 byte>`). Ở `NODE_ENV=production`, `TINGEE_CREDENTIAL_KEYS`
- * và `TICKET_QR_KEYS` không được có khóa nào trùng byte với một trong hai khóa này, bất kể số phiên bản.
+ * Danh sách khóa mẫu của `.env.example` (`v<k>:<base64 của 32 byte>`). Ở `NODE_ENV=production`, `TINGEE_CREDENTIAL_KEYS`,
+ * `TICKET_QR_KEYS` và `GOOGLE_SHEETS_TOKEN_KEYS` không được có khóa nào trùng byte với một trong các khóa này, bất kể số
+ * phiên bản.
  */
 export const ENV_EXAMPLE_KEYS = {
   TINGEE_CREDENTIAL_KEYS: 'v1:H0ifJtEFLX+lF7uW8Yp0o5tbO7bfViFxKAaALW0fOWg=',
   TICKET_QR_KEYS: 'v1:XKzZ7wJ1m6M2fCq9yQb0n3T4sVhR8dLpA5eGiUoWkYc=',
+  GOOGLE_SHEETS_TOKEN_KEYS: 'v1:LyyLU9MIkhSXt+ZLRItxJoibMo60B6wmznw1cIxL9I4=',
 } as const;
 
 /**

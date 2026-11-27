@@ -236,6 +236,33 @@ const storage = {
 };
 
 /**
+ * Google Sheets (Story 6.4, FR-32, AD-23), chung cho vai api (bắt đầu OAuth, đổi `code` lấy refresh token rồi mã hóa) và
+ * worker (giải mã refresh token, lấy access token, tạo và ghi Sheet). OAuth client riêng với đăng nhập Google (Story 1.4,
+ * `GOOGLE_CLIENT_*`): có thể cùng giá trị với client đăng nhập (thêm redirect URI) hoặc client khác. Scope `drive.file`.
+ * Ba URL Google mặc định là endpoint thật; test và stack e2e trỏ vào Google fake.
+ */
+const googleSheets = {
+  /**
+   * OAuth client "Web application" của Google cho Google Sheets. Redirect URI đăng ký trên Google phải là
+   * `<API_PUBLIC_URL>/v1/integrations/google-sheets/callback`. Client secret là secret: không bao giờ log.
+   */
+  GOOGLE_SHEETS_CLIENT_ID: z.string().min(1),
+  GOOGLE_SHEETS_CLIENT_SECRET: z.string().min(1),
+  /**
+   * Khóa AES-256-GCM mã hóa refresh token Google (và `code_verifier` PKCE đang chờ) trong DB: cùng dạng
+   * `TINGEE_CREDENTIAL_KEYS` (`v<k>:<base64 của 32 byte>`, nhiều khóa cách nhau bằng dấu phẩy, không trùng `k`). Khác khóa
+   * của `TINGEE_CREDENTIAL_KEYS` và `TICKET_QR_KEYS`. Sinh khóa: `openssl rand -base64 32`. Không bao giờ log.
+   */
+  GOOGLE_SHEETS_TOKEN_KEYS: credentialKeys,
+  /** Endpoint ủy quyền OAuth của Google (trình duyệt được chuyển tới đây). */
+  GOOGLE_OAUTH_AUTHORIZE_URL: httpUrl.default('https://accounts.google.com/o/oauth2/v2/auth'),
+  /** Endpoint đổi `code` / refresh token lấy token của Google. */
+  GOOGLE_OAUTH_TOKEN_URL: httpUrl.default('https://oauth2.googleapis.com/token'),
+  /** Origin của Google Sheets API (client thêm `/v4/spreadsheets…`). */
+  GOOGLE_SHEETS_API_URL: httpOrigin.default('https://sheets.googleapis.com'),
+};
+
+/**
  * Danh sách CIDR cách nhau bằng dấu phẩy (`parseCidrList`) → CIDR đã chuẩn hóa, không trùng. Lỗi chỉ nêu sai gì và ở mục
  * thứ mấy, không bao giờ nêu giá trị.
  */
@@ -283,6 +310,7 @@ const apiConfigFields = z.object({
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
   ...tingeeAndTickets,
+  ...googleSheets,
   ...storage,
   ...telemetry,
   ...opsAlerts,
@@ -311,7 +339,16 @@ const text = (config: Readonly<Record<string, unknown>>, variable: string): stri
 const EXAMPLE_VALUE_MESSAGE = 'là giá trị mẫu của .env.example; môi trường thật phải sinh giá trị riêng';
 
 /** Biến URL phải là `https:` khi `NODE_ENV=production`. `OTEL_EXPORTER_OTLP_ENDPOINT` không kiểm (collector nội bộ). */
-const HTTPS_VARIABLES = ['API_PUBLIC_URL', 'WEB_ORIGIN', 'TINGEE_BASE_URL', 'S3_ENDPOINT', 'S3_PUBLIC_BASE_URL'];
+const HTTPS_VARIABLES = [
+  'API_PUBLIC_URL',
+  'WEB_ORIGIN',
+  'TINGEE_BASE_URL',
+  'S3_ENDPOINT',
+  'S3_PUBLIC_BASE_URL',
+  'GOOGLE_OAUTH_AUTHORIZE_URL',
+  'GOOGLE_OAUTH_TOKEN_URL',
+  'GOOGLE_SHEETS_API_URL',
+];
 
 /** Luật chung cho mọi vai (Story 4.7-a, 4.7-b, E4-3), theo thứ tự báo lỗi. */
 const CROSS_RULES: readonly CrossRule[] = [
@@ -381,6 +418,21 @@ const CROSS_RULES: readonly CrossRule[] = [
     uses: ['TINGEE_CREDENTIAL_KEYS'],
     check: (c) => !sharesKey(text(c, 'TICKET_QR_KEYS') ?? '', text(c, 'TINGEE_CREDENTIAL_KEYS') ?? ''),
     message: 'dùng chung khóa với TINGEE_CREDENTIAL_KEYS',
+  },
+  // Mọi môi trường (Story 6.4): khóa mã hóa refresh token Google riêng, không dùng chung với khóa credential Tingee hay
+  // khóa ký Mã QR vé (lộ một danh sách không được kéo theo hai bí mật kia). Một issue mỗi biến: luật sau bỏ qua khi luật
+  // trước đã báo.
+  {
+    variable: 'GOOGLE_SHEETS_TOKEN_KEYS',
+    uses: ['TINGEE_CREDENTIAL_KEYS'],
+    check: (c) => !sharesKey(text(c, 'GOOGLE_SHEETS_TOKEN_KEYS') ?? '', text(c, 'TINGEE_CREDENTIAL_KEYS') ?? ''),
+    message: 'dùng chung khóa với TINGEE_CREDENTIAL_KEYS',
+  },
+  {
+    variable: 'GOOGLE_SHEETS_TOKEN_KEYS',
+    uses: ['TICKET_QR_KEYS'],
+    check: (c) => !sharesKey(text(c, 'GOOGLE_SHEETS_TOKEN_KEYS') ?? '', text(c, 'TICKET_QR_KEYS') ?? ''),
+    message: 'dùng chung khóa với TICKET_QR_KEYS',
   },
   // Mọi môi trường: cookie session đặt ở miền này phải tới được cả api lẫn web.
   {
@@ -457,6 +509,8 @@ const workerConfigFields = z.object({
    * (E4-3); story thay hợp đồng tạm bằng hợp đồng thật gỡ luật đó.
    */
   TINGEE_ORDER_STATUS_QUERY: z.stringbool().default(false),
+  /** Cùng giá trị với vai api (Story 6.4): worker giải mã refresh token, tạo và ghi Sheet. */
+  ...googleSheets,
   ...telemetry,
   ...opsAlerts,
   ...opsAlertDelivery,

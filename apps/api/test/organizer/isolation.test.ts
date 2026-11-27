@@ -141,6 +141,10 @@ describe('cách ly BTC', () => {
     expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/orders/:code');
     // Story 6.3: xuất CSV danh sách Đơn của `reporting` (`orders.view`).
     expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/orders/export');
+    // Story 6.4: kết nối Google Sheets của `integration` (Owner và Admin, `events.manage`).
+    expect(guarded).toContain('GET /v1/orgs/:orgId/events/:eventId/google-sheets');
+    expect(guarded).toContain('POST /v1/orgs/:orgId/events/:eventId/google-sheets/connect');
+    expect(guarded).toContain('DELETE /v1/orgs/:orgId/events/:eventId/google-sheets');
     // Story 4.2-b: stream cấp BTC của `reporting` (Owner và Admin, như `notices`).
     expect(guarded).toContain('GET /v1/orgs/:orgId/live');
     // Story 4.2-c: trạng thái bán trên dashboard của `ordering` (ngoài tiền tố `…/events/`, như danh sách Sự kiện).
@@ -183,6 +187,9 @@ describe('cách ly BTC', () => {
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/orders/:code')).toBe(Permission.ORDERS_VIEW);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/orders/export')).toBe(Permission.ORDERS_VIEW);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/pending-payment-count')).toBe(Permission.EVENTS_MANAGE);
+    expect(permissionOf('/v1/orgs/:orgId/events/:eventId/google-sheets')).toBe(Permission.EVENTS_MANAGE);
+    expect(permissionOf('/v1/orgs/:orgId/events/:eventId/google-sheets/connect', 'POST')).toBe(Permission.EVENTS_MANAGE);
+    expect(permissionOf('/v1/orgs/:orgId/events/:eventId/google-sheets', 'DELETE')).toBe(Permission.EVENTS_MANAGE);
     expect(permissionOf('/v1/orgs/:orgId/live')).toBe(Permission.ORG_READ);
     expect(permissionOf('/v1/orgs/:orgId/notices')).toBe(Permission.ORG_READ);
     expect(permissionOf('/v1/orgs/:orgId/event-sale-status')).toBe(Permission.EVENTS_MANAGE);
@@ -405,15 +412,17 @@ describe('cách ly BTC', () => {
   it('route Sự kiện trên BTC A: body {} → 400, id ngẫu nhiên → 404 EVENT_NOT_FOUND', async () => {
     const eventRoutes = routes.filter((r) => r.permission && r.path.startsWith('/v1/orgs/:orgId/events'));
     // Story 5.1: thêm `GET`/`POST …/checker-invite` (25). Story 5.6: danh sách, thu hồi, khôi phục CTV (28). Story 6.1:
-    // danh sách và chi tiết Đơn (30). Story 6.3: xuất CSV danh sách Đơn (31).
-    expect(eventRoutes).toHaveLength(31);
+    // danh sách và chi tiết Đơn (30). Story 6.3: xuất CSV danh sách Đơn (31). Story 6.4: trạng thái, kết nối và ngắt
+    // kết nối Google Sheets (34).
+    expect(eventRoutes).toHaveLength(34);
     for (const route of eventRoutes) {
       const res = await call(route, orgA, ownerA.cookie);
       // Body được kiểm trước khi chạm DB; danh sách Sự kiện của BTC trả 200; còn lại Sự kiện ngẫu nhiên → 404.
-      // Mở bán, Ẩn, Hiện lại, Kết thúc, Tạo link mời CTV, thu hồi/khôi phục CTV không có body nên cũng ra 404.
+      // Mở bán, Ẩn, Hiện lại, Kết thúc, Tạo link mời CTV, thu hồi/khôi phục CTV, kết nối Google Sheets không có body nên
+      // cũng ra 404.
       const hasBody =
         (route.method === 'POST' || route.method === 'PATCH' || route.method === 'PUT') &&
-        !/\/events\/:eventId\/(publish|hide|unhide|end|checker-invite|checkers\/:checkerId\/(revoke|restore))$/.test(
+        !/\/events\/:eventId\/(publish|hide|unhide|end|checker-invite|checkers\/:checkerId\/(revoke|restore)|google-sheets\/connect)$/.test(
           route.path,
         );
       const expected = hasBody ? 400 : route.path === '/v1/orgs/:orgId/events' ? 200 : 404;

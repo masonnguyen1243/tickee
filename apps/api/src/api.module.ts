@@ -5,6 +5,7 @@ import { AdminModule } from './modules/admin/index.js';
 import { CheckinLookupLimitModule, CheckinModule } from './modules/checkin/index.js';
 import { EventModule } from './modules/event/index.js';
 import { IdentityModule } from './modules/identity/index.js';
+import { IntegrationModule } from './modules/integration/index.js';
 import { OrderingModule } from './modules/ordering/index.js';
 import { OrganizerModule } from './modules/organizer/index.js';
 import { PaymentModule } from './modules/payment/index.js';
@@ -83,6 +84,9 @@ export class ApiModule {
         // IPN Tingee (Story 3.5): `POST /v1/payments/tingee/ipn/:ipnKey` → `ordering.markPaid` / `markExpired`; IPN lỗi
         // đếm cho luật cảnh báo `ipn_failures` (Story 4.6-e).
         PaymentModule.forRoot(config),
+        // Google Sheets (Story 6.4): trạng thái, kết nối, ngắt kết nối (route BTC dùng `PermissionGuard` toàn cục của
+        // OrganizerModule) và callback OAuth; chỉ enqueue lần đẩy đầu, worker gọi Google.
+        IntegrationModule.forRoot(config),
         // Hạng vé và tồn kho (Story 2.8), sửa thông tin Sự kiện kèm email báo Người mua và số Người mua (Story 3.10):
         // ghi/đọc cả `event` lẫn `ordering` nên controller ở flows.
         FlowsModule,

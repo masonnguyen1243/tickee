@@ -317,6 +317,37 @@ bị khóa cả gửi lẫn xác minh (`OTP_LOCKED`). Muốn thử lại ngay �
 
 Hai biến này bắt buộc với vai api; test và CI dùng giá trị giả (test chặn lời gọi tới token endpoint của Google).
 
+### Google Sheets
+
+Owner/Admin nối một Sự kiện với một Google Sheet ở tab Cài đặt › "Google Sheets" (Story 6.4): OAuth riêng với đăng nhập
+Google, scope `drive.file` (Tickee chỉ đọc/ghi file do chính Tickee tạo; scope không nhạy cảm nên không cần Google thẩm
+định app). Xong OAuth, worker tạo spreadsheet "Tickee · <tên Sự kiện>" trong Drive của người cấp, ghi hàng tiêu đề và
+mọi Đơn `paid`/`review`/`cancelled`/`refunded`, rồi kết nối chuyển "Đã kết nối". Refresh token lưu mã hóa bằng
+`GOOGLE_SHEETS_TOKEN_KEYS`. "Ngắt kết nối" xóa token, Sheet giữ nguyên trong Drive.
+
+1. Google Cloud Console → APIs & Services: bật **Google Sheets API** cho project (Library). OAuth consent screen như mục
+   trên; thêm scope `.../auth/drive.file`. Chế độ **Testing** chỉ để thử ở local: chỉ Test users đồng ý được và refresh
+   token hết hạn sau 7 ngày (kết nối thành "Mất quyền"). Staging/production phải đặt Publishing status của consent screen
+   là **In production**; `drive.file` không nhạy cảm nên không cần Google thẩm định app.
+2. Credentials → OAuth client ID loại **Web application** (dùng lại client đăng nhập ở trên cũng được, chỉ thêm redirect
+   URI). Authorized redirect URIs: `http://localhost:3001/v1/integrations/google-sheets/callback` (tức
+   `<API_PUBLIC_URL>/v1/integrations/google-sheets/callback`; staging/production thêm URI theo `API_PUBLIC_URL` của môi
+   trường đó).
+3. Đặt `GOOGLE_SHEETS_CLIENT_ID`, `GOOGLE_SHEETS_CLIENT_SECRET` vào `.env` (không commit). `GOOGLE_SHEETS_TOKEN_KEYS` của
+   `.env.example` dùng được ở local; môi trường thật sinh khóa riêng: `openssl rand -base64 32`, viết dạng
+   `v1:<kết quả>`, khác mọi khóa của `TINGEE_CREDENTIAL_KEYS` và `TICKET_QR_KEYS`. Khởi động lại api và worker (cả hai
+   đọc cùng nhóm biến, cùng giá trị).
+4. Mở một Sự kiện → Cài đặt → "Kết nối Google Sheets", đồng ý trên Google; quay về tab Cài đặt, vài giây sau thấy "Đã
+   kết nối", link "Mở Google Sheet" và giờ đồng bộ.
+
+Ba biến bắt buộc với vai api và worker; `.env.example` có giá trị giữ chỗ để khởi động được (nút kết nối chỉ chạy khi đặt
+client thật). `GOOGLE_OAUTH_AUTHORIZE_URL`, `GOOGLE_OAUTH_TOKEN_URL`, `GOOGLE_SHEETS_API_URL` mặc định là endpoint thật của
+Google; test và stack e2e (`pnpm --filter @tickee/api e2e:stack`) trỏ vào Google fake (`apps/api/test/google-fake`, tự
+đồng ý). Google lỗi tạm thời (429, 5xx, timeout) hoặc lỗi cấu hình phía Tickee (`invalid_client`/`unauthorized_client`,
+Sheets API chưa bật: `SERVICE_DISABLED`/`accessNotConfigured`) thì kết nối "Lỗi, đang thử lại" và worker thử lại có
+backoff, hết lượt thì job vào dead-letter (cảnh báo vận hành tự báo; sửa cấu hình rồi requeue từ `/admin`); mất quyền
+(`invalid_grant`, các 401/403 khác) thì "Mất quyền", không thử lại.
+
 ### Quản trị Tingee (`/admin`)
 
 Cờ `users.platform_admin` chỉ cấp/thu bằng CLI, không có UI hay API nào làm việc này. CLI chạy bằng role
@@ -370,17 +401,19 @@ giờ nêu giá trị.
 
 | Luật | Biến | Lý do trong log |
 | ---- | ---- | --------------- |
-| https | `API_PUBLIC_URL`, `WEB_ORIGIN`, `TINGEE_BASE_URL`, `S3_ENDPOINT`, `S3_PUBLIC_BASE_URL`. `OTEL_EXPORTER_OTLP_ENDPOINT` không kiểm (collector nội bộ có thể dùng http) | `phải là https khi NODE_ENV=production` |
-| Không dùng giá trị mẫu của `.env.example` | `BETTER_AUTH_SECRET`, `REVALIDATE_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`: đúng giá trị mẫu. `TINGEE_CREDENTIAL_KEYS`, `TICKET_QR_KEYS`: mọi khóa trùng byte với một trong hai khóa mẫu, bất kể số phiên bản `v<k>` | `là giá trị mẫu của .env.example; môi trường thật phải sinh giá trị riêng` |
+| https | `API_PUBLIC_URL`, `WEB_ORIGIN`, `TINGEE_BASE_URL`, `S3_ENDPOINT`, `S3_PUBLIC_BASE_URL`, `GOOGLE_OAUTH_AUTHORIZE_URL`, `GOOGLE_OAUTH_TOKEN_URL`, `GOOGLE_SHEETS_API_URL`. `OTEL_EXPORTER_OTLP_ENDPOINT` không kiểm (collector nội bộ có thể dùng http) | `phải là https khi NODE_ENV=production` |
+| Không dùng giá trị mẫu của `.env.example` | `BETTER_AUTH_SECRET`, `REVALIDATE_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_SHEETS_CLIENT_ID`, `GOOGLE_SHEETS_CLIENT_SECRET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`: đúng giá trị mẫu. `TINGEE_CREDENTIAL_KEYS`, `TICKET_QR_KEYS`, `GOOGLE_SHEETS_TOKEN_KEYS`: mọi khóa trùng byte với một trong các khóa mẫu, bất kể số phiên bản `v<k>` | `là giá trị mẫu của .env.example; môi trường thật phải sinh giá trị riêng` |
 | Dải IP Quản trị Tingee (Story 4.7-a) | `ADMIN_ALLOWED_CIDRS` | `thiếu` |
 | Cookie dùng chung web và api | `AUTH_COOKIE_DOMAIN`, khi host của `API_PUBLIC_URL` khác host của `WEB_ORIGIN`: SSR của web chuyển tiếp cookie của web sang api (`apps/web/lib/api/server.ts`) | `thiếu` |
 | Người nhận cảnh báo vận hành (E4-3), chỉ worker | `OPS_ALERT_EMAILS` không đặt hoặc rỗng: cảnh báo phát hiện lúc không có người nhận chỉ ra log mà vẫn ghi dấu chống lặp, đặt biến sau cũng không gửi lại | `thiếu` |
 | Đối soát bù tắt (E4-3), chỉ worker | `TINGEE_ORDER_STATUS_QUERY` bật: API tra đơn Gateway mới có hợp đồng tạm mà chỉ Tingee fake hiểu. Không có cờ thoát; story thay hợp đồng tạm bằng hợp đồng thật sẽ gỡ luật này | `phải tắt khi NODE_ENV=production cho tới khi API tra đơn của Tingee có hợp đồng thật` |
 
-Hai luật áp ở mọi môi trường, cả local:
+Ba luật áp ở mọi môi trường, cả local:
 
 - `TICKET_QR_KEYS` không được có khóa trùng byte với một khóa của `TINGEE_CREDENTIAL_KEYS`, bất kể số phiên bản. Lỗi:
   `TICKET_QR_KEYS (dùng chung khóa với TINGEE_CREDENTIAL_KEYS)`.
+- `GOOGLE_SHEETS_TOKEN_KEYS` (Story 6.4) không được có khóa trùng byte với một khóa của `TINGEE_CREDENTIAL_KEYS` hay
+  `TICKET_QR_KEYS`. Lỗi: `GOOGLE_SHEETS_TOKEN_KEYS (dùng chung khóa với TINGEE_CREDENTIAL_KEYS)` (hoặc `… TICKET_QR_KEYS`).
 - `AUTH_COOKIE_DOMAIN`, nếu đặt, phải là miền cha của host `API_PUBLIC_URL` và host `WEB_ORIGIN`: so không phân biệt hoa
   thường, bỏ dấu `.` đầu; host phải bằng miền này hoặc kết thúc bằng `.<miền>`. Vd. `tickee.vn` (hay `.Tickee.VN`) nhận
   `https://api.tickee.vn` và `https://tickee.vn`. Không kiểm danh sách hậu tố công khai. Lỗi:
@@ -398,7 +431,7 @@ Một luật chỉ chạy khi các biến nó dùng (kể cả `NODE_ENV`) khôn
 Image không có `.env.example`, nên giá trị mẫu nằm trong `apps/api/src/platform/config/production-rules.ts`. Sửa giá trị
 mẫu trong `.env.example` thì sửa cả file này: `apps/api/test/config.test.ts` đọc `.env.example` và đỏ nếu hai nơi lệch.
 Mỗi môi trường sinh secret và khóa riêng bằng `openssl rand -base64 32` (khóa viết dạng `v1:<kết quả>`; sinh
-`TINGEE_CREDENTIAL_KEYS` và `TICKET_QR_KEYS` riêng).
+`TINGEE_CREDENTIAL_KEYS`, `TICKET_QR_KEYS` và `GOOGLE_SHEETS_TOKEN_KEYS` riêng).
 
 ### Web chạy thật
 
@@ -528,7 +561,8 @@ Thành công qua SSE trong ≤ 3 giây → email Vé). Sự kiện của test do
 - Kết quả, trace và log của api, worker, Tingee fake, seed: `apps/web/test-results-fullstack/` (log ở `stack-logs/`). CI
   upload thư mục này khi test lỗi.
 - Chỉ dựng stack (không web, không test) để thử bằng tay: `pnpm --filter @tickee/api e2e:stack` (cần `apps/api/dist`;
-  log ở `apps/api/test-results/e2e-stack/`, Ctrl+C để tắt).
+  log ở `apps/api/test-results/e2e-stack/`, Ctrl+C để tắt). Stack chạy thêm Google fake ở cổng 4020 (Story 6.4): "Kết
+  nối Google Sheets" tự đồng ý, link "Mở Google Sheet" mở trang xem ô của fake.
 
 ### Biến build của web
 
@@ -570,6 +604,9 @@ Biến môi trường được kiểm bằng Zod theo vai khi khởi động; th
 | `AUTH_COOKIE_DOMAIN`     | api         | tùy chọn; tên miền cha cho cookie session (vd. `tickee.vn`). Đặt thì phải là miền cha của host `API_PUBLIC_URL` và `WEB_ORIGIN` (mọi môi trường); bắt buộc ở production khi hai host khác nhau |
 | `SMTP_URL`, `EMAIL_FROM` | api, worker | api gửi email OTP/2FA; worker gửi email từ job (lời mời Admin); local là Mailpit `smtp://localhost:1025` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | api | bắt buộc; OAuth client Google, redirect URI `<API_PUBLIC_URL>/v1/auth/callback/google` |
+| `GOOGLE_SHEETS_CLIENT_ID`, `GOOGLE_SHEETS_CLIENT_SECRET` | api, worker | bắt buộc (Story 6.4); OAuth client Google của Google Sheets (scope `drive.file`), redirect URI `<API_PUBLIC_URL>/v1/integrations/google-sheets/callback`. Có thể cùng client với đăng nhập Google. Secret: không log, không commit (xem "Google Sheets") |
+| `GOOGLE_SHEETS_TOKEN_KEYS` | api, worker | bắt buộc (Story 6.4); khóa AES-256-GCM mã hóa refresh token Google (và `code_verifier` PKCE đang chờ), cùng dạng `TINGEE_CREDENTIAL_KEYS` nhưng là khóa khác (dùng chung với `TINGEE_CREDENTIAL_KEYS` hay `TICKET_QR_KEYS` thì api/worker dừng, ở mọi môi trường). **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`. Sinh khóa: `openssl rand -base64 32` |
+| `GOOGLE_OAUTH_AUTHORIZE_URL`, `GOOGLE_OAUTH_TOKEN_URL`, `GOOGLE_SHEETS_API_URL` | api, worker | mặc định endpoint thật của Google (`https://accounts.google.com/o/oauth2/v2/auth`, `https://oauth2.googleapis.com/token`, `https://sheets.googleapis.com`); chỉ đặt khi trỏ vào Google fake (test, stack e2e). `NODE_ENV=production` bắt `https` |
 | `TINGEE_BASE_URL`        | api, worker | bắt buộc; origin Tingee Open API (UAT `https://uat-open-api.tingee.vn`). Env không có credential Tingee: mỗi BTC nhập API key của mình ở trang Tài khoản nhận tiền. `.env` local phải là `http://localhost:4010` (Tingee fake mà `pnpm dev` chạy sẵn): `NODE_ENV=development` mà host không phải local (Tingee thật, kể cả UAT) thì api và worker không khởi động, trừ khi đặt `TINGEE_ALLOW_REAL_IN_DEVELOPMENT=true` (xem "Hai bẫy của `.env` local"). Với Tingee fake: BTC demo của `pnpm db:seed` đã liên kết sẵn, hoặc nhập key merchant demo (`demo-btc-co-tai-khoan` / `demo-secret-co-tai-khoan`: có tài khoản; `demo-btc-chua-lien-ket` / `demo-secret-chua-lien-ket`: chưa liên kết ngân hàng). Worker đọc cùng ba biến Tingee/Vé với api (cùng giá trị): Đối soát bù (Story 4.1) đi cùng đường xử lý IPN và phát Vé |
 | `TINGEE_CREDENTIAL_KEYS` | api, worker | bắt buộc; khóa AES-256-GCM mã hóa Secret Token Tingee của BTC: `v<k>:<base64 của 32 byte>`, nhiều khóa cách nhau bằng dấu phẩy, không trùng `k`. Mã hóa bằng khóa có `k` lớn nhất, giải mã theo tiền tố `v<k>:` của ciphertext; xoay khóa thì thêm khóa mới và giữ khóa cũ. **Không bao giờ đổi giá trị của phiên bản đã dùng**: muốn đổi thì thêm `v<k+1>`; đổi giá trị mà giữ `k` thì api không giải mã được Secret Token đã lưu (local: `pnpm db:seed` mã hóa lại key demo, xem "Hai bẫy của `.env` local"). Sinh khóa: `openssl rand -base64 32`. `pnpm db:seed` cũng đọc biến này để mã hóa key demo |
 | `TINGEE_ALLOW_REAL_IN_DEVELOPMENT` | api, worker | mặc định tắt; cờ opt-in (E4-3): `true` cho `NODE_ENV=development` gọi Tingee thật (`TINGEE_BASE_URL` có host không phải local, kể cả UAT), vd. thử UAT qua đường hầm cho E3-3. Chỉ có tác dụng ở `development`; `test` và `production` bỏ qua cờ. `.env.example` để comment (xem "Hai bẫy của `.env` local") |

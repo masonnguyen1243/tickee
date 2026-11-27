@@ -202,7 +202,17 @@ export type AuditAction =
    * lần xuất, trong transaction riêng, trước byte đầu tiên của file. `changedFields` ghi bộ lọc: `status:<chip>`
    * (`EventOrderFilter`) và `q:<code|email|phone>` (loại giá trị tìm); không bao giờ ghi giá trị tìm.
    */
-  | 'event_orders.exported';
+  | 'event_orders.exported'
+  /**
+   * Owner/Admin kết nối Google Sheets cho Sự kiện (Story 6.4, FR-32; actor: người cấp OAuth; đối tượng: `{ type: 'event',
+   * id }`), cùng transaction tạo kết nối và enqueue lần đẩy đầu, ở callback OAuth. Không ghi token, `code` hay `state`.
+   */
+  | 'sheet_connection.created'
+  /**
+   * Owner/Admin ngắt kết nối Google Sheets của Sự kiện (Story 6.4; đối tượng: `{ type: 'event', id }`): xóa kết nối cùng
+   * refresh token, dừng đồng bộ; Sheet giữ nguyên trong Drive. Không gọi Google.
+   */
+  | 'sheet_connection.deleted';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

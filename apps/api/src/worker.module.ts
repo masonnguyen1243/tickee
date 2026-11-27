@@ -2,6 +2,7 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { CheckinJobsModule } from './modules/checkin/index.js';
 import { EventJobsModule } from './modules/event/index.js';
 import { IdentityJanitorModule } from './modules/identity/index.js';
+import { IntegrationJobsModule } from './modules/integration/index.js';
 import { OrderingJobsModule } from './modules/ordering/index.js';
 import { OrganizerJobsModule } from './modules/organizer/index.js';
 import { PaymentJobsModule } from './modules/payment/index.js';
@@ -24,7 +25,8 @@ import { TelemetryModule } from './platform/telemetry/index.js';
  * cron dò Token mỗi giờ và email cảnh báo Token dưới ngưỡng (Story 4.5-b), kênh cảnh báo vận hành: email cho đội vận hành
  * và job quét mỗi phút (Story 4.6-b), lưới an toàn của `ordering`: quét Đơn quá hạn mỗi phút và đối chiếu tồn kho mỗi 10
  * phút (Story 4.6-c), luật cảnh báo tỉ lệ phát Vé giảm của `ordering` trong job quét (Story 4.6-e), dọn bộ đếm tra tay
- * của `checkin` (Story 5.5). Có sẵn adapter Tingee và Vé (khóa QR).
+ * của `checkin` (Story 5.5), lần đẩy đầu lên Google Sheets của `integration` (Story 6.4). Có sẵn adapter Tingee và Vé
+ * (khóa QR).
  */
 @Module({})
 export class WorkerModule {
@@ -62,6 +64,8 @@ export class WorkerModule {
         }),
         // Dọn bộ đếm tra tay mỗi 10 phút (Story 5.5).
         CheckinJobsModule,
+        // Lần đẩy đầu lên Google Sheets: tạo Sheet trong Drive của người cấp, ghi Đơn hiện có (Story 6.4).
+        IntegrationJobsModule.forRoot(config),
       ],
       providers: [{ provide: APP_CONFIG, useValue: config }, UsePinoLoggerBeforeBootstrap],
     };

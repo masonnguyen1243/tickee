@@ -22,6 +22,14 @@ export const TEST_TICKET_QR_KEYS = testCredentialKey(1, 9);
 /** Khóa QR phiên bản 2 cho test xoay khóa (AD-29): ghép `${TEST_TICKET_QR_KEYS},${TEST_TICKET_QR_KEY_V2}` = đang xoay. */
 export const TEST_TICKET_QR_KEY_V2 = testCredentialKey(2, 11);
 
+/** Khóa mã hóa refresh token Google Sheets chỉ dùng trong test (khác `TEST_CREDENTIAL_KEYS` và `TEST_TICKET_QR_KEYS`). */
+export const TEST_GOOGLE_SHEETS_TOKEN_KEYS = testCredentialKey(1, 13);
+
+/**
+ * Google giả trong test (Story 6.4): cổng 1 để lỡ gọi thì lỗi ngay; test Google Sheets trỏ ba URL vào `test/google-fake`.
+ */
+export const TEST_GOOGLE_UNREACHABLE = 'http://127.0.0.1:1';
+
 /** Origin web giả lập trong test: CORS và Better Auth chỉ tin origin này. */
 export const TEST_WEB_ORIGIN = 'http://web.tickee.test';
 
@@ -51,6 +59,13 @@ export const apiConfig = (overrides: Partial<ApiConfig> = {}): ApiConfig => ({
   TINGEE_ALLOW_REAL_IN_DEVELOPMENT: false,
   TINGEE_CREDENTIAL_KEYS: TEST_CREDENTIAL_KEYS,
   TICKET_QR_KEYS: TEST_TICKET_QR_KEYS,
+  // Google Sheets (Story 6.4): OAuth client giả, Google không tới được trừ khi test trỏ vào Google fake.
+  GOOGLE_SHEETS_CLIENT_ID: 'test-sheets-client-id.apps.googleusercontent.com',
+  GOOGLE_SHEETS_CLIENT_SECRET: 'test-only-google-sheets-client-secret',
+  GOOGLE_SHEETS_TOKEN_KEYS: TEST_GOOGLE_SHEETS_TOKEN_KEYS,
+  GOOGLE_OAUTH_AUTHORIZE_URL: `${TEST_GOOGLE_UNREACHABLE}/o/oauth2/v2/auth`,
+  GOOGLE_OAUTH_TOKEN_URL: `${TEST_GOOGLE_UNREACHABLE}/token`,
+  GOOGLE_SHEETS_API_URL: TEST_GOOGLE_UNREACHABLE,
   // Ảnh Sự kiện (Story 4.8-a): path-style như MinIO local; credential giả chỉ dùng để ký.
   S3_ENDPOINT: TEST_S3_ENDPOINT,
   S3_REGION: 'us-east-1',
@@ -94,6 +109,13 @@ export const workerConfig = (overrides: Partial<WorkerConfig> = {}): WorkerConfi
     TINGEE_CREDENTIAL_KEYS: api.TINGEE_CREDENTIAL_KEYS,
     TICKET_QR_KEYS: api.TICKET_QR_KEYS,
     TINGEE_ORDER_STATUS_QUERY: true,
+    // Google Sheets (Story 6.4): cùng giá trị với vai api.
+    GOOGLE_SHEETS_CLIENT_ID: api.GOOGLE_SHEETS_CLIENT_ID,
+    GOOGLE_SHEETS_CLIENT_SECRET: api.GOOGLE_SHEETS_CLIENT_SECRET,
+    GOOGLE_SHEETS_TOKEN_KEYS: api.GOOGLE_SHEETS_TOKEN_KEYS,
+    GOOGLE_OAUTH_AUTHORIZE_URL: api.GOOGLE_OAUTH_AUTHORIZE_URL,
+    GOOGLE_OAUTH_TOKEN_URL: api.GOOGLE_OAUTH_TOKEN_URL,
+    GOOGLE_SHEETS_API_URL: api.GOOGLE_SHEETS_API_URL,
     OTEL_METRIC_EXPORT_INTERVAL: api.OTEL_METRIC_EXPORT_INTERVAL,
     // Cảnh báo vận hành (Story 4.6-b): mặc định của schema, không có người nhận (chỉ log).
     OPS_ALERT_COOLDOWN_MINUTES: api.OPS_ALERT_COOLDOWN_MINUTES,

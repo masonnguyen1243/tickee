@@ -267,6 +267,13 @@
       "when": 1795592538521,
       "tag": "0037_checkers_revoked_check",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1795752394697,
+      "tag": "0038_sheet_connections",
+      "breakpoints": true
     }
   ]
 }

@@ -179,6 +179,8 @@ jobs:
           revalidate_secret=$(openssl rand -base64 32)
           credential_key=$(openssl rand -base64 32)
           qr_key=$(openssl rand -base64 32)
+          sheets_key=$(openssl rand -base64 32)
+          sheets_secret=$(openssl rand -hex 16)
           db_password=$(openssl rand -hex 16)
           smtp_password=$(openssl rand -hex 16)
           status=0
@@ -192,6 +194,9 @@ jobs:
             -e TINGEE_BASE_URL=https://tingee.example.test \
             -e TINGEE_CREDENTIAL_KEYS="v1:${credential_key}" \
             -e TICKET_QR_KEYS="v1:${qr_key}" \
+            -e GOOGLE_SHEETS_CLIENT_ID=ci-sheets.apps.googleusercontent.com \
+            -e GOOGLE_SHEETS_CLIENT_SECRET="${sheets_secret}" \
+            -e GOOGLE_SHEETS_TOKEN_KEYS="v1:${sheets_key}" \
             -e OPS_ALERT_EMAILS=van-hanh@example.test \
             tickee-api:${{ github.sha }} 2>&1) || status=$?
           echo "$output"
@@ -209,7 +214,7 @@ jobs:
             echo "::error::Output phải nêu đúng một biến (WEB_ORIGIN), nhận ${issue_count// /}"
             exit 1
           fi
-          for secret in "$revalidate_secret" "$credential_key" "$qr_key" "$db_password" "$smtp_password"; do
+          for secret in "$revalidate_secret" "$credential_key" "$qr_key" "$sheets_key" "$sheets_secret" "$db_password" "$smtp_password"; do
             if grep -qF -- "$secret" <<<"$output"; then
               echo "::error::Output lộ giá trị secret"
               exit 1
