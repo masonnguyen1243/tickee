@@ -193,6 +193,7 @@ context:
 - **Sau review (27/11/2026):** cột "Check-in" tách thành hai cột số "Đã check-in", "Số Vé" (cùng vị trí; không có Vé `valid` → cả hai trống); câu trả lời form toàn chữ số bắt đầu bằng `0` hoặc từ 12 chữ số thêm `'` (`csvDigitsAsText` ở `csv.ts`, chỉ cho ô câu trả lời); `CSV_BOM` viết bằng escape `\uFEFF` trong nguồn; nhánh lỗi trước byte đầu tiên gỡ cả `content-type`, `content-disposition`, `cache-control`. Test thêm: câu trả lời toàn chữ số; backpressure (client tạm dừng đọc, có `write` trả `false`, file đủ và đúng thứ tự); client ngắt thì generator đã kết thúc; 404 không sinh audit. Kiểm đột biến: bỏ guard `res.destroyed` ở `writeChunk` → test ngắt đỏ; `drain` coi như đóng → test backpressure đỏ. `event-orders-export.test.ts` 22/22, `csv.test.ts` 10/10.
 - **Kiểm chứng lại sau review (27/11/2026):** `pnpm typecheck`, `pnpm lint:deps` sạch; `pnpm test` xanh (contracts 397, web 501, api 1831); `pnpm test:e2e` 1392 xanh, 2 đỏ ở spec không dính 6.3: `event-image.spec.ts` (chạy lại 3 lần: 108/108 xanh) và `public-event-revalidate.spec.ts` (chạy tuần tự 10/10 xanh; đỏ khi hai project chạy song song vì dùng chung cache Next). Thuộc nhóm test chập chờn của action item E2-8.
 - **Quy trình:** review ra hai intent_gap (Triage #1, #2); Mason chốt cách sửa và chọn giữ code, sửa tại chỗ thay cho revert rồi chạy lại bước 2–4 (Quyết định sau review).
+- Kiểm thủ công (27/11/2026): Trên dev stack: xuất CSV của một Sự kiện có Đơn thật, có câu hỏi form và check-in. Mở bằng Excel (hoặc Numbers/Google Sheets): tiếng Việt đúng, SĐT giữ số 0, giờ Việt Nam, số tiền là số, cột form, "Đã check-in" và "Số Vé" đúng; câu trả lời toàn chữ số giữ số 0 — đạt. Claude sinh file thật qua `GET …/orders/export` trên Postgres local (harness api, Tingee fake): 6 Đơn gồm Đơn 3 Vé đã check-in 2, Đơn lệch tiền chờ xử lý, Đơn duyệt tay nhận thiếu, Đơn chờ thanh toán, tên bắt đầu bằng `=`, câu trả lời CCCD `001203004567`, SĐT người thân, ghi chú có ngoặc kép và xuống dòng; đọc byte thấy BOM và các ô đúng. Mason mở file bằng Excel và xác nhận đạt.
 
 ## Spec Change Log
 
@@ -243,4 +244,4 @@ context:
 - `pnpm test:e2e` -- expected: `event-orders.spec.ts` xanh trên `ios-webkit` và `android-chromium`
 
 **Manual checks (if no CLI):**
-- Trên dev stack: xuất CSV của một Sự kiện có Đơn thật, có câu hỏi form và check-in. Mở bằng Excel (hoặc Numbers/Google Sheets): tiếng Việt đúng, SĐT giữ số 0, giờ Việt Nam, số tiền là số, cột form và "k/N" đúng.
+- Trên dev stack: xuất CSV của một Sự kiện có Đơn thật, có câu hỏi form và check-in. Mở bằng Excel (hoặc Numbers/Google Sheets): tiếng Việt đúng, SĐT giữ số 0, giờ Việt Nam, số tiền là số, cột form, "Đã check-in" và "Số Vé" đúng; câu trả lời toàn chữ số giữ số 0.
