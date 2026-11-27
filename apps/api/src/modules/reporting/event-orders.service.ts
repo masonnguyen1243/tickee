@@ -4,9 +4,12 @@ import {
   ErrorCode,
   EventOrderFilter,
   EventOrderHistoryKind,
+  eventOrdersCsvFilename,
   ORDER_CODE_PATTERN,
   OrderStatus,
+  type EventOrderCursorValue,
   type EventOrderDetail,
+  type EventOrderExportValues,
   type EventOrderHistoryEntry,
   type EventOrderListValues,
   type EventOrderPage,
@@ -14,19 +17,23 @@ import {
 } from '@tickee/contracts';
 import type { AccessContext } from '../../platform/access/index.js';
 import { audit, type AuditAction } from '../../platform/audit/index.js';
-import { DATABASE, type Database } from '../../platform/db/index.js';
+import { DATABASE, type Database, type DbExecutor } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
-import { assertEventOfOrganization } from '../event/index.js';
+import { assertEventOfOrganization, eventSlugOfOrganization } from '../event/index.js';
 import {
+  answerColumnsOf,
+  answersOfOrders,
   eventOrderDetailOf,
   eventOrdersPageOf,
+  type EventAnswerColumn,
   type EventOrderDetailRow,
   type EventOrderListRow,
   type EventOrdersPageFilter,
 } from '../ordering/index.js';
 import { openReviewsOf, reviewItemsOfOrder, type OpenReview, type OrderReviewItemRow } from '../payment/index.js';
-import { orderTicketsOf } from '../ticketing/index.js';
+import { checkinCountsOfOrders, orderTicketsOf } from '../ticketing/index.js';
 import { eventOpenReviewItemsOf } from './event-open-reviews.js';
+import { eventOrderCsvLine, eventOrdersCsvHead } from './event-orders-csv.js';
 
 const orderNotFound = () => new AppError(ErrorCode.ORDER_NOT_FOUND, 'Không tìm thấy Đơn này.');
 
@@ -39,6 +46,50 @@ const FILTER_STATUSES: Readonly<Record<Exclude<EventOrderFilter, 'needs_action'>
   [EventOrderFilter.CANCELLED]: [OrderStatus.CANCELLED],
   [EventOrderFilter.REFUNDED]: [OrderStatus.REFUNDED],
 };
+
+/** Số Đơn mỗi lô khi xuất CSV (Story 6.3): mỗi lô một số câu truy vấn cố định, không nạp mọi Đơn vào bộ nhớ. */
+export const EVENT_ORDERS_EXPORT_BATCH = 500;
+
+/** Bộ lọc của danh sách và CSV, trừ vị trí và số Đơn mỗi trang. */
+type OrdersFilter = Pick<EventOrdersPageFilter, 'statuses' | 'orderIds' | 'search'>;
+
+/**
+ * Bộ lọc dùng chung của danh sách (Story 6.1) và CSV (Story 6.3), cùng nghĩa: `q` khớp đầy đủ; chip trạng thái → trạng
+ * thái Đơn; chip "Cần xử lý" → id các Đơn có mục `open` của Sự kiện ở mọi trạng thái (cùng cách `needs-action-card`
+ * đếm). Có cả hai thì lấy giao. Người gọi đã kiểm Sự kiện thuộc BTC.
+ */
+async function ordersFilterOf(
+  db: DbExecutor,
+  ctx: AccessContext,
+  eventId: string,
+  query: EventOrderExportValues,
+): Promise<OrdersFilter> {
+  const filter: OrdersFilter = { search: query.q };
+  if (query.status === EventOrderFilter.NEEDS_ACTION) {
+    const items = await eventOpenReviewItemsOf(db, ctx, eventId);
+    filter.orderIds = items.flatMap((item) => (item.orderId ? [item.orderId] : []));
+  } else if (query.status !== undefined) {
+    filter.statuses = FILTER_STATUSES[query.status];
+  }
+  return filter;
+}
+
+/** Bộ lọc của một lần xuất trong audit: tên chip và loại giá trị tìm, không bao giờ giá trị tìm. */
+const exportAuditFields = (query: EventOrderExportValues): string[] => [
+  ...(query.status !== undefined ? [`status:${query.status}`] : []),
+  ...(query.q !== undefined ? [`q:${query.q.kind}`] : []),
+];
+
+/** Một lần xuất CSV đã kiểm và đã ghi audit: tên file và các phần của file theo thứ tự. */
+export interface EventOrdersCsvExport {
+  /** `don-<slug>-<yyyyMMdd-HHmm>.csv` (giờ Việt Nam). */
+  filename: string;
+  /**
+   * Phần đầu (BOM + hàng tiêu đề), rồi mỗi lô Đơn một phần. Chỉ đọc DB khi được kéo phần kế tiếp: thôi lặp (`return`) là
+   * thôi đọc DB.
+   */
+  chunks: AsyncGenerator<string, void, undefined>;
+}
 
 /** Audit của Đơn dựng lịch sử: "Đã thanh toán · Duyệt tay", "Đã hủy", "Đã hoàn tay" (Story 4.4). */
 const ORDER_TRAIL_ACTIONS = ['order.paid', 'order.rejected', 'order.refunded'] as const satisfies readonly AuditAction[];
@@ -108,11 +159,11 @@ function historyOf(
 }
 
 /**
- * Tab Đơn của Sự kiện (Story 6.1, FR-31, AD-33): danh sách lọc ở server với phân trang keyset và chi tiết một Đơn, chỉ đọc
- * qua read model của mô-đun sở hữu — `ordering` (Đơn, dòng, câu trả lời form), `ticketing` (Vé của Đơn), `payment` (mục
- * Cần xử lý; ghép ở đây vì `ordering` không được gọi `payment`) — và audit của Đơn (lịch sử "Đã hủy"/"Đã hoàn tay"). Mọi
- * hàm đọc trong `orgScope` và `event_id`; số câu truy vấn cố định cho mỗi trang. Sự kiện được kiểm trước mọi lần đọc.
- * Không log giá trị tìm, email hay SĐT.
+ * Tab Đơn của Sự kiện (Story 6.1, FR-31, AD-33): danh sách lọc ở server với phân trang keyset, chi tiết một Đơn, và xuất
+ * CSV cùng bộ lọc (Story 6.3). Chỉ đọc qua read model của mô-đun sở hữu — `ordering` (Đơn, dòng, câu trả lời form),
+ * `ticketing` (Vé của Đơn, đếm check-in), `payment` (mục Cần xử lý; ghép ở đây vì `ordering` không được gọi `payment`) —
+ * và audit của Đơn (lịch sử "Đã hủy"/"Đã hoàn tay"). Mọi hàm đọc trong `orgScope` và `event_id`; số câu truy vấn cố định
+ * cho mỗi trang/lô. Sự kiện được kiểm trước mọi lần đọc. Không log giá trị tìm, email hay SĐT.
  */
 @Injectable()
 export class EventOrdersService {
@@ -125,14 +176,12 @@ export class EventOrdersService {
    */
   async list(ctx: AccessContext, eventId: string, query: EventOrderListValues): Promise<EventOrderPage> {
     await assertEventOfOrganization(this.db.orm, ctx, eventId);
-    const filter: EventOrdersPageFilter = { search: query.q, cursor: query.cursor, limit: query.limit };
-    if (query.status === EventOrderFilter.NEEDS_ACTION) {
-      const items = await eventOpenReviewItemsOf(this.db.orm, ctx, eventId);
-      filter.orderIds = items.flatMap((item) => (item.orderId ? [item.orderId] : []));
-    } else if (query.status !== undefined) {
-      filter.statuses = FILTER_STATUSES[query.status];
-    }
-    const page = await eventOrdersPageOf(this.db.orm, ctx, eventId, filter);
+    const filter = await ordersFilterOf(this.db.orm, ctx, eventId, query);
+    const page = await eventOrdersPageOf(this.db.orm, ctx, eventId, {
+      ...filter,
+      cursor: query.cursor,
+      limit: query.limit,
+    });
     const reviews = await openReviewsOf(
       this.db.orm,
       page.orders.map((o) => o.id),
@@ -141,6 +190,74 @@ export class EventOrdersService {
       orders: page.orders.map((order) => rowOf(order, reviews.get(order.id))),
       nextCursor: page.next ? encodeEventOrderCursor(page.next) : null,
     };
+  }
+
+  /**
+   * Mở một lần xuất CSV (Story 6.3) mọi Đơn khớp bộ lọc, cùng bộ lọc và thứ tự với `list`. Sự kiện lạ, sai dạng hoặc của
+   * BTC khác → `404 EVENT_NOT_FOUND` (trước khi có byte nào). Không chặn theo khóa BTC hay Sự kiện (Story 7.4: BTC bị khóa
+   * vẫn xuất được). Ghi audit `event_orders.exported` trong transaction riêng trước khi trả về, tức trước byte đầu tiên.
+   * Cột câu hỏi form tính trên mọi Đơn của Sự kiện (không theo bộ lọc). Không đếm tổng, không nạp mọi Đơn: các dòng đọc
+   * theo lô khi người gọi kéo `chunks`.
+   */
+  async exportCsv(
+    ctx: AccessContext,
+    eventId: string,
+    query: EventOrderExportValues,
+    now: Date = new Date(),
+  ): Promise<EventOrdersCsvExport> {
+    const slug = await eventSlugOfOrganization(this.db.orm, ctx, eventId);
+    const filter = await ordersFilterOf(this.db.orm, ctx, eventId, query);
+    const columns = await answerColumnsOf(this.db.orm, ctx, eventId);
+    await this.db.transaction((tx) =>
+      audit.record(tx, {
+        actorUserId: ctx.userId,
+        organizationId: ctx.organizationId,
+        action: 'event_orders.exported',
+        target: { type: 'event', id: eventId.toLowerCase() },
+        changedFields: exportAuditFields(query),
+      }),
+    );
+    return { filename: eventOrdersCsvFilename(slug, now), chunks: this.csvChunks(ctx, eventId, filter, columns) };
+  }
+
+  /**
+   * Phần đầu file, rồi mỗi lô `EVENT_ORDERS_EXPORT_BATCH` Đơn một phần, theo keyset `(created_at, mã Đơn)` giảm dần như
+   * `list`: không mất, không lặp Đơn ở ranh giới lô. Số câu mỗi lô cố định: Đơn + dòng (`eventOrdersPageOf`), câu trả
+   * lời, đếm check-in, mục Cần xử lý `open`. Không bọc trong một transaction (Design Notes: Đơn đổi trạng thái lúc xuất
+   * có thể ra trạng thái cũ, như xem tab Đơn ở hai thời điểm).
+   */
+  private async *csvChunks(
+    ctx: AccessContext,
+    eventId: string,
+    filter: OrdersFilter,
+    columns: readonly EventAnswerColumn[],
+  ): AsyncGenerator<string, void, undefined> {
+    yield eventOrdersCsvHead(columns);
+    let cursor: EventOrderCursorValue | undefined;
+    do {
+      const page = await eventOrdersPageOf(this.db.orm, ctx, eventId, {
+        ...filter,
+        cursor,
+        limit: EVENT_ORDERS_EXPORT_BATCH,
+      });
+      if (page.orders.length === 0) return;
+      const ids = page.orders.map((order) => order.id);
+      const [answers, checkins, reviews] = await Promise.all([
+        answersOfOrders(this.db.orm, ids),
+        checkinCountsOfOrders(this.db.orm, ctx, eventId, ids),
+        openReviewsOf(this.db.orm, ids),
+      ]);
+      yield page.orders
+        .map((order) =>
+          eventOrderCsvLine(
+            order,
+            { review: reviews.get(order.id), checkin: checkins.get(order.id), answers: answers.get(order.id) },
+            columns,
+          ),
+        )
+        .join('');
+      cursor = page.next ?? undefined;
+    } while (cursor !== undefined);
   }
 
   /**

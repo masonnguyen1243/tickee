@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { apiRequest } from '@/lib/api/client';
+import { apiDownload, apiRequest } from '@/lib/api/client';
 import { ApiError } from '@/lib/api/errors';
 
 const Health = z.object({ status: z.literal('ok') });
@@ -126,5 +126,56 @@ describe('apiRequest', () => {
     await apiRequest('/x', { schema: Health, init: { method: 'POST', body: makeBody() } });
     const headers = new Headers(fetchMock.mock.calls[0]![1]?.headers);
     expect(headers.has('content-type')).toBe(false);
+  });
+});
+
+describe('apiDownload (Story 6.3: tải file, vd. CSV)', () => {
+  const fetchMock = vi.fn<typeof fetch>();
+
+  beforeEach(() => {
+    vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', 'http://api.test/');
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    fetchMock.mockReset();
+  });
+
+  it('gọi /v1 kèm cookie; thân thành công là Blob nguyên byte (không parse), kèm header', async () => {
+    const bytes = new Uint8Array([0xef, 0xbb, 0xbf, 0x61, 0x2c, 0x62, 0x0d, 0x0a]);
+    fetchMock.mockResolvedValue(
+      new Response(bytes, { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="a.csv"' } }),
+    );
+
+    const { blob, headers } = await apiDownload('/x/export?q=1');
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('http://api.test/v1/x/export?q=1');
+    expect(init?.credentials).toBe('include');
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(bytes);
+    expect(headers.get('content-disposition')).toBe('attachment; filename="a.csv"');
+  });
+
+  it('lỗi JSON của api → ApiError giữ code và status; thân lạ → INTERNAL_ERROR', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: { code: 'UNAUTHENTICATED', message: 'Đăng nhập', details: null } }));
+    expect(await catchApiError(apiDownload('/x'))).toMatchObject({ code: 'UNAUTHENTICATED', status: 401 });
+
+    fetchMock.mockResolvedValueOnce(new Response('<html>', { status: 502 }));
+    expect(await catchApiError(apiDownload('/x'))).toMatchObject({ code: 'INTERNAL_ERROR', status: 502 });
+  });
+
+  it('lỗi mạng, hoặc kết nối đứt khi đang nhận thân → SERVICE_UNAVAILABLE (không trả file cụt)', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    expect(await catchApiError(apiDownload('/x'))).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: null });
+
+    const broken = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([0xef, 0xbb, 0xbf]));
+        controller.error(new TypeError('network error'));
+      },
+    });
+    fetchMock.mockResolvedValueOnce(new Response(broken, { status: 200, headers: { 'content-type': 'text/csv' } }));
+    expect(await catchApiError(apiDownload('/x'))).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: null });
   });
 });

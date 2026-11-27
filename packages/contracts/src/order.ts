@@ -254,6 +254,19 @@ export const ORDER_STATUSES = Object.values(OrderStatus) as [OrderStatus, ...Ord
 export const orderStatusSchema = z.enum(OrderStatus);
 
 /**
+ * Nhãn tiếng Việt của trạng thái Đơn phía BTC: chữ của `status-badge` trên dashboard (web thêm tone) và cột "Trạng thái"
+ * của CSV (Story 6.3), để hai nơi luôn cùng chữ.
+ */
+export const ORDER_STATUS_LABEL: Readonly<Record<OrderStatus, string>> = {
+  [OrderStatus.PENDING]: 'Chờ thanh toán',
+  [OrderStatus.PAID]: 'Đã thanh toán',
+  [OrderStatus.EXPIRED]: 'Hết hạn',
+  [OrderStatus.CANCELLED]: 'Đã hủy',
+  [OrderStatus.REFUNDED]: 'Đã hoàn tay',
+  [OrderStatus.REVIEW]: 'Cần xử lý',
+};
+
+/**
  * Lý do Đơn bị hủy (`orders.cancel_reason`), có đúng khi Đơn `cancelled`/`refunded` (giữ nguyên khi `cancelled` →
  * `refunded`): `rejected` — BTC "Từ chối" khoản tiền trên mục Cần xử lý (Story 4.4, `review` → `cancelled`);
  * `event_cancelled` — Sự kiện bị hủy (Story 7.1). Trang Đơn và Vé của tôi hiện cả hai bằng `buyerStatus` sẵn có

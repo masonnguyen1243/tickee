@@ -1,21 +1,30 @@
 import { describe, expect, it } from 'vitest';
 import {
+  csvBuyerPhone,
   decodeEventOrderCursor,
   encodeEventOrderCursor,
+  EVENT_ORDERS_CSV_FALLBACK_FILENAME,
   EVENT_ORDERS_PAGE_LIMIT,
   EVENT_ORDERS_PAGE_LIMIT_MAX,
   EVENT_ORDERS_SEARCH_MAX,
   EventOrderDetail,
+  EventOrderExportQuery,
   EventOrderHistoryEntry,
+  eventOrderItemsText,
   EventOrderListQuery,
   EventOrderPage,
   EventOrderRow,
   eventOrderApiPath,
   eventOrdersApiPath,
+  eventOrdersCsvFilename,
+  eventOrdersExportApiPath,
   parseOrderSearch,
 } from '../src/event-orders.js';
 
-/* Story 6.1: tab Đơn — phân loại ô tìm, cursor keyset, query, schema response và đường API. */
+/*
+ * Story 6.1: tab Đơn — phân loại ô tìm, cursor keyset, query, schema response và đường API. Story 6.3: query và đường
+ * xuất CSV, tên file, SĐT và chuỗi Vé của CSV.
+ */
 
 const ORG = '019a3b2c-5678-7abc-8def-0123456789ab';
 const EVENT = '019a3b2c-0712-7abc-8def-0123456789ab';
@@ -197,5 +206,55 @@ describe('đường API', () => {
     );
     expect(eventOrdersApiPath(ORG, EVENT, { q: '0912 345 678' })).toBe(`${base}?q=0912+345+678`);
     expect(eventOrderApiPath(ORG, EVENT, 'TK8F3Q2AXM')).toBe(`${base}/TK8F3Q2AXM`);
+  });
+});
+
+describe('xuất CSV (Story 6.3)', () => {
+  it('EventOrderExportQuery: cùng status và q của danh sách (q chuẩn hóa), không có cursor/limit', () => {
+    expect(EventOrderExportQuery.parse({})).toEqual({});
+    expect(EventOrderExportQuery.parse({ status: 'needs_action', q: '0912 345 678' })).toEqual({
+      status: 'needs_action',
+      q: { kind: 'phone', phone: '+84912345678' },
+    });
+    expect(EventOrderExportQuery.parse({ q: ' tk1234abcd ' })).toEqual({ q: { kind: 'code', code: 'TK1234ABCD' } });
+    expect(EventOrderExportQuery.parse({ q: 'Minh@X.vn' })).toEqual({ q: { kind: 'email', email: 'minh@x.vn' } });
+    // `cursor`, `limit` không thuộc query xuất: bị bỏ qua (như khóa lạ của danh sách).
+    expect(EventOrderExportQuery.parse({ status: 'paid', cursor: 'abc', limit: '0' })).toEqual({ status: 'paid' });
+    for (const query of [{ status: 'abc' }, { status: 'expired' }, { q: '0912' }, { q: '' }, { q: ['0912345678', '0987654321'] }]) {
+      expect(EventOrderExportQuery.safeParse(query).success, JSON.stringify(query)).toBe(false);
+    }
+  });
+
+  it('đường xuất: …/orders/export kèm bộ lọc (bỏ tham số không có)', () => {
+    const base = `/orgs/${ORG}/events/${EVENT}/orders/export`;
+    expect(eventOrdersExportApiPath(ORG, EVENT)).toBe(base);
+    expect(eventOrdersExportApiPath(ORG, EVENT, { status: 'paid', q: 'Minh@X.vn' })).toBe(`${base}?status=paid&q=Minh%40X.vn`);
+    expect(eventOrdersExportApiPath(ORG, EVENT, { q: '0912 345 678' })).toBe(`${base}?q=0912+345+678`);
+  });
+
+  it('tên file: don-<slug>-<yyyyMMdd-HHmm>.csv theo giờ Việt Nam; dự phòng don.csv', () => {
+    expect(eventOrdersCsvFilename('giai-chay-ho-tay-2026-a1b2', new Date('2026-11-26T17:05:59Z'))).toBe(
+      'don-giai-chay-ho-tay-2026-a1b2-20261127-0005.csv',
+    );
+    expect(EVENT_ORDERS_CSV_FALLBACK_FILENAME).toBe('don.csv');
+  });
+
+  it('SĐT: số Việt Nam 10 chữ số → nhóm 4-3-3 giữ số 0 đầu; số khác giữ như localBuyerPhone', () => {
+    expect(csvBuyerPhone('+84912345678')).toBe('0912 345 678');
+    expect(csvBuyerPhone('+84387654321')).toBe('0387 654 321');
+    expect(csvBuyerPhone('0912345678')).toBe('0912 345 678');
+    expect(csvBuyerPhone('+8491234567')).toBe('+8491234567');
+    expect(csvBuyerPhone('+12025550123')).toBe('+12025550123');
+    expect(csvBuyerPhone('lạ')).toBe('lạ');
+  });
+
+  it('chuỗi Vé: "2 × VIP, 1 × Thường"; không có dòng → chuỗi rỗng', () => {
+    expect(
+      eventOrderItemsText([
+        { ticketTypeName: 'VIP', quantity: 2 },
+        { ticketTypeName: 'Thường', quantity: 1 },
+      ]),
+    ).toBe('2 × VIP, 1 × Thường');
+    expect(eventOrderItemsText([])).toBe('');
   });
 });

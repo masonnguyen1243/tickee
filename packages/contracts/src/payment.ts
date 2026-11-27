@@ -31,6 +31,18 @@ export const REVIEW_ITEM_TYPES = Object.values(ReviewItemType) as [ReviewItemTyp
 export const reviewItemTypeSchema = z.enum(ReviewItemType);
 
 /**
+ * Tên loại Cần xử lý (EXPERIENCE › needs-action-row): chữ trên dashboard và cột "Cần xử lý" của CSV (Story 6.3), để hai
+ * nơi luôn cùng chữ.
+ */
+export const REVIEW_TYPE_LABEL: Readonly<Record<ReviewItemType, string>> = {
+  [ReviewItemType.AMOUNT_MISMATCH]: 'Lệch số tiền',
+  [ReviewItemType.ORPHAN]: 'Thanh toán mồ côi',
+  [ReviewItemType.UNMATCHED]: 'Giao dịch chưa khớp',
+  [ReviewItemType.DUPLICATE_PAYMENT]: 'Thanh toán trùng',
+  [ReviewItemType.EVENT_CANCELLED]: 'Sự kiện đã hủy',
+};
+
+/**
  * Lý do của mục `orphan` (chỉ loại này có, và luôn có): `event_ended` — tiền về sau `effective_end_at`; `event_locked` —
  * Đơn đã hết hạn mà Sự kiện hoặc BTC đang bị khóa (không bán lại); `sold_out` — Đơn đã hết hạn, một Hạng vé không còn đủ
  * chỗ để bán lại.

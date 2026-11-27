@@ -1,6 +1,7 @@
 export * from './admin.js';
 export * from './checkin.js';
 export * from './checkout.js';
+export * from './csv.js';
 export * from './errors.js';
 export * from './event.js';
 export * from './event-orders.js';

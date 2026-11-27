@@ -1288,3 +1288,10 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: CTV đăng nhập bằng OTP không có tên, nên kết quả đỏ "đã check-in" hiện "bởi CTV khác" với mọi CTV. Khi nhiều CTV cùng cổng thì không biết ai quét trước. Cân nhắc cho CTV đặt tên hiển thị lúc nhận lời mời (Story 5.2).
   evidence: Spec 5.3-a (`:25`), quyết định nhãn vai trò; kiểm hành vi retro Epic 5. AC 5.3, 5.4 đã sửa theo nhãn vai trò (E5-4).
   story: chưa có; xét cùng E5-1 (luồng lời mời CTV).
+
+## Deferred from: review Story 6.3 (2026-11-27)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-3-xuat-csv-danh-sach-don.md`
+  summary: Chưa kiểm (maybe-false, nếu đúng thì medium): `saveBlob` (`apps/web/lib/reporting/orders.ts`) thu hồi object URL ở `setTimeout(0)` ngay sau `click()`; với CSV vài MB, Safari hoặc Firefox có thể hủy tải trước khi đọc xong `Blob`. Hướng sửa nếu đúng: giữ URL lâu hơn (FileSaver.js giữ 40 giây).
+  evidence: Review 6.3 (Edge Case Hunter, Review Triage #23). Mẫu `enroll-form.tsx:150-161` và e2e `ios-webkit` chỉ tải file nhỏ. Cần thử tải CSV vài MB (vài nghìn Đơn) trên Safari và Firefox thật.
+  story: E5-3

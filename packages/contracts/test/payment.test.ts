@@ -10,6 +10,7 @@ import {
   REVIEW_ITEM_RESOLUTIONS,
   REVIEW_ITEM_STATUSES,
   REVIEW_ITEM_TYPES,
+  REVIEW_TYPE_LABEL,
   reviewItemResolutionsFor,
   reviewItemTypeSchema,
 } from '../src/payment.js';
@@ -21,6 +22,16 @@ describe('review_items (Story 3.6)', () => {
     expect(REVIEW_ITEM_STATUSES).toEqual(['open', 'resolved']);
     expect(REVIEW_ITEM_RESOLUTIONS).toEqual(['approved', 'rejected', 'refunded', 'dismissed']);
     expect(reviewItemTypeSchema.safeParse('lost_race').success).toBe(false);
+  });
+
+  it('tên loại (dashboard và CSV, Story 6.3): đủ 5 loại', () => {
+    expect(REVIEW_TYPE_LABEL).toEqual({
+      amount_mismatch: 'Lệch số tiền',
+      orphan: 'Thanh toán mồ côi',
+      unmatched: 'Giao dịch chưa khớp',
+      duplicate_payment: 'Thanh toán trùng',
+      event_cancelled: 'Sự kiện đã hủy',
+    });
   });
 
   it('event_cancelled, duplicate_payment chỉ kết thúc bằng refunded/dismissed; unmatched thêm approved (ghép, Story 4.4-b); loại khác được mọi cách xử lý', () => {

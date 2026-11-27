@@ -22,6 +22,7 @@ import {
   ORDER_CODE_PATTERN,
   ORDER_RATE_LIMITS,
   ORDER_CANCEL_REASONS,
+  ORDER_STATUS_LABEL,
   ORDER_STATUSES,
   orderPath,
   orderRequestFor,
@@ -376,5 +377,19 @@ describe('Mã QR vé và BuyerTicket', () => {
     for (const shareToken of [undefined, '', SHARE_TOKEN.slice(1), `${SHARE_TOKEN}A`, `${SHARE_TOKEN.slice(1)}=`, `${SHARE_TOKEN.slice(1)}+`]) {
       expect(BuyerTicket.safeParse({ ...ticket(1, 1), shareToken }).success, String(shareToken)).toBe(false);
     }
+  });
+});
+
+describe('ORDER_STATUS_LABEL (Story 6.3: badge của BTC và cột Trạng thái của CSV)', () => {
+  it('mỗi trạng thái Đơn một nhãn tiếng Việt', () => {
+    expect(Object.keys(ORDER_STATUS_LABEL).sort()).toEqual([...ORDER_STATUSES].sort());
+    expect(ORDER_STATUS_LABEL).toEqual({
+      pending: 'Chờ thanh toán',
+      paid: 'Đã thanh toán',
+      expired: 'Hết hạn',
+      cancelled: 'Đã hủy',
+      refunded: 'Đã hoàn tay',
+      review: 'Cần xử lý',
+    });
   });
 });

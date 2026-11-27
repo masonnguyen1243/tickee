@@ -36,6 +36,38 @@ async function readJson(res: Response): Promise<unknown> {
   return JSON.parse(text) as unknown;
 }
 
+const isAbort = (init: RequestInit | undefined, cause: unknown): boolean =>
+  Boolean(init?.signal?.aborted) || (cause instanceof Error && cause.name === 'AbortError');
+
+/**
+ * `fetch` tới `path` của api. Mặc định kèm cookie phiên; lời gọi công khai (vd. Vé được chia sẻ) đặt
+ * `credentials: 'omit'` trong `init`. Lỗi mạng → `serviceUnavailableError`; hủy chủ động thì ném lại nguyên trạng.
+ */
+async function fetchApi(path: string, init: RequestInit | undefined, headers: Headers): Promise<Response> {
+  if (!path.startsWith('/')) throw new Error(`apiRequest: path phải bắt đầu bằng "/", nhận "${path}"`);
+  try {
+    return await fetch(`${requestBaseUrl()}${path}`, { credentials: 'include', ...init, headers });
+  } catch (cause) {
+    // Hủy chủ động (TanStack Query cancel, signal abort) không phải lỗi mạng: ném lại nguyên trạng, không thử lại.
+    if (isAbort(init, cause)) throw cause;
+    throw serviceUnavailableError(cause);
+  }
+}
+
+/** Response lỗi của api (`{ error: { code, message, details } }`) → `ApiError`; thân lạ → lỗi dữ liệu không hợp lệ. */
+async function errorOf(res: Response): Promise<ApiError> {
+  let body: unknown;
+  try {
+    body = await readJson(res);
+  } catch {
+    return invalidResponseError(res.status);
+  }
+  const parsed = ErrorResponse.safeParse(body);
+  if (!parsed.success) return invalidResponseError(res.status);
+  const { code, message, details } = parsed.data.error;
+  return new ApiError(code, message, details, res.status);
+}
+
 /**
  * Lõi dùng chung cho bản client và bản server. `extraHeaders` cho phép bản server chuyển tiếp cookie.
  * @internal
@@ -45,8 +77,6 @@ export async function performApiRequest<S extends z.ZodType>(
   { schema, init }: ApiRequestOptions<S>,
   extraHeaders?: HeadersInit,
 ): Promise<z.output<S>> {
-  if (!path.startsWith('/')) throw new Error(`apiRequest: path phải bắt đầu bằng "/", nhận "${path}"`);
-
   const headers = new Headers(init?.headers);
   if (!headers.has('accept')) headers.set('accept', 'application/json');
   // Chỉ mặc định JSON cho body chuỗi; FormData/URLSearchParams/Blob để fetch tự đặt (vd. boundary multipart).
@@ -55,16 +85,8 @@ export async function performApiRequest<S extends z.ZodType>(
   }
   new Headers(extraHeaders).forEach((value, key) => headers.set(key, value));
 
-  const url = `${requestBaseUrl()}${path}`;
-  let res: Response;
-  try {
-    // Mặc định kèm cookie phiên; lời gọi công khai (vd. Vé được chia sẻ) đặt `credentials: 'omit'` trong `init`.
-    res = await fetch(url, { credentials: 'include', ...init, headers });
-  } catch (cause) {
-    // Hủy chủ động (TanStack Query cancel, signal abort) không phải lỗi mạng: ném lại nguyên trạng, không thử lại.
-    if (init?.signal?.aborted || (cause instanceof Error && cause.name === 'AbortError')) throw cause;
-    throw serviceUnavailableError(cause);
-  }
+  const res = await fetchApi(path, init, headers);
+  if (!res.ok) throw await errorOf(res);
 
   let body: unknown;
   try {
@@ -73,16 +95,31 @@ export async function performApiRequest<S extends z.ZodType>(
     throw invalidResponseError(res.status);
   }
 
-  if (!res.ok) {
-    const parsed = ErrorResponse.safeParse(body);
-    if (!parsed.success) throw invalidResponseError(res.status);
-    const { code, message, details } = parsed.data.error;
-    throw new ApiError(code, message, details, res.status);
-  }
-
   const parsed = schema.safeParse(body);
   if (!parsed.success) throw invalidResponseError(res.status);
   return parsed.data;
+}
+
+/** File tải từ api: nội dung và header của response (vd. `Content-Disposition`). */
+export interface ApiDownload {
+  blob: Blob;
+  headers: Headers;
+}
+
+/**
+ * Tải một file từ REST `/v1` trên trình duyệt (vd. CSV danh sách Đơn, Story 6.3): như `apiRequest` (cookie phiên; lỗi
+ * mạng và lỗi JSON của api → `ApiError`) nhưng thân response thành công đọc thành `Blob`, không parse. Kết nối đứt khi
+ * đang nhận thân (file cụt) → `serviceUnavailableError`, không bao giờ trả file dở.
+ */
+export async function apiDownload(path: string, init?: RequestInit): Promise<ApiDownload> {
+  const res = await fetchApi(path, init, new Headers(init?.headers));
+  if (!res.ok) throw await errorOf(res);
+  try {
+    return { blob: await res.blob(), headers: res.headers };
+  } catch (cause) {
+    if (isAbort(init, cause)) throw cause;
+    throw serviceUnavailableError(cause);
+  }
 }
 
 /**

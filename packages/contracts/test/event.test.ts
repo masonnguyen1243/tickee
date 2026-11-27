@@ -25,7 +25,9 @@ import {
   formatVnDate,
   formatVnDateTime,
   formatVnDayTime,
+  formatVnFileStamp,
   formatVnTime,
+  formatVnTimestamp,
   isSameVnDay,
   notifiesBuyers,
   publicEventTag,
@@ -266,6 +268,22 @@ describe('formatVnDateTime / formatVnDate (offset +07:00 cố định, không In
     expect(formatVnDate('2026-12-31T17:30:00Z')).toBe('01/01/2027');
     expect(formatVnDateTime('2026-12-31T16:59:00Z')).toBe('23:59 31/12/2026');
     expect(formatVnDate('2026-12-31T16:59:00Z')).toBe('31/12/2026');
+  });
+});
+
+describe('formatVnTimestamp / formatVnFileStamp (Story 6.3: cột thời gian và tên file CSV)', () => {
+  it('yyyy-MM-dd HH:mm:ss và yyyyMMdd-HHmm theo giờ Việt Nam; nhận Date hoặc chuỗi ISO (kể cả micro giây)', () => {
+    expect(formatVnTimestamp(new Date('2026-11-08T03:04:05.000Z'))).toBe('2026-11-08 10:04:05');
+    expect(formatVnTimestamp('2026-11-08T10:04:05+07:00')).toBe('2026-11-08 10:04:05');
+    expect(formatVnTimestamp('2026-11-26T00:00:01.123456Z')).toBe('2026-11-26 07:00:01');
+    expect(formatVnFileStamp(new Date('2026-11-08T03:04:59.999Z'))).toBe('20261108-1004');
+  });
+
+  it('qua nửa đêm và năm mới giờ Việt Nam', () => {
+    expect(formatVnTimestamp('2026-11-16T17:00:00Z')).toBe('2026-11-17 00:00:00');
+    expect(formatVnTimestamp('2026-11-16T16:59:59Z')).toBe('2026-11-16 23:59:59');
+    expect(formatVnTimestamp('2026-12-31T17:30:00Z')).toBe('2027-01-01 00:30:00');
+    expect(formatVnFileStamp('2026-12-31T17:30:00Z')).toBe('20270101-0030');
   });
 });
 

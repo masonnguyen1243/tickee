@@ -394,6 +394,21 @@ export function formatVnDateTime(value: Date | string): string {
   return `${pad(p.hour)}:${pad(p.minute)} ${pad(p.day)}/${pad(p.month)}/${pad(p.year, 4)}`;
 }
 
+/**
+ * Ngày-giờ theo giờ Việt Nam, dạng `yyyy-MM-dd HH:mm:ss` (vd. "2026-11-08 10:04:05"): cột thời gian của file CSV (Story
+ * 6.3), Excel và Google Sheets nhận là ngày-giờ và sắp đúng thứ tự. Như `formatVnDateTime`, không dùng `Intl`.
+ */
+export function formatVnTimestamp(value: Date | string): string {
+  const p = vnParts(new Date(value));
+  return `${pad(p.year, 4)}-${pad(p.month)}-${pad(p.day)} ${pad(p.hour)}:${pad(p.minute)}:${pad(p.second)}`;
+}
+
+/** Mốc giờ Việt Nam trong tên file, dạng `yyyyMMdd-HHmm` (vd. "20261108-1004"); không dùng `Intl`. */
+export function formatVnFileStamp(value: Date | string): string {
+  const p = vnParts(new Date(value));
+  return `${pad(p.year, 4)}${pad(p.month)}${pad(p.day)}-${pad(p.hour)}${pad(p.minute)}`;
+}
+
 /** Ngày theo giờ Việt Nam, dạng `dd/MM/yyyy` (vd. "08/11/2026"); như `formatVnDateTime`, không dùng `Intl`. */
 export function formatVnDate(value: Date | string): string {
   const p = vnParts(new Date(value));

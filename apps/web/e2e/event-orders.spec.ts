@@ -1,7 +1,9 @@
+import { readFile } from 'node:fs/promises';
+
 import type { Page } from '@playwright/test';
 
 import { expect, test } from './fixtures';
-import { apiError, me, mockIdentityApi, unauthenticated, type Call, type Reply } from './identity-mock';
+import { apiError, corsHeaders, me, mockIdentityApi, unauthenticated, WEB_ORIGIN, type Call, type Reply } from './identity-mock';
 import { fakeEventSource } from './live-mock';
 import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
 
@@ -10,6 +12,8 @@ import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
  * sau", `Sheet` chi tiết, empty-state và tự cập nhật qua stream Tổng quan (giả bằng `EventSource` điều khiển được, hoặc 503
  * → polling). API giả lọc như api thật (chip, mã Đơn/email/SĐT khớp đầy đủ, cursor). Giờ theo giờ Việt Nam: trình duyệt
  * chạy múi giờ New York. Ca lọc/phân trang/cách ly trên Postgres thật ở `apps/api/test/reporting/event-orders.test.ts`.
+ * Story 6.3: "Xuất CSV" — API giả của route xuất trả `text/csv` bằng `page.route` riêng (`mockOrganizerApi` ép mọi
+ * response thành JSON); định dạng file và stream kiểm ở `apps/api/test/reporting/event-orders-export.test.ts`.
  */
 
 test.use({ timezoneId: 'America/New_York' });
@@ -668,5 +672,162 @@ test.describe('tab Đơn: tự cập nhật và lỗi', () => {
     state.expireOnList = true;
     await page.goto(`${ordersTab}&trangThai=cho-thanh-toan`);
     await page.waitForURL(`**/dang-nhap?returnTo=${encodeURIComponent(base)}`);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Xuất CSV (Story 6.3)
+// ---------------------------------------------------------------------------------------------------------------
+
+const EXPORT_URL = /\/v1\/orgs\/[^/]+\/events\/[^/]+\/orders\/export(\?|$)/;
+const CSV_FILENAME = `don-${SLUG}-20261112-1004.csv`;
+const CSV_BYTES = Buffer.from('\uFEFFMã Đơn,Tên người mua\r\nTK8F3Q2AXM,Nguyễn Văn Minh\r\n', 'utf8');
+
+type ExportReply = { status: number; csv?: boolean } | 'abort';
+
+/**
+ * API giả của `GET …/orders/export`: mỗi lần gọi lấy câu trả lời kế tiếp trong `replies` (hết thì 200 + CSV). CSV kèm
+ * `Content-Disposition` và `Access-Control-Expose-Headers` như api thật; lỗi là JSON. Trả query của từng lần gọi.
+ */
+async function mockExport(page: Page, replies: (() => ExportReply | Promise<ExportReply>)[] = []): Promise<URLSearchParams[]> {
+  const queries: URLSearchParams[] = [];
+  const cors = corsHeaders(WEB_ORIGIN);
+  await page.route(EXPORT_URL, async (route) => {
+    const request = route.request();
+    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    queries.push(new URL(request.url()).searchParams);
+    const reply = (await replies.shift()?.()) ?? { status: 200, csv: true };
+    if (reply === 'abort') return route.abort('connectionreset');
+    if (reply.csv) {
+      return route.fulfill({
+        status: reply.status,
+        headers: {
+          ...cors,
+          'access-control-expose-headers': 'Content-Disposition',
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': `attachment; filename="${CSV_FILENAME}"`,
+          'cache-control': 'no-store',
+        },
+        body: CSV_BYTES,
+      });
+    }
+    const error = reply.status === 401 ? unauthenticated() : apiError(reply.status, 'INTERNAL_ERROR');
+    return route.fulfill({
+      status: error.status,
+      headers: { ...cors, 'content-type': 'application/json' },
+      body: JSON.stringify(error.body),
+    });
+  });
+  return queries;
+}
+
+const exportButton = (page: Page) => page.locator('[data-slot="orders-export-csv"]');
+const EXPORT_ERROR = 'Chưa xuất được CSV. Vui lòng thử lại.';
+
+test.describe('tab Đơn: xuất CSV', () => {
+  test('AC: lọc "Đã thanh toán" + tìm email trên URL → request mang status=paid và q là email (không theo chữ đang gõ dở); spinner chặn bấm lặp; file don-<slug>-….csv bắt đầu bằng BOM; từ md nút căn phải', async ({
+    page,
+  }) => {
+    await page.setViewportSize(DESKTOP);
+    await openApi(page);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const queries = await mockExport(page, [
+      async () => {
+        await gate;
+        return { status: 200, csv: true };
+      },
+    ]);
+    await page.goto(`${ordersTab}&trangThai=da-thanh-toan&tim=minh.nguyen%40vidu.vn`);
+    await expect(rows(page)).toHaveCount(1);
+    // Chữ đang gõ dở trong ô tìm (chưa gửi) không vào lần xuất.
+    await searchBox(page).fill('lan.do@vidu.vn');
+
+    const button = exportButton(page);
+    await expect(button).toHaveText('Xuất CSV');
+    // Từ md: nút ở hàng công cụ, căn phải (mép phải trùng mép phải hàng công cụ), cùng hàng với chip.
+    const toolbar = (await page.locator('[data-slot="orders-toolbar"]').boundingBox())!;
+    const box = (await button.boundingBox())!;
+    expect(Math.abs(box.x + box.width - (toolbar.x + toolbar.width))).toBeLessThanOrEqual(1);
+    const chips = (await page.locator('[data-slot="order-filter-chips"]').boundingBox())!;
+    expect(box.y).toBeLessThan(chips.y + chips.height);
+
+    const download = page.waitForEvent('download');
+    await button.click();
+    await expect(button).toHaveAttribute('aria-busy', 'true');
+    await expect(button.locator('[data-slot="button-spinner"]')).toBeVisible();
+    await button.click();
+    release();
+    const file = await download;
+    expect(file.suggestedFilename()).toBe(CSV_FILENAME);
+    const bytes = await readFile((await file.path())!);
+    expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(bytes.equals(CSV_BYTES)).toBe(true);
+    await expect(button).not.toHaveAttribute('aria-busy');
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.get('status')).toBe('paid');
+    expect(queries[0]!.get('q')).toBe('minh.nguyen@vidu.vn');
+    expect([...queries[0]!.keys()].sort()).toEqual(['q', 'status']);
+  });
+
+  test('API trả 500 hoặc kết nối đứt → toast lỗi, nút bấm lại được; lần sau tải được file', async ({ page }) => {
+    await openApi(page);
+    const queries = await mockExport(page, [() => ({ status: 500 }), () => 'abort']);
+    await page.goto(ordersTab);
+    await expect(cards(page)).toHaveCount(5);
+    const button = exportButton(page);
+
+    await button.click();
+    await expect(page.getByText(EXPORT_ERROR)).toBeVisible();
+    await expect(button).not.toHaveAttribute('aria-busy');
+    await expect.poll(() => queries.length).toBe(1);
+
+    await button.click();
+    await expect(page.getByText(EXPORT_ERROR)).toHaveCount(2);
+    await expect(button).not.toHaveAttribute('aria-busy');
+
+    const download = page.waitForEvent('download');
+    await button.click();
+    expect((await download).suggestedFilename()).toBe(CSV_FILENAME);
+    expect(queries).toHaveLength(3);
+    // Không lọc: không gửi status hay q.
+    expect(queries.every((q) => q.toString() === '')).toBe(true);
+  });
+
+  test('401 → đăng nhập', async ({ page }) => {
+    const { state } = await openApi(page);
+    await mockExport(page, [
+      () => {
+        state.signedOut = true;
+        return { status: 401 };
+      },
+    ]);
+    await page.goto(`${ordersTab}&trangThai=cho-thanh-toan`);
+    await expect(cards(page)).toHaveCount(0);
+    await exportButton(page).click();
+    await page.waitForURL(`**/dang-nhap?returnTo=${encodeURIComponent(base)}`);
+  });
+
+  test('dưới md (375px): nút sau ô tìm, đủ vùng chạm; luôn hiện kể cả khi chưa có Đơn; 375px và 320px không cuộn ngang', async ({
+    page,
+  }) => {
+    await openApi(page, { orders: [] });
+    await mockExport(page);
+    await page.goto(ordersTab);
+    await expect(page.locator('[data-slot="empty-state"]')).toContainText('Chưa có Đơn nào.');
+    const button = exportButton(page);
+    await expect(button).toBeVisible();
+    const search = (await page.locator('[data-slot="order-search"]').boundingBox())!;
+    const box = (await button.boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(search.y + search.height);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    await page.setViewportSize({ width: 320, height: 640 });
+    await expect(button).toBeVisible();
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+
+    const download = page.waitForEvent('download');
+    await button.click();
+    expect((await download).suggestedFilename()).toBe(CSV_FILENAME);
   });
 });
