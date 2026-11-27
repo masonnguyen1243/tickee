@@ -3,7 +3,9 @@ import {
   formatVnDayTime,
   formatVnTime,
   isSameVnDay,
+  ORDER_STATUS_LABEL,
   OrderStatus,
+  REVIEW_TYPE_LABEL,
   ReviewItemType,
   type EventOverviewTicketType,
   type RecentOrder,
@@ -31,27 +33,26 @@ export const OVERVIEW_OFFLINE_TOAST_ID = 'event-overview-offline';
 
 type Badge = { label: string; tone: StatusTone };
 
-/** `status-badge` của Đơn phía BTC (DESIGN.md › status-badge: bảng tone Đơn). */
+const badgeOf = (status: OrderStatus, tone: StatusTone): Badge => ({ label: ORDER_STATUS_LABEL[status], tone });
+
+/**
+ * `status-badge` của Đơn phía BTC (DESIGN.md › status-badge: bảng tone Đơn). Nhãn lấy từ `ORDER_STATUS_LABEL` của
+ * contracts, dùng chung với cột "Trạng thái" của CSV (Story 6.3).
+ */
 export const ORDER_STATUS_BADGE: Readonly<Record<OrderStatus, Badge>> = {
-  [OrderStatus.PENDING]: { label: 'Chờ thanh toán', tone: 'warning' },
-  [OrderStatus.PAID]: { label: 'Đã thanh toán', tone: 'success' },
-  [OrderStatus.EXPIRED]: { label: 'Hết hạn', tone: 'neutral' },
-  [OrderStatus.CANCELLED]: { label: 'Đã hủy', tone: 'neutral' },
-  [OrderStatus.REFUNDED]: { label: 'Đã hoàn tay', tone: 'neutral' },
-  [OrderStatus.REVIEW]: { label: 'Cần xử lý', tone: 'danger' },
+  [OrderStatus.PENDING]: badgeOf(OrderStatus.PENDING, 'warning'),
+  [OrderStatus.PAID]: badgeOf(OrderStatus.PAID, 'success'),
+  [OrderStatus.EXPIRED]: badgeOf(OrderStatus.EXPIRED, 'neutral'),
+  [OrderStatus.CANCELLED]: badgeOf(OrderStatus.CANCELLED, 'neutral'),
+  [OrderStatus.REFUNDED]: badgeOf(OrderStatus.REFUNDED, 'neutral'),
+  [OrderStatus.REVIEW]: badgeOf(OrderStatus.REVIEW, 'danger'),
 };
 
 /** Badge của một trạng thái Đơn. */
 export const orderStatusBadge = (status: OrderStatus): Badge => ORDER_STATUS_BADGE[status];
 
-/** Tên loại Cần xử lý (EXPERIENCE › needs-action-row). */
-export const REVIEW_TYPE_LABEL: Readonly<Record<ReviewItemType, string>> = {
-  [ReviewItemType.AMOUNT_MISMATCH]: 'Lệch số tiền',
-  [ReviewItemType.ORPHAN]: 'Thanh toán mồ côi',
-  [ReviewItemType.UNMATCHED]: 'Giao dịch chưa khớp',
-  [ReviewItemType.DUPLICATE_PAYMENT]: 'Thanh toán trùng',
-  [ReviewItemType.EVENT_CANCELLED]: 'Sự kiện đã hủy',
-};
+/** Tên loại Cần xử lý (EXPERIENCE › needs-action-row), dùng chung với cột "Cần xử lý" của CSV (Story 6.3). */
+export { REVIEW_TYPE_LABEL };
 
 /**
  * Dòng loại của mục Cần xử lý `open` của một Đơn, ở mọi trạng thái Đơn (tab Đơn, Story 6.1: vd. trả trùng cho Đơn Đã

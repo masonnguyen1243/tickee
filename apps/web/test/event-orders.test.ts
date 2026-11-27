@@ -1,11 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { reviewItemLine, reviewLine } from '@/lib/reporting/overview';
 import {
+  csvFilenameOf,
+  downloadEventOrdersCsv,
   eventOrderQueryKey,
   eventOrdersQueryKey,
+  eventOrdersExportPath,
   eventOrdersQueryPrefix,
   eventOrdersTabPath,
+  EXPORT_CSV_ERROR,
+  EXPORT_CSV_LABEL,
   isFiltered,
   NO_ORDERS_FILTER,
   ORDER_FILTER_CHIPS,
@@ -22,7 +27,10 @@ import {
 } from '@/lib/reporting/orders';
 import { NEEDS_ACTION_LINK } from '@/lib/reporting/review-queue';
 
-/* Story 6.1: tab Đơn — bộ lọc trên URL, nhãn chip, nhãn lịch sử, "Vé theo Hạng vé", khóa query. */
+/*
+ * Story 6.1: tab Đơn — bộ lọc trên URL, nhãn chip, nhãn lịch sử, "Vé theo Hạng vé", khóa query. Story 6.3: đường xuất
+ * CSV theo bộ lọc, tên file, tải `Blob`.
+ */
 
 const ORG = '019a3b2c-5678-7abc-8def-0123456789ab';
 const EVENT = '019a3b2c-0712-7abc-8def-0123456789ab';
@@ -155,5 +163,66 @@ describe('khóa query', () => {
     expect(first).not.toEqual(next);
     expect(first).not.toEqual(filtered);
     expect(eventOrderQueryKey(ORG, EVENT, 'TK8F3Q2AXM').slice(0, prefix.length)).toEqual([...prefix]);
+  });
+});
+
+describe('xuất CSV (Story 6.3)', () => {
+  it('nút và toast lỗi', () => {
+    expect(EXPORT_CSV_LABEL).toBe('Xuất CSV');
+    expect(EXPORT_CSV_ERROR).toBe('Chưa xuất được CSV. Vui lòng thử lại.');
+  });
+
+  it('đường xuất theo bộ lọc đang áp dụng: chip → status, chữ tìm đã gửi → q; không lọc → không query', () => {
+    const base = `/orgs/${ORG}/events/${EVENT}/orders/export`;
+    expect(eventOrdersExportPath(ORG, EVENT, NO_ORDERS_FILTER)).toBe(base);
+    expect(eventOrdersExportPath(ORG, EVENT, { status: 'paid', search: 'Minh@X.vn' })).toBe(`${base}?status=paid&q=Minh%40X.vn`);
+    expect(eventOrdersExportPath(ORG, EVENT, { status: null, search: '0912 345 678' })).toBe(`${base}?q=0912+345+678`);
+    // Cùng bộ lọc đọc từ URL tab Đơn.
+    const filter = ordersFilterFromParams(params('tab=don&trangThai=can-xu-ly&tim=tk1234abcd'));
+    expect(eventOrdersExportPath(ORG, EVENT, filter)).toBe(`${base}?status=needs_action&q=tk1234abcd`);
+  });
+
+  it('tên file từ Content-Disposition; thiếu hoặc lạ → don.csv', () => {
+    expect(csvFilenameOf('attachment; filename="don-giai-chay-a1b2-20261127-0005.csv"')).toBe(
+      'don-giai-chay-a1b2-20261127-0005.csv',
+    );
+    expect(csvFilenameOf('attachment; filename=don-x.csv')).toBe('don-x.csv');
+    expect(csvFilenameOf('attachment; filename="../../etc/x.csv"')).toBe('x.csv');
+    expect(csvFilenameOf('attachment')).toBe('don.csv');
+    expect(csvFilenameOf('attachment; filename=""')).toBe('don.csv');
+    expect(csvFilenameOf(null)).toBe('don.csv');
+  });
+
+  describe('downloadEventOrdersCsv', () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    beforeEach(() => {
+      vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', 'http://api.test');
+      vi.stubGlobal('fetch', fetchMock);
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+      fetchMock.mockReset();
+    });
+
+    it('fetch kèm cookie theo bộ lọc, trả Blob và tên file của api', async () => {
+      fetchMock.mockResolvedValue(
+        new Response('\uFEFFMã Đơn\r\n', {
+          status: 200,
+          headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="don-x-20261127-0005.csv"' },
+        }),
+      );
+      const { blob, filename } = await downloadEventOrdersCsv(ORG, EVENT, { status: 'paid', search: 'minh@x.vn' });
+      const [url, init] = fetchMock.mock.calls[0]!;
+      expect(url).toBe(`http://api.test/v1/orgs/${ORG}/events/${EVENT}/orders/export?status=paid&q=minh%40x.vn`);
+      expect(init?.credentials).toBe('include');
+      expect(filename).toBe('don-x-20261127-0005.csv');
+      expect([...new Uint8Array(await blob.arrayBuffer())].slice(0, 3)).toEqual([0xef, 0xbb, 0xbf]);
+    });
+
+    it('thiếu Content-Disposition (CORS chưa mở header) → don.csv', async () => {
+      fetchMock.mockResolvedValue(new Response('x', { status: 200, headers: { 'content-type': 'text/csv' } }));
+      expect((await downloadEventOrdersCsv(ORG, EVENT, NO_ORDERS_FILTER)).filename).toBe('don.csv');
+    });
   });
 });

@@ -1,10 +1,13 @@
 import {
+  EVENT_ORDERS_CSV_FALLBACK_FILENAME,
   EventOrderDetail,
   eventOrderApiPath,
   EventOrderFilter,
   EventOrderHistoryKind,
+  eventOrderItemsText,
   EventOrderPage,
   eventOrdersApiPath,
+  eventOrdersExportApiPath,
   EventOrderTicketStatus,
   eventPath,
   formatVnd,
@@ -13,17 +16,19 @@ import {
   type EventOrderHistoryEntry,
   type EventOrderItem,
   type EventOrderRow,
+  type EventOrdersExportPathQuery,
   type EventOrderTicket,
 } from '@tickee/contracts';
 
 import type { StatusTone } from '@/components/tickee/tone';
-import { apiRequest } from '@/lib/api/client';
+import { apiDownload, apiRequest } from '@/lib/api/client';
 
 import { orderTimeLabel, REVIEW_TYPE_LABEL } from './overview';
 
 /*
  * Tab Đơn của Sự kiện (Story 6.1, FR-31, UX-DR37): bộ lọc trên URL, nhãn chip, nhãn lịch sử, chuỗi "Vé theo Hạng vé",
- * hàm tải và khóa TanStack Query. Hàm thuần (trừ hàm tải), kiểm bằng Vitest môi trường node; giờ theo giờ Việt Nam.
+ * hàm tải và khóa TanStack Query; xuất CSV theo bộ lọc (Story 6.3). Hàm thuần (trừ hàm tải), kiểm bằng Vitest môi trường
+ * node; giờ theo giờ Việt Nam.
  */
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -112,9 +117,9 @@ export const ORDER_REVIEW_LINK = 'Xử lý ở trang Cần xử lý';
 /** Link của `recent-orders-block` sang tab Đơn. */
 export const ALL_ORDERS_LINK = 'Xem tất cả Đơn';
 
-/** Cột Vé theo Hạng vé: "2 × VIP, 1 × Thường"; không có dòng → "—". */
+/** Cột Vé theo Hạng vé: "2 × VIP, 1 × Thường" (cùng chuỗi với cột "Vé" của CSV); không có dòng → "—". */
 export const orderItemsLabel = (items: readonly EventOrderItem[]): string =>
-  items.length === 0 ? EMPTY_VALUE : items.map((item) => `${item.quantity} × ${item.ticketTypeName}`).join(', ');
+  items.length === 0 ? EMPTY_VALUE : eventOrderItemsText(items);
 
 /** Cột Thời gian: "Tạo HH:mm" (hoặc "dd/MM · HH:mm" khác ngày), thêm "Thanh toán …" khi đã thanh toán. */
 export function orderTimeLines(order: Pick<EventOrderRow, 'createdAt' | 'paidAt'>, now: number | Date = Date.now()): string[] {
@@ -186,6 +191,12 @@ export const eventOrdersQueryKey = (orgId: string, eventId: string, filter: Orde
 export const eventOrderQueryKey = (orgId: string, eventId: string, code: string) =>
   [...eventOrdersQueryPrefix(orgId, eventId), 'detail', code] as const;
 
+/** Bộ lọc của tab Đơn → query của api (`status`, `q`; bỏ tham số không có): danh sách và CSV dùng chung. */
+const filterQuery = (filter: OrdersFilter): EventOrdersExportPathQuery => ({
+  ...(filter.status !== null ? { status: filter.status } : {}),
+  ...(filter.search !== null ? { q: filter.search } : {}),
+});
+
 /** `GET /v1/orgs/:orgId/events/:eventId/orders`: một trang Đơn khớp bộ lọc, mới nhất trước. */
 export const fetchEventOrders = (
   orgId: string,
@@ -195,14 +206,65 @@ export const fetchEventOrders = (
   signal?: AbortSignal,
 ) =>
   apiRequest(
-    eventOrdersApiPath(orgId, eventId, {
-      ...(filter.status !== null ? { status: filter.status } : {}),
-      ...(filter.search !== null ? { q: filter.search } : {}),
-      ...(cursor !== null ? { cursor } : {}),
-    }),
+    eventOrdersApiPath(orgId, eventId, { ...filterQuery(filter), ...(cursor !== null ? { cursor } : {}) }),
     { schema: EventOrderPage, init: { signal } },
   );
 
 /** `GET /v1/orgs/:orgId/events/:eventId/orders/:code`: chi tiết một Đơn. */
 export const fetchEventOrder = (orgId: string, eventId: string, code: string, signal?: AbortSignal) =>
   apiRequest(eventOrderApiPath(orgId, eventId, code), { schema: EventOrderDetail, init: { signal } });
+
+// ---------------------------------------------------------------------------------------------------------------
+// Xuất CSV (Story 6.3)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Nút xuất ở hàng công cụ của tab Đơn. */
+export const EXPORT_CSV_LABEL = 'Xuất CSV';
+/** Toast khi api lỗi hoặc kết nối đứt giữa chừng. */
+export const EXPORT_CSV_ERROR = 'Chưa xuất được CSV. Vui lòng thử lại.';
+
+/**
+ * Đường api xuất CSV theo bộ lọc đang áp dụng (chip và chữ tìm đã gửi, như trên URL), không theo chữ đang gõ dở.
+ */
+export const eventOrdersExportPath = (orgId: string, eventId: string, filter: OrdersFilter): string =>
+  eventOrdersExportApiPath(orgId, eventId, filterQuery(filter));
+
+/**
+ * Tên file từ header `Content-Disposition` (`attachment; filename="don-….csv"`); thiếu hoặc lạ → `don.csv`. Chỉ lấy
+ * phần tên (bỏ đường dẫn nếu có).
+ */
+export function csvFilenameOf(contentDisposition: string | null): string {
+  const match = contentDisposition ? /filename\s*=\s*(?:"([^"]*)"|([^;]*))/i.exec(contentDisposition) : null;
+  const name = (match?.[1] ?? match?.[2] ?? '').trim().split(/[/\\]/).at(-1) ?? '';
+  return name === '' ? EVENT_ORDERS_CSV_FALLBACK_FILENAME : name;
+}
+
+/** File CSV đã tải về đủ: nội dung và tên file. */
+export interface EventOrdersCsv {
+  blob: Blob;
+  filename: string;
+}
+
+/**
+ * `GET /v1/orgs/:orgId/events/:eventId/orders/export`: tải trọn file CSV theo bộ lọc (kèm cookie). Lỗi của api (401, 500…)
+ * → `ApiError`; kết nối đứt giữa chừng → `ApiError` lỗi mạng (không bao giờ trả file cụt).
+ */
+export async function downloadEventOrdersCsv(orgId: string, eventId: string, filter: OrdersFilter): Promise<EventOrdersCsv> {
+  const { blob, headers } = await apiDownload(eventOrdersExportPath(orgId, eventId, filter));
+  return { blob, filename: csvFilenameOf(headers.get('content-disposition')) };
+}
+
+/**
+ * Lưu `blob` thành file `filename` trên máy: thẻ `<a download>` tạm, bấm rồi gỡ; thu hồi object URL sau `setTimeout(0)`
+ * (thu hồi ngay sau `click()` có thể hủy tải xuống ở Safari/Firefox). Chỉ chạy trên trình duyệt.
+ */
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}

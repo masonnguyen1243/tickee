@@ -14,6 +14,8 @@ export { issuedTicketCountsByType } from './issued-counts.js';
 // Tra tay (Story 5.5): Vé `valid` của các Đơn khớp SĐT/email (`flows`).
 export { validTicketsOfOrders, type LookupTicketRow } from './lookup-read.js';
 export { type OwnTicket, type OwnTicketDetail } from './my-tickets.js';
+// CSV danh sách Đơn (Story 6.3): số Vé `valid` / đã check-in theo Đơn, cho cột "Check-in" "k/N" (`reporting`).
+export { checkinCountsOfOrders } from './order-checkin-counts.js';
 // Tab Đơn (Story 6.1): Vé của một Đơn cho `Sheet` chi tiết (`reporting`).
 export { orderTicketsOf, type OrderTicketRow } from './order-tickets-read.js';
 export { signTicketQr, TICKET_QR_KEYS, TicketQrKeys, verifyTicketQr, type VerifiedTicketQr } from './qr.js';

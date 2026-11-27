@@ -1,6 +1,6 @@
 'use client';
 
-import { useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ErrorCode,
   eventOverviewLiveApiPath,
@@ -12,9 +12,10 @@ import {
   type EventOrderFilter,
   type EventOrderRow,
 } from '@tickee/contracts';
-import { Check, Copy, Inbox, SearchX, X } from 'lucide-react';
+import { Check, Copy, Download, Inbox, SearchX, X } from 'lucide-react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { toast } from 'sonner';
 
 import { EmptyState } from '@/components/tickee/empty-state';
 import { FieldError } from '@/components/tickee/field-error';
@@ -32,8 +33,11 @@ import { useGoToLogin } from '@/lib/auth/use-go-to-login';
 import { copyWithToast } from '@/lib/clipboard';
 import { useLiveResource } from '@/lib/realtime/use-live-resource';
 import {
+  downloadEventOrdersCsv,
   eventOrdersQueryKey,
   eventOrdersQueryPrefix,
+  EXPORT_CSV_ERROR,
+  EXPORT_CSV_LABEL,
   fetchEventOrders,
   isFiltered,
   NO_ORDERS_FILTER,
@@ -50,6 +54,7 @@ import {
   ordersFilterKey,
   ordersTabQuery,
   orderTimeLines,
+  saveBlob,
   type OrdersFilter,
 } from '@/lib/reporting/orders';
 import { eventOverviewPollInterval, orderStatusBadge, reviewItemLine } from '@/lib/reporting/overview';
@@ -179,6 +184,39 @@ function SearchForm({ search, onSearch }: { search: string | null; onSearch: (se
       </div>
       <FieldError id={errorId} message={error} />
     </form>
+  );
+}
+
+/**
+ * "Xuất CSV" (Story 6.3): tải mọi Đơn khớp bộ lọc đang áp dụng (`filter` đọc từ URL: chip và chữ tìm đã gửi, không phải
+ * chữ đang gõ dở). Đang tải → spinner, chặn bấm lặp, tới khi nhận trọn file; rồi lưu bằng `<a download>` với tên file của
+ * api. 401 → đăng nhập; 2FA, đồng ý NĐ 13, bị xóa khỏi BTC do khung xử lý (2FA xong thì tự xuất lại); lỗi khác hoặc
+ * đứt giữa chừng → toast, bấm lại được. Luôn hiện, kể cả khi danh sách trống (file chỉ có hàng tiêu đề).
+ */
+function ExportCsvButton({ orgId, eventId, filter }: { orgId: string; eventId: string; filter: OrdersFilter }) {
+  const goToLogin = useGoToLogin();
+  const exportCsv = useMutation({
+    mutationFn: (current: OrdersFilter) => downloadEventOrdersCsv(orgId, eventId, current),
+    onSuccess: ({ blob, filename }) => saveBlob(blob, filename),
+    onError: (error) => {
+      if (handledElsewhere(error)) {
+        if (hasErrorCode(error, ErrorCode.UNAUTHENTICATED)) goToLogin();
+        return;
+      }
+      toast.error(EXPORT_CSV_ERROR);
+    },
+  });
+  return (
+    <Button
+      type="button"
+      variant="secondary"
+      data-slot="orders-export-csv"
+      loading={exportCsv.isPending}
+      onClick={() => exportCsv.mutate(filter)}
+    >
+      <Download aria-hidden="true" />
+      {EXPORT_CSV_LABEL}
+    </Button>
   );
 }
 
@@ -504,11 +542,12 @@ function OrdersResults({
 }
 
 /**
- * Tab Đơn của Sự kiện (Story 6.1, FR-31, UX-DR37): chip trạng thái, ô tìm (mã Đơn, email, SĐT đầy đủ), danh sách lọc ở
- * server — từ `md` là `Table` trên `card` sáng, dưới `md` là danh sách thẻ — phân trang "Trang trước"/"Trang sau" và
- * `Sheet` chi tiết. Bộ lọc nằm trên URL (`?tab=don&trangThai=…&tim=…`, F5 vẫn giữ; giá trị lạ bị bỏ qua), đổi bằng
- * `history.replaceState` (không tải lại trang); cursor không lên URL, đổi bộ lọc thì về trang đầu. Không có thao tác
- * Cần xử lý ở đây: `Sheet` dẫn sang trang Cần xử lý.
+ * Tab Đơn của Sự kiện (Story 6.1, FR-31, UX-DR37): chip trạng thái, ô tìm (mã Đơn, email, SĐT đầy đủ), "Xuất CSV" theo
+ * bộ lọc (Story 6.3; dưới `md` nằm sau ô tìm, từ `md` căn phải hàng chip), danh sách lọc ở server — từ `md` là `Table`
+ * trên `card` sáng, dưới `md` là danh sách thẻ — phân trang "Trang trước"/"Trang sau" và `Sheet` chi tiết. Bộ lọc nằm
+ * trên URL (`?tab=don&trangThai=…&tim=…`, F5 vẫn giữ; giá trị lạ bị bỏ qua), đổi bằng `history.replaceState` (không tải
+ * lại trang); cursor không lên URL, đổi bộ lọc thì về trang đầu. Không có thao tác Cần xử lý ở đây: `Sheet` dẫn sang
+ * trang Cần xử lý.
  */
 export function OrdersTab({ orgId, event }: { orgId: string; event: EventDetail }) {
   const pathname = usePathname();
@@ -518,9 +557,16 @@ export function OrdersTab({ orgId, event }: { orgId: string; event: EventDetail 
 
   return (
     <div data-slot="orders-tab" className="flex min-w-0 flex-col gap-section">
-      <div className="flex min-w-0 flex-col gap-stack">
-        <FilterChips status={filter.status} onSelect={(status) => setFilter({ ...filter, status })} />
-        <SearchForm search={filter.search} onSearch={(search) => setFilter({ ...filter, search })} />
+      <div data-slot="orders-toolbar" className="grid min-w-0 grid-cols-1 gap-stack md:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="min-w-0">
+          <FilterChips status={filter.status} onSelect={(status) => setFilter({ ...filter, status })} />
+        </div>
+        <div className="min-w-0 md:col-start-1">
+          <SearchForm search={filter.search} onSearch={(search) => setFilter({ ...filter, search })} />
+        </div>
+        <div className="justify-self-start md:col-start-2 md:row-start-1 md:justify-self-end">
+          <ExportCsvButton orgId={orgId} eventId={event.id} filter={filter} />
+        </div>
       </div>
       <OrdersResults
         key={ordersFilterKey(filter)}

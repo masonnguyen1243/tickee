@@ -196,7 +196,13 @@ export type AuditAction =
    * Owner/Admin "Khôi phục" một CTV đã bị thu hồi khi Sự kiện chưa kết thúc (Story 5.6; đối tượng: `{ type: 'checker',
    * id }`; `changedFields: ['status']`). Người và lúc thu hồi trước đó chỉ còn ở dòng `checker.revoked`.
    */
-  | 'checker.restored';
+  | 'checker.restored'
+  /**
+   * Owner/Admin xuất CSV danh sách Đơn của Sự kiện (Story 6.3, FR-31; đối tượng: `{ type: 'event', id }`), một dòng mỗi
+   * lần xuất, trong transaction riêng, trước byte đầu tiên của file. `changedFields` ghi bộ lọc: `status:<chip>`
+   * (`EventOrderFilter`) và `q:<code|email|phone>` (loại giá trị tìm); không bao giờ ghi giá trị tìm.
+   */
+  | 'event_orders.exported';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

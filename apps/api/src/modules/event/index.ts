@@ -48,6 +48,7 @@ export {
   assertEventOfOrganization,
   assertTicketTypeId,
   deleteTicketTypeRow,
+  eventSlugOfOrganization,
   insertTicketType,
   lockEventForTicketTypes,
   ticketTypeChangedFields,

@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
 import { CHECKIN_LOOKUP_QUERY_MAX, parseLookupQuery, type LookupQuery } from './checkin.js';
-import { EventDateTime } from './event.js';
-import { ORDER_CODE_PATTERN, orderCancelReasonSchema, orderStatusSchema } from './order.js';
+import { EventDateTime, formatVnFileStamp } from './event.js';
+import { localBuyerPhone, ORDER_CODE_PATTERN, orderCancelReasonSchema, orderStatusSchema } from './order.js';
 import { reviewItemTypeSchema } from './payment.js';
 import { RecentOrderReview } from './reporting.js';
 
@@ -13,8 +13,9 @@ import { RecentOrderReview } from './reporting.js';
 /*
  * Chỗ dùng đầu tiên của quy ước phân trang `cursor` + `limit` (spine): `cursor` là chuỗi mờ (base64url), người gọi chỉ
  * gửi lại nguyên văn `nextCursor` của trang trước; không đếm tổng, không cuộn vô hạn. Chỉ Owner và Admin (`orders.view`).
- * Response không bao giờ có id nội bộ, Mã QR vé, token chia sẻ hay id lần quét. CSV (Story 6.3) dùng lại bộ lọc và cursor
- * ở đây.
+ * Response không bao giờ có id nội bộ, Mã QR vé, token chia sẻ hay id lần quét. CSV (Story 6.3) dùng lại bộ lọc
+ * (`EventOrderExportQuery`: `status`, `q`, cùng cách parse) và phân trang keyset ở server (api đọc theo lô, không có
+ * `cursor`/`limit` trên query).
  */
 
 /** Số Đơn mỗi trang mặc định và tối đa. */
@@ -148,6 +149,15 @@ export const EventOrderListQuery = z.object({
 export type EventOrderListQuery = z.input<typeof EventOrderListQuery>;
 export type EventOrderListValues = z.output<typeof EventOrderListQuery>;
 
+/**
+ * Query của `GET /v1/orgs/:orgId/events/:eventId/orders/export` (Story 6.3): đúng bộ lọc của danh sách — `status` (chip),
+ * `q` (ô tìm, qua `parseOrderSearch`) — cùng nghĩa và cùng cách parse; không có `cursor`, `limit` (api tự đọc theo lô).
+ * Sai → `400 VALIDATION_FAILED`.
+ */
+export const EventOrderExportQuery = EventOrderListQuery.pick({ status: true, q: true });
+export type EventOrderExportQuery = z.input<typeof EventOrderExportQuery>;
+export type EventOrderExportValues = z.output<typeof EventOrderExportQuery>;
+
 // ---------------------------------------------------------------------------------------------------------------
 // Danh sách
 // ---------------------------------------------------------------------------------------------------------------
@@ -158,6 +168,10 @@ export const EventOrderItem = z.object({
   quantity: z.number().int().min(1),
 });
 export type EventOrderItem = z.infer<typeof EventOrderItem>;
+
+/** Vé theo Hạng vé của Đơn: "2 × VIP, 1 × Thường" (tab Đơn và cột "Vé" của CSV); không có dòng → `''`. */
+export const eventOrderItemsText = (items: readonly EventOrderItem[]): string =>
+  items.map((item) => `${item.quantity} × ${item.ticketTypeName}`).join(', ');
 
 /**
  * Một Đơn của tab Đơn (mọi trạng thái): mã Đơn, Người mua (bản chụp lúc đặt: tên, email, SĐT E.164), các dòng theo Hạng
@@ -307,3 +321,43 @@ export function eventOrdersApiPath(organizationId: string, eventId: string, quer
 /** Đường API của chi tiết một Đơn. */
 export const eventOrderApiPath = (organizationId: string, eventId: string, code: string): string =>
   `${eventOrdersApiPath(organizationId, eventId)}/${encodeURIComponent(code)}`;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Xuất CSV (Story 6.3, FR-31, UX-DR37)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Tham số của `eventOrdersExportApiPath`: bộ lọc đang áp dụng (`q` là chữ người dùng đã gửi, api tự chuẩn hóa). */
+export type EventOrdersExportPathQuery = Pick<EventOrdersPathQuery, 'status' | 'q'>;
+
+/**
+ * `GET /v1/orgs/:orgId/events/:eventId/orders/export[?status=&q=]` (Owner, Admin: `orders.view`; `no-store`): file CSV
+ * (`text/csv; charset=utf-8`, tải về theo `Content-Disposition`) mọi Đơn khớp bộ lọc, mới nhất trước. Query sai →
+ * `400 VALIDATION_FAILED`, Sự kiện lạ → `404 EVENT_NOT_FOUND`, cả hai là JSON (trước khi có byte CSV nào).
+ */
+export function eventOrdersExportApiPath(
+  organizationId: string,
+  eventId: string,
+  query: EventOrdersExportPathQuery = {},
+): string {
+  const params = new URLSearchParams();
+  if (query.status !== undefined) params.set('status', query.status);
+  if (query.q !== undefined) params.set('q', query.q);
+  const search = params.toString();
+  const path = `${eventOrdersApiPath(organizationId, eventId)}/export`;
+  return search ? `${path}?${search}` : path;
+}
+
+/** Tên file CSV khi không đọc được `Content-Disposition`. */
+export const EVENT_ORDERS_CSV_FALLBACK_FILENAME = 'don.csv';
+
+/** Tên file CSV của Sự kiện `slug` xuất lúc `at`: `don-<slug>-<yyyyMMdd-HHmm>.csv` (giờ Việt Nam). */
+export const eventOrdersCsvFilename = (slug: string, at: Date): string => `don-${slug}-${formatVnFileStamp(at)}.csv`;
+
+/**
+ * SĐT Người mua trong CSV: số Việt Nam 10 chữ số dạng nhóm 4-3-3 (`+84912345678` → "0912 345 678"), để Excel và Google
+ * Sheets giữ là chữ, không mất số 0 đầu (không dùng công thức `="…"`). Số khác giữ như `localBuyerPhone`.
+ */
+export function csvBuyerPhone(phone: string): string {
+  const local = localBuyerPhone(phone);
+  return /^0\d{9}$/.test(local) ? `${local.slice(0, 4)} ${local.slice(4, 7)} ${local.slice(7)}` : local;
+}

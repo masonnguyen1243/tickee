@@ -50,12 +50,21 @@ export async function lockEventForTicketTypes(tx: Tx, ctx: AccessContext, eventI
 
 /** Sự kiện có thuộc BTC không (không khóa); không → `404 EVENT_NOT_FOUND`. */
 export async function assertEventOfOrganization(db: DbExecutor, ctx: AccessContext, eventId: string): Promise<void> {
+  await eventSlugOfOrganization(db, ctx, eventId);
+}
+
+/**
+ * Như `assertEventOfOrganization` (một câu, không khóa, không xét khóa BTC hay Sự kiện), trả thêm `slug` của Sự kiện
+ * (tên file CSV, Story 6.3). Id lạ, sai dạng hoặc của BTC khác → `404 EVENT_NOT_FOUND`.
+ */
+export async function eventSlugOfOrganization(db: DbExecutor, ctx: AccessContext, eventId: string): Promise<string> {
   if (!UUID.test(eventId)) throw notFound();
   const [row] = await db
-    .select({ id: events.id })
+    .select({ slug: events.slug })
     .from(events)
     .where(and(orgScope(ctx)(events), eq(events.id, eventId)));
   if (!row) throw notFound();
+  return row.slug;
 }
 
 /** Hạng vé của một Sự kiện thuộc BTC, tạo trước đứng trước. Người gọi đã kiểm Sự kiện tồn tại. */

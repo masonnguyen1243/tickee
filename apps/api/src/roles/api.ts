@@ -20,8 +20,9 @@ export function configureApiApp<T extends INestApplication>(app: T, options: { s
   express.disable('x-powered-by');
   // Sau load balancer: `req.ip` lấy từ X-Forwarded-For, bỏ qua đúng số hop tin cậy (không tin header do client tự gửi).
   if (config.TRUST_PROXY_HOPS > 0) express.set('trust proxy', config.TRUST_PROXY_HOPS);
-  // Chỉ web origin được gọi kèm cookie; origin lạ không nhận header Access-Control-Allow-Origin.
-  app.enableCors({ origin: [config.WEB_ORIGIN], credentials: true });
+  // Chỉ web origin được gọi kèm cookie; origin lạ không nhận header Access-Control-Allow-Origin. Web đọc được
+  // `Content-Disposition` (tên file CSV danh sách Đơn, Story 6.3).
+  app.enableCors({ origin: [config.WEB_ORIGIN], credentials: true, exposedHeaders: ['Content-Disposition'] });
   app.setGlobalPrefix('v1', { exclude: ['healthz', 'readyz'] });
   if (options.shutdownHooks ?? true) {
     // SIGTERM: đóng HTTP, chạy shutdown hook rồi exit 0.
