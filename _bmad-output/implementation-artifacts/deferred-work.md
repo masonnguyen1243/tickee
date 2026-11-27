@@ -1334,3 +1334,7 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Sheet chứa tên, email, SĐT và câu trả lời form của người mua, nằm trong Google Drive của người cấp, ngoài tầm Tickee thu hồi. Xóa tài khoản theo AD-24 (`flows.deleteAccount`) phải chạm tới dòng của người đó trên Sheet (enqueue `sheet_row_changed`, như epic context ghi cho 7.6); cân nhắc thêm câu báo cho BTC lúc kết nối.
   evidence: Review 6.4 (Triage #52). `epic-6-context.md` › Epic sau › 7.6: "Handler ẩn danh enqueue `sheet_row_changed`".
   story: 7.6
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-ket-noi-google-sheets.md`
+  summary: Kiểm thủ công của 6.4 chưa làm: trên dev stack với OAuth client Google thật, kết nối một Sự kiện có Đơn thật (câu hỏi form, check-in) rồi kiểm Sheet mới trong Drive của người cấp (tiếng Việt đúng, SĐT giữ số 0, số tiền là số, giờ Việt Nam), sau đó ngắt kết nối và thấy Sheet vẫn còn trong Drive.
+  evidence: Spec 6.4 › Verification › Manual checks. Mọi test chạy với Google fake; kiểm với Google thật cần OAuth client thật (README › "Google Sheets"). Mason hoãn ngày 27/11/2026 để kiểm gộp với đồng bộ của 6.5.
+  story: 6.5

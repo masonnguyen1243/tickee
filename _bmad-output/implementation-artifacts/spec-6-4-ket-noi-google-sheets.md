@@ -238,7 +238,7 @@ context:
   - `pnpm typecheck` và `pnpm lint:deps` sạch;
   - `pnpm test` xanh (contracts 405, web 511, api 1.901);
   - `pnpm test:e2e`: 1.423 xanh, 1 đỏ ở spec không liên quan 6.4: `payout-account.spec.ts:752` trên `ios-webkit` (hết 30 giây). Chạy lại riêng test đó 5 + 6 lần: 10/11 xanh; cả spec 72/72 xanh. Đây là test chập chờn trên webkit (nhóm E2-8); 6.4 không chạm trang Tài khoản nhận tiền hay trang chủ BTC.
-- **Chưa làm:** kiểm thủ công với OAuth client Google thật (mục Verification › Manual checks).
+- Kiểm thủ công hoãn (27/11/2026): trên dev stack với OAuth client Google thật, kết nối Sự kiện có Đơn thật, kiểm Sheet trong Drive của người cấp, ngắt kết nối thì Sheet vẫn còn → 6.5.
 
 ## Spec Change Log
 
