@@ -14,7 +14,7 @@ import {
 import { sql } from 'drizzle-orm';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CHECKIN_SCAN_DURATION_METRIC, scanTicket } from '../../src/flows/index.js';
+import { CHECKIN_SCAN_DURATION_METRIC, scanTicket, type SheetRowChanges } from '../../src/flows/index.js';
 import { signTicketQr, TicketQrKeys } from '../../src/modules/ticketing/index.js';
 import { TICKET_CANCEL_REASON } from '../../src/modules/ticketing/schema.js';
 import type { EventAccessContext } from '../../src/platform/access/index.js';
@@ -430,6 +430,12 @@ describe('POST /v1/checkin/events/:eventId/scans', () => {
         throw new Error('không được chạm DB khi chữ ký sai');
       },
     });
+    // Story 6.5: queue `sheet_row_changed` (pg-boss) cũng không được chạm khi chữ ký sai.
+    const untouchableSheets = new Proxy({} as SheetRowChanges, {
+      get: () => {
+        throw new Error('không được chạm pg-boss khi chữ ký sai');
+      },
+    });
     const ctx: EventAccessContext = {
       userId: ctv.userId,
       organizationId: org.orgId,
@@ -440,7 +446,7 @@ describe('POST /v1/checkin/events/:eventId/scans', () => {
     };
     const otherKey = TicketQrKeys.parse(`v1:${Buffer.alloc(32, 7).toString('base64')}`);
     for (const code of ['khong-phai-ma-qr', signTicketQr(otherKey, ticket!.id)]) {
-      await expect(scanTicket(untouchable, qrKeys, ctx, { code, scanId: randomUUID() })).resolves.toEqual(
+      await expect(scanTicket(untouchable, qrKeys, ctx, { code, scanId: randomUUID() }, untouchableSheets)).resolves.toEqual(
         invalid('BAD_SIGNATURE'),
       );
     }

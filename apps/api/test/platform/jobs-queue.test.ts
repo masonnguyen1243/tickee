@@ -148,6 +148,56 @@ describe('defineQueue', () => {
     await testQueue().enqueue(boss, {} as Tx, { itemId }, { id });
     expect(send.mock.calls[0]?.[2]).toMatchObject({ id });
   });
+
+  it('Story 6.5: policy chỉ áp lúc tạo queue; updateQueue không nhận policy (pg-boss ném khi đổi policy)', async () => {
+    const queue = defineQueue({
+      name: 'test.singleton',
+      deadLetter: 'test.singleton.dead-letter',
+      options: { policy: 'singleton', retryLimit: 5, retryDelay: 30 },
+      work: { batchSize: 1, perJobResults: true },
+      payload: TestPayload,
+    });
+    const boss = { createQueue: vi.fn().mockResolvedValue(undefined), updateQueue: vi.fn().mockResolvedValue(undefined) };
+    await queue.ensure(boss as unknown as PgBoss);
+    expect(boss.createQueue.mock.calls).toEqual([
+      ['test.singleton.dead-letter'],
+      ['test.singleton', { policy: 'singleton', retryLimit: 5, retryDelay: 30, deadLetter: 'test.singleton.dead-letter' }],
+    ]);
+    expect(boss.updateQueue.mock.calls).toEqual([
+      ['test.singleton', { retryLimit: 5, retryDelay: 30, deadLetter: 'test.singleton.dead-letter' }],
+    ]);
+
+    // Queue chỉ có policy: không gọi updateQueue (pg-boss từ chối options rỗng).
+    const policyOnly = defineQueue({
+      name: 'test.policy-only',
+      options: { policy: 'singleton' },
+      work: { batchSize: 1, perJobResults: true },
+      payload: TestPayload,
+    });
+    const boss2 = { createQueue: vi.fn().mockResolvedValue(undefined), updateQueue: vi.fn().mockResolvedValue(undefined) };
+    await policyOnly.ensure(boss2 as unknown as PgBoss);
+    expect(boss2.updateQueue).not.toHaveBeenCalled();
+  });
+
+  it('Story 6.5: enqueue debounce gửi singletonKey/singletonSeconds/singletonNextSlot; khe đã có job (null) → không ném', async () => {
+    const send = vi.fn().mockResolvedValue(null);
+    const boss = { send } as unknown as PgBoss;
+    const itemId = randomUUID();
+    await testQueue().enqueue(
+      boss,
+      {} as Tx,
+      { itemId },
+      { singletonKey: itemId, singletonSeconds: 45, singletonNextSlot: true },
+    );
+    expect(send.mock.calls[0]?.[2]).toMatchObject({ singletonKey: itemId, singletonSeconds: 45, singletonNextSlot: true });
+    expect(send.mock.calls[0]?.[2]).toHaveProperty('db');
+    // Không debounce: không có khóa nào.
+    send.mockResolvedValue(randomUUID());
+    await testQueue().enqueue(boss, {} as Tx, { itemId });
+    for (const key of ['singletonKey', 'singletonSeconds', 'singletonNextSlot']) {
+      expect(send.mock.calls[1]?.[2]).not.toHaveProperty(key);
+    }
+  });
 });
 
 describe('errorName / derivedJobId', () => {

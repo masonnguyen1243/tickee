@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { EventModule } from '../modules/event/index.js';
 import { EventChangeEmailQueues } from '../modules/ordering/index.js';
+import { SheetRowChangedQueues } from '../modules/ticketing/index.js';
 import { CheckerInviteAcceptanceController } from './checker-invite.controller.js';
 import { CheckersListController } from './checkers.controller.js';
 import { CheckinLookupController } from './checkin-lookup.controller.js';
@@ -17,7 +18,7 @@ import { TicketTypesController } from './ticket-types.controller.js';
  * toàn cục `TICKET_QR_KEYS`), `identity` và `organizer` (tên, vai người quét trước). Tra tay và check-in tay (Story 5.5)
  * ghép `ordering` (Đơn khớp SĐT/email), `ticketing` và bộ đếm tra tay của `checkin` (`CheckinLookupRateLimiter`, toàn
  * cục từ `CheckinLookupLimitModule`). Danh sách CTV của Sự kiện (Story 5.6) ghép `checkin`, `event` và `identity` (tên,
- * email).
+ * email). `SheetRowChangedQueues` tạo queue `sheet_row_changed` (Story 6.5) mà hai luồng check-in enqueue vào.
  */
 @Module({
   imports: [EventModule],
@@ -29,6 +30,6 @@ import { TicketTypesController } from './ticket-types.controller.js';
     CheckinScanController,
     CheckinLookupController,
   ],
-  providers: [EventChangeEmailQueues],
+  providers: [EventChangeEmailQueues, SheetRowChangedQueues],
 })
 export class FlowsModule {}

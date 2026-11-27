@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, index, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { check, index, integer, pgTable, primaryKey, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, id, timestamptz } from '../../platform/db/index.js';
 import { events } from '../event/schema.js';
 import { users } from '../identity/schema.js';
@@ -14,6 +14,11 @@ import { organizations } from '../organizer/schema.js';
  *
  * `refresh_token`: refresh token Google mã hóa AES-256-GCM bằng `GOOGLE_SHEETS_TOKEN_KEYS` (`v<k>:…`), không bao giờ ở dạng
  * gốc, không bao giờ trong response hay log. `granted_by_user_id`: người cấp OAuth (Owner/Admin bấm "Kết nối").
+ *
+ * `sheet_tab_id` (Story 6.5): `sheetId` của tab chứa Đơn trong spreadsheet (mặc định 0, id đặt lúc tạo Sheet). Worker tìm
+ * tab theo id này, không theo tên, nên BTC đổi tên tab vẫn ghi được. Sheet mất (spreadsheet 404, mất tab, mất cột Mã Đơn)
+ * thì flush đặt lại `spreadsheet_id`/`spreadsheet_url`/`last_synced_at`/`sheet_tab_id`, chuyển `syncing` và chạy lại lần
+ * đẩy đầu (Quyết định 2 của Story 6.5).
  */
 export const sheetConnections = pgTable(
   'sheet_connections',
@@ -32,6 +37,7 @@ export const sheetConnections = pgTable(
     spreadsheetId: text('spreadsheet_id'),
     spreadsheetUrl: text('spreadsheet_url'),
     refreshToken: text('refresh_token').notNull(),
+    sheetTabId: integer('sheet_tab_id').notNull().default(0),
     lastSyncedAt: timestamptz('last_synced_at'),
     lastErrorCode: text('last_error_code'),
     createdAt: createdAt(),
@@ -48,6 +54,31 @@ export const sheetConnections = pgTable(
       'sheet_connections_spreadsheet_check',
       sql`(${t.spreadsheetId} IS NULL) = (${t.spreadsheetUrl} IS NULL)`,
     ),
+    check('sheet_connections_sheet_tab_id_check', sql`${t.sheetTabId} >= 0`),
+  ],
+);
+
+/**
+ * Dòng bẩn của kết nối Google Sheets (Story 6.5, AD-23): Đơn cần ghi lại lên Sheet. Handler `sheet_row_changed` upsert
+ * `(connection_id, order_id)` và tăng `version`; flush đọc `(order_id, version)`, ghi Google rồi chỉ xóa dòng có `version`
+ * vẫn bằng giá trị đã đọc, nên thay đổi đến giữa lượt không bị mất. Không dùng con trỏ `updated_at`. "Ngắt kết nối" xóa
+ * kết nối thì dòng bẩn đi theo (`ON DELETE CASCADE`). `order_id` không có FK: `integration` chỉ đọc `ordering` qua read
+ * model.
+ */
+export const sheetDirtyRows = pgTable(
+  'sheet_dirty_rows',
+  {
+    connectionId: uuid('connection_id')
+      .notNull()
+      .references(() => sheetConnections.id, { onDelete: 'cascade' }),
+    orderId: uuid('order_id').notNull(),
+    version: integer('version').notNull().default(1),
+    markedAt: timestamptz('marked_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.connectionId, t.orderId] }),
+    index('sheet_dirty_rows_connection_id_marked_at_idx').on(t.connectionId, t.markedAt),
+    check('sheet_dirty_rows_version_check', sql`${t.version} >= 1`),
   ],
 );
 

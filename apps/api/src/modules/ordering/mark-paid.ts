@@ -6,7 +6,7 @@ import { audit } from '../../platform/audit/index.js';
 import { dbClock, type DbExecutor, type Tx } from '../../platform/db/index.js';
 import { BOSS } from '../../platform/jobs/index.js';
 import { lockEventByIdForShare, organizationLocked, type PublicEventRef } from '../event/index.js';
-import { TicketsService } from '../ticketing/index.js';
+import { enqueueSheetRowChanged, SheetRowChangedQueues, TicketsService } from '../ticketing/index.js';
 import { BuyerEmailQueues, enqueueBuyerEmail } from './buyer-email-jobs.js';
 import { releaseOrderHeld, sellInventory, settleHeld } from './inventory.service.js';
 import { notifyOrderChanged, orderSignalColumns } from './order-changed.js';
@@ -168,9 +168,10 @@ const isReviewable = (status: OrderStatus): status is Reviewable =>
 /**
  * CAS `from → review` (Đơn đã khóa nên không thể thua đua; 0 dòng là lỗi lập trình → ném, cả `tx` rollback). `pending`
  * thì nhả chỗ đang giữ (`held -= n`); `expired` đã nhả lúc hết hạn. Phát `order_changed` trong `tx` (Trang Đơn hiện "BTC
- * đang kiểm tra thanh toán").
+ * đang kiểm tra thanh toán") và enqueue `integration.sheet_row_changed` (Story 6.5) trong cùng `tx`: mọi đường sang
+ * `review` đi qua đây.
  */
-async function moveToReview(tx: Tx, orderId: string, from: Reviewable): Promise<void> {
+async function moveToReview(tx: Tx, boss: PgBoss, orderId: string, from: Reviewable): Promise<void> {
   const [moved] = await tx
     .update(orders)
     .set({ status: OrderStatus.REVIEW })
@@ -179,6 +180,7 @@ async function moveToReview(tx: Tx, orderId: string, from: Reviewable): Promise<
   if (!moved) throw new Error(`markPaid: CAS ${from} → review thua dù đã khóa Đơn`);
   if (from === OrderStatus.PENDING) await releaseOrderHeld(tx, orderId);
   await notifyOrderChanged(tx, moved);
+  await enqueueSheetRowChanged(boss, tx, { eventId: moved.eventId, orderId: moved.id });
 }
 
 const orphan = (reason: ReviewItemReason): MarkPaidResult => ({ outcome: 'orphan', reason });
@@ -191,9 +193,10 @@ const isManualSource = (status: OrderStatus, approval: ManualApproval): status i
  * Đường duy nhất phát Vé (AD-1, Story 3.3): mọi nguồn ghi nhận thanh toán (`PAID_SOURCES`) đi qua `markPaid` trong `tx`
  * của bên gọi. Một transaction: khóa Sự kiện `FOR SHARE` → (nguồn có phí: khóa Đơn, thứ tự kiểm 3–7 của AD-7) → CAS Đơn
  * → `paid` (kèm `paid_at`, `paid_amount`, `paid_source`) → phép tồn kho theo nguồn → phát N Vé (`ticketing`, kèm link
- * chia sẻ) → enqueue email Vé (Story 3.8, mọi nguồn) → audit `order.paid` → phễu `paid` → tín hiệu `order_changed` (trừ
- * nguồn `free`). Mọi lần Đơn chuyển `review` cũng phát `order_changed`; tiền về muộn hết chỗ (`orphan` `sold_out`) còn
- * enqueue email báo Người mua. Không bao giờ phát Vé từ request của trình duyệt hay `returnUrl`.
+ * chia sẻ) → enqueue email Vé (Story 3.8, mọi nguồn) → enqueue `integration.sheet_row_changed` (Story 6.5, mọi nguồn) →
+ * audit `order.paid` → phễu `paid` → tín hiệu `order_changed` (trừ nguồn `free`). Mọi lần Đơn chuyển `review` cũng phát
+ * `order_changed` và enqueue `sheet_row_changed`; tiền về muộn hết chỗ (`orphan` `sold_out`) còn enqueue email báo Người
+ * mua. Không bao giờ phát Vé từ request của trình duyệt hay `returnUrl`.
  */
 @Injectable()
 export class OrderPayments {
@@ -201,14 +204,15 @@ export class OrderPayments {
     @Inject(TicketsService) private readonly tickets: TicketsService,
     @Inject(BOSS) private readonly boss: PgBoss,
     @Inject(BuyerEmailQueues) private readonly emailQueues: BuyerEmailQueues,
+    @Inject(SheetRowChangedQueues) private readonly sheetQueues: SheetRowChangedQueues,
   ) {}
 
   /**
-   * pg-boss đã start và queue email Người mua đã có: `markPaid` enqueue trong `tx` của bên gọi, nên bên gọi chờ việc này
-   * trước transaction (lần trước lỗi thì làm lại).
+   * pg-boss đã start, queue email Người mua và queue `sheet_row_changed` (Story 6.5) đã có: `markPaid` enqueue trong `tx`
+   * của bên gọi, nên bên gọi chờ việc này trước transaction (lần trước lỗi thì làm lại).
    */
-  ready(): Promise<void> {
-    return this.emailQueues.ready();
+  async ready(): Promise<void> {
+    await Promise.all([this.emailQueues.ready(), this.sheetQueues.ready()]);
   }
 
   /**
@@ -327,21 +331,21 @@ export class OrderPayments {
 
     // 3. Sự kiện đã hủy.
     if (event.status === EventStatus.CANCELLED) {
-      if (isReviewable(status)) await moveToReview(tx, orderId, status);
+      if (isReviewable(status)) await moveToReview(tx, this.boss, orderId, status);
       return { outcome: 'event_cancelled' };
     }
     // 4. Đơn không còn chờ tiền.
     if (!isReviewable(status)) return { outcome: 'duplicate_payment' };
     // 5. Lệch tiền.
     if (paidAmount !== totalAmount) {
-      await moveToReview(tx, orderId, status);
+      await moveToReview(tx, this.boss, orderId, status);
       return { outcome: 'mismatch' };
     }
     // 6. Tiền về muộn. Đồng hồ DB lúc gọi (`clock_timestamp()`): mốc so `effective_end_at`, `issued_at` của Vé, `paid_at`
     // khi Tingee không báo.
     const now = await dbClock(tx);
     if (now.getTime() > event.effectiveEndAt.getTime()) {
-      await moveToReview(tx, orderId, status);
+      await moveToReview(tx, this.boss, orderId, status);
       return orphan(ReviewItemReason.EVENT_ENDED);
     }
     const lines = await linesOf(tx, orderId);
@@ -351,11 +355,11 @@ export class OrderPayments {
       const eventLocked =
         event.lockedAt !== null || (await organizationLocked(tx, { organizationId: event.organizationId }));
       if (eventLocked) {
-        await moveToReview(tx, orderId, status);
+        await moveToReview(tx, this.boss, orderId, status);
         return orphan(ReviewItemReason.EVENT_LOCKED);
       }
       if (!(await sellAllOrNothing(tx, lines))) {
-        await moveToReview(tx, orderId, status);
+        await moveToReview(tx, this.boss, orderId, status);
         // Người mua đã trả tiền mà không có Vé: báo BTC sẽ liên hệ hoàn tiền (email cùng `tx`).
         await enqueueBuyerEmail(this.boss, tx, BuyerEmailKind.ORPHAN_SOLD_OUT, orderId);
         return orphan(ReviewItemReason.SOLD_OUT);
@@ -422,9 +426,10 @@ export class OrderPayments {
 
   /**
    * CAS `from → paid` (kèm `paid_at`, `paid_amount`, `paid_source`) → phát N Vé (`issued_at` = `issuedAt`, thiếu →
-   * `paid_at`) → enqueue email Vé (`tickets`, id job cố định theo Đơn) → audit `order.paid` → phễu `paid` →
-   * `order_changed` (trừ nguồn `free`: Đơn 0đ thành `paid` ngay trong TX1, không `NOTIFY` trong TX1, response tạo Đơn đã
-   * mang kết quả). Phép tồn kho do bên gọi làm. 0 dòng (Đơn không còn ở `from`) → `false`, không làm gì.
+   * `paid_at`) → enqueue email Vé (`tickets`, id job cố định theo Đơn) → enqueue `sheet_row_changed` (Story 6.5; mọi đường
+   * sang `paid`: IPN, Đối soát bù, duyệt tay, ghép, Đơn 0đ) → audit `order.paid` → phễu `paid` → `order_changed` (trừ
+   * nguồn `free`: Đơn 0đ thành `paid` ngay trong TX1, không `NOTIFY` trong TX1, response tạo Đơn đã mang kết quả). Phép tồn
+   * kho do bên gọi làm. 0 dòng (Đơn không còn ở `from`) → `false`, không làm gì.
    */
   private async pay(tx: Tx, orderId: string, input: PayInput): Promise<boolean> {
     const [order] = await tx
@@ -460,6 +465,7 @@ export class OrderPayments {
       lines: input.lines,
     });
     await enqueueBuyerEmail(this.boss, tx, BuyerEmailKind.TICKETS, order.id);
+    await enqueueSheetRowChanged(this.boss, tx, { eventId: order.eventId, orderId: order.id });
     await audit.record(tx, {
       actorUserId: input.actorUserId ?? null,
       organizationId: order.organizationId,
@@ -496,12 +502,13 @@ interface PayInput {
 
 /**
  * `OrderPayments` (`markPaid`) cho mọi vai: `OrderingModule` (api, Đơn 0đ), `payment` (IPN ở api, Đối soát bù ở worker,
- * thao tác trên mục Cần xử lý ở api). Kèm `OrderReviewDecisions` (từ chối, đã hoàn tay; Story 4.4) và `BuyerEmailQueues`
- * (tạo queue email Người mua mà cả hai enqueue vào). Không controller, không cấu hình; cần `TicketingModule` (toàn cục:
- * `TicketsService`), `JobsModule` và `DbModule` ở gốc DI.
+ * thao tác trên mục Cần xử lý ở api). Kèm `OrderReviewDecisions` (từ chối, đã hoàn tay; Story 4.4), `BuyerEmailQueues`
+ * (tạo queue email Người mua mà cả hai enqueue vào) và `SheetRowChangedQueues` (queue `sheet_row_changed` của `ticketing`,
+ * Story 6.5). Không controller, không cấu hình; cần `TicketingModule` (toàn cục: `TicketsService`), `JobsModule` và
+ * `DbModule` ở gốc DI.
  */
 @Module({
-  providers: [OrderPayments, OrderReviewDecisions, BuyerEmailQueues],
+  providers: [OrderPayments, OrderReviewDecisions, BuyerEmailQueues, SheetRowChangedQueues],
   exports: [OrderPayments, OrderReviewDecisions],
 })
 export class OrderPaymentsModule {}

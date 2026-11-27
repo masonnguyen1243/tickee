@@ -1338,3 +1338,9 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Kiểm thủ công của 6.4 chưa làm: trên dev stack với OAuth client Google thật, kết nối một Sự kiện có Đơn thật (câu hỏi form, check-in) rồi kiểm Sheet mới trong Drive của người cấp (tiếng Việt đúng, SĐT giữ số 0, số tiền là số, giờ Việt Nam), sau đó ngắt kết nối và thấy Sheet vẫn còn trong Drive.
   evidence: Spec 6.4 › Verification › Manual checks. Mọi test chạy với Google fake; kiểm với Google thật cần OAuth client thật (README › "Google Sheets"). Mason hoãn ngày 27/11/2026 để kiểm gộp với đồng bộ của 6.5.
   story: 6.5
+
+## Deferred from: code review of spec-6-5-dong-bo-don-va-check-in-len-sheet.md (2026-11-27)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-5-dong-bo-don-va-check-in-len-sheet.md`
+  summary: Chưa kiểm (maybe-false; nếu đúng thì medium): Sheets API có thể vẫn phục vụ spreadsheet đã chuyển vào thùng rác (không trả 404), nên flush không tạo Sheet mới (Quyết định 2) mà tiếp tục ghi vào Sheet trong thùng rác. Ngoài ra, dạng phản hồi của `developerMetadata:search` và lô `appendDimension` + `createDeveloperMetadata` trên chỉ số cột mới mới chỉ kiểm với Google fake.
+  evidence: Review 6.5 (Triage #22). `google-client.ts` (`httpFailure`: chỉ 404 mới là `not_found`); `sheet-flush-jobs.ts` (`recreateSheet` chỉ chạy khi `not_found`). Muốn chốt thì cần phản hồi thật của Google: chuyển Sheet đã kết nối vào thùng rác rồi cho flush chạy, và chạy cả luồng thêm cột với OAuth client thật.
