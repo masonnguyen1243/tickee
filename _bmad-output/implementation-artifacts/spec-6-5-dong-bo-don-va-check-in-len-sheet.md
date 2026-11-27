@@ -268,6 +268,7 @@ context:
   - Google fake bỏ `sheetId`/`startIndex` bằng 0 trong phản hồi `GET` spreadsheet và `developerMetadata:search`, như JSON proto3 của Google;
   - test thêm: Mã Đơn bị xóa giữa hai lần đẩy đầu, cột câu hỏi mới ở lần retry, hẹn lại flush sau lỗi hẹn, `already_active` khi `retrying`, hơn 500 dòng điền cột cùng một thay đổi mới, xóa dòng tiêu đề, 403 chỉ có `ErrorInfo` `RATE_LIMIT_EXCEEDED`;
   - test worker thật (`sheet-initial-sync`, `sheet-flush-worker`) bỏ job Google Sheets còn chờ của các ca gọi thẳng trước đó (`discardPendingSheetJobs`), để kết quả không phụ thuộc thứ tự file.
+- Kiểm thủ công hoãn (27/11/2026): AC thứ ba (dev stack với OAuth client Google thật, gộp kiểm thủ công hoãn từ 6.4) → 6.6.
 
 ## Spec Change Log
 
