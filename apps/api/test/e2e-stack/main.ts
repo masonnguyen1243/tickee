@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseEnv } from 'node:util';
 import pg from 'pg';
 import { runDevSeed } from '../dev-seed/seed.js';
+import { startGoogleFake, type GoogleFake } from '../google-fake/server.js';
 import { fakeDemoMerchants } from '../tingee-fake/demo-merchants.js';
 import { startTingeeFake, type TingeeFake } from '../tingee-fake/server.js';
 import { describeExit, LogSink, startChild, type Child } from './children.js';
@@ -17,10 +18,14 @@ import { describeExit, LogSink, startChild, type Child } from './children.js';
  *   2. tạo lại DB `tickee_e2e` từ đầu bằng superuser Postgres, cấp quyền như `docker/postgres/init.sql`;
  *   3. migrate bằng `tickee_migrator` (`runMigrations` của bản build `dist/`);
  *   4. `db:seed` (BTC demo đã duyệt, có key và tài khoản nhận tiền trỏ vào Tingee fake);
- *   5. Tingee fake (trong tiến trình này), worker và api (`node dist/main.js`, `APP_ROLE=worker|api`).
+ *   5. Tingee fake và Google fake (Story 6.4, Google Sheets; trong tiến trình này), worker và api (`node dist/main.js`,
+ *      `APP_ROLE=worker|api`).
  * `SIGTERM`/`SIGINT` tắt hết. Không đụng DB `tickee` hay `tickee_test`: tên DB là hằng, không đọc từ env.
  *
- * Env lấy từ `.env.example` ở gốc repo (không đọc `.env`), chỉ đè `NODE_ENV=test` và hai URL DB (sang `tickee_e2e`).
+ * Env lấy từ `.env.example` ở gốc repo (không đọc `.env`), chỉ đè `NODE_ENV=test`, hai URL DB (sang `tickee_e2e`) và ba URL
+ * Google (`GOOGLE_OAUTH_AUTHORIZE_URL`, `GOOGLE_OAUTH_TOKEN_URL`, `GOOGLE_SHEETS_API_URL`, sang Google fake ở cổng
+ * `GOOGLE_FAKE_PORT`). "Kết nối Google Sheets" trên stack tự đồng ý ở Google fake; link "Mở Google Sheet" mở trang xem ô
+ * của fake.
  * Log của từng nguồn có tiền tố trên terminal và nằm ở `E2E_STACK_LOG_DIR` (mặc định
  * `apps/api/test-results/e2e-stack`).
  * Cần `apps/api/dist` (build trước). Code nằm ngoài `src/` nên không vào image.
@@ -42,6 +47,9 @@ const SUPERUSER_URL =
 const MAILPIT_URL = 'http://localhost:8025';
 const LOG_DIR = process.env.E2E_STACK_LOG_DIR || join(API_DIR, 'test-results', 'e2e-stack');
 const READY_TIMEOUT_MS = 120_000;
+/** Cổng của Google fake (Story 6.4): cố định để URL Google trong env của api/worker biết trước. */
+const GOOGLE_FAKE_PORT = 4020;
+const GOOGLE_FAKE_ORIGIN = `http://127.0.0.1:${GOOGLE_FAKE_PORT}`;
 
 /** Lỗi dừng stack trước khi chạy test: chỉ in `message` (không stack trace, không chuỗi kết nối). */
 class StackError extends Error {}
@@ -65,6 +73,9 @@ function stackEnv(): StackEnv {
     NODE_ENV: 'test',
     DATABASE_URL: onE2eDatabase('DATABASE_URL'),
     MIGRATION_DATABASE_URL: onE2eDatabase('MIGRATION_DATABASE_URL'),
+    GOOGLE_OAUTH_AUTHORIZE_URL: `${GOOGLE_FAKE_ORIGIN}/o/oauth2/v2/auth`,
+    GOOGLE_OAUTH_TOKEN_URL: `${GOOGLE_FAKE_ORIGIN}/token`,
+    GOOGLE_SHEETS_API_URL: GOOGLE_FAKE_ORIGIN,
   };
 }
 
@@ -133,6 +144,7 @@ async function checkPrerequisites(env: StackEnv): Promise<void> {
   const ports: [string, number][] = [
     ['api', portOf(env, 'API_PUBLIC_URL')],
     ['Tingee fake', portOf(env, 'TINGEE_BASE_URL')],
+    ['Google fake', GOOGLE_FAKE_PORT],
   ];
   const problems = await Promise.all([
     postgresProblem(),
@@ -227,6 +239,7 @@ async function main(): Promise<void> {
   };
   const children: Child[] = [];
   let fake: TingeeFake | null = null;
+  let google: GoogleFake | null = null;
   let stopping = false;
 
   const shutdown = async (exitCode: number): Promise<void> => {
@@ -234,6 +247,7 @@ async function main(): Promise<void> {
     stopping = true;
     await Promise.all(children.map((child) => child.stop()));
     await fake?.close().catch(() => undefined);
+    await google?.close().catch(() => undefined);
     await Promise.all([...sinks, log].map((s) => s.close()));
     process.exit(exitCode);
   };
@@ -262,6 +276,14 @@ async function main(): Promise<void> {
       host: '127.0.0.1',
       log: (line) => fakeLog.line(line),
     });
+    const googleLog = sink('google-fake');
+    google = await startGoogleFake({
+      clientId: env.GOOGLE_SHEETS_CLIENT_ID ?? '',
+      clientSecret: env.GOOGLE_SHEETS_CLIENT_SECRET ?? '',
+      port: GOOGLE_FAKE_PORT,
+      host: '127.0.0.1',
+      log: (line) => googleLog.line(line),
+    });
     for (const role of ['worker', 'api'] as const) {
       const child = startChild(role, ['dist/main.js'], {
         cwd: API_DIR,
@@ -277,7 +299,8 @@ async function main(): Promise<void> {
     }
     if (await waitForApi(env)) {
       log.line(
-        `Sẵn sàng: api ${env.API_PUBLIC_URL}, Tingee fake ${fake.url}, DB ${E2E_DATABASE}, Mailpit ${MAILPIT_URL}. ` +
+        `Sẵn sàng: api ${env.API_PUBLIC_URL}, Tingee fake ${fake.url}, Google fake ${google.url}, DB ${E2E_DATABASE}, ` +
+          `Mailpit ${MAILPIT_URL}. ` +
           `Log ở ${LOG_DIR}. Ctrl+C để tắt.`,
       );
     } else if (!stopping) {

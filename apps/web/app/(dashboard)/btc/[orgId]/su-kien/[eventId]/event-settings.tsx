@@ -46,6 +46,7 @@ import {
   type EventInfoValues,
 } from '../event-info-form';
 import { isEventEnded } from '../event-status';
+import { GoogleSheetsSection } from './google-sheets-section';
 
 /*
  * Tab "Cài đặt" của Sự kiện (Story 2.12): form thông tin (dùng chung với wizard bước 1) và hai hành động trạng thái:
@@ -64,6 +65,8 @@ import { isEventEnded } from '../event-status';
  *
  * Story 4.8-b: ô "Ảnh bìa" upload ngay khi chọn; "Lưu thay đổi" gửi `imageKey` cùng các ô khác (đang upload thì nút bận).
  * Đổi ảnh không báo Người mua (`notifiesBuyers` chỉ xét giờ và địa điểm). Sự kiện đã hủy: ô ảnh chỉ đọc.
+ *
+ * Story 6.4: mục "Google Sheets" (`google-sheets-section.tsx`) dưới "Trạng thái bán".
  */
 
 const NOT_STARTED_REASON = 'Sự kiện chưa bắt đầu — dùng Ẩn để dừng nhận Đơn.';
@@ -472,13 +475,14 @@ function StatusActions({ orgId, event }: { orgId: string; event: EventDetail }) 
   );
 }
 
-/** Tab "Cài đặt": thông tin Sự kiện và trạng thái bán. */
+/** Tab "Cài đặt": thông tin Sự kiện, trạng thái bán và kết nối Google Sheets (Story 6.4). */
 export function EventSettings({ orgId, event }: { orgId: string; event: EventDetail }) {
   return (
     <div className="flex min-w-0 flex-col gap-section" data-slot="event-settings">
       {/* `key` theo cờ đã hủy: Sự kiện thành đã hủy (tải lại sau 409) thì nạp lại giá trị server vào form chỉ đọc. */}
       <InfoForm key={event.status === 'cancelled' ? 'cancelled' : 'editable'} orgId={orgId} event={event} />
       <StatusActions orgId={orgId} event={event} />
+      <GoogleSheetsSection orgId={orgId} eventId={event.id} />
     </div>
   );
 }

@@ -6,6 +6,7 @@ export * from './errors.js';
 export * from './event.js';
 export * from './event-orders.js';
 export * from './form.js';
+export * from './google-sheets.js';
 export * from './identity.js';
 export * from './jobs.js';
 export * from './money.js';

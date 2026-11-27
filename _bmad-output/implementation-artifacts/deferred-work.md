@@ -1295,3 +1295,46 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Chưa kiểm (maybe-false, nếu đúng thì medium): `saveBlob` (`apps/web/lib/reporting/orders.ts`) thu hồi object URL ở `setTimeout(0)` ngay sau `click()`; với CSV vài MB, Safari hoặc Firefox có thể hủy tải trước khi đọc xong `Blob`. Hướng sửa nếu đúng: giữ URL lâu hơn (FileSaver.js giữ 40 giây).
   evidence: Review 6.3 (Edge Case Hunter, Review Triage #23). Mẫu `enroll-form.tsx:150-161` và e2e `ios-webkit` chỉ tải file nhỏ. Cần thử tải CSV vài MB (vài nghìn Đơn) trên Safari và Firefox thật.
   story: E5-3
+
+## Deferred from: code review of spec-6-4-ket-noi-google-sheets.md (2026-11-27)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-ket-noi-google-sheets.md`
+  summary: Sheet bị BTC xóa hoặc chuyển vào thùng rác thì Sheets API trả 404. Lỗi này thành `unexpected_response`, job retry với `spreadsheet_id` cũ tới dead-letter mà không tự phục hồi. Flush của 6.5 cần nhận ra trường hợp này: tạo Sheet mới, hoặc dùng trạng thái hay mã lỗi riêng.
+  evidence: Review 6.4 (Triage #3, #26). `google-client.ts` (`httpFailure`) xếp 4xx lạ vào `failed`; `sheet-sync-jobs.ts` dùng lại `spreadsheet_id` đã lưu. Trong 6.4 chỉ gặp ở cửa sổ retry vài phút; ở 6.5 (đồng bộ lâu dài) thì gặp thường.
+  story: 6.5
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-ket-noi-google-sheets.md`
+  summary: Vùng A1 ghi theo tên tab "Đơn". BTC đổi tên hoặc xóa tab thì mọi lần ghi nhận 400 tới dead-letter. Flush của 6.5 nên tìm tab theo `sheetId` (`SHEET_ORDERS_TAB_ID = 0`) trước khi ghi.
+  evidence: Review 6.4 (Triage #27). `sheet-sync-jobs.ts` dựng vùng bằng `sheetRange(GOOGLE_SHEET_ORDERS_TAB, …)`; `resizeGrid` thì đã dùng `sheetId`.
+  story: 6.5
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-ket-noi-google-sheets.md`
+  summary: `resizeGrid` đặt kích thước lưới tuyệt đối (`sheetGridFor`), không đọc lưới hiện tại, nên có thể thu nhỏ lưới và xóa dòng hay cột BTC tự thêm. Flush của 6.5 chỉ được nới, không thu nhỏ, và không chạm cột BTC thêm (AD-23).
+  evidence: Review 6.4 (Triage #4, #23, #28). `sheet-sync-jobs.ts` gọi `google.resizeGrid(…, grid)` với `rowCount`/`columnCount` tính lại mỗi lần. Trong 6.4 rất hiếm (Sheet mới tạo); ở 6.5 BTC thêm cột là chuyện thường.
+  story: 6.5
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-ket-noi-google-sheets.md`
+  summary: Lần đẩy đầu đọc Đơn từng trang ngoài transaction. Đơn chuyển `paid` khi trang chứa nó đã được đọc sẽ bị sót. 6.5 phải đánh dấu dòng bẩn cả khi kết nối đang `syncing`, và flush các dòng đó sau khi lần đẩy đầu xong.
+  evidence: Review 6.4 (Triage #12, #35). `sheet-sync-jobs.ts` (`sheetOrdersOf`) dùng keyset `created_at DESC` lọc `GOOGLE_SHEET_ORDER_STATUSES`; Đơn `pending` lúc quét rồi thành `paid` không có trong danh sách.
+  story: 6.5
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-ket-noi-google-sheets.md`
+  summary: Google giới hạn 100 refresh token cho mỗi tài khoản Google trên mỗi OAuth client. `prompt=consent` cấp token mới mỗi lần kết nối, và ngắt kết nối không revoke, nên khi vượt giới hạn thì kết nối cũ của cùng người cấp bị vô hiệu (`invalid_grant`). Hệ quả hiện ra như `auth_revoked`. 6.6 xét có cần ghi chú cho BTC, README, hay cách giảm thiểu.
+  evidence: Review 6.4 (Triage #9, #34). `google-client.ts` (`authorizationUrl`: `prompt=consent`); Design Notes của 6.4 cố ý không revoke khi ngắt.
+  story: 6.6
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-ket-noi-google-sheets.md`
+  summary: Chưa kiểm (maybe-false; nếu đúng thì medium): Google có thể trả 403 vì lý do không phải mất quyền (quota hay rate dạng `rateLimitExceeded`/`userRateLimitExceeded`, Drive đầy khi tạo Sheet). `httpFailure` xếp mọi 403 không mang lý do cấu hình vào `auth_revoked`, nên kết nối thành "Mất quyền" vĩnh viễn. 6.5 (flush hay gặp quota) cần xếp các lý do này vào lỗi tạm thời, hoặc cho mã lỗi riêng.
+  evidence: Review 6.4 (Triage #41, #59). `google-client.ts` (`httpFailure`, nhánh `status === 403`). Sheets API v4 báo quota bằng 429; muốn chốt thì cần phản hồi thật của Google cho trường hợp quota và Drive đầy.
+  story: 6.5
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-ket-noi-google-sheets.md`
+  summary: Cột form trên Sheet lấy từ câu hỏi đã có Đơn trả lời lúc kết nối (`answerColumnsOf`, Quyết định 2). Kết nối trước Đơn đầu tiên thì tiêu đề không có cột form nào. 6.5 cần thêm cột cho câu hỏi xuất hiện sau khi kết nối, và lưu ánh xạ cột ↔ `questionId` để ghi đúng ô khi nhãn đổi hay BTC chèn cột.
+  evidence: Review 6.4 (Triage #42). `sheet-sync-jobs.ts` (`sheetHeaderRow(columns)` chỉ ghi một lần ở lần đẩy đầu); Never của 6.4: "thêm cột cho câu hỏi form mới sau khi đã kết nối" là việc của 6.5.
+  story: 6.5
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-ket-noi-google-sheets.md`
+  summary: `pnpm dev` không chạy Google fake, và `.env.example` để ba URL Google trỏ vào Google thật. Bấm "Kết nối Google Sheets" ở local với client giữ chỗ thì dừng ở trang lỗi `invalid_client` của Google. Cân nhắc thêm `dev:google` (Google fake ở cổng cố định, như `dev:tingee`) và trỏ `.env.example` vào đó, để Google thật là lựa chọn bật thêm.
+  evidence: Review 6.4 (Triage #48). `apps/api/test/e2e-stack/main.ts` đã khởi Google fake ở cổng 4020; `startGoogleFake` nhận cổng cố định.
+  story: E5-7
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-ket-noi-google-sheets.md`
+  summary: Sheet chứa tên, email, SĐT và câu trả lời form của người mua, nằm trong Google Drive của người cấp, ngoài tầm Tickee thu hồi. Xóa tài khoản theo AD-24 (`flows.deleteAccount`) phải chạm tới dòng của người đó trên Sheet (enqueue `sheet_row_changed`, như epic context ghi cho 7.6); cân nhắc thêm câu báo cho BTC lúc kết nối.
+  evidence: Review 6.4 (Triage #52). `epic-6-context.md` › Epic sau › 7.6: "Handler ẩn danh enqueue `sheet_row_changed`".
+  story: 7.6
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-ket-noi-google-sheets.md`
+  summary: Kiểm thủ công của 6.4 chưa làm: trên dev stack với OAuth client Google thật, kết nối một Sự kiện có Đơn thật (câu hỏi form, check-in) rồi kiểm Sheet mới trong Drive của người cấp (tiếng Việt đúng, SĐT giữ số 0, số tiền là số, giờ Việt Nam), sau đó ngắt kết nối và thấy Sheet vẫn còn trong Drive.
+  evidence: Spec 6.4 › Verification › Manual checks. Mọi test chạy với Google fake; kiểm với Google thật cần OAuth client thật (README › "Google Sheets"). Mason hoãn ngày 27/11/2026 để kiểm gộp với đồng bộ của 6.5.
+  story: 6.5

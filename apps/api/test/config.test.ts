@@ -22,6 +22,8 @@ const KEY_2 = Buffer.alloc(32, 0xa5).toString('base64');
 /** Khóa 32 byte (base64) dùng làm "giá trị bí mật" của `TICKET_QR_KEYS`. */
 const QR_KEY_1 = Buffer.alloc(32, 0x3c).toString('base64');
 const QR_KEY_2 = Buffer.alloc(32, 0xc3).toString('base64');
+/** Khóa 32 byte (base64) dùng làm "giá trị bí mật" của `GOOGLE_SHEETS_TOKEN_KEYS` (Story 6.4). */
+const SHEETS_KEY_1 = Buffer.alloc(32, 0x66).toString('base64');
 const apiEnv = {
   APP_ROLE: 'api',
   NODE_ENV: 'test',
@@ -36,6 +38,9 @@ const apiEnv = {
   TINGEE_BASE_URL: 'https://uat-open-api.tingee.vn',
   TINGEE_CREDENTIAL_KEYS: `v1:${KEY_1}, v2:${KEY_2}`,
   TICKET_QR_KEYS: `v1:${QR_KEY_1},v2:${QR_KEY_2}`,
+  GOOGLE_SHEETS_CLIENT_ID: '456-sheets.apps.googleusercontent.com',
+  GOOGLE_SHEETS_CLIENT_SECRET: `GOCSPX-sheets-${SECRET}`,
+  GOOGLE_SHEETS_TOKEN_KEYS: `v1:${SHEETS_KEY_1}`,
   S3_ENDPOINT: 'https://s3.tickee.vn',
   S3_BUCKET: 'tickee-event-images',
   S3_ACCESS_KEY_ID: 'AKIA-tickee-api',
@@ -53,6 +58,9 @@ const workerEnv = {
   TINGEE_BASE_URL: apiEnv.TINGEE_BASE_URL,
   TINGEE_CREDENTIAL_KEYS: apiEnv.TINGEE_CREDENTIAL_KEYS,
   TICKET_QR_KEYS: apiEnv.TICKET_QR_KEYS,
+  GOOGLE_SHEETS_CLIENT_ID: apiEnv.GOOGLE_SHEETS_CLIENT_ID,
+  GOOGLE_SHEETS_CLIENT_SECRET: apiEnv.GOOGLE_SHEETS_CLIENT_SECRET,
+  GOOGLE_SHEETS_TOKEN_KEYS: apiEnv.GOOGLE_SHEETS_TOKEN_KEYS,
 };
 /** Production hợp lệ (Story 4.7-b): https, secret riêng, dải IP admin, cookie ở miền cha của `api.tickee.vn` và `tickee.vn`. */
 const apiProdEnv = {
@@ -306,6 +314,9 @@ describe('loadConfig', () => {
       'EMAIL_FROM',
       'GOOGLE_CLIENT_ID',
       'GOOGLE_CLIENT_SECRET',
+      'GOOGLE_SHEETS_CLIENT_ID',
+      'GOOGLE_SHEETS_CLIENT_SECRET',
+      'GOOGLE_SHEETS_TOKEN_KEYS',
       'NODE_ENV',
       'S3_ACCESS_KEY_ID',
       'S3_BUCKET',
@@ -475,6 +486,57 @@ describe('loadConfig', () => {
     expect(other.message).not.toContain(SECRET);
   });
 
+  it('Google Sheets (Story 6.4): client, secret, khóa bắt buộc ở cả api và worker; ba URL Google mặc định là endpoint thật', () => {
+    for (const env of [apiEnv, workerEnv]) {
+      expect(loadConfig(env), env.APP_ROLE).toMatchObject({
+        GOOGLE_SHEETS_CLIENT_ID: '456-sheets.apps.googleusercontent.com',
+        GOOGLE_SHEETS_TOKEN_KEYS: `v1:${SHEETS_KEY_1}`,
+        GOOGLE_OAUTH_AUTHORIZE_URL: 'https://accounts.google.com/o/oauth2/v2/auth',
+        GOOGLE_OAUTH_TOKEN_URL: 'https://oauth2.googleapis.com/token',
+        GOOGLE_SHEETS_API_URL: 'https://sheets.googleapis.com',
+      });
+      const err = issuesOf({
+        ...env,
+        GOOGLE_SHEETS_CLIENT_ID: '',
+        GOOGLE_SHEETS_CLIENT_SECRET: undefined,
+        GOOGLE_SHEETS_TOKEN_KEYS: undefined,
+      });
+      expect(err.issues, env.APP_ROLE).toEqual([
+        { variable: 'GOOGLE_SHEETS_CLIENT_ID', reason: 'thiếu' },
+        { variable: 'GOOGLE_SHEETS_CLIENT_SECRET', reason: 'thiếu' },
+        { variable: 'GOOGLE_SHEETS_TOKEN_KEYS', reason: 'thiếu' },
+      ]);
+      // Trỏ vào Google fake (test, stack e2e).
+      expect(
+        loadConfig({
+          ...env,
+          GOOGLE_OAUTH_AUTHORIZE_URL: 'http://127.0.0.1:4020/o/oauth2/v2/auth',
+          GOOGLE_OAUTH_TOKEN_URL: 'http://127.0.0.1:4020/token',
+          GOOGLE_SHEETS_API_URL: 'http://127.0.0.1:4020',
+        }),
+      ).toMatchObject({ GOOGLE_SHEETS_API_URL: 'http://127.0.0.1:4020' });
+    }
+  });
+
+  it('Google Sheets: khóa sai dạng, URL sai → lỗi nêu tên biến, không in giá trị; GOOGLE_SHEETS_API_URL phải là origin', () => {
+    const short = Buffer.alloc(16, 0x66).toString('base64');
+    const err = issuesOf({
+      ...apiEnv,
+      GOOGLE_SHEETS_TOKEN_KEYS: `v1:${short}`,
+      GOOGLE_OAUTH_AUTHORIZE_URL: `ftp://${SECRET}.vn/auth`,
+      GOOGLE_OAUTH_TOKEN_URL: SECRET,
+      GOOGLE_SHEETS_API_URL: `https://sheets.googleapis.com/${SECRET}`,
+    });
+    expect(err.issues.map((i) => i.variable)).toEqual([
+      'GOOGLE_SHEETS_TOKEN_KEYS',
+      'GOOGLE_OAUTH_AUTHORIZE_URL',
+      'GOOGLE_OAUTH_TOKEN_URL',
+      'GOOGLE_SHEETS_API_URL',
+    ]);
+    expect(err.message).not.toContain(SECRET);
+    expect(err.message).not.toContain(short);
+  });
+
   it('TRUST_PROXY_HOPS: số nguyên ≥ 0, mặc định 0', () => {
     expect(loadConfig({ ...apiEnv, TRUST_PROXY_HOPS: '2' })).toMatchObject({ TRUST_PROXY_HOPS: 2 });
     expect(loadConfig({ ...apiEnv, TRUST_PROXY_HOPS: '' })).toMatchObject({ TRUST_PROXY_HOPS: 0 });
@@ -604,6 +666,13 @@ describe('siết cấu hình production (Story 4.7-b)', () => {
     ['api', 'S3_PUBLIC_BASE_URL', 'http://anh.tickee.vn/anh'],
     ['worker', 'WEB_ORIGIN', 'http://tickee.vn'],
     ['worker', 'TINGEE_BASE_URL', 'http://uat-open-api.tingee.vn'],
+    // Story 6.4: ba URL Google của Google Sheets, ở cả hai vai.
+    ['api', 'GOOGLE_OAUTH_AUTHORIZE_URL', 'http://accounts.google.com/o/oauth2/v2/auth'],
+    ['api', 'GOOGLE_OAUTH_TOKEN_URL', 'http://oauth2.googleapis.com/token'],
+    ['api', 'GOOGLE_SHEETS_API_URL', 'http://sheets.googleapis.com'],
+    ['worker', 'GOOGLE_OAUTH_AUTHORIZE_URL', 'http://accounts.google.com/o/oauth2/v2/auth'],
+    ['worker', 'GOOGLE_OAUTH_TOKEN_URL', 'http://oauth2.googleapis.com/token'],
+    ['worker', 'GOOGLE_SHEETS_API_URL', 'http://sheets.googleapis.com'],
   ])('vai %s: %s http ở production → lỗi, không in giá trị; development/test vẫn nhận', (role, variable, value) => {
     const prod = role === 'api' ? apiProdEnv : workerProdEnv;
     const err = issuesOf({ ...prod, [variable]: value });
@@ -638,14 +707,15 @@ describe('siết cấu hình production (Story 4.7-b)', () => {
     },
   );
 
-  it('TINGEE_CREDENTIAL_KEYS, TICKET_QR_KEYS: khóa trùng byte với một trong hai khóa mẫu, bất kể phiên bản → lỗi ở production', () => {
+  it('TINGEE_CREDENTIAL_KEYS, TICKET_QR_KEYS, GOOGLE_SHEETS_TOKEN_KEYS: khóa trùng byte với một trong các khóa mẫu, bất kể phiên bản → lỗi ở production', () => {
     const exampleKeys = Object.values(ENV_EXAMPLE_KEYS).map((list) => list.slice(list.indexOf(':') + 1));
-    expect(exampleKeys).toHaveLength(2);
+    expect(exampleKeys).toHaveLength(3);
     for (const [role, prod] of prodRoles) {
       for (const example of exampleKeys) {
         for (const [variable, value] of [
           ['TINGEE_CREDENTIAL_KEYS', `v1:${KEY_1},v2:${example}`],
           ['TICKET_QR_KEYS', `v7:${example}`],
+          ['GOOGLE_SHEETS_TOKEN_KEYS', `v3:${example}`],
         ] as const) {
           const err = issuesOf({ ...prod, [variable]: value });
           expect(err.issues, `${role} ${variable}`).toEqual([{ variable, reason: EXAMPLE_REASON }]);
@@ -670,6 +740,23 @@ describe('siết cấu hình production (Story 4.7-b)', () => {
     // Một danh sách sai dạng: chỉ báo lỗi định dạng, không so khóa.
     const invalid = issuesOf({ ...apiEnv, TINGEE_CREDENTIAL_KEYS: `v1:${QR_KEY_1}x`, TICKET_QR_KEYS: `v1:${QR_KEY_1}` });
     expect(invalid.issues.map((i) => i.variable)).toEqual(['TINGEE_CREDENTIAL_KEYS']);
+  });
+
+  it('GOOGLE_SHEETS_TOKEN_KEYS (Story 6.4) có khóa trùng byte với TINGEE_CREDENTIAL_KEYS hoặc TICKET_QR_KEYS → lỗi, ở mọi môi trường', () => {
+    for (const [role, prod] of prodRoles) {
+      for (const NODE_ENV of ['development', 'test', 'production']) {
+        for (const [shared, other] of [
+          [KEY_2, 'TINGEE_CREDENTIAL_KEYS'],
+          [QR_KEY_1, 'TICKET_QR_KEYS'],
+        ] as const) {
+          const err = issuesOf({ ...inNodeEnv(prod, NODE_ENV), GOOGLE_SHEETS_TOKEN_KEYS: `v1:${SHEETS_KEY_1},v4:${shared}` });
+          expect(err.issues, `${role} ${NODE_ENV} ${other}`).toEqual([
+            { variable: 'GOOGLE_SHEETS_TOKEN_KEYS', reason: `dùng chung khóa với ${other}` },
+          ]);
+          expect(err.message).not.toContain(shared);
+        }
+      }
+    }
   });
 
   it('AUTH_COOKIE_DOMAIN đặt thì phải là miền cha của host API_PUBLIC_URL và WEB_ORIGIN, ở mọi môi trường', () => {
@@ -782,6 +869,9 @@ describe('siết cấu hình production (Story 4.7-b)', () => {
         'BETTER_AUTH_SECRET',
         'GOOGLE_CLIENT_ID',
         'GOOGLE_CLIENT_SECRET',
+        'GOOGLE_SHEETS_CLIENT_ID',
+        'GOOGLE_SHEETS_CLIENT_SECRET',
+        'GOOGLE_SHEETS_TOKEN_KEYS',
         'S3_ACCESS_KEY_ID',
         'S3_ENDPOINT',
         'S3_PUBLIC_BASE_URL',
@@ -793,6 +883,9 @@ describe('siết cấu hình production (Story 4.7-b)', () => {
       ],
       // E4-3: `.env.example` để trống người nhận cảnh báo và bật Đối soát bù (hợp đồng tạm).
       worker: [
+        'GOOGLE_SHEETS_CLIENT_ID',
+        'GOOGLE_SHEETS_CLIENT_SECRET',
+        'GOOGLE_SHEETS_TOKEN_KEYS',
         'OPS_ALERT_EMAILS',
         'REVALIDATE_SECRET',
         'TICKET_QR_KEYS',

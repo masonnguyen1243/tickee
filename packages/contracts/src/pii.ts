@@ -17,7 +17,8 @@ const snakeToCamel = (s: string): string => s.replace(/_([a-z0-9])/g, (_, c: str
 
 /**
  * Khóa luôn che trong log dù chưa có cột nào dùng: email, SĐT, số tài khoản đầy đủ, CCCD; số VA nhận tiền và API key
- * Tingee của BTC (`client_id`, `secret_token`; Secret Token chỉ lưu dạng mã hóa, không bao giờ được log).
+ * Tingee của BTC (`client_id`, `secret_token`; Secret Token chỉ lưu dạng mã hóa, không bao giờ được log); token OAuth
+ * Google Sheets và `code_verifier` PKCE (Story 6.4, NFR-6: refresh token chỉ lưu dạng mã hóa, không bao giờ được log).
  */
 const ALWAYS_REDACTED = [
   'email',
@@ -28,6 +29,9 @@ const ALWAYS_REDACTED = [
   'va_account_number',
   'secret_token',
   'client_id',
+  'refresh_token',
+  'access_token',
+  'code_verifier',
 ] as const;
 
 /** Khóa cần che trong log: dạng snake_case và camelCase của mọi cột PII. */

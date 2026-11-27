@@ -71,6 +71,8 @@ const DEFAULT_STATUS: Record<ErrorCode, number> = {
   CHECKER_REVOKED: 403,
   EVENT_ENDED: 403,
   CHECKIN_LOOKUP_RATE_LIMITED: 429,
+  SHEETS_ALREADY_CONNECTED: 409,
+  SHEETS_NOT_CONNECTED: 404,
 };
 
 /** Lỗi nghiệp vụ có mã khai báo trong `@tickee/contracts`; filter toàn cục chuyển thành dạng lỗi chuẩn. */

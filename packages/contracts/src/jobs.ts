@@ -137,6 +137,15 @@ export const JobQueue = {
    * không dead-letter: lượt kế làm lại. Xóa lượt tra cũ hơn `CHECKIN_LOOKUP_RATE_LIMITS.windowSeconds` (đồng hồ DB).
    */
   CHECKIN_PURGE_LOOKUP_ATTEMPTS: 'checkin.purge-lookup-attempts',
+  /**
+   * Lần đẩy đầu của một kết nối Google Sheets (`integration`, Story 6.4, AD-23): tạo spreadsheet mới trong Drive của người
+   * cấp, ghi hàng tiêu đề và mọi Đơn hiện có, rồi chuyển kết nối sang `active`. Payload `SheetInitialSyncPayload` (chỉ id
+   * kết nối; không token). Callback OAuth enqueue bằng chính `tx` tạo kết nối, id job cố định theo kết nối. Google lỗi
+   * tạm thời → retry có backoff; mất quyền → `auth_revoked`, không retry.
+   */
+  INTEGRATION_SHEET_INITIAL_SYNC: 'integration.sheet-initial-sync',
+  /** Dead-letter của `INTEGRATION_SHEET_INITIAL_SYNC`: job hết lượt retry được chép sang đây. */
+  INTEGRATION_SHEET_INITIAL_SYNC_DEAD_LETTER: 'integration.sheet-initial-sync.dead-letter',
 } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];
 
@@ -182,3 +191,7 @@ export const TokenAlertEmailPayload = z.object({
   belowThresholdSince: z.iso.datetime(),
 });
 export type TokenAlertEmailPayload = z.infer<typeof TokenAlertEmailPayload>;
+
+/** Payload của job `integration.sheet-initial-sync` (Story 6.4): chỉ id kết nối Google Sheets, không token, không PII. */
+export const SheetInitialSyncPayload = z.object({ connectionId: z.uuid() });
+export type SheetInitialSyncPayload = z.infer<typeof SheetInitialSyncPayload>;

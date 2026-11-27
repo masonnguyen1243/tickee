@@ -266,6 +266,13 @@ export const ErrorCode = {
    * `details`: `CheckinLookupRateLimitedDetails` (`retryAfterSeconds` theo giới hạn chặn lâu nhất).
    */
   CHECKIN_LOOKUP_RATE_LIMITED: 'CHECKIN_LOOKUP_RATE_LIMITED',
+  /**
+   * "Kết nối Google Sheets" (Story 6.4) khi Sự kiện đã có kết nối (mỗi Sự kiện tối đa một kết nối). Không tạo lượt OAuth
+   * nào.
+   */
+  SHEETS_ALREADY_CONNECTED: 'SHEETS_ALREADY_CONNECTED',
+  /** "Ngắt kết nối" Google Sheets (Story 6.4) khi Sự kiện không có kết nối nào (vd. người khác vừa ngắt). */
+  SHEETS_NOT_CONNECTED: 'SHEETS_NOT_CONNECTED',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

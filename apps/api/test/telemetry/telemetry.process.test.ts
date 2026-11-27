@@ -63,6 +63,9 @@ function apiEnv(port: number, tingeeBaseUrl = 'http://127.0.0.1:1'): Record<stri
     TINGEE_BASE_URL: tingeeBaseUrl,
     TINGEE_CREDENTIAL_KEYS: c.TINGEE_CREDENTIAL_KEYS,
     TICKET_QR_KEYS: c.TICKET_QR_KEYS,
+    GOOGLE_SHEETS_CLIENT_ID: c.GOOGLE_SHEETS_CLIENT_ID,
+    GOOGLE_SHEETS_CLIENT_SECRET: c.GOOGLE_SHEETS_CLIENT_SECRET,
+    GOOGLE_SHEETS_TOKEN_KEYS: c.GOOGLE_SHEETS_TOKEN_KEYS,
     // Ảnh Sự kiện (Story 4.8-a): bắt buộc ở vai api.
     S3_ENDPOINT: c.S3_ENDPOINT,
     S3_BUCKET: c.S3_BUCKET,
@@ -86,6 +89,9 @@ function workerEnv(tingeeBaseUrl = 'http://127.0.0.1:1'): Record<string, string>
     TINGEE_BASE_URL: tingeeBaseUrl,
     TINGEE_CREDENTIAL_KEYS: c.TINGEE_CREDENTIAL_KEYS,
     TICKET_QR_KEYS: c.TICKET_QR_KEYS,
+    GOOGLE_SHEETS_CLIENT_ID: c.GOOGLE_SHEETS_CLIENT_ID,
+    GOOGLE_SHEETS_CLIENT_SECRET: c.GOOGLE_SHEETS_CLIENT_SECRET,
+    GOOGLE_SHEETS_TOKEN_KEYS: c.GOOGLE_SHEETS_TOKEN_KEYS,
   };
 }
 
@@ -368,6 +374,8 @@ describe('OpenTelemetry bật: api và worker xuất trace + metrics (tiến tr�
       revalidateSecret: TEST_REVALIDATE_SECRET,
       credentialKey: apiConfig().TINGEE_CREDENTIAL_KEYS.split(':')[1]!,
       ticketQrKey: apiConfig().TICKET_QR_KEYS.split(':')[1]!,
+      sheetsClientSecret: apiConfig().GOOGLE_SHEETS_CLIENT_SECRET,
+      sheetsTokenKey: apiConfig().GOOGLE_SHEETS_TOKEN_KEYS.split(':')[1]!,
       va: String(account.vaAccountNumber),
     };
     for (const [name, value] of Object.entries(seeded)) expect(payloads.includes(value), name).toBe(false);

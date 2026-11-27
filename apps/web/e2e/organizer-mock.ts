@@ -23,7 +23,8 @@ import { apiError, WEB_ORIGIN, type Call, type Handler } from './identity-mock';
  * → BTC chưa có tài khoản nhận tiền mặc định, không có link portal, chưa đặt ngưỡng cảnh báo (Story 4.5-b),
  * `GET /orgs/:id/events/:eventId/checkers` (tab Check-in, Story 5.6) → chưa có CTV, `GET /checkin/events/:eventId` (khối
  * `checkin-progress` của tab Check-in, Story 5.7) → chưa có Hạng vé, Vé nào (`emptyCheckinEvent`), SSE
- * `GET /checkin/events/:eventId/live` → 503 (không realtime: polling 10 giây); lời gọi không có handler → 500.
+ * `GET /checkin/events/:eventId/live` → 503 (không realtime: polling 10 giây), `GET /orgs/:id/events/:eventId/google-sheets`
+ * (mục "Google Sheets" của tab Cài đặt, Story 6.4) → chưa kết nối (`{ connection: null }`); lời gọi không có handler → 500.
  *
  * Ảnh Sự kiện (Story 4.8-b): `presignReply` cho handler `POST /orgs/:id/event-images`, `mockImageStorage` giả object
  * storage (host riêng, không qua api) cho PUT của trình duyệt và ảnh công khai.
@@ -51,6 +52,7 @@ const TOKEN_KEY = /^GET \/orgs\/[^/]+\/token$/;
 const CHECKERS_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/checkers$/;
 const CHECKIN_EVENT_KEY = /^GET \/checkin\/events\/([^/]+)$/;
 const CHECKIN_EVENT_LIVE_KEY = /^GET \/checkin\/events\/[^/]+\/live$/;
+const GOOGLE_SHEETS_KEY = /^GET \/orgs\/[^/]+\/events\/[^/]+\/google-sheets$/;
 
 /** Đường SSE cấp BTC (Story 4.2-b), để `fakeEventSource` chọn đúng stream giữa stream của khung và stream của trang. */
 export const ORG_LIVE_URL = /\/v1\/orgs\/[^/]+\/live$/;
@@ -149,6 +151,8 @@ function defaultHandler(key: string): Handler | undefined {
   const checkinEvent = CHECKIN_EVENT_KEY.exec(key);
   if (checkinEvent) return () => ({ status: 200, body: emptyCheckinEvent(decodeURIComponent(checkinEvent[1]!)) });
   if (CHECKIN_EVENT_LIVE_KEY.test(key)) return () => apiError(503, 'SERVICE_UNAVAILABLE');
+  // Tab Cài đặt luôn tải mục "Google Sheets" (Story 6.4): mặc định chưa kết nối.
+  if (GOOGLE_SHEETS_KEY.test(key)) return () => ({ status: 200, body: { connection: null } });
   return undefined;
 }
 
