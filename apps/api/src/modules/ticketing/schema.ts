@@ -15,6 +15,13 @@ export const TICKET_CANCEL_REASON = { EVENT_CANCELLED: 'event_cancelled', VOIDED
 export type TicketCancelReason = (typeof TICKET_CANCEL_REASON)[keyof typeof TICKET_CANCEL_REASON];
 
 /**
+ * Cách Vé được check-in (`checkin_method`, E5-5, Story 6.5): quét Mã QR vé (`scan`) hay tra tay rồi check-in (`manual`).
+ * `NULL` khi chưa check-in, hoặc Vé check-in trước Story 6.5.
+ */
+export const TICKET_CHECKIN_METHODS = ['scan', 'manual'] as const;
+export type TicketCheckinMethod = (typeof TICKET_CHECKIN_METHODS)[number];
+
+/**
  * Vé (Story 3.3, AD-1, AD-35): chỉ phát bên trong `ordering.markPaid`, cùng transaction với Đơn chuyển `paid`. Mỗi Vé
  * một dòng, bản chụp lúc phát không đổi được (`UPDATE_PROTECTED_COLUMNS`): `seq` 1..N trong Đơn (theo Hạng vé tăng
  * dần theo id), `order_ticket_count` (N), tên Người mua (`holder_name`, PII), tên Hạng vé, mã Đơn, giờ phát. Mã QR vé
@@ -29,6 +36,8 @@ export type TicketCancelReason = (typeof TICKET_CANCEL_REASON)[keyof typeof TICK
  * `checkin_scan_id` (uuid client sinh cho lần quét, để phát lại cùng kết quả khi gửi lại). Chỉ `ticketing.checkIn` ghi,
  * bằng một UPDATE có điều kiện (`status = 'valid' AND checked_in_at IS NULL`), nên mỗi Vé check-in đúng một lần. Hai cột
  * sau phải `NULL` khi chưa check-in (CHECK); `checked_in_by` không có FK (`ticketing` không phụ thuộc `identity`).
+ * `checkin_method` (Story 6.5): `scan` | `manual`, ghi cùng lệnh check-in; `NULL` khi chưa check-in (CHECK) hoặc Vé
+ * check-in trước Story 6.5.
  *
  * `order_id`, `organization_id`, `user_id` không có FK: `ticketing` không phụ thuộc `ordering`, `organizer` hay
  * `identity` (module-graph, AD-10). FK tới `events` và `ticket_types` (`ticketing → event`): Hạng vé đã phát Vé không
@@ -59,6 +68,7 @@ export const tickets = pgTable(
     checkedInAt: timestamptz('checked_in_at'),
     checkedInBy: uuid('checked_in_by'),
     checkinScanId: uuid('checkin_scan_id'),
+    checkinMethod: text('checkin_method', { enum: TICKET_CHECKIN_METHODS }),
     shareVersion: integer('share_version').notNull().default(1),
     shareTokenHash: text('share_token_hash'),
     updatedAt: timestamptz('updated_at')
@@ -82,6 +92,10 @@ export const tickets = pgTable(
     check(
       'tickets_checkin_check',
       sql`${t.checkedInAt} IS NOT NULL OR (${t.checkedInBy} IS NULL AND ${t.checkinScanId} IS NULL)`,
+    ),
+    check(
+      'tickets_checkin_method_check',
+      sql`${t.checkinMethod} IS NULL OR (${t.checkedInAt} IS NOT NULL AND ${t.checkinMethod} IN ('scan', 'manual'))`,
     ),
   ],
 );

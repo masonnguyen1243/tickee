@@ -146,6 +146,24 @@ export const JobQueue = {
   INTEGRATION_SHEET_INITIAL_SYNC: 'integration.sheet-initial-sync',
   /** Dead-letter của `INTEGRATION_SHEET_INITIAL_SYNC`: job hết lượt retry được chép sang đây. */
   INTEGRATION_SHEET_INITIAL_SYNC_DEAD_LETTER: 'integration.sheet-initial-sync.dead-letter',
+  /**
+   * Một Đơn vừa đổi trên Sheet (Story 6.5, AD-23): Đơn chuyển `paid`, `review`, `cancelled`, `refunded`, hoặc một Vé của
+   * Đơn được check-in. Payload `SheetRowChangedPayload` (chỉ id Sự kiện và id Đơn). `ordering` và `ticketing` enqueue
+   * bằng chính `tx` của lệnh đổi trạng thái (queue khai báo ở `ticketing`, producer thấp nhất, nên không ai import
+   * `integration`). Handler của `integration` chỉ đánh dấu dòng bẩn của kết nối rồi hẹn flush; Sự kiện chưa kết nối thì
+   * không làm gì.
+   */
+  INTEGRATION_SHEET_ROW_CHANGED: 'integration.sheet_row_changed',
+  /** Dead-letter của `INTEGRATION_SHEET_ROW_CHANGED`: job hết lượt retry (lỗi DB) được chép sang đây. */
+  INTEGRATION_SHEET_ROW_CHANGED_DEAD_LETTER: 'integration.sheet_row_changed.dead-letter',
+  /**
+   * Flush dòng bẩn của một kết nối Google Sheets lên Sheet (Story 6.5, AD-23). Payload `SheetFlushPayload` (chỉ id kết
+   * nối). Hẹn bằng debounce theo kết nối (`singletonKey` = id kết nối, cửa sổ 45 giây) và policy `singleton` (không bao
+   * giờ hai lượt của cùng kết nối chạy song song). Google lỗi tạm thời → retry có backoff, dòng bẩn giữ nguyên.
+   */
+  INTEGRATION_SHEET_FLUSH: 'integration.sheet-flush',
+  /** Dead-letter của `INTEGRATION_SHEET_FLUSH`: job hết lượt retry được chép sang đây. */
+  INTEGRATION_SHEET_FLUSH_DEAD_LETTER: 'integration.sheet-flush.dead-letter',
 } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];
 
@@ -195,3 +213,11 @@ export type TokenAlertEmailPayload = z.infer<typeof TokenAlertEmailPayload>;
 /** Payload của job `integration.sheet-initial-sync` (Story 6.4): chỉ id kết nối Google Sheets, không token, không PII. */
 export const SheetInitialSyncPayload = z.object({ connectionId: z.uuid() });
 export type SheetInitialSyncPayload = z.infer<typeof SheetInitialSyncPayload>;
+
+/** Payload của job `integration.sheet_row_changed` (Story 6.5): chỉ id Sự kiện và id Đơn, không PII. */
+export const SheetRowChangedPayload = z.object({ eventId: z.uuid(), orderId: z.uuid() });
+export type SheetRowChangedPayload = z.infer<typeof SheetRowChangedPayload>;
+
+/** Payload của job `integration.sheet-flush` (Story 6.5): chỉ id kết nối Google Sheets, không token, không PII. */
+export const SheetFlushPayload = z.object({ connectionId: z.uuid() });
+export type SheetFlushPayload = z.infer<typeof SheetFlushPayload>;

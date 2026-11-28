@@ -39,6 +39,19 @@ export interface EnqueueOptions {
    * ngày), sau đó enqueue lại cùng id sẽ tạo job mới.
    */
   id?: string;
+  /**
+   * Khóa debounce/throttle của pg-boss (Story 6.5), đi cùng `singletonSeconds`: mỗi khe thời gian `singletonSeconds` giây
+   * có tối đa một job cho khóa này (index `job_i4`, mọi trạng thái trừ `cancelled`). Khe đã có job → không tạo (hoặc sang
+   * khe kế khi `singletonNextSlot`), không lỗi.
+   */
+  singletonKey?: string;
+  /** Độ dài khe (giây) của `singletonKey`. */
+  singletonSeconds?: number;
+  /**
+   * Debounce (`sendDebounced` của pg-boss): khe hiện tại đã có job thì chèn vào khe kế (`startAfter` = đầu khe kế); khe
+   * kế cũng có rồi thì không tạo (job đó chưa chạy).
+   */
+  singletonNextSlot?: boolean;
 }
 
 export interface QueueDefinition<S extends z.ZodType> {
@@ -51,13 +64,15 @@ export interface QueueDefinition<S extends z.ZodType> {
   /**
    * Tạo dead-letter (nếu có) rồi queue (gọi lại không sao). `boss.send` ném lỗi khi queue hoặc dead-letter chưa tồn
    * tại. `createQueue` bỏ qua queue đã có (không đổi cấu hình), nên `updateQueue` áp lại `queueOptions` cho môi trường
-   * đã có queue.
+   * đã có queue, trừ `policy`: pg-boss không cho đổi policy sau khi tạo (`updateQueue` ném lỗi khi nhận `policy`), nên
+   * policy chỉ có hiệu lực lúc tạo queue.
    */
   ensure(boss: PgBoss): Promise<void>;
   /**
    * Enqueue bằng chính `tx` của thay đổi: `tx` rollback thì không có job; commit thì job chắc chắn có. Payload được
    * parse trước khi gửi (lưu dạng đã parse). Người gọi đã `QueueProducer.ready()` trước transaction. Có `options.id` mà
-   * dòng job cùng id còn trong bảng (chưa bị xóa theo `deleteAfterSeconds`) → không làm gì.
+   * dòng job cùng id còn trong bảng (chưa bị xóa theo `deleteAfterSeconds`) → không làm gì. Có `options.singletonKey`
+   * mà khe (và khe kế, khi debounce) đã có job → không làm gì.
    */
   enqueue(boss: PgBoss, tx: Tx, payload: z.input<S>, options?: EnqueueOptions): Promise<void>;
 }
@@ -75,7 +90,8 @@ export function defineQueue<S extends z.ZodType>(spec: QueueSpec<S>): QueueDefin
     async ensure(boss) {
       if (deadLetter) await boss.createQueue(deadLetter);
       await boss.createQueue(name, queueOptions);
-      await boss.updateQueue(name, queueOptions);
+      const { policy: _policy, ...updatable } = queueOptions;
+      if (Object.keys(updatable).length > 0) await boss.updateQueue(name, updatable);
     },
     async enqueue(boss, tx, payload, options = {}) {
       const data = schema.parse(payload) as object;
@@ -83,9 +99,12 @@ export function defineQueue<S extends z.ZodType>(spec: QueueSpec<S>): QueueDefin
         db: fromDrizzle(tx, sql),
         ...(options.startAfter ? { startAfter: options.startAfter } : {}),
         ...(options.id ? { id: options.id } : {}),
+        ...(options.singletonKey ? { singletonKey: options.singletonKey } : {}),
+        ...(options.singletonSeconds ? { singletonSeconds: options.singletonSeconds } : {}),
+        ...(options.singletonNextSlot ? { singletonNextSlot: true } : {}),
       });
-      // Id cố định đã có job: `send` trả `null` (ON CONFLICT DO NOTHING), đúng ý người gọi.
-      if (!jobId && !options.id) throw new Error(`pg-boss không tạo job ${name}`);
+      // Id cố định hay khe singleton đã có job: `send` trả `null` (ON CONFLICT DO NOTHING), đúng ý người gọi.
+      if (!jobId && !options.id && !options.singletonKey) throw new Error(`pg-boss không tạo job ${name}`);
     },
   };
 }

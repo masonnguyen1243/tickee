@@ -14,13 +14,15 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   GoogleApiError,
   GoogleSheetsClient,
+  type CellBlock,
   type GridSize,
-  type SheetCellValue,
 } from '../../src/modules/integration/google-client.js';
+import { SHEET_FLUSH_QUEUE } from '../../src/modules/integration/sheet-flush-queue.js';
 import {
   runSheetInitialSync,
   sheetInitialSyncJobId,
   SheetSyncWorker,
+  type SheetSyncDeps,
 } from '../../src/modules/integration/sheet-sync-jobs.js';
 import { parseCredentialKeys, SecretBox } from '../../src/platform/crypto/index.js';
 import { BOSS } from '../../src/platform/jobs/index.js';
@@ -33,6 +35,7 @@ import {
   type GoogleFake,
 } from '../google-fake/server.js';
 import { createHarness, signUp, type Harness } from '../identity/harness.js';
+import { discardPendingSheetJobs } from './sheet-fixtures.js';
 import {
   EVENT_DRAFT,
   eventOnSale,
@@ -49,7 +52,9 @@ import {
 /*
  * Story 6.4: lần đẩy đầu lên Google Sheets (`runSheetInitialSync`, vai worker) với Google fake. Đơn thật (Đơn 0đ: `paid`
  * ngay, có Vé và câu trả lời form) cùng Đơn chèn bằng SQL cho các trạng thái khác và cho số lượng lớn. Ca cuối chạy
- * worker thật qua pg-boss.
+ * worker thật qua pg-boss. Story 6.5: ghi theo `gridRange` của tab (không theo tên), cột "Check-in tay", tiêu đề và
+ * metadata `tickee.column` gắn cùng một `batchUpdate`, chỉ nới lưới; cột Tickee của Sheet tạo mới, Sheet mất giữa chừng
+ * và hẹn flush khi còn dòng bẩn nằm ở `sheet-flush.test.ts`.
  */
 
 const CLIENT_ID = 'test-sheets-client-id.apps.googleusercontent.com';
@@ -66,6 +71,7 @@ const HEADER = [
   'Thời gian tạo',
   'Thời gian thanh toán',
   'Đã check-in',
+  'Check-in tay',
   'Số Vé',
 ];
 const secretBox = new SecretBox(parseCredentialKeys(TEST_GOOGLE_SHEETS_TOKEN_KEYS));
@@ -96,6 +102,8 @@ beforeAll(async () => {
   fake = await startGoogleFake({ clientId: CLIENT_ID, clientSecret: CLIENT_SECRET });
   h = await createHarness(googleUrls(), { overrides: [rejectingTingee] });
   org = await paidReadyOrg(h, { name: 'CLB Bơi lội' });
+  // Lần đẩy đầu xong mà còn dòng bẩn thì hẹn flush (vai worker tạo queue này lúc khởi động).
+  await SHEET_FLUSH_QUEUE.ensure(h.app.get<PgBoss>(BOSS));
 });
 beforeEach(async () => {
   fake.reset();
@@ -126,7 +134,15 @@ async function connect(eventId: string): Promise<string> {
   return rows[0]!.id;
 }
 
-const run = (connectionId: string, google = clientOf()) => runSheetInitialSync({ db: h.db, google, secretBox }, connectionId);
+const depsOf = (google = clientOf(), box = secretBox): SheetSyncDeps => ({
+  db: h.db,
+  google,
+  secretBox: box,
+  boss: h.app.get<PgBoss>(BOSS),
+  flushWindowSeconds: 45,
+});
+
+const run = (connectionId: string, google = clientOf()) => runSheetInitialSync(depsOf(google), connectionId);
 
 interface ConnectionState {
   status: string;
@@ -144,7 +160,23 @@ async function stateOf(connectionId: string): Promise<ConnectionState | undefine
   return rows[0];
 }
 
-const writes = () => fake.calls('PUT', '/v4/spreadsheets/');
+/** Các lần ghi ô (`values:batchUpdateByDataFilter`). */
+const writes = () => fake.calls('POST', '/v4/spreadsheets/').filter((r) => r.path.endsWith('/values:batchUpdateByDataFilter'));
+
+/** Vùng của từng lần ghi: `[dòng đầu, dòng cuối (không tính), cột đầu, cột cuối (không tính)]` theo `gridRange`, đếm từ 0. */
+const writtenRanges = () =>
+  writes().flatMap((r) =>
+    (r.body as { data: { dataFilter: { gridRange: Record<string, number> } }[] }).data.map(({ dataFilter: { gridRange: g } }) => [
+      g.sheetId,
+      g.startRowIndex,
+      g.endRowIndex,
+      g.startColumnIndex,
+      g.endColumnIndex,
+    ]),
+  );
+
+/** Các `batchUpdate` (tiêu đề + metadata cột, nới lưới). */
+const batchUpdates = () => fake.calls('POST', '/v4/spreadsheets/').filter((r) => r.path.endsWith(':batchUpdate'));
 const creates = () => fake.calls('POST', '/v4/spreadsheets').filter((r) => r.path === '/v4/spreadsheets');
 
 async function placeFree(sale: SaleEvent, options: { tickets?: number; answers?: Record<string, string> } = {}) {
@@ -215,6 +247,27 @@ describe('lần đẩy đầu', () => {
     expect(spreadsheet.tabs).toHaveLength(1);
     expect(spreadsheet.tabs[0]).toMatchObject({ sheetId: 0, title: 'Đơn', frozenRowCount: 1, rowCount: 1000, columnCount: 26 });
     expect(fake.values(spreadsheetId)).toEqual([HEADER]);
+    // Story 6.5: mỗi cột Tickee mang developer metadata `tickee.column` (PROJECT), tiêu đề và metadata trong một batchUpdate.
+    expect(spreadsheet.metadata.map((m) => [m.metadataKey, m.metadataValue, m.column, m.visibility])).toEqual(
+      [
+        'order_code',
+        'buyer_name',
+        'buyer_email',
+        'buyer_phone',
+        'items',
+        'total_amount',
+        'paid_amount',
+        'status',
+        'created_at',
+        'paid_at',
+        'checked_in',
+        'manual_checked_in',
+        'ticket_count',
+      ].map((value, column) => ['tickee.column', value, column, 'PROJECT']),
+    );
+    expect(batchUpdates()).toHaveLength(1);
+    // Lưới tạo đủ lớn: không nới lại.
+    expect(JSON.stringify(batchUpdates())).not.toContain('appendDimension');
 
     const state = await stateOf(connectionId);
     expect(state).toMatchObject({
@@ -281,14 +334,16 @@ describe('lần đẩy đầu', () => {
       formatVnTimestamp(three.created_at),
       formatVnTimestamp(three.paid_at),
       2,
+      // Check-in tay: Vé check-in trước Story 6.5 (`checkin_method` null) không tính là tay.
+      0,
       3,
       // RAW: câu trả lời nguyên văn, giữ số 0 đầu, không thêm `'`.
       '001203004567',
       '=XL',
     ]);
-    expect(values[4]!.slice(10)).toEqual([0, 1, '', 'M']);
+    expect(values[4]!.slice(10)).toEqual([0, 0, 1, '', 'M']);
     // Đơn chèn tay: Cần xử lý / Đã hủy / Đã hoàn tay; số tiền là số; không có Vé → check-in trống.
-    expect(values[1]!.slice(3, 12)).toEqual([
+    expect(values[1]!.slice(3, 13)).toEqual([
       '0987 654 321',
       '',
       150000,
@@ -296,6 +351,7 @@ describe('lần đẩy đầu', () => {
       'Đã hoàn tay',
       '2026-01-01 08:00:00',
       '2026-01-01 08:00:00',
+      '',
       '',
       '',
     ]);
@@ -306,7 +362,7 @@ describe('lần đẩy đầu', () => {
     expect(await stateOf(connectionId)).toMatchObject({ status: 'active', last_error_code: null });
   });
 
-  it('nhiều lô: 1.001 Đơn → nới lưới lên 1.002 dòng, ghi tiêu đề rồi 3 lô 500/500/1 vào đúng vùng cố định', async () => {
+  it('nhiều lô: 1.001 Đơn → Sheet tạo với 1.002 dòng, tiêu đề cùng metadata rồi 3 lô 500/500/1 theo gridRange của tab', async () => {
     const sale = await freeEvent();
     const base = Date.parse('2026-02-01T00:00:00Z');
     const codes = await seed(
@@ -318,18 +374,19 @@ describe('lần đẩy đầu', () => {
     expect(outcome).toMatchObject({ result: 'synced', orders: 1_001 });
     const spreadsheetId = (outcome as { spreadsheetId: string }).spreadsheetId;
     expect(fake.tab(spreadsheetId)).toMatchObject({ rowCount: 1_002, columnCount: 26 });
-    expect(writes().map((r) => decodeURIComponent(r.path.split('/values/')[1]!))).toEqual([
-      "'Đơn'!A1:L1",
-      "'Đơn'!A2:L501",
-      "'Đơn'!A502:L1001",
-      "'Đơn'!A1002:L1002",
+    // Theo `sheetId` (0), không theo tên tab; 13 cột Tickee (A…M).
+    expect(writtenRanges()).toEqual([
+      [0, 1, 501, 0, 13],
+      [0, 501, 1001, 0, 13],
+      [0, 1001, 1002, 0, 13],
     ]);
+    expect(fake.values(spreadsheetId)[0]).toEqual(HEADER);
     const values = fake.values(spreadsheetId);
     expect(values).toHaveLength(1_002);
     expect(values.slice(1).map((row) => row[0])).toEqual(codes);
   });
 
-  it('16 câu hỏi form đã trả lời → 28 cột: nới lưới quá 26 cột, vùng tiêu đề tới cột AB', async () => {
+  it('16 câu hỏi form đã trả lời → 29 cột: lưới quá 26 cột, vùng ghi tới cột AC', async () => {
     const sale = await freeEvent();
     const [code] = await seed(sale.event.id, [{ status: 'paid', createdAt: '2026-05-01T00:00:00Z' }]);
     // Câu trả lời chèn thẳng (bản chụp lúc đặt), mỗi câu một id câu hỏi.
@@ -343,21 +400,19 @@ describe('lần đẩy đầu', () => {
     const outcome = await run(connectionId);
     expect(outcome).toMatchObject({ result: 'synced', orders: 1 });
     const spreadsheetId = (outcome as { spreadsheetId: string }).spreadsheetId;
-    expect(fake.tab(spreadsheetId)).toMatchObject({ rowCount: 1_000, columnCount: 28 });
-    expect(writes().map((r) => decodeURIComponent(r.path.split('/values/')[1]!))).toEqual([
-      "'Đơn'!A1:AB1",
-      "'Đơn'!A2:AB2",
-    ]);
+    expect(fake.tab(spreadsheetId)).toMatchObject({ rowCount: 1_000, columnCount: 29 });
+    expect(writtenRanges()).toEqual([[0, 1, 2, 0, 29]]);
     const values = fake.values(spreadsheetId);
     expect(values[0]).toEqual([...HEADER, ...Array.from({ length: 16 }, (_, i) => `Câu ${i + 1}`)]);
-    expect(values[1]!.slice(12)).toEqual(Array.from({ length: 16 }, (_, i) => `Trả lời ${i + 1}`));
+    expect(values[1]!.slice(13)).toEqual(Array.from({ length: 16 }, (_, i) => `Trả lời ${i + 1}`));
+    expect(fake.spreadsheets.get(spreadsheetId)!.metadata).toHaveLength(29);
   });
 
   it('SecretBox khác khóa (worker thiếu khóa của refresh token) → lần chạy ném lỗi, kết nối vẫn syncing, không gọi Google', async () => {
     const sale = await freeEvent();
     const connectionId = await connect(sale.event.id);
     const wrongBox = new SecretBox(parseCredentialKeys(testCredentialKey(1, 99)));
-    await expect(runSheetInitialSync({ db: h.db, google: clientOf(), secretBox: wrongBox }, connectionId)).rejects.toThrow(
+    await expect(runSheetInitialSync(depsOf(clientOf(), wrongBox), connectionId)).rejects.toThrow(
       'Không giải mã được refresh token Google (SecretBoxError)',
     );
     expect(await stateOf(connectionId)).toMatchObject({ status: 'syncing', last_error_code: null, spreadsheet_id: null });
@@ -366,22 +421,22 @@ describe('lần đẩy đầu', () => {
 });
 
 describe('lỗi Google và retry', () => {
-  it('5xx sau khi tạo Sheet → retrying + server_error; lần retry dùng lại spreadsheet_id (không tạo Sheet thứ hai), ghi đè cùng ô', async () => {
+  it('5xx sau khi tạo Sheet → retrying + server_error; lần retry dùng lại spreadsheet_id (không tạo Sheet thứ hai), giữ metadata, ghi đè cùng ô', async () => {
     const sale = await freeEvent();
     const codes = await seed(sale.event.id, [
       { status: 'paid', createdAt: '2026-03-01T00:00:00Z' },
       { status: 'paid', createdAt: '2026-03-01T00:00:01Z' },
     ]);
     const connectionId = await connect(sale.event.id);
-    // Tạo Sheet được, nới lưới lỗi 500.
+    // Tạo Sheet được, gắn tiêu đề + metadata cột lỗi 500.
     fake.sheetsReplies.push('pass', { status: 500 });
     expect(await run(connectionId)).toEqual({ result: 'retry', code: 'server_error' });
     const failed = await stateOf(connectionId);
     expect(failed).toMatchObject({ status: 'retrying', last_error_code: 'server_error', last_synced_at: null });
     expect(failed!.spreadsheet_id).not.toBeNull();
 
-    // Lần thứ hai: ghi tiêu đề rồi lỗi 429 ở lô Đơn.
-    fake.sheetsReplies.push('pass', 'pass', { status: 429 });
+    // Lần thứ hai: đọc tab, tìm metadata, gắn tiêu đề + metadata rồi lỗi 429 ở lô Đơn.
+    fake.sheetsReplies.push('pass', 'pass', 'pass', { status: 429 });
     expect(await run(connectionId)).toEqual({ result: 'retry', code: 'rate_limited' });
     expect(await stateOf(connectionId)).toMatchObject({ status: 'retrying', last_error_code: 'rate_limited' });
 
@@ -389,7 +444,66 @@ describe('lỗi Google và retry', () => {
     expect(outcome).toEqual({ result: 'synced', orders: 2, spreadsheetId: failed!.spreadsheet_id });
     expect(creates()).toHaveLength(1);
     expect(fake.values(failed!.spreadsheet_id!).map((row) => row[0])).toEqual(['Mã Đơn', ...codes]);
+    // Lần thứ ba thấy metadata của lần hai: không gắn lại (13 cột, mỗi cột một metadata).
+    expect(fake.spreadsheets.get(failed!.spreadsheet_id!)!.metadata).toHaveLength(13);
     expect(await stateOf(connectionId)).toMatchObject({ status: 'active', last_error_code: null });
+  });
+
+  it('lần retry mà BTC đã xóa cột Mã Đơn (Sheet còn cột Tickee khác) → bỏ Sheet đó, tạo Sheet mới ngay, không gắn lại tại chỗ', async () => {
+    const sale = await freeEvent();
+    const codes = await seed(sale.event.id, [{ status: 'paid', createdAt: '2026-06-01T00:00:00Z' }]);
+    const connectionId = await connect(sale.event.id);
+    // Tạo Sheet, gắn tiêu đề + metadata được, ghi lô Đơn lỗi 500.
+    fake.sheetsReplies.push('pass', 'pass', { status: 500 });
+    expect(await run(connectionId)).toEqual({ result: 'retry', code: 'server_error' });
+    const first = (await stateOf(connectionId))!.spreadsheet_id!;
+    fake.deleteColumn(first, fake.columnOf(first, 'order_code')!);
+    const metadataBefore = fake.spreadsheets.get(first)!.metadata.map((m) => [m.metadataValue, m.column]);
+
+    const outcome = await run(connectionId);
+    expect(outcome).toMatchObject({ result: 'synced', orders: 1 });
+    const replacement = (outcome as { spreadsheetId: string }).spreadsheetId;
+    expect(replacement).not.toBe(first);
+    expect(fake.values(replacement)).toHaveLength(2);
+    expect(fake.values(replacement)[1]![0]).toBe(codes[0]);
+    expect(fake.columnOf(replacement, 'order_code')).toBe(0);
+    expect(fake.spreadsheets.get(replacement)!.metadata).toHaveLength(13);
+    // Sheet cũ giữ nguyên, không bị gắn lại.
+    expect(fake.spreadsheets.get(first)!.metadata.map((m) => [m.metadataValue, m.column])).toEqual(metadataBefore);
+    expect(await stateOf(connectionId)).toMatchObject({ status: 'active', spreadsheet_id: replacement });
+  });
+
+  it('lần retry sau khi đã gắn cột: câu hỏi form mới có câu trả lời → thêm cột ở cuối lưới (tiêu đề, metadata), ô của Đơn có câu trả lời', async () => {
+    const sale = await freeEvent(['Biệt danh']);
+    const question = sale.questions[0]!;
+    const [code] = await seed(sale.event.id, [{ status: 'paid', createdAt: '2026-06-02T00:00:00Z' }]);
+    const connectionId = await connect(sale.event.id);
+    // Lần 1: chưa ai trả lời câu hỏi (13 cột); tạo Sheet, gắn tiêu đề + metadata được, ghi lô Đơn lỗi 500.
+    fake.sheetsReplies.push('pass', 'pass', { status: 500 });
+    expect(await run(connectionId)).toEqual({ result: 'retry', code: 'server_error' });
+    const spreadsheetId = (await stateOf(connectionId))!.spreadsheet_id!;
+    const columnCount = fake.tab(spreadsheetId).columnCount;
+    expect(fake.spreadsheets.get(spreadsheetId)!.metadata).toHaveLength(13);
+    await h.db.pool.query(
+      `INSERT INTO order_answers (order_id, question_id, position, label, kind, answer)
+       SELECT id, $2, 0, 'Biệt danh', 'text', 'Cá Mập' FROM orders WHERE code = $1`,
+      [code, question.id],
+    );
+
+    expect(await run(connectionId)).toMatchObject({ result: 'synced', orders: 1, spreadsheetId });
+    const key = `question:${question.id}`;
+    expect(fake.columnOf(spreadsheetId, key)).toBe(columnCount);
+    expect(fake.tab(spreadsheetId).columnCount).toBe(columnCount + 1);
+    expect(fake.spreadsheets.get(spreadsheetId)!.metadata.find((m) => m.metadataValue === key)).toMatchObject({
+      metadataKey: 'tickee.column',
+      visibility: 'PROJECT',
+      column: columnCount,
+    });
+    const values = fake.values(spreadsheetId);
+    expect(values[0]!.slice(0, 13)).toEqual(HEADER);
+    expect(values[0]![columnCount]).toBe('Biệt danh');
+    expect(values[1]![0]).toBe(code);
+    expect(values[1]![columnCount]).toBe('Cá Mập');
   });
 
   it('timeout và lỗi mạng → retrying (timeout / network)', async () => {
@@ -456,7 +570,7 @@ describe('lỗi Google và retry', () => {
 });
 
 describe('ngắt kết nối khi job đang chạy', () => {
-  /** Client ghi xong lần thứ `after` thì "Ngắt kết nối" qua api. */
+  /** Client ghi xong lần thứ `after` (tiêu đề + metadata là lần 1, mỗi lô Đơn một lần) thì "Ngắt kết nối" qua api. */
   class DisconnectingClient extends GoogleSheetsClient {
     private count = 0;
 
@@ -473,13 +587,17 @@ describe('ngắt kết nối khi job đang chạy', () => {
       });
     }
 
-    override async writeValues(
-      accessToken: string,
-      spreadsheetId: string,
-      range: string,
-      values: readonly (readonly SheetCellValue[])[],
-    ): Promise<void> {
-      await super.writeValues(accessToken, spreadsheetId, range, values);
+    override async tagColumns(...args: Parameters<GoogleSheetsClient['tagColumns']>): Promise<void> {
+      await super.tagColumns(...args);
+      await this.wrote();
+    }
+
+    override async writeCells(accessToken: string, spreadsheetId: string, blocks: readonly CellBlock[]): Promise<void> {
+      await super.writeCells(accessToken, spreadsheetId, blocks);
+      await this.wrote();
+    }
+
+    private async wrote(): Promise<void> {
       this.count += 1;
       if (this.count === this.after) {
         await h.http.delete(`/v1${eventGoogleSheetsApiPath(org.orgId, this.eventId)}`).set('cookie', org.owner.cookie).expect(204);
@@ -492,7 +610,8 @@ describe('ngắt kết nối khi job đang chạy', () => {
     await seed(sale.event.id, [{ status: 'paid', createdAt: '2026-04-01T00:00:00Z' }]);
     const connectionId = await connect(sale.event.id);
     expect(await run(connectionId, new DisconnectingClient(sale.event.id, 1))).toEqual({ result: 'disconnected' });
-    expect(writes()).toHaveLength(1);
+    expect(batchUpdates()).toHaveLength(1);
+    expect(writes()).toHaveLength(0);
     expect(await stateOf(connectionId)).toBeUndefined();
     expect(fake.spreadsheets.size).toBeGreaterThan(0);
   });
@@ -502,7 +621,7 @@ describe('ngắt kết nối khi job đang chạy', () => {
     await seed(sale.event.id, [{ status: 'paid', createdAt: '2026-04-02T00:00:00Z' }]);
     const connectionId = await connect(sale.event.id);
     expect(await run(connectionId, new DisconnectingClient(sale.event.id, 2))).toEqual({ result: 'disconnected' });
-    expect(writes()).toHaveLength(2);
+    expect(writes()).toHaveLength(1);
     expect(await stateOf(connectionId)).toBeUndefined();
   });
 
@@ -515,14 +634,14 @@ describe('ngắt kết nối khi job đang chạy', () => {
   });
 
   it.each([
-    ['lỗi tạm thời', new GoogleApiError('resize_grid', 'transient', 'server_error', 500)],
-    ['mất quyền', new GoogleApiError('resize_grid', 'auth_revoked', 'forbidden', 403)],
+    ['lỗi tạm thời', new GoogleApiError('batch_update', 'transient', 'server_error', 500)],
+    ['mất quyền', new GoogleApiError('batch_update', 'auth_revoked', 'forbidden', 403)],
   ])('kết nối bị xóa rồi Google báo %s → disconnected (không retry, không ghi trạng thái)', async (_name, error) => {
     const sale = await freeEvent();
     const connectionId = await connect(sale.event.id);
     const eventId = sale.event.id;
     class FailAfterDisconnect extends GoogleSheetsClient {
-      override async resizeGrid(_token: string, _id: string, _sheetId: number, _grid: GridSize): Promise<void> {
+      override async expandGrid(_token: string, _id: string, _sheetId: number, _current: GridSize, _needed: GridSize): Promise<void> {
         await h.http.delete(`/v1${eventGoogleSheetsApiPath(org.orgId, eventId)}`).set('cookie', org.owner.cookie).expect(204);
         throw error;
       }
@@ -540,6 +659,9 @@ describe('ngắt kết nối khi job đang chạy', () => {
 });
 
 describe('worker thật (pg-boss)', () => {
+  // Job lần đẩy đầu do các ca gọi thẳng để lại (mỗi lần `connect` một job) không được chạy trước job của ca dưới.
+  beforeAll(() => discardPendingSheetJobs(h));
+
   it('callback enqueue job; worker tạo Sheet và chuyển active trong vài giây', async () => {
     const app = await NestFactory.createApplicationContext(WorkerModule.forRoot(workerConfig(googleUrls())), {
       logger: false,

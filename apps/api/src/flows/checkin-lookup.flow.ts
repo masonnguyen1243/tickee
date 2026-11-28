@@ -3,7 +3,7 @@ import { orderIdsByBuyerContact } from '../modules/ordering/index.js';
 import { checkIn, validTicketsOfOrders } from '../modules/ticketing/index.js';
 import type { EventAccessContext } from '../platform/access/index.js';
 import type { Database } from '../platform/db/index.js';
-import { toScanResult } from './checkin-scan.flow.js';
+import { toScanResult, type SheetRowChanges } from './checkin-scan.flow.js';
 
 /*
  * Tra tay và check-in tay (Story 5.5, FR-29, AD-31, AD-35). Ở flows vì SĐT/email Người mua là bản chụp trên Đơn
@@ -37,8 +37,9 @@ export async function lookupTickets(
 }
 
 /**
- * Check-in tay Vé `ticketId` ở Sự kiện `ctx.eventId` (người gọi đã qua `PermissionGuard`, `checkin.lookup`): cùng
- * `ticketing.checkIn` như khi quét, trong một transaction, với `Idempotency-Key` (chữ thường) làm `scanId`. Gửi lại cùng
+ * Check-in tay Vé `ticketId` ở Sự kiện `ctx.eventId` (người gọi đã qua `PermissionGuard`, `checkin.lookup`): chờ queue
+ * `sheet_row_changed` sẵn sàng rồi cùng `ticketing.checkIn` như khi quét (`method: manual`, Story 6.5), trong một
+ * transaction, với `Idempotency-Key` (chữ thường) làm `scanId`. Gửi lại cùng
  * khóa bằng cùng tài khoản phát lại kết quả lần đầu (kể cả khi Sự kiện vừa đóng hay Vé vừa bị hủy); `checked_in_by` là
  * người bấm. Kết quả dựng bằng cùng `toScanResult` của quét. `ticketId` không có Vé → `invalid BAD_SIGNATURE`; Vé của Sự
  * kiện khác → `invalid OTHER_EVENT` (UI không đi tới hai nhánh này).
@@ -48,15 +49,18 @@ export async function manualCheckIn(
   ctx: EventAccessContext,
   ticketId: string,
   idempotencyKey: string,
+  sheets: SheetRowChanges,
 ): Promise<ScanResult> {
+  await sheets.queues.ready();
   const result = await db.transaction((tx) =>
-    checkIn(tx, {
+    checkIn(tx, sheets.boss, {
       ticketId: ticketId.toLowerCase(),
       eventId: ctx.eventId,
       organizationId: ctx.organizationId,
       userId: ctx.userId,
       // Cột uuid trả chữ thường: so phát lại theo cùng dạng dù client gửi chữ hoa.
       scanId: idempotencyKey.toLowerCase(),
+      method: 'manual',
     }),
   );
   return toScanResult(db.orm, ctx, result);

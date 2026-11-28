@@ -14,12 +14,21 @@ export { issuedTicketCountsByType } from './issued-counts.js';
 // Tra tay (Story 5.5): Vé `valid` của các Đơn khớp SĐT/email (`flows`).
 export { validTicketsOfOrders, type LookupTicketRow } from './lookup-read.js';
 export { type OwnTicket, type OwnTicketDetail } from './my-tickets.js';
-// CSV danh sách Đơn (Story 6.3): số Vé `valid` / đã check-in theo Đơn, cho cột "Check-in" "k/N" (`reporting`).
+// CSV danh sách Đơn (Story 6.3): số Vé `valid` / đã check-in theo Đơn, cho cột "Check-in" "k/N" (`reporting`); Google
+// Sheets (Story 6.4, 6.5) thêm số Vé check-in tay (`integration`).
 export { checkinCountsOfOrders } from './order-checkin-counts.js';
 // Tab Đơn (Story 6.1): Vé của một Đơn cho `Sheet` chi tiết (`reporting`).
 export { orderTicketsOf, type OrderTicketRow } from './order-tickets-read.js';
 export { signTicketQr, TICKET_QR_KEYS, TicketQrKeys, verifyTicketQr, type VerifiedTicketQr } from './qr.js';
+export { type TicketCheckinMethod } from './schema.js';
 export { hashShareToken, shareTokenOf } from './share-token.js';
+// Google Sheets (Story 6.5): queue "Đơn vừa đổi trên Sheet", khai báo ở producer thấp nhất. `ordering` enqueue khi Đơn đổi
+// trạng thái, `checkIn` khi check-in; `integration` đăng ký handler (vai worker).
+export {
+  enqueueSheetRowChanged,
+  SHEET_ROW_CHANGED_QUEUE,
+  SheetRowChangedQueues,
+} from './sheet-row-changed-queue.js';
 export { TicketingModule, TicketingRoutesModule, TicketQrKeyCheck, type TicketingConfig } from './ticketing.module.js';
 export {
   TICKET_QR_KEY_MISSING_ALERT,

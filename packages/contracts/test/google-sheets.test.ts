@@ -3,8 +3,12 @@ import {
   eventGoogleSheetsApiPath,
   eventGoogleSheetsConnectApiPath,
   EventSheetConnectionResponse,
+  GOOGLE_SHEET_COLUMN_METADATA_KEY,
   GOOGLE_SHEET_ORDER_STATUSES,
+  GOOGLE_SHEET_QUESTION_COLUMN_PREFIX,
   GOOGLE_SHEETS_SCOPE,
+  GoogleSheetColumn,
+  googleSheetQuestionColumn,
   googleSheetsRedirectUri,
   googleSheetsReturnPath,
   googleSheetTitle,
@@ -17,7 +21,7 @@ import {
   SheetsNotice,
 } from '../src/google-sheets.js';
 import { ErrorCode } from '../src/errors.js';
-import { JobQueue, SheetInitialSyncPayload } from '../src/jobs.js';
+import { JobQueue, SheetFlushPayload, SheetInitialSyncPayload, SheetRowChangedPayload } from '../src/jobs.js';
 import { PII_KEYS } from '../src/pii.js';
 
 /* Story 6.4: hợp đồng kết nối Google Sheets dùng chung api/web. */
@@ -113,6 +117,51 @@ describe('Sheet và job', () => {
     expect(JobQueue.INTEGRATION_SHEET_INITIAL_SYNC_DEAD_LETTER).toBe('integration.sheet-initial-sync.dead-letter');
     expect(SheetInitialSyncPayload.parse({ connectionId: EVENT, refreshToken: 'x' })).toEqual({ connectionId: EVENT });
     expect(SheetInitialSyncPayload.safeParse({ connectionId: 'khong-phai-uuid' }).success).toBe(false);
+  });
+
+  it('Story 6.5: queue sheet_row_changed và flush, mỗi queue kèm dead-letter; payload chỉ id', () => {
+    expect(JobQueue.INTEGRATION_SHEET_ROW_CHANGED).toBe('integration.sheet_row_changed');
+    expect(JobQueue.INTEGRATION_SHEET_ROW_CHANGED_DEAD_LETTER).toBe('integration.sheet_row_changed.dead-letter');
+    expect(JobQueue.INTEGRATION_SHEET_FLUSH).toBe('integration.sheet-flush');
+    expect(JobQueue.INTEGRATION_SHEET_FLUSH_DEAD_LETTER).toBe('integration.sheet-flush.dead-letter');
+    // Tên queue pg-boss chỉ gồm chữ, số, `_`, `-`, `.`, `/`.
+    for (const name of [JobQueue.INTEGRATION_SHEET_ROW_CHANGED, JobQueue.INTEGRATION_SHEET_FLUSH]) {
+      expect(name).toMatch(/^[\w.\-/]+$/);
+    }
+    expect(SheetRowChangedPayload.parse({ eventId: EVENT, orderId: ORG, buyerEmail: 'a@vidu.vn' })).toEqual({
+      eventId: EVENT,
+      orderId: ORG,
+    });
+    expect(SheetRowChangedPayload.safeParse({ eventId: EVENT }).success).toBe(false);
+    expect(SheetFlushPayload.parse({ connectionId: EVENT, token: 'x' })).toEqual({ connectionId: EVENT });
+    expect(SheetFlushPayload.safeParse({ connectionId: 'khong-phai-uuid' }).success).toBe(false);
+  });
+
+  it('Story 6.5: 403 quota/Drive đầy có mã và nhãn riêng (lỗi tạm thời)', () => {
+    expect(SheetSyncErrorCode.RATE_LIMITED).toBe('rate_limited');
+    expect(SheetSyncErrorCode.STORAGE_QUOTA).toBe('storage_quota');
+    expect(SHEET_SYNC_ERROR_LABEL.storage_quota).toBe('Google Drive của người kết nối đã đầy; Tickee sẽ tự thử lại.');
+  });
+
+  it('Story 6.5: cột Tickee nhận ra bằng developer metadata tickee.column; mã cột cố định và cột câu hỏi', () => {
+    expect(GOOGLE_SHEET_COLUMN_METADATA_KEY).toBe('tickee.column');
+    expect(Object.values(GoogleSheetColumn)).toEqual([
+      'order_code',
+      'buyer_name',
+      'buyer_email',
+      'buyer_phone',
+      'items',
+      'total_amount',
+      'paid_amount',
+      'status',
+      'created_at',
+      'paid_at',
+      'checked_in',
+      'manual_checked_in',
+      'ticket_count',
+    ]);
+    expect(googleSheetQuestionColumn(EVENT)).toBe(`question:${EVENT}`);
+    expect(googleSheetQuestionColumn(EVENT).startsWith(GOOGLE_SHEET_QUESTION_COLUMN_PREFIX)).toBe(true);
   });
 
   it('token OAuth và code_verifier luôn bị che trong log (cả snake_case và camelCase)', () => {

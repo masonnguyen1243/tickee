@@ -1,10 +1,12 @@
 import { RealtimeTopic, ScanInvalidReason } from '@tickee/contracts';
 import { and, count, eq, isNull, sql } from 'drizzle-orm';
+import type { PgBoss } from 'pg-boss';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import type { DbExecutor, Tx } from '../../platform/db/index.js';
 import { realtime } from '../../platform/realtime/index.js';
 import { assertCheckinOpen } from '../event/index.js';
-import { TICKET_CANCEL_REASON, tickets } from './schema.js';
+import { TICKET_CANCEL_REASON, tickets, type TicketCheckinMethod } from './schema.js';
+import { enqueueSheetRowChanged } from './sheet-row-changed-queue.js';
 
 /*
  * Check-in đúng một lần (FR-28, AD-15, Story 5.3, 5.4). Mọi check-in (quét, sau này tra tay) đi qua `checkIn`, trong `tx`
@@ -16,13 +18,17 @@ import { TICKET_CANCEL_REASON, tickets } from './schema.js';
  * chụp trên Vé (AD-35), không bao giờ có Mã QR vé, SĐT hay email.
  */
 
-/** Đầu vào check-in: Vé (id từ Mã QR vé đã kiểm chữ ký), Sự kiện và BTC của route, người quét, uuid của lần quét. */
+/**
+ * Đầu vào check-in: Vé (id từ Mã QR vé đã kiểm chữ ký), Sự kiện và BTC của route, người quét, uuid của lần quét, và cách
+ * check-in (`scan` ở Màn quét, `manual` khi tra tay; ghi vào `checkin_method`, Story 6.5).
+ */
 export interface CheckInInput {
   ticketId: string;
   eventId: string;
   organizationId: string;
   userId: string;
   scanId: string;
+  method: TicketCheckinMethod;
 }
 
 /** Bản chụp trên Vé cho kết quả xanh: tên Người mua · Vé k/N · Hạng vé. */
@@ -59,8 +65,8 @@ const snapshot = {
  *    EVENT_ENDED`; không ghi gì. Riêng lần gửi lại cùng `scanId` của chính người quét đã check-in Vé này thì phát lại
  *    `ok` của lần đầu (`replayOf`, chỉ đọc ở nhánh đóng này, khóa dòng Vé `FOR SHARE` để chờ lần đầu còn đang chạy).
  * 2. UPDATE có điều kiện (`id`, `event_id`, `organization_id`, `status = 'valid'`, `checked_in_at IS NULL`) ghi
- *    `checked_in_at = now()`, người quét và `scanId`, `RETURNING` bản chụp. Được 1 dòng → `ok` và tín hiệu
- *    `event_checkins_changed` trong cùng `tx`.
+ *    `checked_in_at = now()`, người quét, `scanId` và `checkin_method`, `RETURNING` bản chụp và id Đơn. Được 1 dòng → `ok`,
+ *    tín hiệu `event_checkins_changed` và job `integration.sheet_row_changed` của Đơn (Story 6.5) trong cùng `tx`.
  * 3. Được 0 dòng → đọc lại Vé theo id chỉ để phân loại (bản chụp chỉ trả khi Vé thuộc Sự kiện này): không có Vé →
  *    `BAD_SIGNATURE`; Vé của Sự kiện khác → `OTHER_EVENT`; cùng `scanId` và cùng người quét → phát lại `ok` (kể cả khi
  *    Vé đã bị hủy sau lần đầu); Vé đã hủy → `VOIDED` (`TICKET_CANCEL_REASON.VOIDED`) hoặc `CANCELLED`; cùng người quét,
@@ -69,9 +75,12 @@ const snapshot = {
  * Phát lại theo `scanId` thắng mọi lý do đóng xảy ra sau lần đầu (AD-15): client gửi lại cùng `scanId` tới khi có phản
  * hồi, nên lần đầu đã ghi mà mất phản hồi vẫn nhận lại đúng kết quả xanh. `scanId` mới, hay người khác dùng `scanId` đó,
  * vẫn nhận lý do đóng.
+ *
+ * Chỉ nhánh 2 (check-in thật) enqueue `sheet_row_changed`; phát lại, `recent`, `already`, `invalid` không đổi gì nên không
+ * enqueue. Bên gọi đã `SheetRowChangedQueues.ready()` trước transaction.
  */
-export async function checkIn(tx: Tx, input: CheckInInput): Promise<CheckInResult> {
-  const { ticketId, eventId, organizationId, userId, scanId } = input;
+export async function checkIn(tx: Tx, boss: PgBoss, input: CheckInInput): Promise<CheckInResult> {
+  const { ticketId, eventId, organizationId, userId, scanId, method } = input;
   const closed = await assertCheckinOpen(tx, eventId);
   if (closed) {
     const replay = await replayOf(tx, input);
@@ -80,7 +89,7 @@ export async function checkIn(tx: Tx, input: CheckInInput): Promise<CheckInResul
 
   const [updated] = await tx
     .update(tickets)
-    .set({ checkedInAt: sql`now()`, checkedInBy: userId, checkinScanId: scanId })
+    .set({ checkedInAt: sql`now()`, checkedInBy: userId, checkinScanId: scanId, checkinMethod: method })
     .where(
       and(
         eq(tickets.id, ticketId),
@@ -90,10 +99,12 @@ export async function checkIn(tx: Tx, input: CheckInInput): Promise<CheckInResul
         isNull(tickets.checkedInAt),
       ),
     )
-    .returning(snapshot);
+    .returning({ ...snapshot, orderId: tickets.orderId });
   if (updated) {
+    const { orderId, ...ticket } = updated;
     await realtime.notify(tx, RealtimeTopic.EVENT_CHECKINS_CHANGED, { id: eventId, organizationId, eventId });
-    return { outcome: 'ok', ...updated };
+    await enqueueSheetRowChanged(boss, tx, { eventId, orderId });
+    return { outcome: 'ok', ...ticket };
   }
 
   // Đọc theo id trên mọi BTC: chỉ để biết Vé của Sự kiện khác; ngoài `eventId` không trả gì của Vé đó.
@@ -167,11 +178,21 @@ async function replayOf(tx: Tx, input: CheckInInput): Promise<CheckedInTicket | 
   return { holderName: row.holderName, seq: row.seq, count: row.count, ticketTypeName: row.ticketTypeName };
 }
 
-/** Số Vé check-in: đã check-in trên tổng số Vé hợp lệ. */
+/**
+ * Số Vé check-in: đã check-in trên tổng số Vé hợp lệ, và trong số đã check-in, số Vé check-in tay (`checkin_method =
+ * 'manual'`, Story 6.5; Vé check-in trước Story 6.5 không tính là tay).
+ */
 export interface CheckinCounts {
   checkedInCount: number;
   validTicketCount: number;
+  manualCheckedInCount: number;
 }
+
+/** `count(*)` các Vé đã check-in tay trong nhóm (dùng chung cho các read model đếm check-in). */
+export const manualCheckedInCount = () =>
+  sql<number>`count(*) FILTER (WHERE ${tickets.checkedInAt} IS NOT NULL AND ${tickets.checkinMethod} = 'manual')`.mapWith(
+    Number,
+  );
 
 /** Số Vé check-in của một Hạng vé. */
 export interface TicketTypeCheckinCounts extends CheckinCounts {
@@ -194,6 +215,7 @@ export async function checkinCountsByTicketType(
       ticketTypeId: tickets.ticketTypeId,
       checkedInCount: sql<number>`count(*) FILTER (WHERE ${tickets.checkedInAt} IS NOT NULL)`.mapWith(Number),
       validTicketCount: count(),
+      manualCheckedInCount: manualCheckedInCount(),
     })
     .from(tickets)
     .where(and(orgScope(scope)(tickets), eq(tickets.eventId, eventId), eq(tickets.status, 'valid')))

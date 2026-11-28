@@ -9,11 +9,14 @@ import {
   type ScanResult,
 } from '@tickee/contracts';
 import type { Request, Response } from 'express';
+import type { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 import { CheckinLookupRateLimiter } from '../modules/checkin/index.js';
+import { SheetRowChangedQueues } from '../modules/ticketing/index.js';
 import { EventAccess, RequirePermission, type EventAccessContext } from '../platform/access/index.js';
 import { DATABASE, type Database } from '../platform/db/index.js';
 import { AppError, parseRequest } from '../platform/http/index.js';
+import { BOSS } from '../platform/jobs/index.js';
 import { lookupTickets, manualCheckIn } from './checkin-lookup.flow.js';
 
 /** IP của request (`req.ip` theo `TRUST_PROXY_HOPS`), như bộ đếm tạo Đơn. */
@@ -51,6 +54,8 @@ export class CheckinLookupController {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     @Inject(CheckinLookupRateLimiter) private readonly limiter: CheckinLookupRateLimiter,
+    @Inject(BOSS) private readonly boss: PgBoss,
+    @Inject(SheetRowChangedQueues) private readonly sheetQueues: SheetRowChangedQueues,
   ) {}
 
   /**
@@ -76,7 +81,7 @@ export class CheckinLookupController {
   /**
    * `POST /v1/checkin/events/:eventId/tickets/:ticketId/check-in` (header `Idempotency-Key`, không body) → `200
    * ScanResult`, mọi kết quả (kể cả đỏ). `Idempotency-Key` thiếu hoặc không phải uuid, hay `ticketId` không phải uuid →
-   * `400 VALIDATION_FAILED`. Không giới hạn tốc độ.
+   * `400 VALIDATION_FAILED`. Không giới hạn tốc độ. Check-in thành công enqueue `sheet_row_changed` (Story 6.5).
    */
   @Post('tickets/:ticketId/check-in')
   @HttpCode(200)
@@ -89,6 +94,6 @@ export class CheckinLookupController {
   ): Promise<ScanResult> {
     res.setHeader('cache-control', 'no-store');
     const idempotencyKey = idempotencyKeyOf(key);
-    return manualCheckIn(this.db, ctx, ticketIdOf(ticketId), idempotencyKey);
+    return manualCheckIn(this.db, ctx, ticketIdOf(ticketId), idempotencyKey, { boss: this.boss, queues: this.sheetQueues });
   }
 }

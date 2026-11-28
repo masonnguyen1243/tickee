@@ -274,6 +274,13 @@
       "when": 1795752394697,
       "tag": "0038_sheet_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1795769168111,
+      "tag": "0039_sheet_dirty_rows",
+      "breakpoints": true
     }
   ]
 }

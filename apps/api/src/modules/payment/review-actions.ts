@@ -199,10 +199,10 @@ export class ReviewActionsService {
   async perform(ctx: AccessContext, itemId: string, request: ReviewActionRequest): Promise<ReviewActionResult> {
     if (!UUID.test(itemId)) throw reviewItemNotFound();
     const id = itemId.toLowerCase();
-    // Duyệt tay và ghép enqueue email Vé, Từ chối enqueue email báo hủy, trong `tx`: queue phải sẵn sàng trước
-    // transaction.
+    // Duyệt tay và ghép enqueue email Vé, Từ chối enqueue email báo hủy, và cả bốn thao tác enqueue `sheet_row_changed`
+    // (Story 6.5) trong `tx`: queue phải sẵn sàng trước transaction.
     if (request.action === ReviewAction.APPROVE || request.action === ReviewAction.MATCH) await this.payments.ready();
-    if (request.action === ReviewAction.REJECT) await this.decisions.ready();
+    if (request.action === ReviewAction.REJECT || request.action === ReviewAction.REFUND) await this.decisions.ready();
 
     const { outcome, result } = await this.db.transaction(async (tx) => {
       const locked = await this.lockItem(tx, ctx, id);

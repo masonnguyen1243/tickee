@@ -77,8 +77,13 @@ export const SHEET_CONNECTION_STATUS_TONE: Readonly<Record<SheetConnectionStatus
  * token hay URL.
  */
 export const SheetSyncErrorCode = {
-  /** HTTP 429 (quota). */
+  /**
+   * HTTP 429 (quota), hoặc 403 kèm lý do `rateLimitExceeded` / `userRateLimitExceeded` / `quotaExceeded` (Story 6.5): lỗi
+   * tạm thời, không phải mất quyền.
+   */
   RATE_LIMITED: 'rate_limited',
+  /** HTTP 403 kèm lý do `storageQuotaExceeded` (Drive của người cấp đầy, Story 6.5): lỗi tạm thời, worker thử lại. */
+  STORAGE_QUOTA: 'storage_quota',
   /** HTTP 5xx. */
   SERVER_ERROR: 'server_error',
   /** Google không trả lời trong thời hạn. */
@@ -106,6 +111,7 @@ export const sheetSyncErrorCodeSchema = z.enum(SheetSyncErrorCode);
 /** Câu ngắn cho `lastErrorCode` (dòng phụ dưới badge "Lỗi, đang thử lại"). */
 export const SHEET_SYNC_ERROR_LABEL: Readonly<Record<SheetSyncErrorCode, string>> = {
   [SheetSyncErrorCode.RATE_LIMITED]: 'Google đang giới hạn số lần ghi.',
+  [SheetSyncErrorCode.STORAGE_QUOTA]: 'Google Drive của người kết nối đã đầy; Tickee sẽ tự thử lại.',
   [SheetSyncErrorCode.SERVER_ERROR]: 'Google đang gặp sự cố.',
   [SheetSyncErrorCode.TIMEOUT]: 'Google không phản hồi kịp.',
   [SheetSyncErrorCode.NETWORK]: 'Không kết nối được tới Google.',
@@ -190,3 +196,39 @@ export const GOOGLE_SHEET_ORDER_STATUSES: readonly OrderStatus[] = [
   OrderStatus.CANCELLED,
   OrderStatus.REFUNDED,
 ];
+
+/*
+ * Cột Tickee trên Sheet (Story 6.5, Quyết định 1): mỗi cột Tickee mang một developer metadata của Google gắn vào chính cột
+ * đó (khóa `GOOGLE_SHEET_COLUMN_METADATA_KEY`, `visibility: PROJECT`), giá trị là mã cột cố định (`GoogleSheetColumn`) hoặc
+ * `question:<questionId>` cho câu hỏi form. BTC chèn, xóa hay di chuyển cột thì Google dời metadata theo cột, nên Tickee
+ * luôn ghi đúng cột theo mã, không theo vị trí hay tiêu đề.
+ */
+
+/** Khóa developer metadata đánh dấu cột Tickee. */
+export const GOOGLE_SHEET_COLUMN_METADATA_KEY = 'tickee.column';
+
+/** Mã cột cố định (giá trị metadata), theo thứ tự cột của Sheet mới. */
+export const GoogleSheetColumn = {
+  ORDER_CODE: 'order_code',
+  BUYER_NAME: 'buyer_name',
+  BUYER_EMAIL: 'buyer_email',
+  BUYER_PHONE: 'buyer_phone',
+  ITEMS: 'items',
+  TOTAL_AMOUNT: 'total_amount',
+  PAID_AMOUNT: 'paid_amount',
+  STATUS: 'status',
+  CREATED_AT: 'created_at',
+  PAID_AT: 'paid_at',
+  CHECKED_IN: 'checked_in',
+  /** Số Vé của Đơn được check-in tay (E5-5, Quyết định 3 của Story 6.5), ngay sau "Đã check-in". */
+  MANUAL_CHECKED_IN: 'manual_checked_in',
+  TICKET_COUNT: 'ticket_count',
+} as const;
+export type GoogleSheetColumn = (typeof GoogleSheetColumn)[keyof typeof GoogleSheetColumn];
+
+/** Tiền tố mã cột của câu hỏi form: `question:<questionId>`. */
+export const GOOGLE_SHEET_QUESTION_COLUMN_PREFIX = 'question:';
+
+/** Mã cột (giá trị metadata) của câu hỏi form `questionId`. */
+export const googleSheetQuestionColumn = (questionId: string): string =>
+  `${GOOGLE_SHEET_QUESTION_COLUMN_PREFIX}${questionId}`;

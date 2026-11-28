@@ -9,7 +9,14 @@ import {
 } from '@tickee/contracts';
 import { userContacts } from '../modules/identity/index.js';
 import { memberRoleOf } from '../modules/organizer/index.js';
-import { checkIn, verifyTicketQr, type CheckInResult, type TicketQrKeys } from '../modules/ticketing/index.js';
+import type { PgBoss } from 'pg-boss';
+import {
+  checkIn,
+  verifyTicketQr,
+  type CheckInResult,
+  type SheetRowChangedQueues,
+  type TicketQrKeys,
+} from '../modules/ticketing/index.js';
 import type { EventAccessContext } from '../platform/access/index.js';
 import type { Database, DbExecutor } from '../platform/db/index.js';
 import { measured, type MeasuredOutcome } from '../platform/telemetry/index.js';
@@ -50,6 +57,15 @@ async function checkedByOf(
 }
 
 /**
+ * Queue `sheet_row_changed` (Story 6.5) mà check-in enqueue vào trong transaction: pg-boss của vai api và producer của
+ * queue (`ready()` trước transaction).
+ */
+export interface SheetRowChanges {
+  boss: PgBoss;
+  queues: SheetRowChangedQueues;
+}
+
+/**
  * `ScanResult` của một lần check-in (quét, hay check-in tay ở `checkin-lookup.flow.ts`): `already` thì dựng `checkedBy`
  * (đọc `identity`, `organizer`), gọi sau khi transaction check-in đã xong (đọc ngoài khóa).
  */
@@ -78,15 +94,17 @@ export async function toScanResult(db: DbExecutor, ctx: EventAccessContext, resu
 
 /**
  * Một lần quét ở Sự kiện `ctx.eventId` (người gọi đã qua `PermissionGuard`, `checkin.scan`): kiểm chữ ký Mã QR vé trước
- * mọi truy vấn DB (sai dạng, sai chữ ký, khóa `k` lạ → `invalid BAD_SIGNATURE`, không chạm DB); rồi `ticketing.checkIn`
- * trong một transaction; `already` thì dựng `checkedBy` sau khi transaction xong (đọc ngoài khóa). Mỗi lần quét chạy
- * trong span `checkin scan` và ghi `CHECKIN_SCAN_DURATION_METRIC`; lỗi DB thì ném lại (span lỗi, không ghi histogram).
+ * mọi truy vấn DB (sai dạng, sai chữ ký, khóa `k` lạ → `invalid BAD_SIGNATURE`, không chạm DB hay pg-boss); rồi chờ queue
+ * `sheet_row_changed` sẵn sàng và `ticketing.checkIn` (`method: scan`) trong một transaction; `already` thì dựng
+ * `checkedBy` sau khi transaction xong (đọc ngoài khóa). Mỗi lần quét chạy trong span `checkin scan` và ghi
+ * `CHECKIN_SCAN_DURATION_METRIC`; lỗi DB thì ném lại (span lỗi, không ghi histogram).
  */
 export function scanTicket(
   db: Database,
   keys: TicketQrKeys,
   ctx: EventAccessContext,
   input: ScanRequest,
+  sheets: SheetRowChanges,
 ): Promise<ScanResult> {
   return measured(
     {
@@ -99,14 +117,16 @@ export function scanTicket(
     async () => {
       const verified = verifyTicketQr(keys, input.code);
       if (!verified) return { outcome: ScanOutcome.INVALID, reason: ScanInvalidReason.BAD_SIGNATURE };
+      await sheets.queues.ready();
       const result = await db.transaction((tx) =>
-        checkIn(tx, {
+        checkIn(tx, sheets.boss, {
           ticketId: verified.ticketId,
           eventId: ctx.eventId,
           organizationId: ctx.organizationId,
           userId: ctx.userId,
           // Cột uuid trả chữ thường: so phát lại theo cùng dạng dù client gửi chữ hoa.
           scanId: input.scanId.toLowerCase(),
+          method: 'scan',
         }),
       );
       return toScanResult(db.orm, ctx, result);
