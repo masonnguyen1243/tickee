@@ -1303,6 +1303,7 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   evidence: Review 6.4 (Triage #3, #26). `google-client.ts` (`httpFailure`) xếp 4xx lạ vào `failed`; `sheet-sync-jobs.ts` dùng lại `spreadsheet_id` đã lưu. Trong 6.4 chỉ gặp ở cửa sổ retry vài phút; ở 6.5 (đồng bộ lâu dài) thì gặp thường.
   story: 6.5
 - Đã xử lý (27/11/2026, 6.5): phần Sheet bị xóa (Sheets API trả 404) của mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-6-5-dong-bo-don-va-check-in-len-sheet.md`: tự tạo Sheet mới (Quyết định 2). Bằng chứng: `apps/api/src/modules/integration/google-client.ts:253`, `apps/api/src/modules/integration/sheet-flush-jobs.ts:270`. Phần "chuyển vào thùng rác" chưa kiểm được với Google thật (Triage #22 của 6.5, mục hoãn ở cuối file).
+- Story nhận (28/11/2026, 6.5): 6.6. Phần "chuyển vào thùng rác" của mục ngay trên, cùng mục hoãn Triage #22 của 6.5: kiểm với Google thật khi làm 6.6.
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-4-ket-noi-google-sheets.md`
   summary: Vùng A1 ghi theo tên tab "Đơn". BTC đổi tên hoặc xóa tab thì mọi lần ghi nhận 400 tới dead-letter. Flush của 6.5 nên tìm tab theo `sheetId` (`SHEET_ORDERS_TAB_ID = 0`) trước khi ghi.
   evidence: Review 6.4 (Triage #27). `sheet-sync-jobs.ts` dựng vùng bằng `sheetRange(GOOGLE_SHEET_ORDERS_TAB, …)`; `resizeGrid` thì đã dùng `sheetId`.
@@ -1351,6 +1352,7 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-5-dong-bo-don-va-check-in-len-sheet.md`
   summary: Chưa kiểm (maybe-false; nếu đúng thì medium): Sheets API có thể vẫn phục vụ spreadsheet đã chuyển vào thùng rác (không trả 404), nên flush không tạo Sheet mới (Quyết định 2) mà tiếp tục ghi vào Sheet trong thùng rác. Ngoài ra, dạng phản hồi của `developerMetadata:search` và lô `appendDimension` + `createDeveloperMetadata` trên chỉ số cột mới mới chỉ kiểm với Google fake.
   evidence: Review 6.5 (Triage #22). `google-client.ts` (`httpFailure`: chỉ 404 mới là `not_found`); `sheet-flush-jobs.ts` (`recreateSheet` chỉ chạy khi `not_found`). Muốn chốt thì cần phản hồi thật của Google: chuyển Sheet đã kết nối vào thùng rác rồi cho flush chạy, và chạy cả luồng thêm cột với OAuth client thật.
+  story: 6.6
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-5-dong-bo-don-va-check-in-len-sheet.md`
   summary: Kiểm thủ công AC 3 của 6.5 (gộp kiểm thủ công hoãn từ 6.4) chưa làm: trên dev stack với OAuth client Google thật, kết nối một Sự kiện có Đơn thật (câu hỏi form, check-in), thanh toán một Đơn mới và check-in một Vé, rồi kiểm Sheet trong Drive của người cấp (tiếng Việt đúng, SĐT giữ số 0, số tiền là số, giờ Việt Nam), dòng mới và ô check-in cập nhật trong khoảng 1 phút, ngắt kết nối thì Sheet vẫn còn trong Drive.
   evidence: Spec 6.5 › Tasks & Acceptance › AC thứ ba và Verification › Manual checks. Mọi test chạy với Google fake. Mason hoãn ngày 27/11/2026 để kiểm gộp với OAuth thật của 6.6 (kết nối lại), cùng lúc với mục Sheet trong thùng rác (Triage #22 của 6.5).
