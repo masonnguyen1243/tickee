@@ -29,7 +29,7 @@
 # - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-28-2026 11:24
+last_updated: 11-28-2026 18:44
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -94,14 +94,14 @@ development_status:
   5-7-theo-dõi-check-in-realtime: done
   epic-5-retrospective: done
 
-  epic-6: in-progress
+  epic-6: done
   6-1-tab-đơn-đầy-đủ: done
   6-2-số-liệu-vé-theo-hạng-vé-trên-tổng-quan: done
   6-3-xuất-csv-danh-sách-đơn: done
   6-4-kết-nối-google-sheets: done
   6-5-đồng-bộ-đơn-và-check-in-lên-sheet-trong-1-phút: done
   6-6-mất-quyền-google-sheets-và-kết-nối-lại: done
-  epic-6-retrospective: optional
+  epic-6-retrospective: done
 
   epic-7: backlog
   7-1-hủy-sự-kiện: backlog
@@ -319,8 +319,9 @@ action_items:
     owner: "Mason"
     status: in-progress
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-09.md"
-    note: "Phần Spec Change Log đã quyết (26/11/2026, E5-6): bỏ luật AI-4; Change Log
-      chỉ ghi khi bad_spec, ghi ở _bmad/custom/bmad-build.toml. Các phần còn lại vẫn mở"
+    note: "Phần Spec Change Log đã quyết (26/11/2026, E5-6): bỏ luật AI-4; Change
+      Log chỉ ghi khi bad_spec, ghi ở _bmad/custom/bmad-build.toml. Các phần còn lại
+      vẫn mở"
   - id: "epic-3-retro-e3-1-siet-ipn-secret-tingee-cu"
     epic: 3
     action: "E3-1 (bảo mật, trước khi bán Vé có phí thật): siết điều kiện nhận IPN
@@ -483,10 +484,10 @@ action_items:
     owner: "Mason"
     status: in-progress
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-20.md"
-    note: "C1, C2, C3 chốt qua _bmad-output/planning-artifacts/sprint-change-proposal-2026-11-26-doi-chieu-spec-epic-5.md (26/11/2026): doanh thu theo paid_amount
-      (AC 6.2, AD-33); Đơn review và Đơn expired có tiền về sau khi hủy Sự kiện chuyển
-      cancelled(event_cancelled), mục chỉ đóng (AC 7.1/7.2, AD-3, AD-7, AD-28). Còn
-      B2"
+    note: "C1, C2, C3 chốt qua _bmad-output/planning-artifacts/sprint-change-proposal-2026-11-26-doi-chieu-spec-epic-5.md
+      (26/11/2026): doanh thu theo paid_amount (AC 6.2, AD-33); Đơn review và Đơn
+      expired có tiền về sau khi hủy Sự kiện chuyển cancelled(event_cancelled), mục
+      chỉ đóng (AC 7.1/7.2, AD-3, AD-7, AD-28). Còn B2"
   - id: "epic-4-retro-e4-6-giu-cho-hang-loat"
     epic: 4
     action: "E4-6 (bảo mật, trước Closed Beta): chốt cách chặn giữ chỗ hàng loạt (trần
@@ -557,7 +558,7 @@ action_items:
       không có quyền có lối đăng xuất. Chi tiết ở ghi chú bảo mật local (retro A1,
       A2, A3, R3)"
     owner: "Mason"
-    status: open
+    status: in-progress
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
     note: "Phần \"removeMember thu hồi dòng checkers trong BTC\" đã làm ở Story 6.6
       (28/11/2026, _bmad-output/implementation-artifacts/spec-6-6-mat-quyen-google-sheets-va-ket-noi-lai.md,
@@ -593,8 +594,9 @@ action_items:
     owner: "Mason"
     status: done
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
-    note: "Xong qua _bmad-output/planning-artifacts/sprint-change-proposal-2026-11-26-doi-chieu-spec-epic-5.md (26/11/2026), gồm cả AC 7.6, 9.1, 9.2. p95 quét
-      ở 9.2 đo phía client (câu hỏi mở 6)"
+    note: "Xong qua _bmad-output/planning-artifacts/sprint-change-proposal-2026-11-26-doi-chieu-spec-epic-5.md
+      (26/11/2026), gồm cả AC 7.6, 9.1, 9.2. p95 quét ở 9.2 đo phía client (câu hỏi
+      mở 6)"
   - id: "epic-5-retro-e5-5-no-ky-thuat"
     epic: 5
     action: "E5-5: gom 4 bộ giới hạn tốc độ Postgres thành một helper (trước story
@@ -602,7 +604,7 @@ action_items:
       và Idempotency-Key; tách checkin-event-screen.tsx trước story đầu tiên chạm
       lại; cột checkin_method cùng 6.1 hoặc 6.5 (retro F2, F3, F7, S5)"
     owner: "Mason"
-    status: open
+    status: in-progress
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
   - id: "epic-5-retro-e5-6-quy-trinh-build"
     epic: 5
@@ -615,8 +617,8 @@ action_items:
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
     note: "Xong qua _bmad/custom/bmad-build.toml (26/11/2026, bmad-customize): persistent
       facts cho action item có điều kiện thứ tự (G2), gỡ phần tử UI (A3), ngưỡng spec
-      5.000 token và Spec Change Log chỉ ghi khi bad_spec (G7, G8, Mason chốt: bỏ AI-4);
-      on_complete thêm mục Kiểm thủ công chưa làm chạy trước khi đặt done (G3)"
+      5.000 token và Spec Change Log chỉ ghi khi bad_spec (G7, G8, Mason chốt: bỏ
+      AI-4); on_complete thêm mục Kiểm thủ công chưa làm chạy trước khi đặt done (G3)"
   - id: "epic-5-retro-e5-7-moi-truong-dev"
     epic: 5
     action: "E5-7 (ngay): chốt .env local về Tingee fake hoặc UAT, không trỏ production;
@@ -626,3 +628,76 @@ action_items:
     owner: "Mason"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
+  - id: "epic-6-retro-e6-1-kiem-google-that"
+    epic: 6
+    action: "E6-1 (trước kết nối Sheets thật đầu tiên, chậm nhất trước Closed Beta;
+      không chờ staging 9.1): kiểm Google Sheets với Google thật bằng OAuth client
+      chế độ Testing ở local, gộp 4 mục deferred-work đang story 9.1 (kiểm tay 6.4,
+      AC3 của 6.5, triage 6.5 #22, AC thứ hai của 6.6); thêm ca Sheet đã chia sẻ rồi
+      người cấp bị xóa và ca lỗi 4xx lặp; lưu body thật làm fixture cho Google fake
+      (retro F1, G1, K1, S5)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-28.md"
+  - id: "epic-6-retro-e6-2-ket-noi-lai-sheet-moi"
+    epic: 6
+    action: "E6-2 (bảo mật, trước kết nối Sheets thật đầu tiên; Mason chốt 28/11):
+      kết nối lại sau grantor_removed luôn tạo Sheet mới, không dò Sheet cũ; sửa driveNote
+      cho đúng chủ file; thêm chốt thế hệ cho saveSpreadsheet và markSynced. Chi tiết
+      ở ghi chú bảo mật local (retro K1, K3, K4, S2)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-28.md"
+  - id: "epic-6-retro-e6-3-doi-chieu-spec"
+    epic: 6
+    action: "E6-3 (trước Story 7.1): đối chiếu spec. epics.md: AC 7.1 và 7.5 enqueue
+      integration.sheet_row_changed; AC 7.6 deleteAccount gọi revokeSheetConnectionsOfGrantor
+      và không giữ refresh token của người đã rời; AC 9.1 log truy cập không ghi query
+      q/tim, runbook xoay GOOGLE_SHEETS_TOKEN_KEYS; AC 6.3 k/N thành hai cột, AD-22
+      thành AD-20; ghi lệch có chủ đích của 6.1, 6.2. Spine: AD-23, AD-25 (removeMember),
+      AD-12 (queue), bảng email theo mô-đun, checkin_method. PRD FR-32 (retro F2,
+      F3, K2, K5, K6, D1, D2, F8, F10)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-28.md"
+  - id: "epic-6-retro-e6-4-sua-nho"
+    epic: 6
+    action: "E6-4 (trước Story 7.1, một PR chore): markDirty keep chèn marked_at epoch
+      kèm test chiều ngược; assert SHEET_FLUSH_WINDOW_SECONDS + 10 <= 60; test phát
+      lại cùng scanId; saveBlob giữ URL khoảng 40 giây (cả enroll-form.tsx); nút Kết
+      nối lại trên banner bắt đầu OAuth luôn; SĐT cùng định dạng giữa danh sách, CSV
+      và Sheet (retro S1, S6, S7, D3)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-28.md"
+  - id: "epic-6-retro-e6-5-no-ky-thuat"
+    epic: 6
+    action: "E6-5 (đặc tả cột: trước Story 7.2; còn lại: trước story đầu tiên chạm
+      lại): đặc tả cột Đơn dùng chung cho CSV, Sheet và danh sách hoàn tiền; tách
+      helper chung của sheet-sync-jobs.ts và sheet-flush-jobs.ts; tách orders-tab.tsx;
+      trạng thái Google Sheets ở Cài đặt dùng useLiveResource; gom các chỗ lặp nhỏ
+      (retro F4, F6, F7, F9)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-28.md"
+  - id: "epic-6-retro-e6-6-quy-trinh-build"
+    epic: 6
+    action: "E6-6 (trước Story 7.1): quy trình Build trong _bmad/custom/bmad-build.toml.
+      Mục kiểm thủ công đã hoãn một lần không được hoãn tiếp sang story kế; khuyến
+      nghị Hoãn/Bỏ phải nêu các bước để làm ngay; ngoại lệ intent_gap sửa tại chỗ
+      kèm chỗ ghi lại; cỡ spec đếm bằng script hoặc ngưỡng khoảng 8.000 token; e2e
+      đỏ rồi xanh ghi mục hoãn giao E2-8 (ngay: free-order.test.ts Kết thúc sớm, payout-account.spec.ts:752);
+      hạn cứng cho phần tách file của E4-10 (retro G1, G2, G4, G5, G6, G7)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-28.md"
+  - id: "epic-6-retro-e6-7-moi-truong-dev"
+    epic: 6
+    action: "E6-7 (ngay, trước E6-1; mở rộng E5-7): thêm GOOGLE_SHEETS_CLIENT_ID,
+      GOOGLE_SHEETS_CLIENT_SECRET, GOOGLE_SHEETS_TOKEN_KEYS vào .env; migrate DB tickee
+      tới 0040; script kiểm env chạy trước khi đề xuất pnpm dev (Tingee local, tên
+      biến khớp .env.example, migration đã áp); điều khiển Google fake từ ngoài khi
+      chạy e2e:stack; track .claude/launch.json (retro G3)"
+    owner: "Mason"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-28.md"
