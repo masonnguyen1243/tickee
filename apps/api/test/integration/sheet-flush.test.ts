@@ -10,7 +10,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GoogleSheetsClient, type CellBlock } from '../../src/modules/integration/google-client.js';
 import { markDirty } from '../../src/modules/integration/sheet-connection-store.js';
 import { markSheetRowChanged, runSheetFlush } from '../../src/modules/integration/sheet-flush-jobs.js';
-import { runSheetInitialSync, sheetInitialSyncJobId } from '../../src/modules/integration/sheet-sync-jobs.js';
+import { revokeSheetConnection } from '../../src/modules/integration/sheet-revocation.js';
+import {
+  runSheetInitialSync,
+  SHEET_SYNC_BATCH,
+  sheetInitialSyncJobId,
+} from '../../src/modules/integration/sheet-sync-jobs.js';
+import { BOSS } from '../../src/platform/jobs/index.js';
 import { sheetsForbidden, startGoogleFake, type FakeCell, type GoogleFake } from '../google-fake/server.js';
 import { createHarness, type Harness } from '../identity/harness.js';
 import { paidReadyOrg, rejectingTingee, resetOrderRateLimit, type Org, type SaleEvent } from '../ordering/order-fixtures.js';
@@ -41,7 +47,8 @@ import {
  * của I/O Matrix: Đơn mới thêm cuối Sheet, check-in (quét và tay), Cần xử lý, 20 Đơn một lượt, `version` chống mất thay
  * đổi giữa lượt, BTC sửa dòng / đổi tên tab / chèn và di chuyển cột (cột BTC không bị chạm), lưới chỉ nới, cột Tickee bị
  * xóa và câu hỏi form mới (thêm cột ở cuối), Sheet mất (cả Sheet của 6.4 chưa có metadata) → tạo Sheet mới, mất quyền,
- * lỗi tạm thời (kể cả 403 quota, không thành `auth_revoked`), ngắt kết nối giữa lượt.
+ * lỗi tạm thời (kể cả 403 quota, không thành `auth_revoked`), ngắt kết nối giữa lượt. Story 6.6: kết nối chuyển
+ * `auth_revoked` giữa lượt (người cấp bị xóa khỏi BTC) → flush và lần đẩy đầu dừng trước lần ghi kế.
  */
 
 let fake: GoogleFake;
@@ -548,7 +555,10 @@ describe('I/O Matrix: trạng thái kết nối và lỗi Google', () => {
     expect(fake.requests).toEqual([]);
 
     expect(await runSheetInitialSync(sheetDeps(env), connectionId)).toMatchObject({ result: 'synced' });
-    await h.db.pool.query("UPDATE sheet_connections SET status = 'auth_revoked' WHERE id = $1", [connectionId]);
+    await h.db.pool.query(
+      "UPDATE sheet_connections SET status = 'auth_revoked', auth_revoked_at = now() WHERE id = $1",
+      [connectionId],
+    );
     fake.reset();
     expect(await flush(connectionId)).toEqual({ result: 'skipped', reason: 'auth_revoked' });
     expect(fake.requests).toEqual([]);
@@ -695,5 +705,141 @@ describe('I/O Matrix: ngắt kết nối giữa lượt', () => {
     expect(writes()).toHaveLength(writeCount);
     expect(await connectionStateOf(h, connectionId)).toBeUndefined();
     expect(await dirtyOf(h, connectionId)).toEqual(new Map());
+  });
+});
+
+describe('mất quyền giữa lượt (Story 6.6): người cấp bị xóa khỏi BTC trong lúc job đang ghi', () => {
+  type Moment = 'info' | 'read' | 'write' | 'create';
+  /** Mốc `auth_revoked_at` ngay sau lần chuyển của mỗi kết nối (so "lượt không đè"). */
+  const revokedAt = new Map<string, Date>();
+
+  /** Chuyển kết nối sang `auth_revoked` (như luồng xóa người cấp) đúng một lần, ở thời điểm `when` của lượt. */
+  const revokingClient = (connectionId: () => string, when: Moment) => {
+    let done = false;
+    const revoke = async () => {
+      if (done) return;
+      done = true;
+      const boss = h.app.get<PgBoss>(BOSS);
+      expect(await h.db.transaction((tx) => revokeSheetConnection(tx, boss, connectionId(), 'grantor_removed'))).toBe(true);
+      revokedAt.set(connectionId(), (await connectionStateOf(h, connectionId()))!.auth_revoked_at!);
+    };
+    class RevokingClient extends GoogleSheetsClient {
+      override async spreadsheetInfo(...args: Parameters<GoogleSheetsClient['spreadsheetInfo']>) {
+        const tabs = await super.spreadsheetInfo(...args);
+        if (when === 'info') await revoke();
+        return tabs;
+      }
+
+      override async createSpreadsheet(...args: Parameters<GoogleSheetsClient['createSpreadsheet']>) {
+        const created = await super.createSpreadsheet(...args);
+        if (when === 'create') await revoke();
+        return created;
+      }
+
+      override async readColumn(...args: Parameters<GoogleSheetsClient['readColumn']>): Promise<string[]> {
+        const column = await super.readColumn(...args);
+        if (when === 'read') await revoke();
+        return column;
+      }
+
+      override async writeCells(accessToken: string, spreadsheetId: string, blocks: readonly CellBlock[]): Promise<void> {
+        await super.writeCells(accessToken, spreadsheetId, blocks);
+        if (when === 'write') await revoke();
+      }
+    }
+    return new RevokingClient({
+      clientId: SHEETS_CLIENT_ID,
+      clientSecret: SHEETS_CLIENT_SECRET,
+      authorizeUrl: fake.authorizeUrl,
+      tokenUrl: fake.tokenUrl,
+      sheetsApiUrl: fake.url,
+    });
+  };
+
+  /** Trạng thái sau khi chuyển: vẫn `auth_revoked`, mã `grantor_removed`, đúng mốc của lần chuyển (lượt không đè). */
+  async function expectStillRevoked(connectionId: string) {
+    const state = (await connectionStateOf(h, connectionId))!;
+    expect(state).toMatchObject({ status: 'auth_revoked', last_error_code: 'grantor_removed' });
+    expect(state.auth_revoked_at).toEqual(revokedAt.get(connectionId));
+    return state;
+  }
+
+  it.each([
+    ['trước khi ghi', 'read', 0],
+    ['sau khi ghi, trước khi cập nhật trạng thái', 'write', 1],
+  ] as const)('flush: kết nối chuyển auth_revoked %s → dừng (skipped), không ghi tiếp; giữ mốc, mã và dòng bẩn', async (_name, when, writeCount) => {
+    const { sale, orders, connectionId } = await syncedEvent(1);
+    await mark(sale.event.id, orders[0]!.id);
+    const outcome = await flush(connectionId, revokingClient(() => connectionId, when));
+    expect(outcome).toEqual({ result: 'skipped', reason: 'auth_revoked' });
+    expect(writes()).toHaveLength(writeCount);
+    const state = await expectStillRevoked(connectionId);
+    expect(await dirtyOf(h, connectionId)).toEqual(new Map([[orders[0]!.id, 1]]));
+    // Lượt sau không gọi Google, mốc giữ nguyên.
+    fake.reset();
+    expect(await flush(connectionId)).toEqual({ result: 'skipped', reason: 'auth_revoked' });
+    expect(fake.requests).toEqual([]);
+    expect((await connectionStateOf(h, connectionId))!.auth_revoked_at).toEqual(state.auth_revoked_at);
+  });
+
+  it('flush: Sheet mất tab mà kết nối vừa chuyển auth_revoked → không đặt lại Sheet, không enqueue lần đẩy đầu', async () => {
+    const { sale, orders, connectionId, spreadsheetId } = await syncedEvent(1);
+    await mark(sale.event.id, orders[0]!.id);
+    fake.addTab(spreadsheetId, 'Khác');
+    fake.deleteTab(spreadsheetId, 0);
+    const jobs = (await initialSyncJobsOf(h, connectionId)).length;
+    expect(await flush(connectionId, revokingClient(() => connectionId, 'info'))).toEqual({
+      result: 'skipped',
+      reason: 'auth_revoked',
+    });
+    await expectStillRevoked(connectionId);
+    expect(await connectionStateOf(h, connectionId)).toMatchObject({ spreadsheet_id: spreadsheetId });
+    expect(await initialSyncJobsOf(h, connectionId)).toHaveLength(jobs);
+  });
+
+  it('lần đẩy đầu: chuyển auth_revoked sau khi tạo Sheet → không nới lưới, không ghi; sau lô đầu → không ghi lô sau; sau lô cuối → không chuyển active', async () => {
+    // Sau khi tạo Sheet, trước lô đầu.
+    const created = await freeSheetEvent(org);
+    await seedOrders(env, created.event.id, [{ status: 'paid' }]);
+    const createdId = await connectSheet(env, created.event.id);
+    fake.reset();
+    expect(await runSheetInitialSync(sheetDeps(env, revokingClient(() => createdId, 'create')), createdId)).toEqual({
+      result: 'skipped',
+      reason: 'auth_revoked',
+    });
+    expect(writes()).toEqual([]);
+    expect(batchUpdates()).toEqual([]);
+    await expectStillRevoked(createdId);
+
+    // Hai lô: chuyển sau lô đầu → lô sau không ghi.
+    // Đơn chèn bằng SQL: không qua sức chứa Hạng vé.
+    const many = await freeSheetEvent(org);
+    await seedOrders(
+      env,
+      many.event.id,
+      Array.from({ length: SHEET_SYNC_BATCH + 1 }, () => ({ status: 'paid' as const })),
+    );
+    const manyId = await connectSheet(env, many.event.id);
+    fake.reset();
+    expect(await runSheetInitialSync(sheetDeps(env, revokingClient(() => manyId, 'write')), manyId)).toEqual({
+      result: 'skipped',
+      reason: 'auth_revoked',
+    });
+    expect(writes()).toHaveLength(1);
+    expect(await connectionStateOf(h, manyId)).toMatchObject({ last_synced_at: null });
+    await expectStillRevoked(manyId);
+
+    // Một lô: chuyển sau lô cuối → `markSynced` không đè trạng thái mất quyền.
+    const single = await freeSheetEvent(org);
+    await seedOrders(env, single.event.id, [{ status: 'paid' }]);
+    const singleId = await connectSheet(env, single.event.id);
+    fake.reset();
+    expect(await runSheetInitialSync(sheetDeps(env, revokingClient(() => singleId, 'write')), singleId)).toEqual({
+      result: 'skipped',
+      reason: 'auth_revoked',
+    });
+    expect(writes()).toHaveLength(1);
+    expect(await connectionStateOf(h, singleId)).toMatchObject({ last_synced_at: null });
+    await expectStillRevoked(singleId);
   });
 });

@@ -1304,6 +1304,7 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   story: 6.5
 - Đã xử lý (27/11/2026, 6.5): phần Sheet bị xóa (Sheets API trả 404) của mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-6-5-dong-bo-don-va-check-in-len-sheet.md`: tự tạo Sheet mới (Quyết định 2). Bằng chứng: `apps/api/src/modules/integration/google-client.ts:253`, `apps/api/src/modules/integration/sheet-flush-jobs.ts:270`. Phần "chuyển vào thùng rác" chưa kiểm được với Google thật (Triage #22 của 6.5, mục hoãn ở cuối file).
 - Story nhận (28/11/2026, 6.5): 6.6. Phần "chuyển vào thùng rác" của mục ngay trên, cùng mục hoãn Triage #22 của 6.5: kiểm với Google thật khi làm 6.6.
+- Story nhận (28/11/2026, 6.6): 9.1. Đã gộp vào kiểm thủ công AC thứ hai của 6.6 (OAuth client Google thật); Mason hoãn kiểm đó sang 9.1 vì staging cần OAuth client Google thật.
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-4-ket-noi-google-sheets.md`
   summary: Vùng A1 ghi theo tên tab "Đơn". BTC đổi tên hoặc xóa tab thì mọi lần ghi nhận 400 tới dead-letter. Flush của 6.5 nên tìm tab theo `sheetId` (`SHEET_ORDERS_TAB_ID = 0`) trước khi ghi.
   evidence: Review 6.4 (Triage #27). `sheet-sync-jobs.ts` dựng vùng bằng `sheetRange(GOOGLE_SHEET_ORDERS_TAB, …)`; `resizeGrid` thì đã dùng `sheetId`.
@@ -1323,6 +1324,7 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Google giới hạn 100 refresh token cho mỗi tài khoản Google trên mỗi OAuth client. `prompt=consent` cấp token mới mỗi lần kết nối, và ngắt kết nối không revoke, nên khi vượt giới hạn thì kết nối cũ của cùng người cấp bị vô hiệu (`invalid_grant`). Hệ quả hiện ra như `auth_revoked`. 6.6 xét có cần ghi chú cho BTC, README, hay cách giảm thiểu.
   evidence: Review 6.4 (Triage #9, #34). `google-client.ts` (`authorizationUrl`: `prompt=consent`); Design Notes của 6.4 cố ý không revoke khi ngắt.
   story: 6.6
+- Đã xử lý (28/11/2026, 6.6): mục ngay trên đã làm ở `_bmad-output/implementation-artifacts/spec-6-6-mat-quyen-google-sheets-va-ket-noi-lai.md` (ghi chú vận hành ở README, không thêm câu chữ cho BTC hay giảm thiểu bằng code: kết nối vượt giới hạn nhận `invalid_grant` và đi đường banner + "Kết nối lại"). Bằng chứng: `README.md:358`.
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-4-ket-noi-google-sheets.md`
   summary: Chưa kiểm (maybe-false; nếu đúng thì medium): Google có thể trả 403 vì lý do không phải mất quyền (quota hay rate dạng `rateLimitExceeded`/`userRateLimitExceeded`, Drive đầy khi tạo Sheet). `httpFailure` xếp mọi 403 không mang lý do cấu hình vào `auth_revoked`, nên kết nối thành "Mất quyền" vĩnh viễn. 6.5 (flush hay gặp quota) cần xếp các lý do này vào lỗi tạm thời, hoặc cho mã lỗi riêng.
   evidence: Review 6.4 (Triage #41, #59). `google-client.ts` (`httpFailure`, nhánh `status === 403`). Sheets API v4 báo quota bằng 429; muốn chốt thì cần phản hồi thật của Google cho trường hợp quota và Drive đầy.
@@ -1346,6 +1348,7 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   evidence: Spec 6.4 › Verification › Manual checks. Mọi test chạy với Google fake; kiểm với Google thật cần OAuth client thật (README › "Google Sheets"). Mason hoãn ngày 27/11/2026 để kiểm gộp với đồng bộ của 6.5.
   story: 6.5
 - Story nhận (27/11/2026, 6.5): 6.6. Đã gộp vào kiểm thủ công AC 3 của 6.5; Mason hoãn kiểm đó sang 6.6 (cùng OAuth Google thật của kết nối lại).
+- Story nhận (28/11/2026, 6.6): 9.1. Đã gộp vào kiểm thủ công AC thứ hai của 6.6 (OAuth client Google thật); Mason hoãn kiểm đó sang 9.1 vì staging cần OAuth client Google thật.
 
 ## Deferred from: code review of spec-6-5-dong-bo-don-va-check-in-len-sheet.md (2026-11-27)
 
@@ -1353,7 +1356,16 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Chưa kiểm (maybe-false; nếu đúng thì medium): Sheets API có thể vẫn phục vụ spreadsheet đã chuyển vào thùng rác (không trả 404), nên flush không tạo Sheet mới (Quyết định 2) mà tiếp tục ghi vào Sheet trong thùng rác. Ngoài ra, dạng phản hồi của `developerMetadata:search` và lô `appendDimension` + `createDeveloperMetadata` trên chỉ số cột mới mới chỉ kiểm với Google fake.
   evidence: Review 6.5 (Triage #22). `google-client.ts` (`httpFailure`: chỉ 404 mới là `not_found`); `sheet-flush-jobs.ts` (`recreateSheet` chỉ chạy khi `not_found`). Muốn chốt thì cần phản hồi thật của Google: chuyển Sheet đã kết nối vào thùng rác rồi cho flush chạy, và chạy cả luồng thêm cột với OAuth client thật.
   story: 6.6
+- Story nhận (28/11/2026, 6.6): 9.1. Đã gộp vào kiểm thủ công AC thứ hai của 6.6 (OAuth client Google thật); Mason hoãn kiểm đó sang 9.1 vì staging cần OAuth client Google thật.
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-5-dong-bo-don-va-check-in-len-sheet.md`
   summary: Kiểm thủ công AC 3 của 6.5 (gộp kiểm thủ công hoãn từ 6.4) chưa làm: trên dev stack với OAuth client Google thật, kết nối một Sự kiện có Đơn thật (câu hỏi form, check-in), thanh toán một Đơn mới và check-in một Vé, rồi kiểm Sheet trong Drive của người cấp (tiếng Việt đúng, SĐT giữ số 0, số tiền là số, giờ Việt Nam), dòng mới và ô check-in cập nhật trong khoảng 1 phút, ngắt kết nối thì Sheet vẫn còn trong Drive.
   evidence: Spec 6.5 › Tasks & Acceptance › AC thứ ba và Verification › Manual checks. Mọi test chạy với Google fake. Mason hoãn ngày 27/11/2026 để kiểm gộp với OAuth thật của 6.6 (kết nối lại), cùng lúc với mục Sheet trong thùng rác (Triage #22 của 6.5).
   story: 6.6
+- Story nhận (28/11/2026, 6.6): 9.1. Đã gộp vào kiểm thủ công AC thứ hai của 6.6 (OAuth client Google thật); Mason hoãn kiểm đó sang 9.1 vì staging cần OAuth client Google thật.
+
+## Deferred from: kiểm thủ công of spec-6-6-mat-quyen-google-sheets-va-ket-noi-lai.md (2026-11-28)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-6-mat-quyen-google-sheets-va-ket-noi-lai.md`
+  summary: Kiểm thủ công AC thứ hai của 6.6 (gộp kiểm tay hoãn từ 6.4 và 6.5) chưa làm: trên stack có OAuth client Google thật, kết nối một Sự kiện có Đơn thật (câu hỏi form, check-in), thanh toán một Đơn mới, check-in một Vé, thu hồi quyền của Tickee ở trang quyền của tài khoản Google, đổi một Đơn rồi bấm "Kết nối lại". Kiểm Sheet (tiếng Việt đúng, SĐT giữ số 0, số tiền là số, giờ Việt Nam, dòng mới và ô check-in cập nhật trong khoảng 1 phút), banner và đúng một email khi mất quyền, kết nối lại bằng cùng tài khoản dùng lại Sheet cũ (`drive.file`), Sheet chuyển vào thùng rác khi flush chạy (Triage #22 của 6.5), lô thêm cột khi có câu hỏi form mới, và ngắt kết nối thì Sheet vẫn còn trong Drive.
+  evidence: Spec 6.6 › Tasks & Acceptance › AC thứ hai và Verification › Manual checks. Mọi test chạy với Google fake; hành vi `drive.file` khi kết nối lại bằng cùng tài khoản mới chỉ có fake mô phỏng (knob `account`). Mason hoãn ngày 28/11/2026 sang 9.1: môi trường staging cần OAuth client Google thật.
+  story: 9.1

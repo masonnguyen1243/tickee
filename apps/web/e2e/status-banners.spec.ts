@@ -20,7 +20,8 @@ import {
  * `…/live` (giả bằng `EventSource` điều khiển được) hoặc polling 10 giây khi không có SSE. Story 4.2-c: nhãn trạng thái
  * bán của thẻ Sự kiện (`GET …/event-sale-status`) đổi theo cùng tín hiệu, dự phòng bằng nhãn tính ở máy khách.
  * Story 4.5-b: banner warning "Token khả dụng dưới ngưỡng cảnh báo." đóng được (khóa đóng theo BTC + `code` + `version`),
- * hiện lại ở lần vượt ngưỡng mới.
+ * hiện lại ở lần vượt ngưỡng mới. Story 6.6: mỗi kết nối Google Sheets mất quyền một banner warning "Mất quyền ghi Google
+ * Sheets" nêu tên Sự kiện, "Kết nối lại" tới tab Cài đặt của Sự kiện đó, đóng riêng từng banner (khóa có id Sự kiện).
  */
 
 const CONSENTED = '2026-10-29T01:02:03.000Z';
@@ -604,4 +605,79 @@ test('Token dưới ngưỡng: đóng ở BTC khác (cùng mã, cùng version) k
   await expect(banners(page).nth(0)).toHaveAttribute('data-tone', 'danger');
   await expect(banners(page).nth(1)).toContainText(BELOW_TITLE);
   await expect(closeButtons(page)).toHaveCount(1);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Mất quyền ghi Google Sheets (Story 6.6)
+// ---------------------------------------------------------------------------------------------------------------
+
+const SHEETS_TITLE = 'Mất quyền ghi Google Sheets';
+const SHEETS_KEPT = 'Thay đổi trong lúc mất quyền được giữ lại và ghi lên Sheet khi kết nối lại.';
+const SHEETS_EVENT = '019a3b2c-0712-7abc-8def-0123456789ab';
+const SHEETS_OTHER_EVENT = '019a3b2c-0713-7abc-8def-0123456789ab';
+/** Hai kết nối mất quyền trong cùng transaction (xóa người cấp): cùng `auth_revoked_at`, nên cùng `version`. */
+const SHEETS_VERSION = '2026-11-28T03:04:05.123Z';
+const sheetsNotice = (data: Record<string, unknown>, version = SHEETS_VERSION) =>
+  statusNotice('SHEETS_AUTH_REVOKED', { dismissible: true, scope: 'event', data, version });
+
+test('mất quyền Google Sheets: warning đóng được, mô tả nêu tên Sự kiện, "Kết nối lại" tới tab Cài đặt của Sự kiện đó', async ({
+  page,
+}) => {
+  await openDashboard(page, () => [sheetsNotice({ eventId: SHEETS_EVENT, eventName: 'Giải bơi mùa đông' })], {
+    role: 'admin',
+  });
+  await expect(banners(page)).toHaveCount(1);
+  const banner = banners(page).first();
+  await expect(banner).toHaveAttribute('data-tone', 'warning');
+  await expect(banner).toContainText(SHEETS_TITLE);
+  await expect(banner).toContainText(`Google Sheet của Sự kiện “Giải bơi mùa đông” đang dừng đồng bộ. ${SHEETS_KEPT}`);
+  const action = banner.getByRole('link', { name: 'Kết nối lại' });
+  await expect(action).toHaveAttribute('href', `/btc/${ORG_ID}/su-kien/${SHEETS_EVENT}?tab=cai-dat`);
+  // Link trong app: không mở tab mới.
+  await expect(action).not.toHaveAttribute('target', '_blank');
+  await expect(closeButtons(page)).toHaveCount(1);
+});
+
+test('mất quyền Google Sheets ở hai Sự kiện cùng lúc (cùng version): mỗi banner đóng riêng, khóa đóng có id Sự kiện', async ({
+  page,
+}) => {
+  await openDashboard(page, () => [
+    sheetsNotice({ eventId: SHEETS_EVENT, eventName: 'Giải bơi mùa đông' }),
+    sheetsNotice({ eventId: SHEETS_OTHER_EVENT, eventName: 'Giải chạy đêm' }),
+  ]);
+  await expect(banners(page)).toHaveCount(2);
+  await expect(banners(page).nth(0)).toContainText('Giải bơi mùa đông');
+  await expect(banners(page).nth(1)).toContainText('Giải chạy đêm');
+
+  await banners(page).nth(0).getByRole('button', { name: 'Đóng thông báo' }).click();
+  await expect(banners(page)).toHaveCount(1);
+  await expect(banners(page).first()).toContainText('Giải chạy đêm');
+  await expect(banners(page).first().getByRole('link', { name: 'Kết nối lại' })).toHaveAttribute(
+    'href',
+    `/btc/${ORG_ID}/su-kien/${SHEETS_OTHER_EVENT}?tab=cai-dat`,
+  );
+  expect(await page.evaluate(() => Object.keys(window.sessionStorage))).toContain(
+    `tickee:thong-bao-da-dong:${ORG_ID}:SHEETS_AUTH_REVOKED:${SHEETS_EVENT}:${SHEETS_VERSION}`,
+  );
+
+  // Tải lại: banner đã đóng vẫn ẩn, banner kia vẫn hiện.
+  await page.reload();
+  await expect(heading(page)).toBeVisible();
+  await expect(banners(page)).toHaveCount(1);
+  await expect(banners(page).first()).toContainText('Giải chạy đêm');
+});
+
+test('mất quyền Google Sheets: thiếu id Sự kiện (hay sai dạng) → banner không có hành động; xếp sau banner chặn bán', async ({
+  page,
+}) => {
+  await openDashboard(page, () => [
+    statusNotice('CLOSED_BETA_REVOKED'),
+    sheetsNotice({ eventId: 'khong-phai-uuid', eventName: 'Giải bơi mùa đông' }),
+  ]);
+  await expect(banners(page)).toHaveCount(2);
+  await expect(banners(page).nth(0)).toHaveAttribute('data-tone', 'danger');
+  const banner = banners(page).nth(1);
+  await expect(banner).toContainText(SHEETS_TITLE);
+  await expect(banner.getByRole('link')).toHaveCount(0);
+  await expect(banner.getByRole('button', { name: 'Đóng thông báo' })).toHaveCount(1);
 });

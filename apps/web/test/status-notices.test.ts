@@ -5,6 +5,7 @@ import { StatusNoticesResponse } from '@/lib/reporting/api';
 import {
   isStatusNoticeDismissed,
   saveStatusNoticeDismissed,
+  SHEETS_AUTH_REVOKED_TITLE,
   STATUS_NOTICE_CONTENT,
   statusNoticeContent,
   statusNoticeDismissKey,
@@ -222,5 +223,78 @@ describe('đọc danh sách thông báo dễ dãi', () => {
 
   it('response không phải mảng vẫn bị từ chối', () => {
     expect(StatusNoticesResponse.safeParse({ notices: [] }).success).toBe(false);
+  });
+});
+
+describe('mất quyền ghi Google Sheets (Story 6.6)', () => {
+  const ORG = '019a3b2c-5678-7abc-8def-0123456789ab';
+  const EVENT = '019a3b2c-0712-7abc-8def-0123456789ab';
+  const OTHER_EVENT = '019a3b2c-0713-7abc-8def-0123456789ab';
+  const KEPT = 'Thay đổi trong lúc mất quyền được giữ lại và ghi lên Sheet khi kết nối lại.';
+
+  it('tiêu đề, mô tả nêu tên Sự kiện kèm câu giữ dòng bẩn, "Kết nối lại"; như nhau cho Owner và Admin', () => {
+    const data = { eventId: EVENT, eventName: 'Giải bơi mùa đông' };
+    const owner = statusNoticeContent('SHEETS_AUTH_REVOKED', 'owner', data);
+    expect(owner).toEqual({
+      title: 'Mất quyền ghi Google Sheets',
+      description: `Google Sheet của Sự kiện “Giải bơi mùa đông” đang dừng đồng bộ. ${KEPT}`,
+      action: { label: 'Kết nối lại', eventSettings: 'eventId' },
+    });
+    expect(SHEETS_AUTH_REVOKED_TITLE).toBe('Mất quyền ghi Google Sheets');
+    expect(statusNoticeContent('SHEETS_AUTH_REVOKED', 'admin', data)).toEqual(owner);
+    // Thiếu tên (hay tên rỗng, không phải chuỗi): câu chung, vẫn có tiêu đề và hành động.
+    for (const bad of [{}, { eventName: '  ' }, { eventName: 42 }]) {
+      expect(statusNoticeContent('SHEETS_AUTH_REVOKED', 'owner', bad).description, JSON.stringify(bad)).toBe(
+        `Google Sheet của một Sự kiện đang dừng đồng bộ. ${KEPT}`,
+      );
+    }
+    expect(statusNoticeContent('SHEETS_AUTH_REVOKED', 'owner').title).toBe('Mất quyền ghi Google Sheets');
+  });
+
+  it('"Kết nối lại" dẫn tới tab Cài đặt của data.eventId (trong app); thiếu hay sai dạng → không có hành động', () => {
+    const action = statusNoticeContent('SHEETS_AUTH_REVOKED', 'owner', { eventId: EVENT }).action!;
+    expect(statusNoticeLink(action, { data: { eventId: EVENT, eventName: 'X' } }, ORG)).toEqual({
+      label: 'Kết nối lại',
+      href: `/btc/${ORG}/su-kien/${EVENT}?tab=cai-dat`,
+      external: false,
+    });
+    for (const data of [{}, { eventId: 42 }, { eventId: 'khong-phai-uuid' }, { eventId: '../../admin' }, { eventId: '' }]) {
+      expect(statusNoticeLink(action, { data }, ORG), JSON.stringify(data)).toBeNull();
+    }
+  });
+
+  it('khóa đóng thêm id Sự kiện: hai kết nối mất quyền cùng lúc (cùng version) đóng riêng; khóa cũ không đổi', () => {
+    const version = '2026-11-28T03:04:05.123Z';
+    const a = statusNoticeDismissKey(ORG, { code: 'SHEETS_AUTH_REVOKED', version, data: { eventId: EVENT } });
+    const b = statusNoticeDismissKey(ORG, { code: 'SHEETS_AUTH_REVOKED', version, data: { eventId: OTHER_EVENT } });
+    expect(a).toBe(`tickee:thong-bao-da-dong:${ORG}:SHEETS_AUTH_REVOKED:${EVENT}:${version}`);
+    expect(a).not.toBe(b);
+    // Mất quyền lần mới (version mới) → khóa mới.
+    expect(a).not.toBe(
+      statusNoticeDismissKey(ORG, { code: 'SHEETS_AUTH_REVOKED', version: '2026-11-29T00:00:00.000Z', data: { eventId: EVENT } }),
+    );
+    // Thông báo không theo Sự kiện (hay eventId sai dạng) giữ khóa dạng cũ.
+    expect(statusNoticeDismissKey(ORG, { code: 'token_below_threshold', version, data: { tingeePortalUrl: 'https://x.vn' } })).toBe(
+      `tickee:thong-bao-da-dong:${ORG}:token_below_threshold:${version}`,
+    );
+    expect(statusNoticeDismissKey(ORG, { code: 'SHEETS_AUTH_REVOKED', version, data: { eventId: 'la' } })).toBe(
+      `tickee:thong-bao-da-dong:${ORG}:SHEETS_AUTH_REVOKED:${version}`,
+    );
+  });
+
+  it('thông báo api trả được web nhận (mã mới có trong contracts)', () => {
+    const parsed = StatusNoticesResponse.parse([
+      {
+        code: 'SHEETS_AUTH_REVOKED',
+        severity: 'warning',
+        blocking: false,
+        dismissible: true,
+        scope: 'event',
+        audience: ['owner', 'admin'],
+        data: { eventId: EVENT, eventName: 'Giải bơi mùa đông' },
+        version: '2026-11-28T03:04:05.123Z',
+      },
+    ]);
+    expect(parsed.map((n) => n.code)).toEqual(['SHEETS_AUTH_REVOKED']);
   });
 });

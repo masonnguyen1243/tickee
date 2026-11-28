@@ -7,14 +7,24 @@ import {
   ORGANIZATION_INVITATION_DAILY_LIMIT,
   OrganizationInvitation,
   REAUTH_HEADER,
+  Role,
+  SheetsAuthRevokedEmailPayload,
 } from '@tickee/contracts';
 import { sql } from 'drizzle-orm';
+import pg from 'pg';
 import type { PgBoss } from 'pg-boss';
 import type { Response } from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  sendSheetsAuthRevokedEmail,
+  sheetsAuthRevokedRecipients,
+} from '../../src/modules/integration/sheet-revoked-email-jobs.js';
+import { sheetsAuthRevokedEmailJobId } from '../../src/modules/integration/sheet-revocation.js';
 import { sendAdminInvitation } from '../../src/modules/organizer/invitation-jobs.js';
+import { Database } from '../../src/platform/db/index.js';
 import { BOSS } from '../../src/platform/jobs/index.js';
-import { TEST_WEB_ORIGIN } from '../helpers.js';
+import { REALTIME_CHANNEL } from '../../src/platform/realtime/index.js';
+import { databaseUrl, migrationDatabaseUrl, TEST_WEB_ORIGIN } from '../helpers.js';
 import {
   createHarness,
   newEmail,
@@ -28,7 +38,9 @@ import {
 
 /*
  * Story 2.4: Owner mời Admin bằng email (job pg-boss gửi email), thu hồi, xóa Admin; người được mời xem trước và nhận
- * lời mời. Postgres thật; email đi qua `FakeEmailTransport` của harness.
+ * lời mời. Postgres thật; email đi qua `FakeEmailTransport` của harness. Story 6.6: xóa Admin (route chuyển sang
+ * `flows/`) chuyển `auth_revoked` mọi kết nối Google Sheets người đó cấp và thu hồi mọi dòng CTV `active` của người đó
+ * trong BTC, cùng transaction.
  */
 
 const QUEUE = JobQueue.ORGANIZER_SEND_ADMIN_INVITATION;
@@ -595,5 +607,263 @@ describe('chuyển quyền Owner', () => {
     expectError(await transfer(peer.memberId, token, admin.cookie), 403, 'FORBIDDEN_ROLE');
     expect(await grantUsedAt(token)).toBeNull();
     expect((await rolesOf()).filter((r) => r.role === 'owner')).toEqual([{ user_id: owner.userId, role: 'owner' }]);
+  });
+});
+
+describe('xóa Admin (Story 6.6): kết nối Google Sheets người đó cấp và dòng CTV, cùng transaction', () => {
+  const EMAIL_QUEUE = JobQueue.INTEGRATION_SHEETS_AUTH_REVOKED_EMAIL;
+  const draft = {
+    name: 'Giải cờ nhanh mùa đông',
+    startsAt: '2099-12-16T07:00:00+07:00',
+    endsAt: '2099-12-16T17:00:00+07:00',
+    refundPolicy: 'Không hoàn vé.',
+  };
+  let listener: pg.Client;
+  const notified: Record<string, unknown>[] = [];
+
+  beforeAll(async () => {
+    listener = new pg.Client({ connectionString: databaseUrl() });
+    await listener.connect();
+    listener.on('notification', (m) => notified.push(JSON.parse(m.payload ?? '{}') as Record<string, unknown>));
+    await listener.query(`LISTEN ${REALTIME_CHANNEL}`);
+  });
+  afterAll(async () => {
+    await listener.end();
+  });
+
+  const statusSignals = () => notified.filter((n) => n.type === 'org_status_changed' && n.organizationId === orgId);
+
+  /** Admin mới của BTC hiện tại (chèn thẳng `members`): tài khoản và id dòng thành viên. */
+  async function newAdmin() {
+    const user = await signUp(h);
+    const { rows } = await h.db.pool.query<{ id: string }>(
+      'INSERT INTO members (organization_id, user_id, role) VALUES ($1, $2, $3) RETURNING id',
+      [orgId, user.userId, Role.ADMIN],
+    );
+    return { ...user, memberId: rows[0]!.id };
+  }
+
+  const newEvent = async () =>
+    (await h.http.post(`/v1/orgs/${orgId}/events`).set('cookie', owner.cookie).send(draft).expect(201)).body.id as string;
+
+  /** Kết nối Google Sheets của Sự kiện (BTC `org`, mặc định BTC hiện tại), chèn thẳng (không qua Google): `active`. */
+  async function connectionFor(eventId: string, grantedBy: string, org = orgId): Promise<string> {
+    const { rows } = await h.db.pool.query<{ id: string }>(
+      `INSERT INTO sheet_connections (organization_id, event_id, granted_by_user_id, status, refresh_token, spreadsheet_id,
+                                      spreadsheet_url, last_synced_at)
+       VALUES ($1, $2, $3, 'active', 'v1:khong-dung', $4, $5, now()) RETURNING id`,
+      [org, eventId, grantedBy, `sheet-${eventId}`, `https://docs.google.com/spreadsheets/d/sheet-${eventId}/edit`],
+    );
+    return rows[0]!.id;
+  }
+
+  async function connectionState(connectionId: string) {
+    const { rows } = await h.db.pool.query<{ status: string; last_error_code: string | null; auth_revoked_at: Date | null }>(
+      'SELECT status, last_error_code, auth_revoked_at FROM sheet_connections WHERE id = $1',
+      [connectionId],
+    );
+    return rows[0];
+  }
+
+  async function checkerRows(userId: string) {
+    const { rows } = await h.db.pool.query<{
+      id: string;
+      event_id: string;
+      status: string;
+      revoked_by: string | null;
+      revoked_at: Date | null;
+    }>('SELECT id, event_id, status, revoked_by, revoked_at FROM checkers WHERE user_id = $1 ORDER BY created_at, id', [
+      userId,
+    ]);
+    return rows;
+  }
+
+  const emailRootsOf = async (connectionId: string) =>
+    (await boss().findJobs(EMAIL_QUEUE, { data: { connectionId } })).filter(
+      (job) => (job.data as { recipientUserId?: string }).recipientUserId === undefined,
+    );
+
+  const removeAdmin = (memberId: string, cookie = owner.cookie) =>
+    h.http.delete(`/v1/orgs/${orgId}/members/${memberId}`).set('cookie', cookie);
+
+  it('xóa người cấp OAuth của 2 Sự kiện: cả hai kết nối auth_revoked (grantor_removed) cùng mốc; mỗi kết nối một job email; mỗi người nhận hai email; kết nối người khác cấp giữ nguyên; một tín hiệu', async () => {
+    const granter = await newAdmin();
+    const stays = await newAdmin();
+    const [e1, e2, e3, e4] = [await newEvent(), await newEvent(), await newEvent(), await newEvent()];
+    const c1 = await connectionFor(e1, granter.userId);
+    const c2 = await connectionFor(e2, granter.userId);
+    const byOwner = await connectionFor(e3, owner.userId);
+    const byOther = await connectionFor(e4, stays.userId);
+    const signals = statusSignals().length;
+
+    await removeAdmin(granter.memberId).expect(204);
+    expect(await memberRows(orgId, granter.userId)).toEqual([]);
+    const [s1, s2] = [(await connectionState(c1))!, (await connectionState(c2))!];
+    for (const state of [s1, s2]) {
+      expect(state).toMatchObject({ status: 'auth_revoked', last_error_code: 'grantor_removed' });
+      expect(state.auth_revoked_at).toBeInstanceOf(Date);
+    }
+    // Cùng transaction: cùng `now()`.
+    expect(s1.auth_revoked_at!.getTime()).toBe(s2.auth_revoked_at!.getTime());
+    for (const id of [byOwner, byOther]) {
+      expect(await connectionState(id)).toMatchObject({ status: 'active', last_error_code: null, auth_revoked_at: null });
+    }
+    for (const [id, state] of [
+      [c1, s1],
+      [c2, s2],
+    ] as const) {
+      expect((await emailRootsOf(id)).map((job) => job.id)).toEqual([sheetsAuthRevokedEmailJobId(id, state.auth_revoked_at!)]);
+    }
+    expect(await emailRootsOf(byOwner)).toEqual([]);
+    await expect.poll(() => statusSignals().length, { timeout: 5_000, interval: 50 }).toBe(signals + 1);
+
+    // Người nhận: Owner và Admin còn lại (người bị xóa không còn trong BTC); mỗi người hai email (mỗi kết nối một).
+    const notifier = { db: h.db, email: h.email, webOrigin: TEST_WEB_ORIGIN };
+    const before = h.email.sent.length;
+    for (const id of [c1, c2]) {
+      const payload = SheetsAuthRevokedEmailPayload.parse((await emailRootsOf(id))[0]!.data);
+      const recipients = await sheetsAuthRevokedRecipients(h.db, payload);
+      expect(recipients).toEqual([owner.userId, stays.userId]);
+      for (const userId of recipients as string[]) {
+        expect(await sendSheetsAuthRevokedEmail(notifier, payload, userId)).toBe('sent');
+      }
+      // Người bị xóa không bao giờ nhận.
+      expect(await sendSheetsAuthRevokedEmail(notifier, payload, granter.userId)).toBe('skipped');
+    }
+    const sent = h.email.sent.slice(before);
+    expect(sent.filter((m) => m.to === owner.email)).toHaveLength(2);
+    expect(sent.filter((m) => m.to === stays.email)).toHaveLength(2);
+    expect(sent.filter((m) => m.to === granter.email)).toEqual([]);
+    for (const m of sent) expect(m.text).toContain('Lý do: Người kết nối đã rời BTC.');
+  });
+
+  it('kết nối người bị xóa cấp ở BTC khác (vẫn là Admin ở đó) giữ nguyên: active, không mốc, không job email', async () => {
+    const granter = await newAdmin();
+    const here = await connectionFor(await newEvent(), granter.userId);
+    const otherOwner = await signUp(h);
+    const otherOrg = await createOrg(otherOwner.cookie, 'BTC khác của người cấp');
+    await h.db.pool.query('INSERT INTO members (organization_id, user_id, role) VALUES ($1, $2, $3)', [
+      otherOrg,
+      granter.userId,
+      Role.ADMIN,
+    ]);
+    const otherEvent = (
+      await h.http.post(`/v1/orgs/${otherOrg}/events`).set('cookie', otherOwner.cookie).send(draft).expect(201)
+    ).body.id as string;
+    const there = await connectionFor(otherEvent, granter.userId, otherOrg);
+
+    await removeAdmin(granter.memberId).expect(204);
+    expect(await connectionState(here)).toMatchObject({ status: 'auth_revoked', last_error_code: 'grantor_removed' });
+    expect(await connectionState(there)).toEqual({ status: 'active', last_error_code: null, auth_revoked_at: null });
+    expect(await emailRootsOf(there)).toEqual([]);
+    expect(await memberRows(otherOrg, granter.userId)).toHaveLength(1);
+  });
+
+  it('xóa Admin không cấp kết nối nào: như cũ, không kết nối nào đổi, không job email, không tín hiệu', async () => {
+    const plain = await newAdmin();
+    const event = await newEvent();
+    const kept = await connectionFor(event, owner.userId);
+    const signals = statusSignals().length;
+    await removeAdmin(plain.memberId).expect(204);
+    expect(await memberRows(orgId, plain.userId)).toEqual([]);
+    expect(await connectionState(kept)).toMatchObject({ status: 'active', auth_revoked_at: null });
+    expect(await emailRootsOf(kept)).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(statusSignals()).toHaveLength(signals);
+  });
+
+  it('xóa Admin là CTV: dòng active ở 2 Sự kiện → revoked (người xóa, lúc xóa) + audit checker.revoked; dòng đã revoked giữ người và lúc thu hồi cũ; sau đó bị chặn ở route check-in', async () => {
+    const ctv = await newAdmin();
+    const otherOwner = await signUp(h);
+    const otherOrg = await createOrg(otherOwner.cookie, 'BTC khác của CTV');
+    const otherEvent = (
+      await h.http.post(`/v1/orgs/${otherOrg}/events`).set('cookie', otherOwner.cookie).send(draft).expect(201)
+    ).body.id as string;
+    const [a1, a2, a3] = [await newEvent(), await newEvent(), await newEvent()];
+    const oldRevokedAt = new Date('2026-11-20T03:04:05.000Z');
+    await h.db.pool.query(
+      `INSERT INTO checkers (organization_id, event_id, user_id, status, revoked_at, revoked_by) VALUES
+         ($1, $2, $5, 'active', NULL, NULL),
+         ($1, $3, $5, 'active', NULL, NULL),
+         ($1, $4, $5, 'revoked', $6, $7),
+         ($8, $9, $5, 'active', NULL, NULL)`,
+      [orgId, a1, a2, a3, ctv.userId, oldRevokedAt, owner.userId, otherOrg, otherEvent],
+    );
+    const ids = Object.fromEntries((await checkerRows(ctv.userId)).map((r) => [r.event_id, r.id]));
+
+    const before = Date.now();
+    await removeAdmin(ctv.memberId).expect(204);
+    const rows = Object.fromEntries((await checkerRows(ctv.userId)).map((r) => [r.event_id, r]));
+    for (const event of [a1, a2]) {
+      expect(rows[event]).toMatchObject({ status: 'revoked', revoked_by: owner.userId });
+      expect(rows[event]!.revoked_at!.getTime()).toBeGreaterThanOrEqual(before - 5_000);
+    }
+    // Dòng đã thu hồi giữ người và lúc thu hồi cũ; CTV ở BTC khác không đổi.
+    expect(rows[a3]).toMatchObject({ status: 'revoked', revoked_by: owner.userId, revoked_at: oldRevokedAt });
+    expect(rows[otherEvent]).toMatchObject({ status: 'active', revoked_by: null, revoked_at: null });
+    const audits = (await auditRows(orgId, 'checker.revoked')).filter((r) => [ids[a1], ids[a2], ids[a3]].includes(r.target_id));
+    expect(audits.map((r) => r.target_id).sort()).toEqual([ids[a1], ids[a2]].sort());
+    for (const audit of audits) {
+      expect(audit).toMatchObject({ actor_user_id: owner.userId, target_type: 'checker', changed_fields: ['status'] });
+    }
+
+    // Không còn là thành viên, CTV đã bị thu hồi: route check-in chặn.
+    const gate = await h.http.get(`/v1/checkin/events/${a1}`).set('cookie', ctv.cookie);
+    expectError(gate, 403, 'CHECKER_REVOKED');
+  });
+
+  it('CTV (không phải thành viên) gọi xóa Admin → 403 NOT_A_MEMBER; route vẫn trong bộ cách ly', async () => {
+    const target = await newAdmin();
+    const ctv = await signUp(h);
+    const event = await newEvent();
+    await h.db.pool.query(
+      "INSERT INTO checkers (organization_id, event_id, user_id, status) VALUES ($1, $2, $3, 'active')",
+      [orgId, event, ctv.userId],
+    );
+    expectError(await removeAdmin(target.memberId, ctv.cookie), 403, 'NOT_A_MEMBER');
+    expect(await memberRows(orgId, target.userId)).toHaveLength(1);
+  });
+
+  it('lỗi DB lúc commit → rollback: Admin chưa bị xóa, CTV và kết nối không đổi, không job email, không audit', async () => {
+    const granter = await newAdmin();
+    const event = await newEvent();
+    const connection = await connectionFor(event, granter.userId);
+    await h.db.pool.query("INSERT INTO checkers (organization_id, event_id, user_id, status) VALUES ($1, $2, $3, 'active')", [
+      orgId,
+      event,
+      granter.userId,
+    ]);
+    // Trigger hoãn tới lúc commit: flow đã xóa thành viên, thu hồi CTV, chuyển kết nối và enqueue email rồi mới hỏng.
+    const migrator = new Database({ connectionString: migrationDatabaseUrl(), max: 1 });
+    try {
+      await migrator.pool.query(`
+        CREATE OR REPLACE FUNCTION test_member_removal_fail() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.granted_by_user_id = '${granter.userId}' AND NEW.last_error_code = 'grantor_removed' THEN
+            RAISE EXCEPTION 'test: rollback xóa Admin';
+          END IF;
+          RETURN NULL;
+        END $$`);
+      await migrator.pool.query(`
+        CREATE CONSTRAINT TRIGGER test_member_removal_fail AFTER UPDATE ON sheet_connections
+          DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION test_member_removal_fail()`);
+
+      const res = await removeAdmin(granter.memberId);
+      expect(res.status).toBe(500);
+      expect(await memberRows(orgId, granter.userId)).toHaveLength(1);
+      expect(await checkerRows(granter.userId)).toEqual([
+        expect.objectContaining({ status: 'active', revoked_by: null, revoked_at: null }),
+      ]);
+      expect(await connectionState(connection)).toMatchObject({ status: 'active', auth_revoked_at: null });
+      expect(await emailRootsOf(connection)).toEqual([]);
+      expect((await auditRows(orgId, 'member.removed')).filter((r) => r.target_id === granter.userId)).toEqual([]);
+    } finally {
+      await migrator.pool.query('DROP TRIGGER IF EXISTS test_member_removal_fail ON sheet_connections');
+      await migrator.pool.query('DROP FUNCTION IF EXISTS test_member_removal_fail()');
+      await migrator.close();
+    }
+    // Hết lỗi: xóa lại được.
+    await removeAdmin(granter.memberId).expect(204);
+    expect(await connectionState(connection)).toMatchObject({ status: 'auth_revoked', last_error_code: 'grantor_removed' });
   });
 });

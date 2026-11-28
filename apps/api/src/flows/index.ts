@@ -5,4 +5,5 @@ export { lookupTickets, manualCheckIn } from './checkin-lookup.flow.js';
 export { CHECKIN_SCAN_DURATION_METRIC, scanTicket, toScanResult, type SheetRowChanges } from './checkin-scan.flow.js';
 export { eventBuyerCount, eventPendingPaymentCount, updateEvent } from './event-update.flow.js';
 export { FlowsModule } from './flows.module.js';
+export { removeMember, type MemberRemoval } from './member-removal.flow.js';
 export { createTicketType, deleteTicketType, listTicketTypes, updateTicketType } from './ticket-types.flow.js';

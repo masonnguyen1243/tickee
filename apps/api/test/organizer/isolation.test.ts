@@ -190,6 +190,11 @@ describe('cách ly BTC', () => {
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/google-sheets')).toBe(Permission.EVENTS_MANAGE);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/google-sheets/connect', 'POST')).toBe(Permission.EVENTS_MANAGE);
     expect(permissionOf('/v1/orgs/:orgId/events/:eventId/google-sheets', 'DELETE')).toBe(Permission.EVENTS_MANAGE);
+    // Story 6.6: xóa Admin chuyển sang flows (cùng method, đường dẫn và quyền chỉ Owner).
+    expect(permissionOf('/v1/orgs/:orgId/members/:memberId', 'DELETE')).toBe(Permission.MEMBERS_MANAGE);
+    expect(routes.find((r) => r.method === 'DELETE' && r.path === '/v1/orgs/:orgId/members/:memberId')?.handler).toMatch(
+      /^MemberRemovalController\./,
+    );
     expect(permissionOf('/v1/orgs/:orgId/live')).toBe(Permission.ORG_READ);
     expect(permissionOf('/v1/orgs/:orgId/notices')).toBe(Permission.ORG_READ);
     expect(permissionOf('/v1/orgs/:orgId/event-sale-status')).toBe(Permission.EVENTS_MANAGE);

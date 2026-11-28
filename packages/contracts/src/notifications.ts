@@ -8,13 +8,14 @@ import { StatusNoticeCode } from './reporting.js';
 
 /*
  * Mỗi thông báo gửi cho thành viên BTC khai báo một dòng ở đây; api đọc người nhận và khóa từ dòng đó (email và
- * `audience` của banner). Hiện chỉ có cảnh báo Token dưới ngưỡng; các thông báo khác (email Vé, đổi giờ/địa điểm, Cần xử
- * lý…) thêm sau.
+ * `audience` của banner). Hiện có cảnh báo Token dưới ngưỡng (Story 4.5-b) và mất quyền Google Sheets (Story 6.6); các
+ * thông báo khác (email Vé, đổi giờ/địa điểm, Cần xử lý…) thêm sau.
  */
 
 /** Loại thông báo. */
 export const NotificationKind = {
   TOKEN_BELOW_THRESHOLD: 'token_below_threshold',
+  SHEETS_AUTH_REVOKED: 'sheets_auth_revoked',
 } as const;
 export type NotificationKind = (typeof NotificationKind)[keyof typeof NotificationKind];
 
@@ -54,5 +55,16 @@ export const NOTIFICATION_CATALOG = {
     dedupeKey: ['organizationId', 'token_below_threshold_since'],
     emailQueue: JobQueue.TOKEN_ALERT_EMAIL,
     noticeCode: StatusNoticeCode.TOKEN_BELOW_THRESHOLD,
+  },
+  sheets_auth_revoked: {
+    trigger:
+      'Kết nối Google Sheets của một Sự kiện chuyển "Mất quyền" (`auth_revoked`): Google trả `invalid_grant`/401/403 ' +
+      'khi đẩy lần đầu hay flush, hoặc người cấp OAuth bị xóa khỏi BTC; kết nối lại rồi mất quyền lần nữa là một lần mới.',
+    recipients: [Role.OWNER, Role.ADMIN],
+    channels: [NotificationChannel.EMAIL, NotificationChannel.BANNER],
+    // (kết nối, lần mất quyền) = (`connectionId`, `auth_revoked_at`).
+    dedupeKey: ['connectionId', 'auth_revoked_at'],
+    emailQueue: JobQueue.INTEGRATION_SHEETS_AUTH_REVOKED_EMAIL,
+    noticeCode: StatusNoticeCode.SHEETS_AUTH_REVOKED,
   },
 } as const satisfies Record<NotificationKind, NotificationSpec>;

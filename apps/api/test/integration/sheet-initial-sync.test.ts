@@ -18,6 +18,7 @@ import {
   type GridSize,
 } from '../../src/modules/integration/google-client.js';
 import { SHEET_FLUSH_QUEUE } from '../../src/modules/integration/sheet-flush-queue.js';
+import { SHEETS_AUTH_REVOKED_EMAIL_QUEUE } from '../../src/modules/integration/sheet-revocation.js';
 import {
   runSheetInitialSync,
   sheetInitialSyncJobId,
@@ -102,8 +103,10 @@ beforeAll(async () => {
   fake = await startGoogleFake({ clientId: CLIENT_ID, clientSecret: CLIENT_SECRET });
   h = await createHarness(googleUrls(), { overrides: [rejectingTingee] });
   org = await paidReadyOrg(h, { name: 'CLB Bơi lội' });
-  // Lần đẩy đầu xong mà còn dòng bẩn thì hẹn flush (vai worker tạo queue này lúc khởi động).
+  // Lần đẩy đầu xong mà còn dòng bẩn thì hẹn flush, mất quyền thì enqueue email (vai worker tạo hai queue này lúc khởi
+  // động).
   await SHEET_FLUSH_QUEUE.ensure(h.app.get<PgBoss>(BOSS));
+  await SHEETS_AUTH_REVOKED_EMAIL_QUEUE.ensure(h.app.get<PgBoss>(BOSS));
 });
 beforeEach(async () => {
   fake.reset();

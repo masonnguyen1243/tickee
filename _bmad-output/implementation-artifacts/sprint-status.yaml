@@ -29,7 +29,7 @@
 # - Build (bmad-build) reviews inside its own run, then _bmad/custom/bmad-build.toml sets the story 'done' on the story branch (same PR)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-28-2026 14:52
-last_updated: 11-27-2026 17:20
+last_updated: 11-28-2026 11:24
 project: tickee
 project_key: NOKEY
 tracking_system: file-system
@@ -100,7 +100,7 @@ development_status:
   6-3-xuất-csv-danh-sách-đơn: done
   6-4-kết-nối-google-sheets: done
   6-5-đồng-bộ-đơn-và-check-in-lên-sheet-trong-1-phút: done
-  6-6-mất-quyền-google-sheets-và-kết-nối-lại: backlog
+  6-6-mất-quyền-google-sheets-và-kết-nối-lại: done
   epic-6-retrospective: optional
 
   epic-7: backlog
@@ -559,6 +559,10 @@ action_items:
     owner: "Mason"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-26.md"
+    note: "Phần \"removeMember thu hồi dòng checkers trong BTC\" đã làm ở Story 6.6
+      (28/11/2026, _bmad-output/implementation-artifacts/spec-6-6-mat-quyen-google-sheets-va-ket-noi-lai.md,
+      Quyết định 1): xóa Admin thu hồi mọi dòng checkers active của người đó trong
+      BTC, cùng transaction. Các phần khác của E5-1 vẫn mở"
   - id: "epic-5-retro-e5-2-realtime-o-cong"
     epic: 5
     action: "E5-2 (trước Sự kiện thật đầu tiên dùng check-in; hạn mới của E3-4, Mason

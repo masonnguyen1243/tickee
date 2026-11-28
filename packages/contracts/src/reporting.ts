@@ -71,6 +71,13 @@ export const StatusNoticeCode = {
    * mã trùng loại thông báo trong danh mục (`NotificationKind.TOKEN_BELOW_THRESHOLD`).
    */
   TOKEN_BELOW_THRESHOLD: 'token_below_threshold',
+  /**
+   * Tickee mất quyền ghi Google Sheet của một Sự kiện (Story 6.6, FR-32; kết nối `auth_revoked`): warning, không chặn
+   * bán, đóng được; audience theo danh mục thông báo (`NOTIFICATION_CATALOG.sheets_auth_revoked`: Owner và Admin). Mỗi
+   * kết nối `auth_revoked` một thông báo, `data = { eventId, eventName }` (hành động "Kết nối lại" tới tab Cài đặt của Sự
+   * kiện đó), `version` = lúc mất quyền (`auth_revoked_at`, ISO): mất quyền lần mới thì banner đã đóng hiện lại.
+   */
+  SHEETS_AUTH_REVOKED: 'SHEETS_AUTH_REVOKED',
 } as const;
 export type StatusNoticeCode = (typeof StatusNoticeCode)[keyof typeof StatusNoticeCode];
 export const statusNoticeCodeSchema = z.enum(StatusNoticeCode);
@@ -91,6 +98,8 @@ export const STATUS_NOTICE_PRIORITY: readonly StatusNoticeCode[] = [
   StatusNoticeCode.PAYMENT_SERVICE_SUSPENDED_TINGEE_DISABLED,
   StatusNoticeCode.PAYOUT_ACCOUNT_NOT_LINKED,
   StatusNoticeCode.CLOSED_BETA_PENDING,
+  // Bậc 8 (Story 6.6): nhiều kết nối `auth_revoked` thì giữ thứ tự api trả (lúc mất quyền tăng dần).
+  StatusNoticeCode.SHEETS_AUTH_REVOKED,
   // Bậc 9 (Story 4.5-b).
   StatusNoticeCode.TOKEN_BELOW_THRESHOLD,
 ];

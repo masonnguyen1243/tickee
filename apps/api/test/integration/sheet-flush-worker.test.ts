@@ -14,10 +14,11 @@ import { checkinCountsOfOrders, enqueueSheetRowChanged, SHEET_ROW_CHANGED_QUEUE 
 import type { TingeeCredential } from '../../src/modules/tingee/index.js';
 import { SlidingWindow } from '../../src/platform/alerts/index.js';
 import { DATABASE, DbModule, type Database } from '../../src/platform/db/index.js';
+import { EMAIL_TRANSPORT, EmailModule } from '../../src/platform/email/index.js';
 import { BOSS, JobsModule } from '../../src/platform/jobs/index.js';
 import { startGoogleFake, type GoogleFake } from '../google-fake/server.js';
 import { databaseUrl, workerConfig } from '../helpers.js';
-import { createHarness, signUp, type Harness } from '../identity/harness.js';
+import { createHarness, FakeEmailTransport, signUp, type Harness } from '../identity/harness.js';
 import {
   eventOnSale,
   ipnKeyOf,
@@ -121,15 +122,20 @@ beforeAll(async () => {
     sheetsApiUrl: google.url,
   });
   const connectionString = databaseUrl();
+  const config = workerConfig(googleUrlsOf(google));
   const moduleRef = await Test.createTestingModule({
     imports: [
       DbModule.forRoot({ connectionString, applicationName: 'tickee-worker-sheets-test' }),
       JobsModule.forRoot({ connectionString, applicationName: 'tickee-worker-sheets-test' }),
-      IntegrationJobsModule.forRoot(workerConfig(googleUrlsOf(google)), { flushWindowSeconds: W }),
+      // Email mất quyền (Story 6.6) của `IntegrationJobsModule`: transport giả, không SMTP.
+      EmailModule.forRoot({ url: config.SMTP_URL, from: config.EMAIL_FROM }),
+      IntegrationJobsModule.forRoot(config, { flushWindowSeconds: W }),
     ],
   })
     .overrideProvider(GOOGLE_SHEETS_CLIENT)
     .useValue(tracing)
+    .overrideProvider(EMAIL_TRANSPORT)
+    .useValue(new FakeEmailTransport())
     .compile();
   worker = await moduleRef.init();
   workerBoss = worker.get<PgBoss>(BOSS);

@@ -164,6 +164,17 @@ export const JobQueue = {
   INTEGRATION_SHEET_FLUSH: 'integration.sheet-flush',
   /** Dead-letter của `INTEGRATION_SHEET_FLUSH`: job hết lượt retry được chép sang đây. */
   INTEGRATION_SHEET_FLUSH_DEAD_LETTER: 'integration.sheet-flush.dead-letter',
+  /**
+   * Email báo Tickee mất quyền ghi Google Sheet của một Sự kiện (`integration`, Story 6.6), payload
+   * `SheetsAuthRevokedEmailPayload` (id kết nối và lúc mất quyền; không token, không email). Lệnh chuyển kết nối sang
+   * `auth_revoked` (lỗi Google ở lần đẩy đầu/flush, hay xóa người cấp khỏi BTC) enqueue job gốc bằng chính `tx` đó, id
+   * cố định theo (kết nối, `auth_revoked_at`). Worker chốt người nhận lúc chạy job gốc (Owner rồi mọi Admin) rồi tạo mỗi
+   * người một job con (`recipientUserId`, id suy từ id job gốc); job con gửi đúng một email. Kết nối không còn, hay không
+   * còn `auth_revoked` với đúng mốc đó (đã kết nối lại, đã ngắt) → bỏ qua.
+   */
+  INTEGRATION_SHEETS_AUTH_REVOKED_EMAIL: 'integration.sheets-auth-revoked-email',
+  /** Dead-letter của `INTEGRATION_SHEETS_AUTH_REVOKED_EMAIL`: job hết lượt retry được chép sang đây. */
+  INTEGRATION_SHEETS_AUTH_REVOKED_EMAIL_DEAD_LETTER: 'integration.sheets-auth-revoked-email.dead-letter',
 } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];
 
@@ -221,3 +232,15 @@ export type SheetRowChangedPayload = z.infer<typeof SheetRowChangedPayload>;
 /** Payload của job `integration.sheet-flush` (Story 6.5): chỉ id kết nối Google Sheets, không token, không PII. */
 export const SheetFlushPayload = z.object({ connectionId: z.uuid() });
 export type SheetFlushPayload = z.infer<typeof SheetFlushPayload>;
+
+/**
+ * Payload của job `integration.sheets-auth-revoked-email` (Story 6.6): id kết nối và lúc mất quyền
+ * (`auth_revoked_at`, ISO) — cũng là khóa chống gửi lặp của danh mục thông báo. Không token, không email hay SĐT.
+ */
+export const SheetsAuthRevokedEmailPayload = z.object({
+  connectionId: z.uuid(),
+  authRevokedAt: z.iso.datetime(),
+  /** Có: job con, gửi đúng một email cho người này. Thiếu: job gốc, tính người nhận rồi tạo job con. */
+  recipientUserId: z.uuid().optional(),
+});
+export type SheetsAuthRevokedEmailPayload = z.infer<typeof SheetsAuthRevokedEmailPayload>;

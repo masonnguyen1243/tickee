@@ -42,13 +42,35 @@ export async function connectionById(db: DbExecutor, connectionId: string): Prom
   return row ?? null;
 }
 
-/** Kết nối còn tồn tại không (worker kiểm trước mỗi lô ghi). */
-export async function connectionExists(db: DbExecutor, connectionId: string): Promise<boolean> {
+/**
+ * Worker còn được ghi lên Sheet của kết nối không, kiểm trước mỗi lô ghi: `writable`; kết nối đã bị xóa ("Ngắt kết nối")
+ * → `disconnected`; đã chuyển `auth_revoked` giữa lượt (Story 6.6: người cấp bị xóa khỏi BTC, hay job khác vừa nhận lỗi
+ * mất quyền) → `auth_revoked`: dừng, không ghi tiếp vào Drive của người cấp.
+ */
+export async function connectionWritable(
+  db: DbExecutor,
+  connectionId: string,
+): Promise<'writable' | 'disconnected' | 'auth_revoked'> {
   const [row] = await db
-    .select({ id: sheetConnections.id })
+    .select({ status: sheetConnections.status })
     .from(sheetConnections)
     .where(eq(sheetConnections.id, connectionId));
-  return row !== undefined;
+  if (!row) return 'disconnected';
+  return row.status === SheetConnectionStatus.AUTH_REVOKED ? 'auth_revoked' : 'writable';
+}
+
+/** Kết quả dừng lượt khi kết nối không còn ghi được (`connectionWritable`), chung cho lần đẩy đầu và flush. */
+export const stoppedRun = (state: 'disconnected' | 'auth_revoked') =>
+  state === 'disconnected'
+    ? ({ result: 'disconnected' } as const)
+    : ({ result: 'skipped', reason: 'auth_revoked' } as const);
+
+/**
+ * Lệnh ghi trạng thái có điều kiện (`markSynced`, `resetSpreadsheet`) không áp: kết nối đã bị xóa (`disconnected`) hay
+ * đã chuyển `auth_revoked` giữa lượt (Story 6.6, `skipped`).
+ */
+export async function stoppedAfterWrite(db: DbExecutor, connectionId: string) {
+  return stoppedRun((await connectionWritable(db, connectionId)) === 'auth_revoked' ? 'auth_revoked' : 'disconnected');
 }
 
 /**
@@ -70,24 +92,28 @@ export async function saveSpreadsheet(
 }
 
 /**
- * Ghi lỗi Google của lần chạy: `retrying` (lỗi tạm thời) hoặc `auth_revoked` (mất quyền), kèm `last_error_code`. Không
- * đụng kết nối đã `auth_revoked` (giữ mã lỗi đã chốt). Trả `false` khi kết nối đã bị xóa (hoặc đã `auth_revoked`).
+ * Ghi lỗi Google tạm thời của lần chạy: `retrying` kèm `last_error_code`. Không đụng kết nối đã `auth_revoked` (giữ mã
+ * lỗi và mốc đã chốt). Trả `false` khi kết nối đã bị xóa (hoặc đã `auth_revoked`). Mất quyền đi qua
+ * `revokeSheetConnection` (`sheet-revocation.ts`, Story 6.6): mốc, email và tín hiệu trong cùng transaction.
  */
 export async function markSyncFailure(
   db: DbExecutor,
   connectionId: string,
-  status: typeof SheetConnectionStatus.RETRYING | typeof SheetConnectionStatus.AUTH_REVOKED,
   code: SheetSyncErrorCode,
 ): Promise<boolean> {
   const rows = await db
     .update(sheetConnections)
-    .set({ status, lastErrorCode: code, updatedAt: sql`now()` })
+    .set({ status: SheetConnectionStatus.RETRYING, lastErrorCode: code, updatedAt: sql`now()` })
     .where(and(eq(sheetConnections.id, connectionId), ne(sheetConnections.status, SheetConnectionStatus.AUTH_REVOKED)))
     .returning({ id: sheetConnections.id });
   return rows.length > 0;
 }
 
-/** Lần đẩy xong: `active`, `last_synced_at` = đồng hồ DB, xóa mã lỗi. `false` khi kết nối đã bị xóa. */
+/**
+ * Lần đẩy xong: `active`, `last_synced_at` = đồng hồ DB, xóa mã lỗi. `false` khi kết nối đã bị xóa, hoặc đã chuyển
+ * `auth_revoked` giữa lượt (Story 6.6: người cấp bị xóa khỏi BTC trong lúc job đang ghi; không bao giờ đè trạng thái mất
+ * quyền).
+ */
 export async function markSynced(db: DbExecutor, connectionId: string): Promise<boolean> {
   const rows = await db
     .update(sheetConnections)
@@ -97,7 +123,7 @@ export async function markSynced(db: DbExecutor, connectionId: string): Promise<
       lastErrorCode: null,
       updatedAt: sql`now()`,
     })
-    .where(eq(sheetConnections.id, connectionId))
+    .where(and(eq(sheetConnections.id, connectionId), ne(sheetConnections.status, SheetConnectionStatus.AUTH_REVOKED)))
     .returning({ id: sheetConnections.id });
   return rows.length > 0;
 }
@@ -105,7 +131,8 @@ export async function markSynced(db: DbExecutor, connectionId: string): Promise<
 /**
  * Sheet của kết nối không còn dùng được (spreadsheet 404, mất tab, mất cột Mã Đơn; Quyết định 2 của Story 6.5): CAS theo
  * `spreadsheet_id` đang giữ, đặt lại `spreadsheet_id`, `spreadsheet_url`, `last_synced_at`, `last_error_code` và
- * `sheet_tab_id` (mặc định 0), chuyển `syncing`. Dòng bẩn giữ nguyên. `false` khi kết nối đã bị xóa hoặc đã đổi Sheet.
+ * `sheet_tab_id` (mặc định 0), chuyển `syncing`. Dòng bẩn giữ nguyên. `false` khi kết nối đã bị xóa, đã đổi Sheet, hoặc
+ * đã chuyển `auth_revoked` giữa lượt (Story 6.6).
  */
 export async function resetSpreadsheet(db: DbExecutor, connectionId: string, spreadsheetId: string): Promise<boolean> {
   const rows = await db
@@ -119,7 +146,13 @@ export async function resetSpreadsheet(db: DbExecutor, connectionId: string, spr
       sheetTabId: sql`DEFAULT`,
       updatedAt: sql`now()`,
     })
-    .where(and(eq(sheetConnections.id, connectionId), eq(sheetConnections.spreadsheetId, spreadsheetId)))
+    .where(
+      and(
+        eq(sheetConnections.id, connectionId),
+        eq(sheetConnections.spreadsheetId, spreadsheetId),
+        ne(sheetConnections.status, SheetConnectionStatus.AUTH_REVOKED),
+      ),
+    )
     .returning({ id: sheetConnections.id });
   return rows.length > 0;
 }

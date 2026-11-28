@@ -1,10 +1,13 @@
 import {
+  eventSettingsPath,
   organizationSectionPath,
+  SHEETS_KEPT_CHANGES_NOTE,
   type OrganizationSection,
   type Role,
   type StatusNotice,
   type StatusNoticeCode,
 } from '@tickee/contracts';
+import { z } from 'zod';
 
 /*
  * Nội dung `status-banner` theo mã thông báo trạng thái (AD-34). Web chỉ ánh xạ `code` → nội dung (có thể khác theo vai
@@ -20,13 +23,22 @@ export type SectionNoticeAction = { label: string; section: OrganizationSection 
  */
 export type ExternalNoticeAction = { label: string; urlKey: 'tingeePortalUrl' };
 
+/**
+ * Hành động dạng link tới tab Cài đặt của một Sự kiện (Story 6.6, "Kết nối lại" Google Sheets): id Sự kiện lấy từ
+ * `notice.data[eventSettings]` do api trả; thiếu hoặc không phải UUID thì banner không có hành động.
+ */
+export type EventSettingsNoticeAction = { label: string; eventSettings: 'eventId' };
+
 /** Tối đa một hành động mỗi banner. */
-export type StatusNoticeAction = SectionNoticeAction | ExternalNoticeAction;
+export type StatusNoticeAction = SectionNoticeAction | ExternalNoticeAction | EventSettingsNoticeAction;
 
 export type StatusNoticeContent = { title: string; description?: string; action?: StatusNoticeAction };
 
 /** Nội dung riêng cho từng vai (vd. Owner có nút, Admin chỉ được nhắc nhờ Owner). */
 export type StatusNoticeContentByRole = Readonly<Record<Role, StatusNoticeContent>>;
+
+/** Nội dung tính từ `notice.data` (vd. tên Sự kiện trong mô tả, Story 6.6); như nhau cho mọi vai. */
+export type StatusNoticeContentOf = (data: StatusNotice['data']) => StatusNoticeContent;
 
 const NOT_LINKED_TITLE = 'Chưa liên kết tài khoản nhận tiền';
 /** Hậu quả chung của năm mã dịch vụ thanh toán bị ngắt (Story 4.2). */
@@ -96,8 +108,28 @@ const PAYMENT_SERVICE_CONTENT = {
   },
 } satisfies Partial<Record<StatusNoticeCode, StatusNoticeContentByRole>>;
 
+/** Tiêu đề banner mất quyền Google Sheets (Story 6.6). */
+export const SHEETS_AUTH_REVOKED_TITLE = 'Mất quyền ghi Google Sheets';
+
+/**
+ * Story 6.6: mỗi kết nối `auth_revoked` một banner (warning, đóng được; Owner và Admin), mô tả nêu tên Sự kiện
+ * (`data.eventName`) kèm câu giữ dòng bẩn, "Kết nối lại" tới tab Cài đặt của `data.eventId`.
+ */
+function sheetsAuthRevokedContent(data: StatusNotice['data']): StatusNoticeContent {
+  const name = typeof data.eventName === 'string' ? data.eventName.trim() : '';
+  return {
+    title: SHEETS_AUTH_REVOKED_TITLE,
+    description: name
+      ? `Google Sheet của Sự kiện “${name}” đang dừng đồng bộ. ${SHEETS_KEPT_CHANGES_NOTE}`
+      : `Google Sheet của một Sự kiện đang dừng đồng bộ. ${SHEETS_KEPT_CHANGES_NOTE}`,
+    action: { label: 'Kết nối lại', eventSettings: 'eventId' },
+  };
+}
+
 /** Mỗi mã trong `StatusNoticeCode` bắt buộc có nội dung (thiếu thì lỗi typecheck). */
-export const STATUS_NOTICE_CONTENT: Readonly<Record<StatusNoticeCode, StatusNoticeContent | StatusNoticeContentByRole>> = {
+export const STATUS_NOTICE_CONTENT: Readonly<
+  Record<StatusNoticeCode, StatusNoticeContent | StatusNoticeContentByRole | StatusNoticeContentOf>
+> = {
   CLOSED_BETA_REVOKED: {
     title: 'Closed Beta đã bị thu hồi',
     description: 'Hạng vé có phí của BTC đang Tạm ngừng bán. Hạng vé 0đ vẫn bán bình thường.',
@@ -122,11 +154,17 @@ export const STATUS_NOTICE_CONTENT: Readonly<Record<StatusNoticeCode, StatusNoti
     description: 'Mua thêm Token trước khi Sự kiện có phí bị Tạm ngừng bán.',
     action: { label: 'Mua thêm Token', urlKey: 'tingeePortalUrl' },
   },
+  SHEETS_AUTH_REVOKED: sheetsAuthRevokedContent,
 };
 
-/** Nội dung của một mã cho vai người xem. */
-export function statusNoticeContent(code: StatusNoticeCode, role: Role): StatusNoticeContent {
+/** Nội dung của một mã cho vai người xem; mã có nội dung theo dữ liệu đọc `data` (`notice.data` do api trả). */
+export function statusNoticeContent(
+  code: StatusNoticeCode,
+  role: Role,
+  data: StatusNotice['data'] = {},
+): StatusNoticeContent {
   const content = STATUS_NOTICE_CONTENT[code];
+  if (typeof content === 'function') return content(data);
   return 'title' in content ? content : content[role];
 }
 
@@ -144,9 +182,18 @@ function httpUrl(value: unknown): string | null {
   }
 }
 
+const uuid = z.uuid();
+
+/** `data.eventId` khi là UUID (không bao giờ đặt chuỗi tùy ý vào đường dẫn), không thì `null`. */
+function eventIdOf(data: StatusNotice['data'] | undefined): string | null {
+  const value = data?.eventId;
+  return typeof value === 'string' && uuid.safeParse(value).success ? value : null;
+}
+
 /**
- * Đích của hành động: mục của BTC `orgId`, hoặc URL ngoài đọc từ `notice.data`. URL ngoài thiếu hay sai dạng → `null`
- * (banner hiện không có hành động thay vì một nút hỏng).
+ * Đích của hành động: mục của BTC `orgId`, tab Cài đặt của Sự kiện `data.eventId` (Story 6.6), hoặc URL ngoài đọc từ
+ * `notice.data`. Id Sự kiện hay URL ngoài thiếu hoặc sai dạng → `null` (banner hiện không có hành động thay vì một nút
+ * hỏng).
  */
 export function statusNoticeLink(
   action: StatusNoticeAction,
@@ -156,20 +203,30 @@ export function statusNoticeLink(
   if ('section' in action) {
     return { label: action.label, href: organizationSectionPath(orgId, action.section), external: false };
   }
+  if ('eventSettings' in action) {
+    const eventId = eventIdOf(notice.data);
+    return eventId ? { label: action.label, href: eventSettingsPath(orgId, eventId), external: false } : null;
+  }
   const href = httpUrl(notice.data[action.urlKey]);
   return href ? { label: action.label, href, external: true } : null;
 }
 
 const DISMISSED_PREFIX = 'tickee:thong-bao-da-dong:';
 
-type DismissibleNotice = Pick<StatusNotice, 'code' | 'version'>;
+type DismissibleNotice = Pick<StatusNotice, 'code' | 'version'> & { data?: StatusNotice['data'] };
 
 /**
  * Khóa `sessionStorage` của một banner đã đóng: theo BTC `orgId` + `code` + `version`, nên trạng thái đổi thì banner hiện
- * lại, và đóng banner của BTC này không ẩn banner cùng mã, cùng `version` của BTC khác (Story 4.5-b).
+ * lại, và đóng banner của BTC này không ẩn banner cùng mã, cùng `version` của BTC khác (Story 4.5-b). Thông báo theo Sự
+ * kiện (`data.eventId`, Story 6.6) thêm id Sự kiện vào khóa: hai kết nối mất quyền trong cùng một transaction (xóa người
+ * cấp) có cùng `version` nhưng mỗi banner vẫn đóng riêng (khóa cũng là `key` React của banner).
  */
-export const statusNoticeDismissKey = (orgId: string, notice: DismissibleNotice): string =>
-  `${DISMISSED_PREFIX}${orgId}:${notice.code}:${notice.version}`;
+export function statusNoticeDismissKey(orgId: string, notice: DismissibleNotice): string {
+  const eventId = eventIdOf(notice.data);
+  return eventId
+    ? `${DISMISSED_PREFIX}${orgId}:${notice.code}:${eventId}:${notice.version}`
+    : `${DISMISSED_PREFIX}${orgId}:${notice.code}:${notice.version}`;
+}
 
 /** Đã đóng trong phiên trình duyệt này chưa; storage bị chặn thì coi như chưa (banner vẫn hiện). */
 export function isStatusNoticeDismissed(orgId: string, notice: DismissibleNotice): boolean {

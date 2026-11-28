@@ -11,7 +11,8 @@ import { checkerInvites, checkers } from './schema.js';
 
 /*
  * Phần `checkin` mà luồng nhận lời mời CTV (`flows.acceptCheckerInvite`, `flows.previewCheckerInvite`, Story 5.2), cổng
- * quyền CTV, danh sách CTV (`flows`, Story 5.6) và "Thu hồi"/"Khôi phục" (Story 5.6) cần. Token chỉ vào đây và chỉ được
+ * quyền CTV, danh sách CTV (`flows`, Story 5.6), "Thu hồi"/"Khôi phục" (Story 5.6) và xóa Admin (`flows.removeMember`,
+ * Story 6.6) cần. Token chỉ vào đây và chỉ được
  * băm: không trả ra, không log. Đọc theo BTC qua `orgScope`, trừ một ngoại lệ có chủ ý: `checkerInviteByToken` tìm link
  * theo hash token trên mọi BTC (người mở link chưa thuộc BTC nào; token 128 bit là khóa tra), rồi các bước sau dùng BTC
  * của chính link đó.
@@ -195,4 +196,30 @@ export async function setCheckerStatus(
       changedFields: ['status'],
     });
   });
+}
+
+/**
+ * Admin `userId` vừa bị xóa khỏi BTC (Story 6.6, gộp phần "removeMember thu hồi dòng checkers trong BTC" của E5-1), trong
+ * `tx` của `flows.removeMember`: mọi dòng `checkers` còn `active` của người đó trong các Sự kiện của BTC `ctx` chuyển
+ * `revoked`, người thu hồi là người xóa (`ctx.userId`), lúc thu hồi `now()`; mỗi dòng đổi một audit `checker.revoked`
+ * (`changedFields: ['status']`), như "Thu hồi" (`setCheckerStatus`). Dòng đã `revoked` giữ người và lúc thu hồi cũ. Không
+ * đẩy realtime: quyền CTV đọc lại ở mỗi request. Trả id các dòng vừa thu hồi.
+ */
+export async function revokeCheckersOfMember(tx: Tx, ctx: AccessContext, userId: string): Promise<string[]> {
+  const rule = ACTION_RULES[CheckerAction.REVOKE];
+  const revoked = await tx
+    .update(checkers)
+    .set({ status: rule.status, revokedBy: ctx.userId, revokedAt: sql`now()` })
+    .where(and(orgScope(ctx)(checkers), eq(checkers.userId, userId), eq(checkers.status, 'active')))
+    .returning({ id: checkers.id });
+  for (const { id } of revoked) {
+    await audit.record(tx, {
+      actorUserId: ctx.userId,
+      organizationId: ctx.organizationId,
+      action: rule.audit,
+      target: { type: 'checker', id },
+      changedFields: ['status'],
+    });
+  }
+  return revoked.map((row) => row.id);
 }

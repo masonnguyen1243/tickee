@@ -19,12 +19,14 @@ import { GOOGLE_SHEETS_CLIENT, SHEETS_SECRET_BOX } from './integration.config.js
 import {
   clearDirty,
   connectionById,
-  connectionExists,
+  connectionWritable,
   connectionOfEventForShare,
   dirtyRowsOf,
   markDirty,
   markSynced,
   resetSpreadsheet,
+  stoppedAfterWrite,
+  stoppedRun,
   type SheetConnectionRow,
 } from './sheet-connection-store.js';
 import {
@@ -41,9 +43,11 @@ import {
   recordGoogleFailure,
   scheduleFlushIfDirty,
   SHEET_INITIAL_SYNC_QUEUE,
+  sheetInitialSyncJobId,
   sheetOrdersOf,
   type SheetSyncDeps,
 } from './sheet-sync-jobs.js';
+import { SHEETS_AUTH_REVOKED_EMAIL_QUEUE } from './sheet-revocation.js';
 
 /*
  * Đồng bộ Đơn và check-in lên Google Sheets trong 1 phút (Story 6.5, FR-32, AD-23), vai worker.
@@ -51,7 +55,8 @@ import {
  * Handler `integration.sheet_row_changed` `{ eventId, orderId }` (producer: `ordering`, `ticketing`): trong một transaction,
  * khóa kết nối của Sự kiện `FOR SHARE`; không có kết nối → xong; có (mọi trạng thái) → upsert dòng bẩn và tăng `version`;
  * chỉ hẹn flush khi lần đẩy đầu đã xong (`last_synced_at` có) và kết nối không `auth_revoked`. Lần đẩy đầu chưa xong → chỉ
- * đánh dấu (lần đẩy đầu xong thì tự hẹn flush); `auth_revoked` → chỉ đánh dấu, giữ cho 6.6.
+ * đánh dấu (lần đẩy đầu xong thì tự hẹn flush); `auth_revoked` → chỉ đánh dấu: "Kết nối lại" (Story 6.6) hẹn flush hay
+ * chạy lại lần đẩy đầu cho các dòng này.
  *
  * Flush `integration.sheet-flush` `{ connectionId }` (debounce theo kết nối, policy `singleton`), mỗi lượt:
  *   1. đọc kết nối (không còn, `auth_revoked`, lần đẩy đầu chưa xong → xong, không gọi Google) và tối đa 500 dòng bẩn
@@ -70,9 +75,11 @@ import {
  *      liền nhau; ô của cột BTC không bị chạm;
  *   7. xóa dòng bẩn đã đọc khi `version` vẫn bằng giá trị đã đọc (Đơn đổi giữa lượt giữ dấu), `active` + `last_synced_at`,
  *      xóa `last_error_code`; còn dòng bẩn → hẹn lượt sau.
- * Trước khi ghi và trước khi cập nhật trạng thái kiểm kết nối còn tồn tại ("Ngắt kết nối" xóa luôn dòng bẩn). Không gọi
- * Google trong transaction DB. Lỗi Google phân loại như lần đẩy đầu: mất quyền → `auth_revoked` (không retry, giữ dòng
- * bẩn); lỗi tạm thời (kể cả 403 quota) → `retrying` + `last_error_code`, pg-boss retry có backoff, hết lượt → dead-letter.
+ * Trước khi ghi và trước khi cập nhật trạng thái kiểm kết nối còn ghi được ("Ngắt kết nối" xóa luôn dòng bẩn; đã chuyển
+ * `auth_revoked` giữa lượt thì dừng, giữ dòng bẩn — Story 6.6). Không gọi Google trong transaction DB. Lỗi Google phân
+ * loại như lần đẩy đầu: mất quyền → `auth_revoked` (mốc, email, `org_status_changed` cùng transaction — Story 6.6; không
+ * retry, giữ dòng bẩn); lỗi tạm thời (kể cả 403 quota) → `retrying` + `last_error_code`, pg-boss retry có backoff, hết
+ * lượt → dead-letter.
  * Không log token hay giá trị Đơn.
  */
 
@@ -111,7 +118,7 @@ export type SheetRecreateReason = 'spreadsheet_not_found' | 'tab_not_found' | 'o
 
 /** Kết quả một lượt flush (cho log và test). */
 export type SheetFlushOutcome =
-  /** Không gọi Google. */
+  /** Không gọi Google (trừ `auth_revoked` giữa lượt: dừng trước lần ghi kế, Story 6.6). */
   | {
       result: 'skipped';
       reason: 'not_found' | 'auth_revoked' | 'initial_sync_pending' | 'clean' | 'event_not_found';
@@ -143,10 +150,10 @@ async function recreateSheet(
 ): Promise<SheetFlushOutcome> {
   const reset = await deps.db.transaction(async (tx) => {
     if (!(await resetSpreadsheet(tx, connection.id, spreadsheetId))) return false;
-    await enqueueSheetInitialSync(deps.boss, tx, connection.id, spreadsheetId);
+    await enqueueSheetInitialSync(deps.boss, tx, connection.id, sheetInitialSyncJobId(connection.id, spreadsheetId));
     return true;
   });
-  return reset ? { result: 'recreating', reason } : { result: 'disconnected' };
+  return reset ? { result: 'recreating', reason } : stoppedAfterWrite(deps.db.orm, connection.id);
 }
 
 /** Id mọi Đơn đồng bộ của Sự kiện (để điền cột vừa thêm). */
@@ -223,7 +230,8 @@ export async function runSheetFlush(deps: SheetSyncDeps, connectionId: string): 
       return { order, row };
     });
 
-    if (!(await connectionExists(db.orm, connectionId))) return { result: 'disconnected' };
+    const writable = await connectionWritable(db.orm, connectionId);
+    if (writable !== 'writable') return stoppedRun(writable);
     let grid = tab.grid;
     if (missing.length > 0) {
       // Đánh dấu trước khi thêm cột: lượt này lỗi sau khi thêm cột thì các lượt sau vẫn điền đủ cột đó.
@@ -253,9 +261,10 @@ export async function runSheetFlush(deps: SheetSyncDeps, connectionId: string): 
     }));
     await google.writeCells(accessToken, spreadsheetId, cellBlocks(tab.sheetId, positions, rows));
 
-    if (!(await connectionExists(db.orm, connectionId))) return { result: 'disconnected' };
+    const written = await connectionWritable(db.orm, connectionId);
+    if (written !== 'writable') return stoppedRun(written);
     await clearDirty(db.orm, connectionId, dirty);
-    if (!(await markSynced(db.orm, connectionId))) return { result: 'disconnected' };
+    if (!(await markSynced(db.orm, connectionId))) return await stoppedAfterWrite(db.orm, connectionId);
     const more = await scheduleFlushIfDirty(deps, connectionId);
     return {
       result: 'flushed',
@@ -268,7 +277,7 @@ export async function runSheetFlush(deps: SheetSyncDeps, connectionId: string): 
   } catch (err) {
     if (!(err instanceof GoogleApiError)) throw err;
     if (err.kind === 'not_found') return recreateSheet(deps, connection, spreadsheetId, 'spreadsheet_not_found');
-    return recordGoogleFailure(db, connectionId, err);
+    return recordGoogleFailure(deps, connectionId, err);
   }
 }
 
@@ -300,6 +309,8 @@ export class SheetFlushWorker implements OnApplicationBootstrap {
 
   async onApplicationBootstrap(): Promise<void> {
     await SHEET_INITIAL_SYNC_QUEUE.ensure(this.boss);
+    // Mất quyền khi flush thì enqueue email (Story 6.6): queue phải có trước lượt flush đầu tiên.
+    await SHEETS_AUTH_REVOKED_EMAIL_QUEUE.ensure(this.boss);
     // Queue flush đăng ký trước: handler `sheet_row_changed` enqueue vào nó.
     await registerQueueWorker(this.boss, SHEET_FLUSH_QUEUE, {
       logger: this.logger,

@@ -146,6 +146,13 @@ function InviteForm({ orgId }: { orgId: string }) {
   );
 }
 
+/**
+ * Hậu quả thêm của "Xóa" (Story 6.6): kết nối Google Sheets người này tạo chuyển "Mất quyền" (Owner và Admin nhận email và
+ * banner để kết nối lại) và quyền soát vé (CTV) của người này ở các Sự kiện của BTC bị thu hồi.
+ */
+const REMOVAL_SIDE_EFFECTS =
+  'Kết nối Google Sheets người này đã tạo sẽ dừng đồng bộ (Owner và Admin được báo để kết nối lại), và quyền soát vé (CTV) của người này bị thu hồi.';
+
 function RemoveDialog({
   orgId,
   member,
@@ -192,7 +199,7 @@ function RemoveDialog({
       descriptionClassName="break-words"
       description={
         member
-          ? `${member.email} sẽ không còn quản lý Sự kiện, Đơn và các mục khác của ${organizationName}. Muốn họ quay lại thì mời lại.`
+          ? `${member.email} sẽ không còn quản lý Sự kiện, Đơn và các mục khác của ${organizationName}. ${REMOVAL_SIDE_EFFECTS} Muốn họ quay lại thì mời lại.`
           : null
       }
       confirmLabel="Xóa"

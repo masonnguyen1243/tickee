@@ -277,11 +277,12 @@ describe('handler sheet_row_changed', () => {
     expect(await dirtyOf(h, connectionId)).toEqual(new Map([[order.id, 2]]));
   });
 
-  it('auth_revoked → chỉ đánh dấu, giữ dòng bẩn cho 6.6, không hẹn flush', async () => {
+  it('auth_revoked → chỉ đánh dấu, giữ dòng bẩn cho lần kết nối lại (6.6), không hẹn flush', async () => {
     const sale = await freeSheetEvent(org);
     const { connectionId } = await connectAndSync(env, sale.event.id);
     await h.db.pool.query(
-      "UPDATE sheet_connections SET status = 'auth_revoked', last_error_code = 'invalid_grant' WHERE id = $1",
+      `UPDATE sheet_connections SET status = 'auth_revoked', last_error_code = 'invalid_grant', auth_revoked_at = now()
+        WHERE id = $1`,
       [connectionId],
     );
     const order = await placeFreeOrder(h, sale);
