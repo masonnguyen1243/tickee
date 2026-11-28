@@ -176,6 +176,7 @@ context:
   - test thêm: kết nối người đó cấp ở BTC khác giữ nguyên, SMTP lỗi chỉ ném tên lớp, mất quyền giữa lượt ở flush và lần đẩy đầu (trước/sau khi ghi, khi tạo lại Sheet, giữa hai lô, sau lô cuối), người kết nối lại bị xóa trong lúc dò.
 - **Kiểm chứng (28/11/2026):** `pnpm typecheck` sạch; `pnpm lint:deps` 0 vi phạm; `pnpm test`: api 113 file / 1.995 test, web 516, contracts 412, đều xanh. `pnpm test:e2e` lần đầu báo lỗi (log chỉ giữ phần cuối nên không biết test nào), chạy lại 1.438/1.438 xanh trên `ios-webkit` và `android-chromium`. Migration 0040 đã chạy lại tay trên 306 dòng `auth_revoked` có sẵn (Triage #17).
 - **Còn mở:** AC thứ hai (OAuth client Google thật) chưa kiểm. Chưa chốt được hành vi thật của `drive.file` khi kết nối lại bằng cùng tài khoản (có mở lại được Sheet cũ không); hiện chỉ Google fake mô phỏng.
+- Kiểm thủ công hoãn (28/11/2026): AC thứ hai (dev stack với OAuth client Google thật, gộp kiểm tay hoãn từ 6.4 và 6.5) và Verification › Manual checks → 9.1.
 
 ## Spec Change Log
 

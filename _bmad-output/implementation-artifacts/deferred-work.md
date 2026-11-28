@@ -1357,3 +1357,10 @@ Từ 19/11/2026, Story 4.7 chỉ còn phần không cần nhà cung cấp hạ t
   summary: Kiểm thủ công AC 3 của 6.5 (gộp kiểm thủ công hoãn từ 6.4) chưa làm: trên dev stack với OAuth client Google thật, kết nối một Sự kiện có Đơn thật (câu hỏi form, check-in), thanh toán một Đơn mới và check-in một Vé, rồi kiểm Sheet trong Drive của người cấp (tiếng Việt đúng, SĐT giữ số 0, số tiền là số, giờ Việt Nam), dòng mới và ô check-in cập nhật trong khoảng 1 phút, ngắt kết nối thì Sheet vẫn còn trong Drive.
   evidence: Spec 6.5 › Tasks & Acceptance › AC thứ ba và Verification › Manual checks. Mọi test chạy với Google fake. Mason hoãn ngày 27/11/2026 để kiểm gộp với OAuth thật của 6.6 (kết nối lại), cùng lúc với mục Sheet trong thùng rác (Triage #22 của 6.5).
   story: 6.6
+
+## Deferred from: kiểm thủ công of spec-6-6-mat-quyen-google-sheets-va-ket-noi-lai.md (2026-11-28)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-6-mat-quyen-google-sheets-va-ket-noi-lai.md`
+  summary: Kiểm thủ công AC thứ hai của 6.6 (gộp kiểm tay hoãn từ 6.4 và 6.5) chưa làm: trên stack có OAuth client Google thật, kết nối một Sự kiện có Đơn thật (câu hỏi form, check-in), thanh toán một Đơn mới, check-in một Vé, thu hồi quyền của Tickee ở trang quyền của tài khoản Google, đổi một Đơn rồi bấm "Kết nối lại". Kiểm Sheet (tiếng Việt đúng, SĐT giữ số 0, số tiền là số, giờ Việt Nam, dòng mới và ô check-in cập nhật trong khoảng 1 phút), banner và đúng một email khi mất quyền, kết nối lại bằng cùng tài khoản dùng lại Sheet cũ (`drive.file`), Sheet chuyển vào thùng rác khi flush chạy (Triage #22 của 6.5), lô thêm cột khi có câu hỏi form mới, và ngắt kết nối thì Sheet vẫn còn trong Drive.
+  evidence: Spec 6.6 › Tasks & Acceptance › AC thứ hai và Verification › Manual checks. Mọi test chạy với Google fake; hành vi `drive.file` khi kết nối lại bằng cùng tài khoản mới chỉ có fake mô phỏng (knob `account`). Mason hoãn ngày 28/11/2026 sang 9.1: môi trường staging cần OAuth client Google thật.
+  story: 9.1
