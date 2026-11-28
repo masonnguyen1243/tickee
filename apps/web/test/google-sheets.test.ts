@@ -9,6 +9,7 @@ import {
   sheetsRefetchInterval,
   SHEETS_RETRYING_POLL_MS,
   SHEETS_SYNCING_POLL_MS,
+  SHEETS_RECONNECT_LABEL,
   startSheetsConnect,
 } from '@/lib/integration/google-sheets';
 import { noticeMessage } from '@/lib/notices';
@@ -97,6 +98,8 @@ describe('câu chữ theo trạng thái', () => {
     expect(sheetsConnectionView(connection())).toEqual({
       badge: { label: 'Đã kết nối', tone: 'success' },
       error: null,
+      reconnect: false,
+      keptChanges: null,
       lastSynced: 'Đồng bộ lần cuối: 10:04 27/11/2026 (giờ Việt Nam)',
       connectedBy: 'Kết nối bởi Trần Thu Hà',
       creating: false,
@@ -111,6 +114,8 @@ describe('câu chữ theo trạng thái', () => {
     ).toEqual({
       badge: { label: 'Đang đồng bộ', tone: 'neutral' },
       error: null,
+      reconnect: false,
+      keptChanges: null,
       lastSynced: 'Đang đẩy các Đơn hiện có lên Sheet.',
       connectedBy: 'Kết nối bởi một thành viên của BTC',
       creating: true,
@@ -131,6 +136,29 @@ describe('câu chữ theo trạng thái', () => {
     expect(configuration.error).toBe('Cấu hình Google của Tickee đang lỗi; Tickee sẽ tự thử lại khi đã sửa.');
   });
 
+  it('Story 6.6: mất quyền → "Kết nối lại" và câu giữ dòng bẩn; người cấp rời BTC có lý do riêng; trạng thái khác thì không', () => {
+    const revoked = sheetsConnectionView(connection({ status: 'auth_revoked', lastErrorCode: 'invalid_grant' }));
+    expect(revoked.reconnect).toBe(true);
+    expect(revoked.keptChanges).toBe('Thay đổi trong lúc mất quyền được giữ lại và ghi lên Sheet khi kết nối lại.');
+    expect(SHEETS_RECONNECT_LABEL).toBe('Kết nối lại');
+    const grantorRemoved = sheetsConnectionView(
+      connection({ status: 'auth_revoked', lastErrorCode: 'grantor_removed', connectedByName: null }),
+    );
+    expect(grantorRemoved.error).toBe('Người kết nối đã rời BTC.');
+    expect(grantorRemoved.reconnect).toBe(true);
+    // Mất quyền trước khi có Sheet: vẫn kết nối lại được, không quay "Đang tạo Sheet…".
+    const noSheet = sheetsConnectionView(
+      connection({ status: 'auth_revoked', lastErrorCode: 'forbidden', spreadsheetUrl: null, lastSyncedAt: null }),
+    );
+    expect(noSheet).toMatchObject({ reconnect: true, creating: false });
+    for (const status of ['active', 'syncing', 'retrying'] as const) {
+      expect(sheetsConnectionView(connection({ status, lastErrorCode: status === 'retrying' ? 'timeout' : null })), status).toMatchObject({
+        reconnect: false,
+        keptChanges: null,
+      });
+    }
+  });
+
   it('"Đang tạo Sheet…" chỉ khi chưa có link mà còn syncing/retrying; mất quyền khi chưa tạo Sheet → không quay mãi', () => {
     const noLink = { spreadsheetUrl: null, lastSyncedAt: null };
     expect(sheetsConnectionView(connection({ ...noLink, status: 'syncing' })).creating).toBe(true);
@@ -143,11 +171,12 @@ describe('câu chữ theo trạng thái', () => {
 });
 
 describe('notice khi callback OAuth quay về', () => {
-  it('bốn mã của Google Sheets có câu toast; mã lạ → không', () => {
+  it('năm mã của Google Sheets có câu toast (kể cả kết nối lại, Story 6.6); mã lạ → không', () => {
     expect(noticeMessage('sheets-connected')).toBe('Đã kết nối Google Sheets. Tickee đang tạo Sheet và đẩy các Đơn hiện có.');
     expect(noticeMessage('sheets-denied')).toBe('Bạn chưa cho phép Tickee truy cập Google Drive nên chưa kết nối Google Sheets.');
     expect(noticeMessage('sheets-failed')).toBe('Chưa kết nối được Google Sheets. Vui lòng thử lại.');
     expect(noticeMessage('sheets-already-connected')).toBe('Sự kiện này đã kết nối Google Sheets.');
+    expect(noticeMessage('sheets-reconnected')).toBe('Đã kết nối lại Google Sheets.');
     expect(noticeMessage('sheets-khac')).toBeNull();
   });
 });

@@ -234,6 +234,10 @@ test('xóa Admin: Dialog nêu hậu quả; Hủy không gọi api; Xóa → DELE
   await memberRow(page, ADMIN_EMAIL).getByRole('button', { name: `Xóa ${ADMIN_EMAIL}` }).click();
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText(`${ADMIN_EMAIL} sẽ không còn quản lý Sự kiện, Đơn và các mục khác của ${ORG_NAME}.`);
+  // Story 6.6: kết nối Google Sheets người này tạo dừng đồng bộ, quyền CTV bị thu hồi.
+  await expect(dialog).toContainText(
+    'Kết nối Google Sheets người này đã tạo sẽ dừng đồng bộ (Owner và Admin được báo để kết nối lại), và quyền soát vé (CTV) của người này bị thu hồi.',
+  );
   await dialog.getByRole('button', { name: 'Hủy' }).click();
   await expect(dialog).toBeHidden();
   expect(deletes()).toHaveLength(0);

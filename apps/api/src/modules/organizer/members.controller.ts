@@ -13,7 +13,8 @@ import { MembersService } from './members.service.js';
 
 /**
  * Thành viên và lời mời Admin của một BTC (Story 2.4). Chỉ Owner (`members.manage`): Admin nhận `FORBIDDEN_ROLE`.
- * Mọi route mang `@RequirePermission` nên tự rơi vào bộ test cách ly.
+ * Mọi route mang `@RequirePermission` nên tự rơi vào bộ test cách ly. Xóa Admin (`DELETE …/members/:memberId`) ở
+ * `flows/member-removal.controller.ts` (Story 6.6): cùng transaction còn thu hồi CTV và kết nối Google Sheets người đó cấp.
  */
 @Controller('orgs/:orgId')
 export class MembersController {
@@ -39,13 +40,6 @@ export class MembersController {
   @RequirePermission(Permission.MEMBERS_MANAGE)
   async revoke(@Access() ctx: AccessContext, @Param('invitationId') invitationId: string): Promise<void> {
     await this.members.revokeInvitation(ctx, invitationId);
-  }
-
-  @Delete('members/:memberId')
-  @HttpCode(204)
-  @RequirePermission(Permission.MEMBERS_MANAGE)
-  async remove(@Access() ctx: AccessContext, @Param('memberId') memberId: string): Promise<void> {
-    await this.members.removeMember(ctx, memberId);
   }
 
   /**

@@ -23,9 +23,9 @@ import { z } from 'zod';
  *   Tổng quan Sự kiện (Story 4.3). Tín hiệu cấp BTC: `id` = `organizationId`, không có `eventId` (mục `unmatched` không
  *   gắn Sự kiện nào). Phát trong cùng `tx` với INSERT `review_items` (IPN và Đối soát bù).
  * - `org_status_changed`: thành viên BTC → `notices`, vai trò. Tín hiệu cấp BTC: `id` = `organizationId`, không có
- *   `eventId`. Hiện cờ dịch vụ thanh toán (Story 4.2: bật, đổi lý do hoặc tắt) và cảnh báo Token (Story 4.5-b: vượt
- *   ngưỡng, về trên ngưỡng, Owner tắt cảnh báo) phát; duyệt/thu hồi Closed Beta và liên kết/hủy liên kết tài khoản nhận
- *   tiền chưa phát (xem `deferred-work.md`).
+ *   `eventId`. Hiện cờ dịch vụ thanh toán (Story 4.2: bật, đổi lý do hoặc tắt), cảnh báo Token (Story 4.5-b: vượt
+ *   ngưỡng, về trên ngưỡng, Owner tắt cảnh báo) và kết nối Google Sheets (Story 6.6: chuyển `auth_revoked`, kết nối lại)
+ *   phát; duyệt/thu hồi Closed Beta và liên kết/hủy liên kết tài khoản nhận tiền chưa phát (xem `deferred-work.md`).
  */
 export const RealtimeTopic = {
   ORDER_CHANGED: 'order_changed',

@@ -31,12 +31,14 @@ import { GoogleApiError, type GoogleSheetsClient, type SpreadsheetTab } from './
 import { GOOGLE_SHEETS_CLIENT, SHEETS_SECRET_BOX } from './integration.config.js';
 import {
   connectionById,
-  connectionExists,
+  connectionWritable,
   hasDirty,
   markSyncFailure,
   markSynced,
   resetSpreadsheet,
   saveSpreadsheet,
+  stoppedAfterWrite,
+  stoppedRun,
   type SheetConnectionRow,
 } from './sheet-connection-store.js';
 import {
@@ -46,12 +48,14 @@ import {
   type SheetFlushSettings,
 } from './sheet-flush-queue.js';
 import { cellBlocks, columnPositions, SHEET_ORDERS_TAB_ID, SHEET_SYNC_BATCH, sheetGridFor } from './sheet-layout.js';
+import { revokeSheetConnection, SHEETS_AUTH_REVOKED_EMAIL_QUEUE } from './sheet-revocation.js';
 import { sheetColumnsOf, sheetOrderValues } from './sheet-rows.js';
 
 /*
  * Lần đẩy đầu của kết nối Google Sheets (Story 6.4, 6.5, FR-32, AD-23), vai worker. Callback OAuth enqueue job
  * `integration.sheet-initial-sync` `{ connectionId }` bằng chính `tx` tạo kết nối (`syncing`); flush enqueue lại (id job
- * mới) khi Sheet mất (Quyết định 2 của Story 6.5). Worker:
+ * mới) khi Sheet mất (Quyết định 2 của Story 6.5), và "Kết nối lại" enqueue lại (id job mới) khi phải tạo Sheet mới hay
+ * lần đẩy đầu chưa xong lúc mất quyền (Story 6.6). Worker:
  *   1. đọc kết nối (đã xóa, đã đẩy xong — `active` hay `last_synced_at` có —, hay `auth_revoked` → xong, không gọi
  *      Google; đã đẩy xong mà còn dòng bẩn thì hẹn lại flush, phòng lần trước hẹn lỗi sau `markSynced`), giải mã refresh
  *      token, lấy access token;
@@ -69,9 +73,11 @@ import { sheetColumnsOf, sheetOrderValues } from './sheet-rows.js';
  *      chỉ các cột Tickee;
  *   6. chuyển `active` + `last_synced_at`; còn dòng bẩn (Đơn đổi trong lúc đẩy đầu, kể cả Đơn chuyển `paid` sau khi trang
  *      chứa nó đã được đọc) → hẹn flush.
- * Trước mỗi lô và trước bước cuối kiểm kết nối còn tồn tại: "Ngắt kết nối" giữa chừng thì dừng, không cập nhật trạng thái.
- * Không gọi Google trong transaction DB. Lỗi Google: `invalid_grant`, 401, 403 (trừ quota/Drive đầy) → `auth_revoked`, xong
- * (không retry); 429, 5xx, 403 quota/Drive đầy, timeout, lỗi mạng, lỗi cấu hình phía Tickee (`configuration`) và phản hồi
+ * Trước mỗi lô và trước bước cuối kiểm kết nối còn ghi được: "Ngắt kết nối" giữa chừng thì dừng (`disconnected`), đã
+ * chuyển `auth_revoked` giữa chừng (Story 6.6: người cấp bị xóa khỏi BTC) thì dừng (`skipped`); không cập nhật trạng thái.
+ * Không gọi Google trong transaction DB. Lỗi Google: `invalid_grant`, 401, 403 (trừ quota/Drive đầy) → `auth_revoked`
+ * (`revokeSheetConnection`: mốc, email cho Owner/Admin và `org_status_changed` cùng transaction, Story 6.6), xong (không
+ * retry); 429, 5xx, 403 quota/Drive đầy, timeout, lỗi mạng, lỗi cấu hình phía Tickee (`configuration`) và phản hồi
  * lạ → `retrying` + `last_error_code`, retry có backoff, hết lượt → dead-letter (luật `dead_letter` của job quét cảnh báo
  * tự báo). Kết nối đã bị xóa lúc ghi lỗi → dừng (`disconnected`). Không log token, `code` hay giá trị Đơn.
  */
@@ -104,28 +110,45 @@ export const sheetInitialSyncJobId = (connectionId: string, replacedSpreadsheetI
   );
 
 /**
- * Enqueue lần đẩy đầu bằng chính `tx` tạo kết nối (hay `tx` đặt lại Sheet khi tạo lại, kèm `replacedSpreadsheetId`).
+ * Id job lần đẩy đầu của một lần "Kết nối lại" (Story 6.6): suy từ lần mất quyền vừa được nối lại (`auth_revoked_at`),
+ * nên khác job của lần kết nối, của mỗi lần tạo lại Sheet và của mỗi lần kết nối lại trước.
+ */
+export const sheetReconnectSyncJobId = (connectionId: string, authRevokedAt: Date): string =>
+  derivedJobId(connectionId, `${JobQueue.INTEGRATION_SHEET_INITIAL_SYNC}:reconnects:${authRevokedAt.toISOString()}`);
+
+/**
+ * Enqueue lần đẩy đầu bằng chính `tx` tạo kết nối, `tx` đặt lại Sheet khi tạo lại (`jobId` =
+ * `sheetInitialSyncJobId(connectionId, replacedSpreadsheetId)`), hay `tx` kết nối lại (`sheetReconnectSyncJobId`).
  * Người gọi đã `SheetSyncQueues.ready()` (vai api) hoặc queue đã có (vai worker) trước transaction.
  */
 export async function enqueueSheetInitialSync(
   boss: PgBoss,
   tx: Tx,
   connectionId: string,
-  replacedSpreadsheetId?: string,
+  jobId: string = sheetInitialSyncJobId(connectionId),
 ): Promise<void> {
-  await SHEET_INITIAL_SYNC_QUEUE.enqueue(
-    boss,
-    tx,
-    { connectionId },
-    { id: sheetInitialSyncJobId(connectionId, replacedSpreadsheetId) },
-  );
+  await SHEET_INITIAL_SYNC_QUEUE.enqueue(boss, tx, { connectionId }, { id: jobId });
 }
 
-/** Vai `api`: start pg-boss (producer) và tạo queue lúc khởi động; `ready()` trước transaction của callback OAuth. */
+/**
+ * Vai `api`: start pg-boss (producer) và tạo queue lần đẩy đầu và queue flush lúc khởi động; `ready()` trước transaction
+ * của callback OAuth (kết nối mới enqueue lần đẩy đầu; "Kết nối lại" dùng lại Sheet còn dòng bẩn thì hẹn flush, Story
+ * 6.6).
+ */
 @Injectable()
 export class SheetSyncQueues extends QueueProducer {
   constructor(@Inject(BOSS) boss: PgBoss) {
-    super(boss, SHEET_INITIAL_SYNC_QUEUE, 'khi kết nối Google Sheets');
+    super(
+      boss,
+      {
+        name: SHEET_INITIAL_SYNC_QUEUE.name,
+        ensure: async (b) => {
+          await SHEET_INITIAL_SYNC_QUEUE.ensure(b);
+          await SHEET_FLUSH_QUEUE.ensure(b);
+        },
+      },
+      'khi kết nối Google Sheets',
+    );
   }
 }
 
@@ -135,7 +158,10 @@ export interface SheetSyncDeps {
   google: GoogleSheetsClient;
   /** Giải mã refresh token (`GOOGLE_SHEETS_TOKEN_KEYS`). */
   secretBox: SecretBox;
-  /** Hẹn flush (lần đẩy đầu xong mà còn dòng bẩn) và enqueue lại lần đẩy đầu (flush tạo lại Sheet). */
+  /**
+   * Hẹn flush (lần đẩy đầu xong mà còn dòng bẩn), enqueue lại lần đẩy đầu (flush tạo lại Sheet) và job email mất quyền
+   * (Story 6.6).
+   */
   boss: PgBoss;
   /** Cửa sổ debounce của flush (giây). */
   flushWindowSeconds: number;
@@ -143,7 +169,10 @@ export interface SheetSyncDeps {
 
 /** Kết quả một lần chạy (cho log và test). */
 export type SheetInitialSyncOutcome =
-  /** Không gọi Google: kết nối không còn, đã đẩy xong / `auth_revoked`, hoặc Sự kiện không còn. */
+  /**
+   * Không gọi Google: kết nối không còn, đã đẩy xong / `auth_revoked`, hoặc Sự kiện không còn. `auth_revoked` giữa lượt
+   * (Story 6.6): dừng trước lần ghi kế.
+   */
   | { result: 'skipped'; reason: 'not_found' | 'already_active' | 'auth_revoked' | 'event_not_found' }
   /** Kết nối bị xóa giữa chừng: dừng, không cập nhật trạng thái. */
   | { result: 'disconnected' }
@@ -265,7 +294,9 @@ export async function runSheetInitialSync(deps: SheetSyncDeps, connectionId: str
       if (!tab) {
         // Sheet của lần chạy trước không dùng được (BTC xóa Sheet, tab hay cột Mã Đơn giữa chừng): bỏ nó, tạo Sheet mới
         // ngay lần này.
-        if (!(await resetSpreadsheet(db.orm, connectionId, spreadsheetId))) return { result: 'disconnected' };
+        if (!(await resetSpreadsheet(db.orm, connectionId, spreadsheetId))) {
+          return await stoppedAfterWrite(db.orm, connectionId);
+        }
         spreadsheetId = null;
         tagged = new Map();
       }
@@ -293,7 +324,8 @@ export async function runSheetInitialSync(deps: SheetSyncDeps, connectionId: str
     }
     const sheet = { spreadsheetId, tab: tab! };
 
-    if (!(await connectionExists(db.orm, connectionId))) return { result: 'disconnected' };
+    const writable = await connectionWritable(db.orm, connectionId);
+    if (writable !== 'writable') return stoppedRun(writable);
     await google.expandGrid(accessToken, sheet.spreadsheetId, sheet.tab.sheetId, sheet.tab.grid, needed);
     let columnCount = Math.max(sheet.tab.grid.columnCount, needed.columnCount);
 
@@ -329,7 +361,8 @@ export async function runSheetInitialSync(deps: SheetSyncDeps, connectionId: str
     }
 
     for (let start = 0; start < orders.length; start += SHEET_SYNC_BATCH) {
-      if (!(await connectionExists(db.orm, connectionId))) return { result: 'disconnected' };
+      const state = await connectionWritable(db.orm, connectionId);
+      if (state !== 'writable') return stoppedRun(state);
       const batch = orders.slice(start, start + SHEET_SYNC_BATCH);
       const ids = batch.map((order) => order.id);
       const [answers, checkins] = await Promise.all([
@@ -344,33 +377,31 @@ export async function runSheetInitialSync(deps: SheetSyncDeps, connectionId: str
       await google.writeCells(accessToken, sheet.spreadsheetId, cellBlocks(sheet.tab.sheetId, positions, rows));
     }
 
-    if (!(await markSynced(db.orm, connectionId))) return { result: 'disconnected' };
+    if (!(await markSynced(db.orm, connectionId))) return await stoppedAfterWrite(db.orm, connectionId);
     await scheduleFlushIfDirty(deps, connectionId);
     return { result: 'synced', orders: orders.length, spreadsheetId: sheet.spreadsheetId };
   } catch (err) {
     if (!(err instanceof GoogleApiError)) throw err;
-    return recordGoogleFailure(db, connectionId, err);
+    return recordGoogleFailure(deps, connectionId, err);
   }
 }
 
 /**
- * Ghi lỗi Google của lần chạy (lần đẩy đầu hay flush): mất quyền → `auth_revoked` (không retry); còn lại → `retrying`
- * (pg-boss retry). Kết nối đã bị xóa giữa chừng: không ghi trạng thái, không retry.
+ * Ghi lỗi Google của lần chạy (lần đẩy đầu hay flush): mất quyền → `auth_revoked` qua `revokeSheetConnection` trong một
+ * transaction (mốc, email, `org_status_changed`; Story 6.6), không retry; còn lại → `retrying` (pg-boss retry). Kết nối
+ * đã bị xóa giữa chừng (hoặc đã `auth_revoked` từ job khác: giữ mốc và mã đầu tiên, không email thứ hai): không ghi
+ * trạng thái, không retry.
  */
 export async function recordGoogleFailure(
-  db: Database,
+  deps: Pick<SheetSyncDeps, 'db' | 'boss'>,
   connectionId: string,
   err: GoogleApiError,
 ): Promise<{ result: 'disconnected' } | { result: 'auth_revoked' | 'retry'; code: SheetSyncErrorCode }> {
   if (err.kind === 'auth_revoked') {
-    if (!(await markSyncFailure(db.orm, connectionId, SheetConnectionStatus.AUTH_REVOKED, err.code))) {
-      return { result: 'disconnected' };
-    }
-    return { result: 'auth_revoked', code: err.code };
+    const revoked = await deps.db.transaction((tx) => revokeSheetConnection(tx, deps.boss, connectionId, err.code));
+    return revoked ? { result: 'auth_revoked', code: err.code } : { result: 'disconnected' };
   }
-  if (!(await markSyncFailure(db.orm, connectionId, SheetConnectionStatus.RETRYING, err.code))) {
-    return { result: 'disconnected' };
-  }
+  if (!(await markSyncFailure(deps.db.orm, connectionId, err.code))) return { result: 'disconnected' };
   return { result: 'retry', code: err.code };
 }
 
@@ -388,8 +419,9 @@ export class SheetSyncWorker implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    // Lần đẩy đầu xong thì hẹn flush: queue flush phải có trước job đầu tiên.
+    // Lần đẩy đầu xong thì hẹn flush, mất quyền thì enqueue email (Story 6.6): hai queue phải có trước job đầu tiên.
     await SHEET_FLUSH_QUEUE.ensure(this.boss);
+    await SHEETS_AUTH_REVOKED_EMAIL_QUEUE.ensure(this.boss);
     await registerQueueWorker(this.boss, SHEET_INITIAL_SYNC_QUEUE, {
       logger: this.logger,
       label: 'Lần đẩy đầu lên Google Sheets',

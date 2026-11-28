@@ -7,11 +7,11 @@ import {
   type Membership,
   type Organization,
 } from '@tickee/contracts';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { orgScope, type AccessContext } from '../../platform/access/index.js';
 import { audit } from '../../platform/audit/index.js';
-import { DATABASE, type Database, type DbExecutor } from '../../platform/db/index.js';
+import { DATABASE, type Database, type DbExecutor, type Tx } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
 import { userContacts } from '../identity/index.js';
 import { members, organizations } from './schema.js';
@@ -69,6 +69,25 @@ export async function memberNamesOf(
 }
 
 /**
+ * Read model người nhận thông báo của BTC trong `scope` (Story 6.6, email mất quyền Google Sheets của `integration`):
+ * `userId` của thành viên có vai trong `roles`, Owner trước rồi Admin theo ngày vào (như người nhận email cảnh báo đổi tài
+ * khoản nhận tiền). Danh sách vai rỗng → rỗng, không chạm DB.
+ */
+export async function memberUserIdsOf(
+  db: DbExecutor,
+  scope: Pick<AccessContext, 'organizationId'>,
+  roles: readonly Role[],
+): Promise<string[]> {
+  if (roles.length === 0) return [];
+  const rows = await db
+    .select({ userId: members.userId })
+    .from(members)
+    .where(and(orgScope(scope)(members), inArray(members.role, [...roles])))
+    .orderBy(sql`${members.role} = ${Role.OWNER} DESC`, asc(members.createdAt), asc(members.id));
+  return rows.map((row) => row.userId);
+}
+
+/**
  * Read model vai của `userId` ở BTC `organizationId`; `null` khi không là thành viên (kể cả BTC không tồn tại). Cổng
  * `AccessResolver` (`PermissionGuard`) và luồng không qua guard (nhận lời mời CTV, Story 5.2: Owner/Admin quét không
  * cần lời mời) cùng đọc ở đây; nhận `tx` để đọc trong transaction của bên gọi.
@@ -78,6 +97,20 @@ export async function memberRoleOf(db: DbExecutor, userId: string, organizationI
     .select({ role: members.role })
     .from(members)
     .where(and(orgScope({ organizationId })(members), eq(members.userId, userId)));
+  return row?.role ?? null;
+}
+
+/**
+ * Như `memberRoleOf` nhưng khóa dòng `members` của `userId` `FOR SHARE` trong `tx` của bên gọi (Story 6.6: callback OAuth
+ * Google Sheets kiểm lại vai ngay trước khi ghi người cấp). Lệnh xóa thành viên đang chạy thì chờ nó commit rồi thấy dòng
+ * đã mất (`null`); khóa được trước thì lệnh xóa chờ `tx` này commit rồi mới xóa, nên luôn thấy kết nối vừa ghi.
+ */
+export async function lockMemberRole(tx: Tx, userId: string, organizationId: string): Promise<Role | null> {
+  const [row] = await tx
+    .select({ role: members.role })
+    .from(members)
+    .where(and(orgScope({ organizationId })(members), eq(members.userId, userId)))
+    .for('share');
   return row?.role ?? null;
 }
 

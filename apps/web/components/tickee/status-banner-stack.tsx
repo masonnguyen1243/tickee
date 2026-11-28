@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { refreshEventSaleStatus } from '@/lib/event/sale-status';
+import { googleSheetsQueryPrefix } from '@/lib/integration/google-sheets';
 import { payoutAccountQueryKey } from '@/lib/organizer/api';
 import { useLiveResource } from '@/lib/realtime/use-live-resource';
 import {
@@ -49,7 +50,7 @@ const pollInterval = () => STATUS_NOTICES_POLL_MS;
 
 function NoticeBanner({ notice, onDismiss }: { notice: StatusNotice; onDismiss: (notice: StatusNotice) => void }) {
   const organization = useCurrentOrganization();
-  const content = statusNoticeContent(notice.code, organization.role);
+  const content = statusNoticeContent(notice.code, organization.role, notice.data);
   const link = content.action ? statusNoticeLink(content.action, notice, organization.id) : null;
   return (
     <StatusBanner
@@ -78,13 +79,14 @@ function NoticeBanner({ notice, onDismiss }: { notice: StatusNotice; onDismiss: 
  * app, hoặc liên kết ngoài mở tab mới). Hiện tối đa `STATUS_BANNER_LIMIT` banner, còn lại gộp "+N thông báo" mở `Sheet`.
  * Banner `dismissible` đóng được và ẩn theo BTC + `code` + `version` tới hết phiên trình duyệt. Thay đổi được đọc qua
  * `aria-live="polite"` (vùng luôn có trong DOM). Lỗi tải thì không hiện gì: 401, 2FA và bị xóa khỏi BTC do khung
- * dashboard / `Providers` xử lý.
+ * dashboard / `Providers` xử lý. Nội dung có thể đọc `notice.data` (vd. tên Sự kiện của banner mất quyền Google Sheets,
+ * nút "Kết nối lại" tới tab Cài đặt của Sự kiện đó, Story 6.6).
  *
  * Tự cập nhật (Story 4.2-b, AD-17): `useLiveResource` + stream cấp BTC `GET /v1/orgs/:orgId/live`; mỗi tín hiệu
  * (`org_status_changed`, `org_review_items_changed`, `resync`) tải lại `notices`, tổng quan Tài khoản nhận tiền (khối
  * "Dịch vụ thanh toán", chỉ khi trang đó đang mở), trạng thái bán của Sự kiện (badge "Tạm ngừng bán" ở trang chủ BTC và
- * tab Tổng quan, Story 4.2-c), và số mục, hàng, chi tiết Cần xử lý (badge ở sidebar và tab bar, trang Cần xử lý; Story
- * 4.3). Đây là EventSource cấp BTC duy nhất của khung: nơi khác không mở stream thứ hai mà đọc `onConnectedChange` (qua
+ * tab Tổng quan, Story 4.2-c), số mục, hàng, chi tiết Cần xử lý (badge ở sidebar và tab bar, trang Cần xử lý; Story
+ * 4.3), và mục Google Sheets ở tab Cài đặt Sự kiện (Story 6.6). Đây là EventSource cấp BTC duy nhất của khung: nơi khác không mở stream thứ hai mà đọc `onConnectedChange` (qua
  * `OrganizationLiveProvider`) để chỉ polling khi chưa có stream. Không có SSE thì polling `notices` 10 giây; banner về
  * điều kiện bán Vé có phí (dịch vụ thanh toán, Closed Beta, tài khoản nhận tiền) đổi giữa hai lần polling thì hai tài
  * nguyên kia cũng tải lại.
@@ -106,6 +108,9 @@ export function StatusBannerStack({
     refreshPaymentServiceViews();
     // Tín hiệu là lời nhắc chung (stream không nói topic nào): badge, hàng và chi tiết Cần xử lý cùng tải lại.
     void queryClient.invalidateQueries({ queryKey: reviewQueueQueryPrefix(orgId) });
+    // Story 6.6: kết nối Google Sheets vừa mất quyền, được kết nối lại hay bị ngắt ở nơi khác → mục Google Sheets ở tab Cài
+    // đặt (nếu đang mở) theo kịp banner.
+    void queryClient.invalidateQueries({ queryKey: googleSheetsQueryPrefix(orgId) });
   };
   const { query: notices, connected } = useLiveResource({
     queryKey: statusNoticesQueryKey(orgId),

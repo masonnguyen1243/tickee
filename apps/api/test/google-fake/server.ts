@@ -15,7 +15,8 @@ import type { AddressInfo } from 'node:net';
  *   `tokenReplies` / `refreshReplies` cài trước phản hồi của các lần gọi kế tiếp (`invalid_grant`, 500, thiếu refresh
  *   token, 429, treo…).
  * - Sheets API v4 (cần `Authorization: Bearer <access token còn hiệu lực>`, không thì 401; spreadsheet không có, đã xóa hay
- *   của grant khác → 404 như `drive.file`):
+ *   của tài khoản khác → 404 như `drive.file`; mặc định mỗi grant là một tài khoản riêng, `account` đặt trước lần đồng ý
+ *   cho các grant cùng tài khoản Google thấy Sheet của nhau, như kết nối lại bằng cùng tài khoản — Story 6.6):
  *   - `POST /v4/spreadsheets` (tạo, giữ tiêu đề, locale, múi giờ, các tab và lưới);
  *   - `GET /v4/spreadsheets/{id}` (tab: `sheetId`, tên, lưới);
  *   - như JSON proto3 của Google, phản hồi của `GET` spreadsheet và `developerMetadata:search` bỏ `sheetId`/`startIndex`
@@ -163,6 +164,12 @@ export interface GoogleFake {
   requests: RecordedGoogleRequest[];
   /** Người dùng ở màn đồng ý: `allow` (mặc định) hay `deny`. */
   consent: 'allow' | 'deny';
+  /**
+   * Tài khoản Google ở màn đồng ý (Story 6.6): grant cấp khi đặt cùng giá trị thì thấy spreadsheet do grant khác của tài
+   * khoản đó tạo (Google thật với `drive.file` có thể khác: kiểm tay). `null` (mặc định): mỗi grant là một tài khoản
+   * riêng, grant mới nhận 404 với Sheet của grant cũ.
+   */
+  account: string | null;
   tokenReplies: FakeTokenReply[];
   refreshReplies: FakeTokenReply[];
   sheetsReplies: FakeSheetsReply[];
@@ -205,7 +212,7 @@ export interface GoogleFake {
   calls(method: string, pathPrefix: string): RecordedGoogleRequest[];
   /** Như trình duyệt mở URL ủy quyền: `GET` không theo redirect, trả `Location` (hoặc lỗi khi không phải 302). */
   authorize(authorizationUrl: string): Promise<string>;
-  /** Xóa request đã ghi, phản hồi cài trước, và đặt lại `consent`. Không xóa token hay spreadsheet. */
+  /** Xóa request đã ghi, phản hồi cài trước, và đặt lại `consent`, `account`. Không xóa token hay spreadsheet. */
   reset(): void;
   close(): Promise<void>;
 }
@@ -214,6 +221,8 @@ interface PendingCode {
   redirectUri: string;
   codeChallenge: string;
   used: boolean;
+  /** Tài khoản Google đã đồng ý (`fake.account` lúc đó); `null`: tài khoản riêng của grant. */
+  account: string | null;
 }
 
 const randomToken = (prefix: string, bytes = 24): string => `${prefix}${randomBytes(bytes).toString('base64url')}`;
@@ -239,6 +248,10 @@ export async function startGoogleFake(options: GoogleFakeOptions): Promise<Googl
   const issued = { codes: [] as string[], refreshTokens: [] as string[], accessTokens: [] as string[] };
   /** Phản hồi cài trước theo grant (refresh token). */
   const grantReplies = new Map<string, FakeSheetsReply[]>();
+  /** Refresh token → tài khoản Google đã đồng ý (khi `account` được đặt lúc đồng ý). */
+  const grantAccounts = new Map<string, string>();
+  /** Tài khoản sở hữu của một grant: tài khoản đã đồng ý, không thì chính grant đó. */
+  const accountOf = (refreshToken: string): string => grantAccounts.get(refreshToken) ?? `grant:${refreshToken}`;
   const log = options.log ?? (() => undefined);
   let baseUrl = '';
   let nextMetadataId = 1;
@@ -252,6 +265,7 @@ export async function startGoogleFake(options: GoogleFakeOptions): Promise<Googl
   const fake: Omit<GoogleFake, 'url' | 'authorizeUrl' | 'tokenUrl' | 'close'> = {
     requests,
     consent: 'allow',
+    account: null,
     tokenReplies: [],
     refreshReplies: [],
     sheetsReplies: [],
@@ -372,6 +386,7 @@ export async function startGoogleFake(options: GoogleFakeOptions): Promise<Googl
       fake.sheetsReplies.length = 0;
       grantReplies.clear();
       fake.consent = 'allow';
+      fake.account = null;
     },
   };
 
@@ -412,9 +427,10 @@ export async function startGoogleFake(options: GoogleFakeOptions): Promise<Googl
     return token;
   }
 
-  function issueGrant(): Record<string, unknown> {
+  function issueGrant(account: string | null = null): Record<string, unknown> {
     const refreshToken = randomToken('1//fake-refresh-');
     refreshTokens.set(refreshToken, true);
+    if (account !== null) grantAccounts.set(refreshToken, account);
     issued.refreshTokens.push(refreshToken);
     return {
       access_token: issueAccessToken(refreshToken),
@@ -450,7 +466,7 @@ export async function startGoogleFake(options: GoogleFakeOptions): Promise<Googl
       target.searchParams.set('error', 'access_denied');
     } else {
       const code = randomToken('4/fake-code-', 18);
-      codes.set(code, { redirectUri, codeChallenge: challenge, used: false });
+      codes.set(code, { redirectUri, codeChallenge: challenge, used: false, account: fake.account });
       issued.codes.push(code);
       target.searchParams.set('code', code);
       target.searchParams.set('scope', DRIVE_FILE_SCOPE);
@@ -477,7 +493,7 @@ export async function startGoogleFake(options: GoogleFakeOptions): Promise<Googl
         return;
       }
       code.used = true;
-      json(res, 200, issueGrant());
+      json(res, 200, issueGrant(code.account));
       return;
     }
     if (grantType === 'refresh_token') {
@@ -824,8 +840,8 @@ export async function startGoogleFake(options: GoogleFakeOptions): Promise<Googl
     if (req.method === 'POST' && path === '/v4/spreadsheets') return createSpreadsheet(res, owner, body);
     const match = /^\/v4\/spreadsheets\/([^/:]+)(.*)$/.exec(path);
     const spreadsheet = spreadsheets.get(decodeURIComponent(match?.[1] ?? ''));
-    if (!match || !spreadsheet || spreadsheet.owner !== owner) {
-      // drive.file: chỉ thấy file do chính grant này tạo; file đã xóa → 404.
+    if (!match || !spreadsheet || accountOf(spreadsheet.owner) !== accountOf(owner)) {
+      // drive.file: chỉ thấy file do tài khoản này tạo qua Tickee; file đã xóa → 404.
       return sheetsError(res, 404, 'Requested entity was not found.');
     }
     const action = `${req.method} ${match[2]}`;
@@ -887,6 +903,12 @@ export async function startGoogleFake(options: GoogleFakeOptions): Promise<Googl
     },
     set consent(value) {
       fake.consent = value;
+    },
+    get account() {
+      return fake.account;
+    },
+    set account(value) {
+      fake.account = value;
     },
     async close() {
       for (const res of hanging) res.destroy();

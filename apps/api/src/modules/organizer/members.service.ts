@@ -37,6 +37,29 @@ const invitationInvalid = () => new AppError(ErrorCode.INVITATION_INVALID, 'Link
 const invitationExpired = () => new AppError(ErrorCode.INVITATION_EXPIRED, 'Link mời đã hết hạn.');
 const invitationUsed = () => new AppError(ErrorCode.INVITATION_USED, 'Link mời đã được dùng.');
 
+/**
+ * Xóa một Admin khỏi BTC trong `tx` của bên gọi (Story 6.6: luồng `flows.removeMember` còn thu hồi CTV và chuyển kết nối
+ * Google Sheets người đó cấp sang `auth_revoked` trong cùng transaction). Chỉ dòng `role='admin'`, không bao giờ Owner;
+ * audit `member.removed`. `AccessResolver` không cache vai, nên request kế tiếp của người bị xóa nhận `NOT_A_MEMBER`. Id
+ * sai dạng (kiểm trước mọi truy vấn), Owner, id lạ hoặc id của BTC khác → `404 NOT_FOUND`. Trả tài khoản bị xóa.
+ */
+export async function removeAdminMember(tx: Tx, ctx: AccessContext, memberId: string): Promise<{ userId: string }> {
+  if (!UUID.test(memberId)) throw memberNotFound();
+  const [removed] = await tx
+    .delete(members)
+    .where(and(orgScope(ctx)(members), eq(members.id, memberId), eq(members.role, Role.ADMIN)))
+    .returning({ userId: members.userId });
+  if (!removed) throw memberNotFound();
+  await audit.record(tx, {
+    actorUserId: ctx.userId,
+    organizationId: ctx.organizationId,
+    action: 'member.removed',
+    target: { type: 'user', id: removed.userId },
+    changedFields: ['role'],
+  });
+  return removed;
+}
+
 /** Tài khoản đang đăng nhập (đã qua `SessionGuard`); email Better Auth luôn chữ thường. */
 export interface SessionUser {
   id: string;
@@ -185,28 +208,6 @@ export class MembersService {
         organizationId: ctx.organizationId,
         action: 'member.invitation_revoked',
         target: { type: 'organization_invitation', id: revoked.id },
-      });
-    });
-  }
-
-  /**
-   * Xóa một Admin khỏi BTC (chỉ dòng `role='admin'`, không bao giờ Owner). `AccessResolver` không cache vai, nên request
-   * kế tiếp của người bị xóa nhận `NOT_A_MEMBER`. Owner, id lạ hoặc id của BTC khác → 404.
-   */
-  async removeMember(ctx: AccessContext, memberId: string): Promise<void> {
-    if (!UUID.test(memberId)) throw memberNotFound();
-    await this.db.transaction(async (tx) => {
-      const [removed] = await tx
-        .delete(members)
-        .where(and(orgScope(ctx)(members), eq(members.id, memberId), eq(members.role, Role.ADMIN)))
-        .returning({ userId: members.userId });
-      if (!removed) throw memberNotFound();
-      await audit.record(tx, {
-        actorUserId: ctx.userId,
-        organizationId: ctx.organizationId,
-        action: 'member.removed',
-        target: { type: 'user', id: removed.userId },
-        changedFields: ['role'],
       });
     });
   }

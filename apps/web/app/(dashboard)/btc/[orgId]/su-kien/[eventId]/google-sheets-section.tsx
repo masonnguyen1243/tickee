@@ -33,6 +33,7 @@ import {
   SHEETS_DISCONNECTED_TOAST,
   SHEETS_KEEP_LABEL,
   SHEETS_OPEN_LABEL,
+  SHEETS_RECONNECT_LABEL,
   SHEETS_TITLE,
   startSheetsConnect,
 } from '@/lib/integration/google-sheets';
@@ -47,7 +48,11 @@ import {
  *   Google), "Ngắt kết nối" qua `ConfirmDialog` nêu hậu quả (dừng đồng bộ, Sheet giữ nguyên trong Drive). "Đang tạo
  *   Sheet…" chỉ khi chưa có link mà còn `syncing`/`retrying`. Tải lại trạng thái mỗi 3 giây khi `syncing`, 15 giây khi
  *   `retrying`.
- * Kết quả của lượt OAuth (callback 302 về `?tab=cai-dat&notice=sheets-…`) do `NoticeToast` ở layout gốc báo.
+ * - mất quyền (Story 6.6, `auth_revoked`): nút chính "Kết nối lại" (cùng luồng với "Kết nối Google Sheets": `POST
+ *   …/connect` rồi chuyển trang tới Google; api chạy lại OAuth trên chính kết nối đó), lý do theo mã lỗi và câu "Thay
+ *   đổi trong lúc mất quyền được giữ lại…"; vẫn có "Mở Google Sheet" (nếu có link) và "Ngắt kết nối".
+ * Kết quả của lượt OAuth (callback 302 về `?tab=cai-dat&notice=sheets-…`, kể cả `sheets-reconnected`) do `NoticeToast`
+ * ở layout gốc báo.
  */
 
 const cardClass = 'flex min-w-0 flex-col gap-stack rounded-lg bg-card p-card-padding shadow-card';
@@ -65,9 +70,15 @@ function SheetsSkeleton() {
 function ConnectedBody({
   connection,
   onDisconnect,
+  onReconnect,
+  reconnecting,
 }: {
   connection: EventSheetConnection;
   onDisconnect: () => void;
+  /** "Kết nối lại" (chỉ hiện khi mất quyền). */
+  onReconnect: () => void;
+  /** Đang lấy URL ủy quyền hoặc đang rời trang tới Google. */
+  reconnecting: boolean;
 }) {
   const view = sheetsConnectionView(connection);
   return (
@@ -79,6 +90,11 @@ function ConnectedBody({
         {view.error ? (
           <p className="text-meta wrap-break-word text-muted-foreground" data-slot="google-sheets-error">
             {view.error}
+          </p>
+        ) : null}
+        {view.keptChanges ? (
+          <p className="text-meta wrap-break-word text-muted-foreground" data-slot="google-sheets-kept-changes">
+            {view.keptChanges}
           </p>
         ) : null}
       </div>
@@ -94,6 +110,16 @@ function ConnectedBody({
         </p>
       </div>
       <div className="flex flex-col gap-stack sm:flex-row sm:flex-wrap sm:items-center">
+        {view.reconnect ? (
+          <Button
+            type="button"
+            className="self-start sm:self-auto"
+            loading={reconnecting}
+            onClick={onReconnect}
+          >
+            {SHEETS_RECONNECT_LABEL}
+          </Button>
+        ) : null}
         {connection.spreadsheetUrl ? (
           <Button asChild variant="secondary" className="self-start sm:self-auto">
             <a href={connection.spreadsheetUrl} target="_blank" rel="noopener noreferrer" data-slot="google-sheets-open">
@@ -195,6 +221,8 @@ export function GoogleSheetsSection({ orgId, eventId }: { orgId: string; eventId
           disconnect.reset();
           setConfirming(true);
         }}
+        onReconnect={() => connect.mutate()}
+        reconnecting={connect.isPending || redirecting}
       />
     );
   } else if (query.data) {

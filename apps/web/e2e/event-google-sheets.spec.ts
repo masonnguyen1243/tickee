@@ -8,7 +8,8 @@ import { mockOrganizerApi, organization, ORG_ID } from './organizer-mock';
  * Mục "Google Sheets" ở tab Cài đặt của Sự kiện (Story 6.4, FR-32) với API giả có trạng thái: chưa kết nối → "Kết nối
  * Google Sheets" (`POST …/connect` rồi chuyển cả trang tới URL ủy quyền; Google bị chặn bằng route), bốn trạng thái của
  * kết nối, tải lại mỗi 3 giây khi đang đồng bộ, "Ngắt kết nối" qua `Dialog`, toast theo `?notice=` khi callback OAuth quay
- * về, và bố cục ở màn hẹp.
+ * về, và bố cục ở màn hẹp. Story 6.6: kết nối "Mất quyền" có nút chính "Kết nối lại" (cùng luồng `POST …/connect`), lý do
+ * theo mã lỗi và câu giữ dòng bẩn; toast `sheets-reconnected`.
  */
 
 const CONSENTED = '2026-10-29T01:02:03.000Z';
@@ -238,6 +239,86 @@ test('bốn trạng thái: Đã kết nối · Đang đồng bộ · Lỗi, đan
   );
 });
 
+const KEPT_CHANGES = 'Thay đổi trong lúc mất quyền được giữ lại và ghi lên Sheet khi kết nối lại.';
+const reconnectButton = (page: Page) => section(page).getByRole('button', { name: 'Kết nối lại' });
+
+test('mất quyền (Story 6.6): nút chính "Kết nối lại", lý do, câu giữ dòng bẩn; vẫn mở Sheet và ngắt kết nối được', async ({
+  page,
+}) => {
+  const { state } = await openApi(page, { connection: connection({ status: 'auth_revoked', lastErrorCode: 'invalid_grant' }) });
+  await page.goto(settings);
+  await expect(section(page).locator('[data-slot="status-badge"]')).toHaveText('Mất quyền');
+  await expect(section(page).locator('[data-slot="google-sheets-error"]')).toHaveText(
+    'Quyền truy cập Google Drive đã bị thu hồi.',
+  );
+  await expect(section(page).locator('[data-slot="google-sheets-kept-changes"]')).toHaveText(KEPT_CHANGES);
+  const reconnect = reconnectButton(page);
+  await expect(reconnect).toBeVisible();
+  // Hành động chính của mục: nút nền đậm (không phải kiểu viền), "Kết nối Google Sheets" không hiện.
+  await expect(reconnect).not.toHaveClass(/bg-card/);
+  await expect(connectButton(page)).toHaveCount(0);
+  await expect(section(page).getByRole('link', { name: /Mở Google Sheet/ })).toHaveAttribute('href', SHEET_URL);
+  const disconnect = section(page).getByRole('button', { name: 'Ngắt kết nối' });
+  await expect(disconnect).toBeVisible();
+  await expect(disconnect).toHaveClass(/bg-card/);
+
+  // Người cấp rời BTC, chưa có Sheet: lý do riêng, vẫn kết nối lại được, không có link.
+  state.connection = connection({
+    status: 'auth_revoked',
+    lastErrorCode: 'grantor_removed',
+    connectedByName: null,
+    spreadsheetUrl: null,
+    lastSyncedAt: null,
+  });
+  await page.reload();
+  await expect(section(page).locator('[data-slot="google-sheets-error"]')).toHaveText('Người kết nối đã rời BTC.');
+  await expect(section(page).locator('[data-slot="google-sheets-kept-changes"]')).toHaveText(KEPT_CHANGES);
+  await expect(reconnectButton(page)).toBeVisible();
+  await expect(section(page).getByRole('link', { name: /Mở Google Sheet/ })).toHaveCount(0);
+  await expect(section(page).locator('[data-slot="google-sheets-creating"]')).toHaveCount(0);
+
+  // Trạng thái khác không có "Kết nối lại" hay câu giữ dòng bẩn.
+  state.connection = connection();
+  await page.reload();
+  await expect(section(page).locator('[data-slot="status-badge"]')).toHaveText('Đã kết nối');
+  await expect(reconnectButton(page)).toHaveCount(0);
+  await expect(section(page).locator('[data-slot="google-sheets-kept-changes"]')).toHaveCount(0);
+});
+
+test('bấm "Kết nối lại": spinner, chặn bấm lặp, POST connect rồi chuyển tới URL ủy quyền', async ({ page }) => {
+  let release!: () => void;
+  const { calls } = await openApi(page, {
+    connection: connection({ status: 'auth_revoked', lastErrorCode: 'invalid_grant' }),
+    holdConnect: new Promise((resolve) => (release = resolve)),
+  });
+  const visited = await blockGoogle(page);
+  await page.goto(settings);
+  const button = reconnectButton(page);
+  await button.click();
+  await expect(button).toHaveAttribute('aria-busy', 'true');
+  await button.click({ force: true });
+  release();
+  await page.waitForURL(AUTH_URL);
+  expect(callsTo(calls, 'POST', `${sheetsPath}/connect`)).toHaveLength(1);
+  expect(visited).toEqual([AUTH_URL]);
+});
+
+test('"Kết nối lại" khi người khác vừa kết nối lại (409): toast, tải lại thấy "Đã kết nối", không rời trang', async ({ page }) => {
+  const { state } = await openApi(page, {
+    connection: connection({ status: 'auth_revoked', lastErrorCode: 'invalid_grant' }),
+    connectError: { status: 409, code: 'SHEETS_ALREADY_CONNECTED' },
+  });
+  const visited = await blockGoogle(page);
+  await page.goto(settings);
+  await expect(reconnectButton(page)).toBeVisible();
+  state.connection = connection();
+  await reconnectButton(page).click();
+  await expect(page.getByText('Sự kiện này đã kết nối Google Sheets.')).toBeVisible();
+  await expect(section(page).locator('[data-slot="status-badge"]')).toHaveText('Đã kết nối');
+  await expect(reconnectButton(page)).toHaveCount(0);
+  expect(visited).toEqual([]);
+});
+
 test('đang đồng bộ: tải lại mỗi 3 giây tới khi Sheet sẵn sàng, rồi thôi', async ({ page }) => {
   const { calls, state } = await openApi(page, {
     connection: connection({ status: 'syncing', spreadsheetUrl: null, lastSyncedAt: null }),
@@ -318,10 +399,16 @@ for (const [notice, message] of [
   ['sheets-denied', 'Bạn chưa cho phép Tickee truy cập Google Drive nên chưa kết nối Google Sheets.'],
   ['sheets-failed', 'Chưa kết nối được Google Sheets. Vui lòng thử lại.'],
   ['sheets-already-connected', 'Sự kiện này đã kết nối Google Sheets.'],
+  ['sheets-reconnected', 'Đã kết nối lại Google Sheets.'],
 ] as const) {
   test(`quay về từ callback (?notice=${notice}): toast, ở tab Cài đặt, xóa notice khỏi URL`, async ({ page }) => {
     await openApi(page, {
-      connection: notice === 'sheets-connected' ? connection({ status: 'syncing', spreadsheetUrl: null, lastSyncedAt: null }) : null,
+      connection:
+        notice === 'sheets-connected'
+          ? connection({ status: 'syncing', spreadsheetUrl: null, lastSyncedAt: null })
+          : notice === 'sheets-reconnected'
+            ? connection({ status: 'syncing' })
+            : null,
     });
     await page.goto(`${settings}&notice=${notice}`);
     await expect(page.getByText(message)).toBeVisible();

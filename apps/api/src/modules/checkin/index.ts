@@ -16,3 +16,5 @@ export {
 } from './checkers.js';
 // Danh sách CTV của Sự kiện (Story 5.6): `flows.listCheckers` ghép tên, email của `identity`.
 export { checkersOf, type CheckerRow } from './checkers.js';
+// Xóa Admin (Story 6.6): `flows.removeMember` thu hồi mọi dòng CTV `active` của người đó trong BTC, cùng transaction.
+export { revokeCheckersOfMember } from './checkers.js';

@@ -212,7 +212,14 @@ export type AuditAction =
    * Owner/Admin ngắt kết nối Google Sheets của Sự kiện (Story 6.4; đối tượng: `{ type: 'event', id }`): xóa kết nối cùng
    * refresh token, dừng đồng bộ; Sheet giữ nguyên trong Drive. Không gọi Google.
    */
-  | 'sheet_connection.deleted';
+  | 'sheet_connection.deleted'
+  /**
+   * Owner/Admin "Kết nối lại" Google Sheets cho kết nối `auth_revoked` của Sự kiện (Story 6.6; actor: người kết nối lại,
+   * nay là người cấp OAuth; đối tượng: `{ type: 'event', id }`), cùng transaction thay refresh token và xóa mốc mất quyền,
+   * ở callback OAuth. `changedFields`: `granted_by_user_id`, `refresh_token`, `status`, thêm `spreadsheet_id` khi phải tạo
+   * Sheet mới (lần đẩy đầu chạy lại). Không ghi token, `code` hay `state`.
+   */
+  | 'sheet_connection.reconnected';
 
 export interface AuditEvent {
   /** `null` = hệ thống. */

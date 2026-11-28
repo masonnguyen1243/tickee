@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { EventModule } from '../modules/event/index.js';
+import { SheetRevocationQueues } from '../modules/integration/index.js';
 import { EventChangeEmailQueues } from '../modules/ordering/index.js';
 import { SheetRowChangedQueues } from '../modules/ticketing/index.js';
 import { CheckerInviteAcceptanceController } from './checker-invite.controller.js';
@@ -7,6 +8,7 @@ import { CheckersListController } from './checkers.controller.js';
 import { CheckinLookupController } from './checkin-lookup.controller.js';
 import { CheckinScanController } from './checkin-scan.controller.js';
 import { EventEditController } from './event-edit.controller.js';
+import { MemberRemovalController } from './member-removal.controller.js';
 import { TicketTypesController } from './ticket-types.controller.js';
 
 /**
@@ -18,7 +20,9 @@ import { TicketTypesController } from './ticket-types.controller.js';
  * toàn cục `TICKET_QR_KEYS`), `identity` và `organizer` (tên, vai người quét trước). Tra tay và check-in tay (Story 5.5)
  * ghép `ordering` (Đơn khớp SĐT/email), `ticketing` và bộ đếm tra tay của `checkin` (`CheckinLookupRateLimiter`, toàn
  * cục từ `CheckinLookupLimitModule`). Danh sách CTV của Sự kiện (Story 5.6) ghép `checkin`, `event` và `identity` (tên,
- * email). `SheetRowChangedQueues` tạo queue `sheet_row_changed` (Story 6.5) mà hai luồng check-in enqueue vào.
+ * email). `SheetRowChangedQueues` tạo queue `sheet_row_changed` (Story 6.5) mà hai luồng check-in enqueue vào. Xóa Admin
+ * (Story 6.6) ghép `organizer`, `checkin` (thu hồi CTV) và `integration` (kết nối Google Sheets người đó cấp chuyển mất
+ * quyền); `SheetRevocationQueues` tạo queue email mất quyền mà luồng này enqueue vào.
  */
 @Module({
   imports: [EventModule],
@@ -29,7 +33,8 @@ import { TicketTypesController } from './ticket-types.controller.js';
     CheckersListController,
     CheckinScanController,
     CheckinLookupController,
+    MemberRemovalController,
   ],
-  providers: [EventChangeEmailQueues, SheetRowChangedQueues],
+  providers: [EventChangeEmailQueues, SheetRowChangedQueues, SheetRevocationQueues],
 })
 export class FlowsModule {}

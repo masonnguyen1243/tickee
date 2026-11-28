@@ -9,7 +9,16 @@ export {
   type ClosedBetaState,
 } from './closed-beta.js';
 export { payoutAccountStatusOf, type PayoutAccountState } from './payout-account.service.js';
-export { memberNamesOf, memberRoleOf, organizationNameOf, organizerContactOf } from './organizer.service.js';
+export {
+  lockMemberRole,
+  memberNamesOf,
+  memberRoleOf,
+  memberUserIdsOf,
+  organizationNameOf,
+  organizerContactOf,
+} from './organizer.service.js';
+// Xóa Admin (Story 6.6): `flows.removeMember` gọi trong cùng transaction với thu hồi CTV và kết nối Google Sheets.
+export { removeAdminMember } from './members.service.js';
 export {
   listSuspendedPaymentServices,
   PAYMENT_SERVICE_RESUMED_QUEUE,

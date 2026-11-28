@@ -18,11 +18,21 @@ import {
   SHEET_SYNC_ERROR_LABEL,
   SheetConnectStartResponse,
   SheetSyncErrorCode,
+  SHEETS_KEPT_CHANGES_NOTE,
   SheetsNotice,
+  eventSettingsPath,
 } from '../src/google-sheets.js';
 import { ErrorCode } from '../src/errors.js';
-import { JobQueue, SheetFlushPayload, SheetInitialSyncPayload, SheetRowChangedPayload } from '../src/jobs.js';
+import {
+  JobQueue,
+  SheetFlushPayload,
+  SheetInitialSyncPayload,
+  SheetRowChangedPayload,
+  SheetsAuthRevokedEmailPayload,
+} from '../src/jobs.js';
+import { NOTIFICATION_CATALOG, NotificationKind } from '../src/notifications.js';
 import { PII_KEYS } from '../src/pii.js';
+import { STATUS_NOTICE_PRIORITY, StatusNoticeCode } from '../src/reporting.js';
 
 /* Story 6.4: hợp đồng kết nối Google Sheets dùng chung api/web. */
 
@@ -52,7 +62,13 @@ describe('đường dẫn và OAuth', () => {
       'sheets-denied',
       'sheets-failed',
       'sheets-already-connected',
+      'sheets-reconnected',
     ]);
+    // Story 6.6: tab Cài đặt (đích "Kết nối lại" của banner và email), và kết nối lại quay về đó.
+    expect(eventSettingsPath(ORG, EVENT)).toBe(`/btc/${ORG}/su-kien/${EVENT}?tab=cai-dat`);
+    expect(googleSheetsReturnPath(SheetsNotice.RECONNECTED, { organizationId: ORG, eventId: EVENT })).toBe(
+      `/btc/${ORG}/su-kien/${EVENT}?tab=cai-dat&notice=sheets-reconnected`,
+    );
   });
 });
 
@@ -168,5 +184,54 @@ describe('Sheet và job', () => {
     for (const key of ['refresh_token', 'refreshToken', 'access_token', 'accessToken', 'code_verifier', 'codeVerifier']) {
       expect(PII_KEYS).toContain(key);
     }
+  });
+});
+
+describe('Story 6.6: mất quyền và kết nối lại', () => {
+  it('mã lỗi người cấp rời BTC có nhãn; câu giữ dòng bẩn dùng chung', () => {
+    expect(SheetSyncErrorCode.GRANTOR_REMOVED).toBe('grantor_removed');
+    expect(SHEET_SYNC_ERROR_LABEL.grantor_removed).toBe('Người kết nối đã rời BTC.');
+    expect(SHEETS_KEPT_CHANGES_NOTE).toBe('Thay đổi trong lúc mất quyền được giữ lại và ghi lên Sheet khi kết nối lại.');
+    const connection = {
+      status: 'auth_revoked',
+      spreadsheetUrl: null,
+      lastSyncedAt: null,
+      lastErrorCode: 'grantor_removed',
+      connectedByName: null,
+      createdAt: '2026-11-27T03:00:00.000Z',
+    };
+    expect(EventSheetConnectionResponse.parse({ connection })).toEqual({ connection });
+  });
+
+  it('banner bậc 8: ngay trên Token dưới ngưỡng, dưới chờ duyệt Closed Beta', () => {
+    expect(StatusNoticeCode.SHEETS_AUTH_REVOKED).toBe('SHEETS_AUTH_REVOKED');
+    const rank = (code: StatusNoticeCode) => STATUS_NOTICE_PRIORITY.indexOf(code);
+    expect(rank(StatusNoticeCode.SHEETS_AUTH_REVOKED)).toBe(rank(StatusNoticeCode.TOKEN_BELOW_THRESHOLD) - 1);
+    expect(rank(StatusNoticeCode.SHEETS_AUTH_REVOKED)).toBe(rank(StatusNoticeCode.CLOSED_BETA_PENDING) + 1);
+  });
+
+  it('danh mục thông báo: Owner và Admin, email + banner, khóa (kết nối, lần mất quyền)', () => {
+    expect(NotificationKind.SHEETS_AUTH_REVOKED).toBe('sheets_auth_revoked');
+    expect(NOTIFICATION_CATALOG.sheets_auth_revoked).toMatchObject({
+      recipients: ['owner', 'admin'],
+      channels: ['email', 'banner'],
+      dedupeKey: ['connectionId', 'auth_revoked_at'],
+      emailQueue: JobQueue.INTEGRATION_SHEETS_AUTH_REVOKED_EMAIL,
+      noticeCode: StatusNoticeCode.SHEETS_AUTH_REVOKED,
+    });
+    expect(NOTIFICATION_CATALOG.sheets_auth_revoked.trigger.length).toBeGreaterThan(0);
+  });
+
+  it('queue email (gốc và con chung queue) kèm dead-letter; payload chỉ id và mốc', () => {
+    expect(JobQueue.INTEGRATION_SHEETS_AUTH_REVOKED_EMAIL).toBe('integration.sheets-auth-revoked-email');
+    expect(JobQueue.INTEGRATION_SHEETS_AUTH_REVOKED_EMAIL_DEAD_LETTER).toBe(
+      'integration.sheets-auth-revoked-email.dead-letter',
+    );
+    expect(JobQueue.INTEGRATION_SHEETS_AUTH_REVOKED_EMAIL).toMatch(/^[\w.\-/]+$/);
+    const root = { connectionId: EVENT, authRevokedAt: '2026-11-28T03:04:05.123Z' };
+    expect(SheetsAuthRevokedEmailPayload.parse({ ...root, refreshToken: 'x', email: 'a@vidu.vn' })).toEqual(root);
+    expect(SheetsAuthRevokedEmailPayload.parse({ ...root, recipientUserId: ORG })).toEqual({ ...root, recipientUserId: ORG });
+    expect(SheetsAuthRevokedEmailPayload.safeParse({ ...root, authRevokedAt: 'hôm qua' }).success).toBe(false);
+    expect(SheetsAuthRevokedEmailPayload.safeParse({ authRevokedAt: root.authRevokedAt }).success).toBe(false);
   });
 });

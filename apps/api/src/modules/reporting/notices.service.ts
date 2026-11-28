@@ -16,6 +16,8 @@ import {
 import type { AccessContext } from '../../platform/access/index.js';
 import { DATABASE, type Database } from '../../platform/db/index.js';
 import { AppError } from '../../platform/http/index.js';
+import { ticketEventsByIds } from '../event/index.js';
+import { revokedSheetConnectionsOf, type RevokedSheetConnection } from '../integration/index.js';
 import {
   closedBetaStatusOf,
   paymentServiceStateOf,
@@ -153,9 +155,39 @@ function tokenAlertNotices(
 }
 
 /**
+ * Thông báo mất quyền Google Sheets (Story 6.6): mỗi kết nối `auth_revoked` → một `SHEETS_AUTH_REVOKED` (warning, không
+ * chặn bán, đóng được; audience theo danh mục thông báo: Owner và Admin), `data = { eventId, eventName }` (hành động "Kết
+ * nối lại" tới tab Cài đặt của Sự kiện), `version` = lúc mất quyền: mỗi banner một khóa đóng, mất quyền lần mới thì hiện
+ * lại. Thứ tự theo lúc mất quyền. Sự kiện không còn (hay của BTC khác) → bỏ qua.
+ */
+function sheetsAuthRevokedNotices(
+  revoked: readonly RevokedSheetConnection[],
+  eventNames: ReadonlyMap<string, string>,
+): StatusNotice[] {
+  const notification = NOTIFICATION_CATALOG.sheets_auth_revoked;
+  return revoked.flatMap((connection) => {
+    const eventName = eventNames.get(connection.eventId);
+    if (eventName === undefined) return [];
+    return [
+      {
+        code: notification.noticeCode,
+        severity: StatusNoticeSeverity.WARNING,
+        blocking: false,
+        dismissible: true,
+        scope: StatusNoticeScope.EVENT,
+        audience: [...notification.recipients],
+        data: { eventId: connection.eventId, eventName },
+        version: connection.authRevokedAt.toISOString(),
+      },
+    ];
+  });
+}
+
+/**
  * `reporting.notices(scope)` (AD-34): nguồn duy nhất cho `status-banner` của dashboard. Chỉ đọc qua read model của mô-đun
- * sở hữu (Closed Beta, tài khoản nhận tiền, dịch vụ thanh toán, cảnh báo Token: `organizer`); trả thông báo có vai của
- * người xem trong `audience`, sắp theo `STATUS_NOTICE_PRIORITY`. Story sau (Sheets…) thêm nguồn vào đây.
+ * sở hữu (Closed Beta, tài khoản nhận tiền, dịch vụ thanh toán, cảnh báo Token: `organizer`; kết nối Google Sheets mất
+ * quyền: `integration`, tên Sự kiện: `event`); trả thông báo có vai của người xem trong `audience`, sắp theo
+ * `STATUS_NOTICE_PRIORITY`.
  */
 @Injectable()
 export class NoticesService {
@@ -171,13 +203,32 @@ export class NoticesService {
     const payout = await payoutAccountStatusOf(this.db.orm, scope);
     const paymentService = await paymentServiceStateOf(this.db.orm, scope);
     const tokenAlert = await tokenAlertStateOf(this.db.orm, scope);
+    const revokedSheets = await revokedSheetConnectionsOf(this.db.orm, scope);
+    const eventNames = await this.eventNamesOf(scope, revokedSheets);
     const { tingeePortalUrl } = this.settings;
     const all = [
       ...closedBetaNotices(closedBeta),
       ...(paymentService ? paymentServiceNotices(paymentService, tingeePortalUrl) : []),
       ...payoutNotices(payout, closedBeta.createdAt),
+      ...sheetsAuthRevokedNotices(revokedSheets, eventNames),
       ...(tokenAlert ? tokenAlertNotices(tokenAlert, paymentService, tingeePortalUrl) : []),
     ];
     return sortStatusNotices(all.filter((n) => n.audience.includes(scope.role)));
+  }
+
+  /** Tên Sự kiện của các kết nối mất quyền, chỉ Sự kiện của BTC trong `scope` (một truy vấn; rỗng → không chạm DB). */
+  private async eventNamesOf(
+    scope: OrganizationNoticeScope,
+    revoked: readonly RevokedSheetConnection[],
+  ): Promise<Map<string, string>> {
+    const events = await ticketEventsByIds(
+      this.db.orm,
+      revoked.map((connection) => connection.eventId),
+    );
+    return new Map(
+      [...events.values()]
+        .filter((event) => event.organizationId === scope.organizationId)
+        .map((event) => [event.id, event.name]),
+    );
   }
 }

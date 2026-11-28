@@ -44,7 +44,10 @@ export const SheetConnectionStatus = {
   SYNCING: 'syncing',
   /** Google lỗi tạm thời hoặc hết quota: worker tự thử lại có backoff (`lastErrorCode`). */
   RETRYING: 'retrying',
-  /** Tickee mất quyền ghi (người cấp thu hồi quyền, `invalid_grant`, 401, 403): dừng thử lại. */
+  /**
+   * Tickee mất quyền ghi (người cấp thu hồi quyền, `invalid_grant`, 401, 403, hoặc người cấp bị xóa khỏi BTC — Story
+   * 6.6): dừng thử lại, giữ dòng bẩn. Owner/Admin "Kết nối lại" trên chính kết nối này.
+   */
   AUTH_REVOKED: 'auth_revoked',
 } as const;
 export type SheetConnectionStatus = (typeof SheetConnectionStatus)[keyof typeof SheetConnectionStatus];
@@ -104,6 +107,11 @@ export const SheetSyncErrorCode = {
    * project Google). Worker thử lại có backoff, hết lượt thì vào dead-letter; sửa cấu hình rồi requeue là chạy tiếp.
    */
   CONFIGURATION: 'configuration',
+  /**
+   * Người cấp OAuth bị xóa khỏi BTC (Story 6.6): kết nối chuyển `auth_revoked` cùng transaction xóa thành viên, để Tickee
+   * không ghi tiếp dữ liệu người mua vào Drive của người đã rời BTC. Không gọi Google.
+   */
+  GRANTOR_REMOVED: 'grantor_removed',
 } as const;
 export type SheetSyncErrorCode = (typeof SheetSyncErrorCode)[keyof typeof SheetSyncErrorCode];
 export const sheetSyncErrorCodeSchema = z.enum(SheetSyncErrorCode);
@@ -120,7 +128,14 @@ export const SHEET_SYNC_ERROR_LABEL: Readonly<Record<SheetSyncErrorCode, string>
   [SheetSyncErrorCode.FORBIDDEN]: 'Google từ chối quyền ghi Sheet.',
   [SheetSyncErrorCode.UNEXPECTED_RESPONSE]: 'Google trả về phản hồi không mong đợi.',
   [SheetSyncErrorCode.CONFIGURATION]: 'Cấu hình Google của Tickee đang lỗi; Tickee sẽ tự thử lại khi đã sửa.',
+  [SheetSyncErrorCode.GRANTOR_REMOVED]: 'Người kết nối đã rời BTC.',
 };
+
+/**
+ * Câu nhắc khi kết nối mất quyền (Story 6.6), dùng chung cho email, banner và tab Cài đặt: dòng bẩn không mất, kết nối
+ * lại thì Tickee ghi bù.
+ */
+export const SHEETS_KEPT_CHANGES_NOTE = 'Thay đổi trong lúc mất quyền được giữ lại và ghi lên Sheet khi kết nối lại.';
 
 /** ISO 8601 có offset (api trả `…Z`). */
 const IsoDateTime = z.iso.datetime({ offset: true });
@@ -157,6 +172,8 @@ export const SheetsNotice = {
   DENIED: 'sheets-denied',
   FAILED: 'sheets-failed',
   ALREADY_CONNECTED: 'sheets-already-connected',
+  /** Kết nối `auth_revoked` vừa được "Kết nối lại" (Story 6.6). */
+  RECONNECTED: 'sheets-reconnected',
 } as const;
 export type SheetsNotice = (typeof SheetsNotice)[keyof typeof SheetsNotice];
 
@@ -164,12 +181,19 @@ export type SheetsNotice = (typeof SheetsNotice)[keyof typeof SheetsNotice];
 export const EVENT_SETTINGS_TAB = 'cai-dat';
 
 /**
+ * Tab Cài đặt của Sự kiện (đường dẫn web, chưa có origin): `/btc/<orgId>/su-kien/<eventId>?tab=cai-dat`. Đích của
+ * "Kết nối lại" trên banner và trong email mất quyền (Story 6.6).
+ */
+export const eventSettingsPath = (organizationId: string, eventId: string): string =>
+  `${eventPath(organizationId, eventId)}?tab=${EVENT_SETTINGS_TAB}`;
+
+/**
  * Đích 302 của callback OAuth (đường dẫn web, chưa có origin): tab Cài đặt của Sự kiện khi biết Sự kiện
  * (`/btc/<orgId>/su-kien/<eventId>?tab=cai-dat&notice=…`), không thì trang gốc (`/?notice=…`).
  */
 export function googleSheetsReturnPath(notice: SheetsNotice, target?: { organizationId: string; eventId: string }): string {
   if (!target) return `/?notice=${notice}`;
-  return `${eventPath(target.organizationId, target.eventId)}?tab=${EVENT_SETTINGS_TAB}&notice=${notice}`;
+  return `${eventSettingsPath(target.organizationId, target.eventId)}&notice=${notice}`;
 }
 
 // ---------------------------------------------------------------------------------------------------------------

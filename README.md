@@ -348,6 +348,17 @@ Sheets API chưa bật: `SERVICE_DISABLED`/`accessNotConfigured`) thì kết n�
 backoff, hết lượt thì job vào dead-letter (cảnh báo vận hành tự báo; sửa cấu hình rồi requeue từ `/admin`); mất quyền
 (`invalid_grant`, các 401/403 khác) thì "Mất quyền", không thử lại.
 
+Mất quyền và kết nối lại (Story 6.6): kết nối chuyển "Mất quyền" khi Google trả `invalid_grant`/401/403, hoặc khi Owner
+xóa Admin đã cấp OAuth khỏi BTC (mã `grantor_removed`, cùng transaction xóa thành viên). Thay đổi trong lúc mất quyền
+được giữ (dòng bẩn), Owner và mỗi Admin nhận một email cho mỗi lần mất quyền (worker gửi lại sau khi sập giữa chừng thì
+hiếm khi một người nhận hai lần), dashboard hiện banner "Mất quyền ghi Google Sheets". Owner hoặc Admin bấm "Kết nối lại"
+(banner hoặc tab Cài đặt): token mới mở được Sheet cũ thì dùng lại và ghi bù các thay đổi, không thì tạo Sheet mới và đẩy
+lại toàn bộ Đơn. Tickee không bao giờ gọi endpoint revoke của Google.
+
+Ghi chú vận hành: Google giữ tối đa 100 refresh token còn hiệu lực cho mỗi tài khoản Google trên mỗi OAuth client; cấp
+token thứ 101 (vd. một người kết nối hơn 100 Sự kiện, hay kết nối lại nhiều lần) thì token cũ nhất hết hiệu lực. Kết nối
+dùng token đó nhận `invalid_grant` ở lần ghi kế và đi đúng đường "Mất quyền" → banner + email → "Kết nối lại" ở trên.
+
 ### Quản trị Tingee (`/admin`)
 
 Cờ `users.platform_admin` chỉ cấp/thu bằng CLI, không có UI hay API nào làm việc này. CLI chạy bằng role

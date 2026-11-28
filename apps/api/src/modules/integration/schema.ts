@@ -19,6 +19,10 @@ import { organizations } from '../organizer/schema.js';
  * tab theo id này, không theo tên, nên BTC đổi tên tab vẫn ghi được. Sheet mất (spreadsheet 404, mất tab, mất cột Mã Đơn)
  * thì flush đặt lại `spreadsheet_id`/`spreadsheet_url`/`last_synced_at`/`sheet_tab_id`, chuyển `syncing` và chạy lại lần
  * đẩy đầu (Quyết định 2 của Story 6.5).
+ *
+ * `auth_revoked_at` (Story 6.6): lúc kết nối chuyển `auth_revoked` (đồng hồ DB), có khi và chỉ khi `status =
+ * 'auth_revoked'` (CHECK). Là khóa chống gửi lặp của email mất quyền và `version` của banner: mất quyền lần mới (sau khi
+ * đã kết nối lại) là một mốc mới. "Kết nối lại" xóa mốc cùng `last_error_code`.
  */
 export const sheetConnections = pgTable(
   'sheet_connections',
@@ -40,6 +44,7 @@ export const sheetConnections = pgTable(
     sheetTabId: integer('sheet_tab_id').notNull().default(0),
     lastSyncedAt: timestamptz('last_synced_at'),
     lastErrorCode: text('last_error_code'),
+    authRevokedAt: timestamptz('auth_revoked_at'),
     createdAt: createdAt(),
     updatedAt: timestamptz('updated_at').notNull().defaultNow(),
   },
@@ -55,6 +60,11 @@ export const sheetConnections = pgTable(
       sql`(${t.spreadsheetId} IS NULL) = (${t.spreadsheetUrl} IS NULL)`,
     ),
     check('sheet_connections_sheet_tab_id_check', sql`${t.sheetTabId} >= 0`),
+    // Mốc mất quyền đi cùng trạng thái `auth_revoked` (Story 6.6).
+    check(
+      'sheet_connections_auth_revoked_check',
+      sql`(${t.status} = 'auth_revoked') = (${t.authRevokedAt} IS NOT NULL)`,
+    ),
   ],
 );
 

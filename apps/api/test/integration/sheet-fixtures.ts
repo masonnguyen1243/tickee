@@ -10,6 +10,7 @@ import type { PgBoss } from 'pg-boss';
 import { expect } from 'vitest';
 import { GoogleSheetsClient } from '../../src/modules/integration/google-client.js';
 import { SHEET_FLUSH_QUEUE } from '../../src/modules/integration/sheet-flush-queue.js';
+import { SHEETS_AUTH_REVOKED_EMAIL_QUEUE } from '../../src/modules/integration/sheet-revocation.js';
 import { runSheetInitialSync, type SheetSyncDeps } from '../../src/modules/integration/sheet-sync-jobs.js';
 import { parseCredentialKeys, SecretBox } from '../../src/platform/crypto/index.js';
 import { BOSS } from '../../src/platform/jobs/index.js';
@@ -82,7 +83,7 @@ export const sheetDeps = (env: SheetEnv, google = sheetsClientOf(env.fake), flus
 });
 
 /**
- * Bỏ mọi job còn chờ (`created`, `retry`) của ba queue Google Sheets trước khi một test khởi worker thật: test gọi thẳng
+ * Bỏ mọi job còn chờ (`created`, `retry`) của các queue Google Sheets trước khi một test khởi worker thật: test gọi thẳng
  * lần đẩy đầu / flush (file này và các file trước) để lại job không ai chạy, và worker sẽ xử lý chúng trước job của test
  * (lần đẩy đầu chỉ lấy 5 job mỗi lần poll 2 giây), làm test chờ quá hạn tùy thứ tự file.
  */
@@ -93,14 +94,19 @@ export async function discardPendingSheetJobs(h: Harness): Promise<void> {
     JobQueue.INTEGRATION_SHEET_INITIAL_SYNC,
     JobQueue.INTEGRATION_SHEET_FLUSH,
     JobQueue.INTEGRATION_SHEET_ROW_CHANGED,
+    JobQueue.INTEGRATION_SHEETS_AUTH_REVOKED_EMAIL,
   ]) {
     if (await boss.getQueue(name)) await boss.deleteQueuedJobs(name);
   }
 }
 
-/** Queue flush (vai worker tạo lúc khởi động) phải có để gọi thẳng handler / lần đẩy đầu từ vai api. */
+/**
+ * Queue flush và queue email mất quyền (vai worker tạo lúc khởi động) phải có để gọi thẳng handler / lần đẩy đầu / flush
+ * từ vai api.
+ */
 export async function prepareSheetQueues(h: Harness): Promise<void> {
   await SHEET_FLUSH_QUEUE.ensure(h.app.get<PgBoss>(BOSS));
+  await SHEETS_AUTH_REVOKED_EMAIL_QUEUE.ensure(h.app.get<PgBoss>(BOSS));
 }
 
 /** Sự kiện miễn phí đã mở bán (Đơn 0đ `paid` ngay, có Vé), kèm câu hỏi form. */
@@ -142,11 +148,14 @@ export interface ConnectionState {
   sheet_tab_id: number;
   last_synced_at: Date | null;
   last_error_code: string | null;
+  auth_revoked_at: Date | null;
+  granted_by_user_id: string;
 }
 
 export async function connectionStateOf(h: Harness, connectionId: string): Promise<ConnectionState | undefined> {
   const { rows } = await h.db.pool.query<ConnectionState>(
-    `SELECT status, spreadsheet_id, spreadsheet_url, sheet_tab_id, last_synced_at, last_error_code
+    `SELECT status, spreadsheet_id, spreadsheet_url, sheet_tab_id, last_synced_at, last_error_code, auth_revoked_at,
+            granted_by_user_id
        FROM sheet_connections WHERE id = $1`,
     [connectionId],
   );

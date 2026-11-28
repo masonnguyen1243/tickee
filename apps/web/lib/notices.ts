@@ -10,6 +10,8 @@ export const NOTICES = {
   [SheetsNotice.DENIED]: 'Bạn chưa cho phép Tickee truy cập Google Drive nên chưa kết nối Google Sheets.',
   [SheetsNotice.FAILED]: 'Chưa kết nối được Google Sheets. Vui lòng thử lại.',
   [SheetsNotice.ALREADY_CONNECTED]: 'Sự kiện này đã kết nối Google Sheets.',
+  // Story 6.6: "Kết nối lại" một kết nối mất quyền.
+  [SheetsNotice.RECONNECTED]: 'Đã kết nối lại Google Sheets.',
 } as const;
 
 export type NoticeCode = keyof typeof NOTICES;
